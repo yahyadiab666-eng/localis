@@ -1,0 +1,12 @@
+﻿.env
+localis.db
+test_localis.db
+*.db-journal
+*.db-wal
+*.db-shm
+__pycache__/
+*.pyc
+instance/
+static/uploads/*
+!static/uploads/.gitkeep
+test_app_localis.py
