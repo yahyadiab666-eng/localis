@@ -191,7 +191,7 @@
                                 <span class="badge badge-{{ comercio.estado_pago or 'gratis' }}">{{ comercio.plan_nombre or comercio.plan_tipo or 'gratis' }}</span>
                                 <br><small>Pago: {{ comercio.estado_pago or 'gratis' }}</small>
                             </td>
-                            <td><small>{{ comercio.fecha_vencimiento or '—' }}</small></td>
+                            <td><small>{{ comercio.fecha_vencimiento|fecha_corta }}</small></td>
                             <td>
                                 {% if comercio.visible == 1 %}
                                     <span class="badge badge-visible">Visible</span>

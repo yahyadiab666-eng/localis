@@ -182,7 +182,7 @@
               {% if comercio.fecha_vencimiento %}
               <div class="flex items-center gap-1.5">
                 <i data-lucide="calendar" class="text-amber-600" style="width:15px;height:15px;"></i>
-                <span>Vence: <span data-fecha-vencimiento>{{ comercio.fecha_vencimiento[:10] if comercio.fecha_vencimiento else '—' }}</span></span>
+                <span>Vence: <span data-fecha-vencimiento>{{ comercio.fecha_vencimiento|fecha_corta }}</span></span>
               </div>
               {% endif %}
               <div class="flex items-center gap-1.5">

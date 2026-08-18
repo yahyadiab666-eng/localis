@@ -80,7 +80,12 @@ from backend.subscriptions import (
     verificar_vencimiento_comercio,
     verificar_vencimientos_comercios,
 )
-from backend.utils import normalizar_telefono_whatsapp, url_maps_comercio, url_whatsapp_comercio
+from backend.utils import (
+    formatear_fecha,
+    normalizar_telefono_whatsapp,
+    url_maps_comercio,
+    url_whatsapp_comercio,
+)
 from backend.stores import (
     actualizar_datos_comercio,
     buscar_y_filtrar_productos,
@@ -112,6 +117,11 @@ app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_BYTES
 os.makedirs(os.path.join(BASE_DIR, 'static', 'images'), exist_ok=True)
 
 csrf = CSRFProtect(app)
+
+
+@app.template_filter('fecha_corta')
+def _filtro_fecha_corta(valor):
+    return formatear_fecha(valor) or '—'
 
 DEFAULT_BANNER = (
     'https://images.pexels.com/photos/18618233/pexels-photo-18618233.jpeg'
@@ -192,7 +202,7 @@ if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
 
 
 def _normalizar_imagenes_comercio(comercio):
-    """Normaliza logo y banner por separado (componentes independientes)."""
+    """Normaliza logo, banner y fechas para plantillas (PostgreSQL datetime)."""
     if not comercio:
         return comercio
     comercio = dict(comercio)
@@ -210,6 +220,13 @@ def _normalizar_imagenes_comercio(comercio):
         comercio['banner_completo'] = None
 
     comercio['tiene_banner'] = bool(comercio.get('banner_completo'))
+    for campo in (
+        'fecha_vencimiento',
+        'fecha_registro',
+        'fecha_inicio_suscripcion',
+    ):
+        if comercio.get(campo) is not None:
+            comercio[campo] = formatear_fecha(comercio[campo])
     return comercio
 
 

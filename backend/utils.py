@@ -1,7 +1,20 @@
-"""Utilidades compartidas para URLs y contacto."""
+"""Utilidades compartidas para URLs, contacto y fechas."""
 
 import re
+from datetime import date, datetime
 from urllib.parse import quote
+
+
+def formatear_fecha(valor):
+    """Convierte datetime/date/str de PostgreSQL o SQLite a YYYY-MM-DD."""
+    if valor is None or valor == '':
+        return None
+    if isinstance(valor, datetime):
+        return valor.strftime('%Y-%m-%d')
+    if isinstance(valor, date):
+        return valor.strftime('%Y-%m-%d')
+    texto = str(valor).strip()
+    return texto[:10] if texto else None
 
 
 def normalizar_telefono_whatsapp(telefono):
