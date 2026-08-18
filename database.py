@@ -5,9 +5,15 @@ import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-DATABASE_URL = (os.getenv('DATABASE_URL') or '').strip()
-if DATABASE_URL.startswith('postgres://'):
-    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+def normalize_database_url(url):
+    """Convierte postgres:// a postgresql:// (requerido por SQLAlchemy)."""
+    valor = (url or '').strip()
+    if valor.startswith('postgres://'):
+        return valor.replace('postgres://', 'postgresql://', 1)
+    return valor
+
+
+DATABASE_URL = normalize_database_url(os.getenv('DATABASE_URL'))
 
 TABLAS_PERMITIDAS = frozenset({
     'usuarios',

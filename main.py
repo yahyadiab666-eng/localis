@@ -55,7 +55,7 @@ from backend.auth import obtener_o_crear_usuario_google
 from backend.images import comprimir_y_guardar
 from backend.image_search import obtener_url_imagen_automatica
 from backend.db import get_db_connection
-from database import init_db
+from database import DATABASE_URL, init_db
 from backend.plans import PLANES, MENSAJE_LIMITE_PRODUCTOS, es_limite_ilimitado, obtener_beneficios_plan
 from backend.payment_ocr import extraer_referencia_desde_bytes
 from backend.subscriptions import (
@@ -85,15 +85,11 @@ from backend.stores import (
 
 app = Flask(__name__)
 
-# Configuración de base de datos (Supabase PostgreSQL)
-db_url = os.getenv('DATABASE_URL')
-if db_url and db_url.startswith('postgres://'):
-    db_url = db_url.replace('postgres://', 'postgresql://', 1)
-
-if not db_url:
+# Flask-SQLAlchemy requiere postgresql:// (Supabase entrega postgres://)
+if not DATABASE_URL:
     print('Aviso: DATABASE_URL no configurada. La app requiere PostgreSQL (Supabase).')
 
-app.config['SQLALCHEMY_DATABASE_URI'] = db_url or 'postgresql://localhost/localis'
+app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL or 'postgresql://localhost/localis'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
@@ -118,7 +114,7 @@ DEFAULT_BANNER = (
 
 def _inicializar_aplicacion():
     """Migraciones y verificación de vencimientos al cargar la app."""
-    if db_url:
+    if DATABASE_URL:
         print('Base de datos: PostgreSQL (DATABASE_URL / Supabase SQL).')
     else:
         print('Aviso: DATABASE_URL no configurada.')
