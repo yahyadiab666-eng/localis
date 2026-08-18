@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS comercios (
     ciudad TEXT,
     zona TEXT,
     maps_url TEXT,
+    ubicacion_maps_url TEXT,
     categoria_id INTEGER,
 
     -- Suscripción y planes
@@ -72,6 +73,7 @@ CREATE TABLE IF NOT EXISTS comercios (
 
     fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     aviso_bienvenida_visto INTEGER DEFAULT 0,
+    imagen_portada TEXT,
     visible INTEGER DEFAULT 1,         -- 0 = Oculto, 1 = Visible
 
     FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
@@ -189,6 +191,21 @@ CREATE TABLE IF NOT EXISTS pagos (
     FOREIGN KEY (plan_id) REFERENCES planes(id)
 );
 
+-- ==========================================
+-- 11. TABLA DE SOLICITUDES DE PAGO
+-- ==========================================
+CREATE TABLE IF NOT EXISTS solicitudes_pago (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    comercio_id INTEGER NOT NULL,
+    plan_tipo TEXT NOT NULL,
+    referencia TEXT NOT NULL,
+    fecha_transferencia TEXT NOT NULL,
+    estado TEXT DEFAULT 'pendiente',
+    fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (comercio_id) REFERENCES comercios(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_productos_tienda ON productos(comercio_id);
 CREATE INDEX IF NOT EXISTS idx_tiendas_estado ON comercios(estado_pago, plan_id);
 CREATE INDEX IF NOT EXISTS idx_pagos_tienda ON pagos(tienda_id);
+CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_comercio ON solicitudes_pago(comercio_id);

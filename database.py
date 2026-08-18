@@ -1,6 +1,7 @@
 """Esquema PostgreSQL (Supabase), conexión vía psycopg2 e init_db()."""
 
 import os
+import re
 import time
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
@@ -68,6 +69,8 @@ def normalize_database_url(url):
 
 DATABASE_URL = normalize_database_url(os.getenv('DATABASE_URL'))
 
+_IDENTIFICADOR_SQL = re.compile(r'^[a-z_][a-z0-9_]*$')
+
 TABLAS_PERMITIDAS = frozenset({
     'usuarios',
     'planes',
@@ -84,22 +87,167 @@ TABLAS_PERMITIDAS = frozenset({
     'solicitudes_pago',
 })
 
-COLUMNAS_COMERCIOS = [
-    ('banner_url', 'TEXT'),
-    ('ciudad', 'TEXT'),
-    ('zona', 'TEXT'),
-    ('maps_url', 'TEXT'),
-    ('ubicacion_maps_url', 'TEXT'),
-    ('documento_identidad', 'TEXT'),
-    ('plan_id', 'INTEGER DEFAULT 1'),
-    ('plan_tipo', "TEXT DEFAULT 'gratis'"),
-    ('fecha_inicio_suscripcion', 'TIMESTAMP'),
-    ('fecha_vencimiento', 'DATE'),
-    ('limite_productos', 'INTEGER DEFAULT 50'),
-    ('estado_pago', "TEXT DEFAULT 'activo'"),
-    ('aviso_bienvenida_visto', 'INTEGER DEFAULT 0'),
-    ('imagen_portada', 'TEXT'),
-]
+# Columnas que deben existir en tablas ya creadas (ADD COLUMN IF NOT EXISTS).
+# No incluye id SERIAL: las tablas nuevas lo traen en CREATE TABLE.
+COLUMNAS_ESQUEMA = {
+    'usuarios': [
+        ('nombre', 'TEXT'),
+        ('correo', 'TEXT'),
+        ('contrasena', 'TEXT'),
+        ('foto_url', 'TEXT'),
+        ('rol', "TEXT DEFAULT 'comerciante'"),
+    ],
+    'categorias': [
+        ('nombre', 'TEXT'),
+    ],
+    'planes': [
+        ('codigo', 'TEXT'),
+        ('nombre', 'TEXT'),
+        ('precio', 'DOUBLE PRECISION DEFAULT 0'),
+        ('limite_productos', 'INTEGER'),
+        ('soporte_prioritario', 'INTEGER DEFAULT 0'),
+        ('dias_duracion', 'INTEGER DEFAULT 30'),
+        ('destacado', 'INTEGER DEFAULT 0'),
+        ('activo', 'INTEGER DEFAULT 1'),
+    ],
+    'comercios': [
+        ('usuario_id', 'INTEGER'),
+        ('nombre', 'TEXT'),
+        ('descripcion', 'TEXT'),
+        ('telefono', 'TEXT'),
+        ('documento_identidad', 'TEXT'),
+        ('logo_url', 'TEXT'),
+        ('banner_url', 'TEXT'),
+        ('direccion', 'TEXT'),
+        ('ciudad', 'TEXT'),
+        ('zona', 'TEXT'),
+        ('maps_url', 'TEXT'),
+        ('ubicacion_maps_url', 'TEXT'),
+        ('categoria_id', 'INTEGER'),
+        ('plan_id', 'INTEGER DEFAULT 1'),
+        ('plan_tipo', "TEXT DEFAULT 'gratis'"),
+        ('fecha_inicio_suscripcion', 'TIMESTAMP'),
+        ('fecha_vencimiento', 'TIMESTAMP'),
+        ('limite_productos', 'INTEGER DEFAULT 50'),
+        ('estado_pago', "TEXT DEFAULT 'activo'"),
+        ('fecha_registro', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+        ('aviso_bienvenida_visto', 'INTEGER DEFAULT 0'),
+        ('imagen_portada', 'TEXT'),
+        ('visible', 'INTEGER DEFAULT 1'),
+    ],
+    'sucursales': [
+        ('comercio_id', 'INTEGER'),
+        ('direccion', 'TEXT'),
+        ('coordinates_maps', 'TEXT'),
+    ],
+    'productos': [
+        ('comercio_id', 'INTEGER'),
+        ('nombre', 'TEXT'),
+        ('precio_usd', 'DOUBLE PRECISION'),
+        ('descripcion', 'TEXT'),
+        ('imagen_url', 'TEXT'),
+        ('stock', 'INTEGER DEFAULT 0'),
+        ('codigo_barras', 'TEXT'),
+    ],
+    'soporte_y_reportes': [
+        ('usuario_id', 'INTEGER'),
+        ('tipo', 'TEXT'),
+        ('correo', 'TEXT'),
+        ('mensaje', 'TEXT'),
+        ('referencia_id', 'INTEGER'),
+        ('fecha', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+        ('estado', "TEXT DEFAULT 'pendiente'"),
+    ],
+    'configuracion_sistema': [
+        ('clave', 'TEXT'),
+        ('valor', 'TEXT'),
+    ],
+    'logs_auditoria': [
+        ('usuario_id', 'INTEGER'),
+        ('accion', 'TEXT'),
+        ('detalles', 'TEXT'),
+        ('fecha', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+    ],
+    'intentos_login': [
+        ('correo_intentado', 'TEXT'),
+        ('ip_direccion', "TEXT DEFAULT '127.0.0.1'"),
+        ('intentos', 'INTEGER DEFAULT 1'),
+        ('fecha', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+    ],
+    'pagos': [
+        ('tienda_id', 'INTEGER'),
+        ('plan_id', 'INTEGER'),
+        ('monto', 'DOUBLE PRECISION'),
+        ('metodo', 'TEXT'),
+        ('referencia', 'TEXT'),
+        ('banco_origen', 'TEXT'),
+        ('cedula_pagador', 'TEXT'),
+        ('telefono_pagador', 'TEXT'),
+        ('estado', "TEXT DEFAULT 'pendiente'"),
+        ('fecha_pago', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+    ],
+    'solicitudes_pago': [
+        ('comercio_id', 'INTEGER'),
+        ('plan_tipo', 'TEXT'),
+        ('referencia', 'TEXT'),
+        ('fecha_transferencia', 'TEXT'),
+        ('estado', "TEXT DEFAULT 'pendiente'"),
+        ('fecha_registro', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+    ],
+}
+
+CLAVES_FORANEAS = (
+    (
+        'comercios',
+        'comercios_usuario_id_fkey',
+        'FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE',
+    ),
+    (
+        'comercios',
+        'comercios_categoria_id_fkey',
+        'FOREIGN KEY (categoria_id) REFERENCES categorias(id) ON DELETE SET NULL',
+    ),
+    (
+        'comercios',
+        'comercios_plan_id_fkey',
+        'FOREIGN KEY (plan_id) REFERENCES planes(id) ON DELETE SET NULL',
+    ),
+    (
+        'sucursales',
+        'sucursales_comercio_id_fkey',
+        'FOREIGN KEY (comercio_id) REFERENCES comercios(id) ON DELETE CASCADE',
+    ),
+    (
+        'productos',
+        'productos_comercio_id_fkey',
+        'FOREIGN KEY (comercio_id) REFERENCES comercios(id) ON DELETE CASCADE',
+    ),
+    (
+        'soporte_y_reportes',
+        'soporte_y_reportes_usuario_id_fkey',
+        'FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL',
+    ),
+    (
+        'logs_auditoria',
+        'logs_auditoria_usuario_id_fkey',
+        'FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL',
+    ),
+    (
+        'pagos',
+        'pagos_tienda_id_fkey',
+        'FOREIGN KEY (tienda_id) REFERENCES comercios(id)',
+    ),
+    (
+        'pagos',
+        'pagos_plan_id_fkey',
+        'FOREIGN KEY (plan_id) REFERENCES planes(id)',
+    ),
+    (
+        'solicitudes_pago',
+        'solicitudes_pago_comercio_id_fkey',
+        'FOREIGN KEY (comercio_id) REFERENCES comercios(id) ON DELETE CASCADE',
+    ),
+)
 
 PLANES_SEED = [
     ('gratis', 'Plan Gratis / Prueba', 0, 50, 0, 30, 0, 1),
@@ -288,18 +436,10 @@ def ejecutar_con_reintentos_bd(operacion, reintentos=None):
     return None
 
 
-def _columnas_existentes(cursor, tabla):
-    if tabla not in TABLAS_PERMITIDAS:
-        raise ValueError(f'Tabla no permitida para introspección: {tabla}')
-    cursor.execute(
-        """
-        SELECT column_name
-        FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = %s
-        """,
-        (tabla,),
-    )
-    return {row[0] for row in cursor.fetchall()}
+def _validar_identificador(nombre):
+    if not _IDENTIFICADOR_SQL.match(nombre or ''):
+        raise ValueError(f'Identificador SQL no permitido: {nombre}')
+    return nombre
 
 
 def _tabla_existe(cursor, tabla):
@@ -315,126 +455,172 @@ def _tabla_existe(cursor, tabla):
     return cursor.fetchone() is not None
 
 
+def _ejecutar_ddl_seguro(cursor, sql):
+    """Ejecuta DDL con savepoint para no abortar init_db si el objeto ya existe."""
+    cursor.execute('SAVEPOINT ddl_seguro')
+    try:
+        cursor.execute(sql)
+        cursor.execute('RELEASE SAVEPOINT ddl_seguro')
+        return True
+    except Exception as error:
+        cursor.execute('ROLLBACK TO SAVEPOINT ddl_seguro')
+        print(f'Aviso DDL: {error}')
+        return False
+
+
 def _agregar_columna_si_falta(cursor, tabla, nombre, tipo_sql):
-    existentes = _columnas_existentes(cursor, tabla)
-    if nombre not in existentes:
-        cursor.execute(f'ALTER TABLE {tabla} ADD COLUMN {nombre} {tipo_sql}')
-
-
-def _ejecutar_ddl(cursor, ddl):
-    for statement in ddl.split(';'):
-        sql = statement.strip()
-        if sql:
-            cursor.execute(sql)
-
-
-def _ejecutar_schema_base(cursor):
-    """Crea tablas base con CREATE TABLE IF NOT EXISTS (PostgreSQL)."""
-    ddl_base = """
-    CREATE TABLE IF NOT EXISTS usuarios (
-        id SERIAL PRIMARY KEY,
-        nombre TEXT NOT NULL,
-        correo TEXT UNIQUE NOT NULL,
-        contrasena TEXT,
-        foto_url TEXT,
-        rol TEXT DEFAULT 'comerciante'
-    );
-
-    CREATE TABLE IF NOT EXISTS categorias (
-        id SERIAL PRIMARY KEY,
-        nombre TEXT UNIQUE NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS comercios (
-        id SERIAL PRIMARY KEY,
-        usuario_id INTEGER REFERENCES usuarios(id) ON DELETE CASCADE,
-        nombre TEXT NOT NULL,
-        descripcion TEXT,
-        telefono TEXT,
-        documento_identidad TEXT,
-        logo_url TEXT,
-        banner_url TEXT,
-        direccion TEXT,
-        ciudad TEXT,
-        zona TEXT,
-        maps_url TEXT,
-        categoria_id INTEGER REFERENCES categorias(id) ON DELETE SET NULL,
-        plan_id INTEGER,
-        plan_tipo TEXT DEFAULT 'gratis',
-        fecha_inicio_suscripcion TIMESTAMP,
-        fecha_vencimiento TIMESTAMP,
-        limite_productos INTEGER DEFAULT 50,
-        estado_pago TEXT DEFAULT 'activo',
-        fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        aviso_bienvenida_visto INTEGER DEFAULT 0,
-        visible INTEGER DEFAULT 1
-    );
-
-    CREATE TABLE IF NOT EXISTS sucursales (
-        id SERIAL PRIMARY KEY,
-        comercio_id INTEGER REFERENCES comercios(id) ON DELETE CASCADE,
-        direccion TEXT NOT NULL,
-        coordinates_maps TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS productos (
-        id SERIAL PRIMARY KEY,
-        comercio_id INTEGER REFERENCES comercios(id) ON DELETE CASCADE,
-        nombre TEXT NOT NULL,
-        precio_usd DOUBLE PRECISION NOT NULL,
-        descripcion TEXT,
-        imagen_url TEXT,
-        stock INTEGER DEFAULT 0,
-        codigo_barras TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS soporte_y_reportes (
-        id SERIAL PRIMARY KEY,
-        usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
-        tipo TEXT NOT NULL,
-        correo TEXT NOT NULL,
-        mensaje TEXT NOT NULL,
-        referencia_id INTEGER,
-        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        estado TEXT DEFAULT 'pendiente'
-    );
-
-    CREATE TABLE IF NOT EXISTS configuracion_sistema (
-        clave TEXT PRIMARY KEY,
-        valor TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS logs_auditoria (
-        id SERIAL PRIMARY KEY,
-        usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
-        accion TEXT NOT NULL,
-        detalles TEXT,
-        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS intentos_login (
-        id SERIAL PRIMARY KEY,
-        correo_intentado TEXT NOT NULL,
-        ip_direccion TEXT DEFAULT '127.0.0.1',
-        intentos INTEGER DEFAULT 1,
-        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    _validar_identificador(tabla)
+    _validar_identificador(nombre)
+    if tabla not in TABLAS_PERMITIDAS:
+        raise ValueError(f'Tabla no permitida: {tabla}')
+    cursor.execute(
+        f'ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS {nombre} {tipo_sql}'
     )
-    """
-    _ejecutar_ddl(cursor, ddl_base)
 
-    for nombre in ('Alimentos', 'Ropa', 'Tecnología', 'Otros'):
-        cursor.execute(
-            """
-            INSERT INTO categorias (nombre)
-            VALUES (%s)
-            ON CONFLICT (nombre) DO NOTHING
-            """,
-            (nombre,),
+
+def _migrar_columnas(cursor):
+    for tabla, columnas in COLUMNAS_ESQUEMA.items():
+        if not _tabla_existe(cursor, tabla):
+            continue
+        for nombre, tipo_sql in columnas:
+            _agregar_columna_si_falta(cursor, tabla, nombre, tipo_sql)
+
+
+def _restriccion_existe(cursor, nombre):
+    cursor.execute(
+        """
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = %s
+        LIMIT 1
+        """,
+        (nombre,),
+    )
+    return cursor.fetchone() is not None
+
+
+def _asegurar_claves_foraneas(cursor):
+    for tabla, constraint, definicion in CLAVES_FORANEAS:
+        if not _tabla_existe(cursor, tabla):
+            continue
+        if _restriccion_existe(cursor, constraint):
+            continue
+        _validar_identificador(tabla)
+        _validar_identificador(constraint)
+        _ejecutar_ddl_seguro(
+            cursor,
+            f'ALTER TABLE {tabla} ADD CONSTRAINT {constraint} {definicion} NOT VALID',
         )
 
 
+def _crear_tabla_usuarios(cursor):
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id SERIAL PRIMARY KEY,
+            nombre TEXT NOT NULL,
+            correo TEXT UNIQUE NOT NULL,
+            contrasena TEXT,
+            foto_url TEXT,
+            rol TEXT DEFAULT 'comerciante'
+        )
+        """
+    )
+
+
+def _crear_tabla_categorias(cursor):
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS categorias (
+            id SERIAL PRIMARY KEY,
+            nombre TEXT UNIQUE NOT NULL
+        )
+        """
+    )
+
+
+def _crear_tabla_planes(cursor):
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS planes (
+            id SERIAL PRIMARY KEY,
+            codigo TEXT UNIQUE,
+            nombre TEXT UNIQUE NOT NULL,
+            precio DOUBLE PRECISION NOT NULL DEFAULT 0,
+            limite_productos INTEGER,
+            soporte_prioritario INTEGER DEFAULT 0,
+            dias_duracion INTEGER DEFAULT 30,
+            destacado INTEGER DEFAULT 0,
+            activo INTEGER DEFAULT 1
+        )
+        """
+    )
+
+
+def _crear_tabla_comercios(cursor):
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS comercios (
+            id SERIAL PRIMARY KEY,
+            usuario_id INTEGER REFERENCES usuarios(id) ON DELETE CASCADE,
+            nombre TEXT NOT NULL,
+            descripcion TEXT,
+            telefono TEXT,
+            documento_identidad TEXT,
+            logo_url TEXT,
+            banner_url TEXT,
+            direccion TEXT,
+            ciudad TEXT,
+            zona TEXT,
+            maps_url TEXT,
+            ubicacion_maps_url TEXT,
+            categoria_id INTEGER REFERENCES categorias(id) ON DELETE SET NULL,
+            plan_id INTEGER REFERENCES planes(id) ON DELETE SET NULL,
+            plan_tipo TEXT DEFAULT 'gratis',
+            fecha_inicio_suscripcion TIMESTAMP,
+            fecha_vencimiento TIMESTAMP,
+            limite_productos INTEGER DEFAULT 50,
+            estado_pago TEXT DEFAULT 'activo',
+            fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            aviso_bienvenida_visto INTEGER DEFAULT 0,
+            imagen_portada TEXT,
+            visible INTEGER DEFAULT 1
+        )
+        """
+    )
+
+
+def _crear_tabla_sucursales(cursor):
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sucursales (
+            id SERIAL PRIMARY KEY,
+            comercio_id INTEGER REFERENCES comercios(id) ON DELETE CASCADE,
+            direccion TEXT NOT NULL,
+            coordinates_maps TEXT
+        )
+        """
+    )
+
+
+def _crear_tabla_productos(cursor):
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS productos (
+            id SERIAL PRIMARY KEY,
+            comercio_id INTEGER REFERENCES comercios(id) ON DELETE CASCADE,
+            nombre TEXT NOT NULL,
+            precio_usd DOUBLE PRECISION NOT NULL,
+            descripcion TEXT,
+            imagen_url TEXT,
+            stock INTEGER DEFAULT 0,
+            codigo_barras TEXT
+        )
+        """
+    )
+
+
 def _crear_tabla_soporte_y_reportes(cursor):
-    """Garantiza la tabla de tickets aunque el resto del esquema ya exista."""
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS soporte_y_reportes (
@@ -451,45 +637,43 @@ def _crear_tabla_soporte_y_reportes(cursor):
     )
 
 
-def _crear_tabla_planes(cursor):
+def _crear_tabla_configuracion_sistema(cursor):
     cursor.execute(
         """
-        CREATE TABLE IF NOT EXISTS planes (
-            id SERIAL PRIMARY KEY,
-            codigo TEXT UNIQUE,
-            nombre TEXT UNIQUE NOT NULL,
-            precio DOUBLE PRECISION NOT NULL,
-            limite_productos INTEGER,
-            soporte_prioritario INTEGER DEFAULT 0,
-            dias_duracion INTEGER DEFAULT 30,
-            destacado INTEGER DEFAULT 0,
-            activo INTEGER DEFAULT 1
+        CREATE TABLE IF NOT EXISTS configuracion_sistema (
+            clave TEXT PRIMARY KEY,
+            valor TEXT NOT NULL
         )
         """
     )
 
-    columnas = _columnas_existentes(cursor, 'planes')
-    if 'codigo' not in columnas:
-        _agregar_columna_si_falta(cursor, 'planes', 'codigo', 'TEXT')
 
-    for fila in PLANES_SEED:
-        cursor.execute(
-            """
-            INSERT INTO planes
-            (codigo, nombre, precio, limite_productos, soporte_prioritario,
-             dias_duracion, destacado, activo)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (codigo) DO UPDATE SET
-                nombre = EXCLUDED.nombre,
-                precio = EXCLUDED.precio,
-                limite_productos = EXCLUDED.limite_productos,
-                soporte_prioritario = EXCLUDED.soporte_prioritario,
-                dias_duracion = EXCLUDED.dias_duracion,
-                destacado = EXCLUDED.destacado,
-                activo = EXCLUDED.activo
-            """,
-            fila,
+def _crear_tabla_logs_auditoria(cursor):
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS logs_auditoria (
+            id SERIAL PRIMARY KEY,
+            usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+            accion TEXT NOT NULL,
+            detalles TEXT,
+            fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
+        """
+    )
+
+
+def _crear_tabla_intentos_login(cursor):
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS intentos_login (
+            id SERIAL PRIMARY KEY,
+            correo_intentado TEXT NOT NULL,
+            ip_direccion TEXT DEFAULT '127.0.0.1',
+            intentos INTEGER DEFAULT 1,
+            fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
 
 
 def _crear_tabla_pagos(cursor):
@@ -512,7 +696,84 @@ def _crear_tabla_pagos(cursor):
     )
 
 
+def _crear_tabla_solicitudes_pago(cursor):
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS solicitudes_pago (
+            id SERIAL PRIMARY KEY,
+            comercio_id INTEGER NOT NULL REFERENCES comercios(id) ON DELETE CASCADE,
+            plan_tipo TEXT NOT NULL,
+            referencia TEXT NOT NULL,
+            fecha_transferencia TEXT NOT NULL,
+            estado TEXT DEFAULT 'pendiente',
+            fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
+def _crear_tablas(cursor):
+    """Crea todas las tablas de la aplicación. El orden respeta las FKs."""
+    _crear_tabla_usuarios(cursor)
+    _crear_tabla_categorias(cursor)
+    _crear_tabla_planes(cursor)
+    _crear_tabla_comercios(cursor)
+    _crear_tabla_sucursales(cursor)
+    _crear_tabla_productos(cursor)
+    _crear_tabla_soporte_y_reportes(cursor)
+    _crear_tabla_configuracion_sistema(cursor)
+    _crear_tabla_logs_auditoria(cursor)
+    _crear_tabla_intentos_login(cursor)
+    _crear_tabla_pagos(cursor)
+    _crear_tabla_solicitudes_pago(cursor)
+
+
+def _asegurar_indices_unicos(cursor):
+    indices = [
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_correo ON usuarios(correo)',
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_categorias_nombre ON categorias(nombre)',
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_planes_codigo ON planes(codigo)',
+    ]
+    for ddl in indices:
+        _ejecutar_ddl_seguro(cursor, ddl)
+
+
+def _sembrar_categorias(cursor):
+    for nombre in ('Alimentos', 'Ropa', 'Tecnología', 'Otros'):
+        cursor.execute(
+            """
+            INSERT INTO categorias (nombre)
+            VALUES (%s)
+            ON CONFLICT (nombre) DO NOTHING
+            """,
+            (nombre,),
+        )
+
+
+def _sembrar_planes(cursor):
+    for fila in PLANES_SEED:
+        cursor.execute(
+            """
+            INSERT INTO planes
+            (codigo, nombre, precio, limite_productos, soporte_prioritario,
+             dias_duracion, destacado, activo)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (codigo) DO UPDATE SET
+                nombre = EXCLUDED.nombre,
+                precio = EXCLUDED.precio,
+                limite_productos = EXCLUDED.limite_productos,
+                soporte_prioritario = EXCLUDED.soporte_prioritario,
+                dias_duracion = EXCLUDED.dias_duracion,
+                destacado = EXCLUDED.destacado,
+                activo = EXCLUDED.activo
+            """,
+            fila,
+        )
+
+
 def _crear_vista_tiendas(cursor):
+    if not _tabla_existe(cursor, 'comercios'):
+        return
     cursor.execute(
         """
         CREATE OR REPLACE VIEW tiendas AS
@@ -531,12 +792,9 @@ def _crear_vista_tiendas(cursor):
     )
 
 
-def _migrar_columnas_comercios(cursor):
+def _backfill_comercios(cursor):
     if not _tabla_existe(cursor, 'comercios'):
         return
-
-    for nombre, tipo in COLUMNAS_COMERCIOS:
-        _agregar_columna_si_falta(cursor, 'comercios', nombre, tipo)
 
     cursor.execute(
         """
@@ -555,18 +813,21 @@ def _migrar_columnas_comercios(cursor):
     cursor.execute(
         """
         UPDATE comercios
-        SET plan_id = 1
-        WHERE plan_id IS NULL
+        SET visible = 1
+        WHERE visible IS NULL
         """
     )
 
 
 def _asignar_plan_id_existentes(cursor):
-    if not _tabla_existe(cursor, 'comercios'):
+    if not _tabla_existe(cursor, 'comercios') or not _tabla_existe(cursor, 'planes'):
         return
 
     cursor.execute('SELECT id, codigo FROM planes')
     mapa = {row[1]: row[0] for row in cursor.fetchall() if row[1]}
+    plan_gratis_id = mapa.get('gratis')
+    if not plan_gratis_id and mapa:
+        plan_gratis_id = next(iter(mapa.values()))
 
     cursor.execute('SELECT id, plan_tipo, plan_id FROM comercios')
     for comercio_id, plan_tipo, plan_id in cursor.fetchall():
@@ -575,9 +836,12 @@ def _asignar_plan_id_existentes(cursor):
         codigo = (plan_tipo or 'gratis').lower()
         if codigo not in mapa:
             codigo = 'gratis'
+        nuevo_plan = mapa.get(codigo, plan_gratis_id)
+        if not nuevo_plan:
+            continue
         cursor.execute(
             'UPDATE comercios SET plan_id = %s WHERE id = %s',
-            (mapa.get(codigo, 1), comercio_id),
+            (nuevo_plan, comercio_id),
         )
 
 
@@ -586,19 +850,24 @@ def _crear_indices(cursor):
         'CREATE INDEX IF NOT EXISTS idx_productos_tienda ON productos(comercio_id)',
         'CREATE INDEX IF NOT EXISTS idx_tiendas_estado ON comercios(estado_pago, plan_id)',
         'CREATE INDEX IF NOT EXISTS idx_pagos_tienda ON pagos(tienda_id)',
+        'CREATE INDEX IF NOT EXISTS idx_pagos_referencia ON pagos(referencia)',
         'CREATE INDEX IF NOT EXISTS idx_productos_comercio_id ON productos(comercio_id)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_estado_plan ON comercios(estado_pago, plan_tipo)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_plan_id ON comercios(plan_id)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_ciudad ON comercios(ciudad)',
+        'CREATE INDEX IF NOT EXISTS idx_comercios_usuario_id ON comercios(usuario_id)',
         'CREATE INDEX IF NOT EXISTS idx_intentos_correo ON intentos_login(correo_intentado)',
         'CREATE INDEX IF NOT EXISTS idx_productos_nombre ON productos(nombre)',
         'CREATE INDEX IF NOT EXISTS idx_productos_codigo_barras ON productos(codigo_barras)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_nombre ON comercios(nombre)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_categoria ON comercios(categoria_id)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_visible ON comercios(visible)',
+        'CREATE INDEX IF NOT EXISTS idx_soporte_estado ON soporte_y_reportes(estado)',
+        'CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_comercio ON solicitudes_pago(comercio_id)',
+        'CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_referencia ON solicitudes_pago(referencia)',
     ]
     for ddl in indices:
-        cursor.execute(ddl)
+        _ejecutar_ddl_seguro(cursor, ddl)
 
 
 def _sembrar_configuracion(cursor):
@@ -620,25 +889,11 @@ def _sembrar_configuracion(cursor):
             (clave, valor),
         )
 
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS solicitudes_pago (
-            id SERIAL PRIMARY KEY,
-            comercio_id INTEGER NOT NULL REFERENCES comercios(id) ON DELETE CASCADE,
-            plan_tipo TEXT NOT NULL,
-            referencia TEXT NOT NULL,
-            fecha_transferencia TEXT NOT NULL,
-            estado TEXT DEFAULT 'pendiente',
-            fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-
 
 def init_db():
     """
     Inicializa o actualiza la base PostgreSQL en Supabase sin destruir datos.
-    Requiere DATABASE_URL en el entorno.
+    Crea tablas faltantes, añade columnas ausentes y asegura FKs e índices.
     """
     _require_database_url()
 
@@ -646,12 +901,14 @@ def init_db():
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
 
-            _ejecutar_schema_base(cursor)
-            _crear_tabla_planes(cursor)
-            _crear_tabla_soporte_y_reportes(cursor)
-            _migrar_columnas_comercios(cursor)
+            _crear_tablas(cursor)
+            _migrar_columnas(cursor)
+            _asegurar_indices_unicos(cursor)
+            _sembrar_categorias(cursor)
+            _sembrar_planes(cursor)
+            _backfill_comercios(cursor)
             _asignar_plan_id_existentes(cursor)
-            _crear_tabla_pagos(cursor)
+            _asegurar_claves_foraneas(cursor)
             _crear_vista_tiendas(cursor)
             _sembrar_configuracion(cursor)
             _crear_indices(cursor)
