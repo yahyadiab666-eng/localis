@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Localis - Panel de Administración</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: #f4f6f9; color: #333; }
+        header {
+            background-color: #212529; color: white; padding: 1rem 2rem;
+            display: flex; justify-content: space-between; align-items: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        header h1 { font-size: 1.5rem; color: #ffc107; }
+        .nav-links a { color: white; text-decoration: none; margin-left: 15px; font-weight: 600; }
+        .nav-links .wa-link { color: #25d366; }
+        .alertas-contenedor { max-width: 1200px; margin: 1.5rem auto 0; padding: 0 1rem; }
+        .alerta { padding: 0.75rem 1rem; border-radius: 6px; font-size: 0.95rem; margin-bottom: 10px; border-left: 5px solid; }
+        .alerta-error { background: #fde8e8; color: #9b1c1c; border-color: #f05252; }
+        .alerta-exito { background: #def7ec; color: #03543f; border-color: #31c48d; }
+        .alerta-info { background: #e1effe; color: #1e429f; border-color: #3f83f8; }
+        .container {
+            max-width: 1200px; margin: 2rem auto; padding: 0 1rem;
+            display: grid; grid-template-columns: 1fr 2fr; gap: 2rem;
+        }
+        @media (max-width: 992px) { .container { grid-template-columns: 1fr; } }
+        .col-izquierda { display: flex; flex-direction: column; gap: 2rem; }
+        .card {
+            background: white; padding: 1.5rem; border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05); border: 1px solid #e1e4e8;
+        }
+        .card h2 {
+            font-size: 1.25rem; color: #212529; margin-bottom: 1.25rem;
+            border-bottom: 2px solid #f4f6f9; padding-bottom: 0.5rem;
+        }
+        .form-group { margin-bottom: 1rem; display: flex; flex-direction: column; }
+        .form-group label { margin-bottom: 0.5rem; font-weight: 600; font-size: 0.95rem; }
+        .form-group input, .form-group select { padding: 0.6rem; border: 1px solid #ccc; border-radius: 4px; }
+        .btn-primario {
+            background: #212529; color: white; border: none; padding: 0.6rem 1.2rem;
+            border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%;
+        }
+        .btn-primario:hover { background: #343a40; }
+        .banner-preview { width: 100%; max-height: 120px; object-fit: cover; border-radius: 6px; margin-bottom: 1rem; }
+        .tabla-box {
+            background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            border: 1px solid #e1e4e8; overflow: hidden;
+        }
+        .tabla-contenedor { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; text-align: left; }
+        th, td { padding: 0.75rem 1rem; border-bottom: 1px solid #e1e4e8; font-size: 0.9rem; }
+        th { background: #f8f9fa; font-weight: 600; color: #555; }
+        .badge { padding: 3px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; }
+        .badge-visible, .badge-activo { background: #d4edda; color: #155724; }
+        .badge-oculto, .badge-suspendido { background: #f8d7da; color: #721c24; }
+        .badge-gratis { background: #fff3cd; color: #856404; }
+        .badge-vencido { background: #e2e3e5; color: #383d41; }
+        .busqueda-admin { display: flex; gap: 8px; margin-top: 1rem; }
+        .busqueda-admin input { flex: 1; padding: 0.6rem; border: 1px solid #ccc; border-radius: 4px; }
+        .busqueda-admin button { padding: 0.6rem 1rem; border: none; background: #212529; color: white; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .btn-accion-tabla {
+            padding: 4px 8px; border: none; border-radius: 4px; cursor: pointer;
+            font-size: 0.8rem; font-weight: bold; margin: 2px;
+        }
+        .btn-suspender { background: #dc3545; color: white; }
+        .btn-activar { background: #28a745; color: white; }
+        .btn-resolver { background: #007bff; color: white; }
+        .ticket-item {
+            padding: 1rem; border-bottom: 1px solid #e1e4e8;
+            display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem;
+        }
+        .plan-form { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+        .plan-form select { padding: 4px; font-size: 0.8rem; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Localis | Panel Admin</h1>
+        <div class="nav-links">
+            <a href="https://wa.me/584125970507" target="_blank" class="wa-link">WhatsApp Soporte</a>
+            <a href="{{ url_for('index') }}">Ver Sitio Público</a>
+            <a href="{{ url_for('logout') }}" style="color: #ffc107;">Cerrar Sesión</a>
+        </div>
+    </header>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="alertas-contenedor">
+          {% for category, message in messages %}
+            <div class="alerta alerta-{{ 'exito' if category == 'exito' else ('error' if category == 'error' else 'info') }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <div class="container">
+        <div class="col-izquierda">
+
+            <aside class="card">
+                <h2>Configuración Económica</h2>
+                <form action="{{ url_for('actualizar_tasa') }}" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="form-group">
+                        <label for="tasa_dolar">Tasa del Dólar (Bs.)</label>
+                        <input type="number" id="tasa_dolar" name="tasa_dolar" value="{{ tasa }}" step="0.01" min="1" required>
+                    </div>
+                    <button type="submit" class="btn-primario">Actualizar Tasa</button>
+                </form>
+            </aside>
+
+            <aside class="card">
+                <h2>Banner Promocional (App Cliente)</h2>
+                <img src="{{ banner_url }}" alt="Banner actual" class="banner-preview" onerror="this.style.display='none'">
+                <form action="{{ url_for('admin_banner') }}" method="POST" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="form-group">
+                        <label for="banner">Nueva imagen de banner</label>
+                        <input type="file" id="banner" name="banner" accept="image/*" required>
+                    </div>
+                    <button type="submit" class="btn-primario">Actualizar Banner</button>
+                </form>
+            </aside>
+
+            <aside class="card">
+                <h2>Bandeja de Soporte</h2>
+                <div style="max-height: 400px; overflow-y: auto;">
+                    {% for ticket in tickets %}
+                        <div class="ticket-item">
+                            <div>
+                                <h4 style="font-size:0.95rem;">[{{ ticket.tipo | upper }}] {{ ticket.correo }}</h4>
+                                <p style="font-size:0.9rem;color:#666;">{{ ticket.mensaje }}</p>
+                                <span class="badge">{{ ticket.estado }}</span>
+                            </div>
+                            {% if ticket.estado == 'pendiente' %}
+                                <form action="{{ url_for('admin_resolver_ticket', ticket_id=ticket.id) }}" method="POST">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button type="submit" class="btn-accion-tabla btn-resolver">Listo</button>
+                                </form>
+                            {% endif %}
+                        </div>
+                    {% else %}
+                        <p style="text-align:center;color:#777;padding:1rem;">No hay alertas pendientes.</p>
+                    {% endfor %}
+                </div>
+            </aside>
+        </div>
+
+        <main class="tabla-box">
+            <div style="padding: 1.5rem; border-bottom: 1px solid #e1e4e8;">
+                <h2 style="font-size:1.3rem;">Control de Comercios y Planes</h2>
+                <p style="font-size:0.85rem;color:#666;margin-top:0.5rem;">
+                    Planes: Gratis (30 días) · Básica ${{ planes.basica.precio_usd }} (50 prod.) · Pro ${{ planes.pro.precio_usd }} (200) · Business ${{ planes.business.precio_usd }} (ilimitado)
+                </p>
+                <form action="{{ url_for('panel_admin') }}" method="GET" class="busqueda-admin">
+                    <input type="text" name="q" value="{{ q or '' }}" placeholder="Buscar por nombre, correo del dueño, RIF/Cédula o teléfono...">
+                    <button type="submit">Buscar</button>
+                    {% if q %}
+                        <a href="{{ url_for('panel_admin') }}" style="align-self:center;font-size:0.85rem;color:#666;">Limpiar</a>
+                    {% endif %}
+                </form>
+            </div>
+            <div class="tabla-contenedor">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Comercio</th>
+                            <th>Dueño / Doc.</th>
+                            <th>Categoría</th>
+                            <th>Plan / Pago</th>
+                            <th>Vencimiento</th>
+                            <th>Visibilidad</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for comercio in comercios %}
+                        <tr>
+                            <td>{{ comercio.id }}</td>
+                            <td><strong>{{ comercio.nombre }}</strong><br><small>{{ comercio.telefono or '' }}</small></td>
+                            <td><small>{{ comercio.correo_dueno or '—' }}</small><br><small>{{ comercio.documento_identidad or '' }}</small></td>
+                            <td>{{ comercio.categoria or '—' }}</td>
+                            <td>
+                                <span class="badge badge-{{ comercio.estado_pago or 'gratis' }}">{{ comercio.plan_tipo or 'gratis' }}</span>
+                                <br><small>{{ comercio.estado_pago or 'gratis' }}</small>
+                            </td>
+                            <td><small>{{ comercio.fecha_vencimiento or '—' }}</small></td>
+                            <td>
+                                {% if comercio.visible == 1 %}
+                                    <span class="badge badge-visible">Visible</span>
+                                {% else %}
+                                    <span class="badge badge-oculto">Oculto</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <form action="{{ url_for('cambiar_estado_comercio', comercio_id=comercio.id) }}" method="POST" style="display:inline;">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    {% if comercio.visible == 1 %}
+                                        <input type="hidden" name="nuevo_estado" value="0">
+                                        <input type="hidden" name="estado_pago" value="suspendido">
+                                        <button type="submit" class="btn-accion-tabla btn-suspender">Ocultar</button>
+                                    {% else %}
+                                        <input type="hidden" name="nuevo_estado" value="1">
+                                        <input type="hidden" name="estado_pago" value="activo">
+                                        <button type="submit" class="btn-accion-tabla btn-activar">Habilitar</button>
+                                    {% endif %}
+                                </form>
+
+                                <form action="{{ url_for('admin_cambiar_plan', comercio_id=comercio.id) }}" method="POST" class="plan-form" style="margin-top:6px;">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <select name="plan_tipo">
+                                        <option value="gratis" {% if comercio.plan_tipo == 'gratis' %}selected{% endif %}>Gratis / Prueba</option>
+                                        <option value="basica" {% if comercio.plan_tipo == 'basica' %}selected{% endif %}>Básica</option>
+                                        <option value="pro" {% if comercio.plan_tipo == 'pro' %}selected{% endif %}>Pro</option>
+                                        <option value="business" {% if comercio.plan_tipo == 'business' %}selected{% endif %}>Business</option>
+                                    </select>
+                                    <select name="estado_pago">
+                                        <option value="activo" {% if comercio.estado_pago == 'activo' %}selected{% endif %}>Activo</option>
+                                        <option value="vencido" {% if comercio.estado_pago == 'vencido' %}selected{% endif %}>Vencido</option>
+                                        <option value="suspendido" {% if comercio.estado_pago == 'suspendido' %}selected{% endif %}>Suspendido</option>
+                                        <option value="gratis" {% if comercio.estado_pago == 'gratis' %}selected{% endif %}>Gratis</option>
+                                    </select>
+                                    <button type="submit" class="btn-accion-tabla btn-resolver">Plan</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="8" style="text-align:center;padding:2rem;color:#666;">No hay comercios registrados.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </main>
+    </div>
+</body>
+</html>

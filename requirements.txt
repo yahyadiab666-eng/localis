@@ -1,0 +1,12 @@
+Flask
+Flask-WTF
+authlib
+gunicorn
+python-dotenv
+rapidocr-onnxruntime
+opencv-python-headless
+Pillow
+numpy
+openpyxl
+requests
+Werkzeug

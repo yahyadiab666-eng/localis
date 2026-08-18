@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>Localis - Panel del Comercio</title>
+  
+  <!-- Tailwind CSS & Lucide Icons -->
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
+  
+  <!-- Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700;900&display=swap" rel="stylesheet">
+  
+  <style>
+    body { font-family: 'DM Sans', sans-serif; }
+    .font-display { font-family: 'Fraunces', serif; }
+    .card-hover { transition: transform 0.3s, box-shadow 0.3s; }
+    .card-hover:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(0,0,0,0.08); }
+    .modal-push { display: none; position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.55); align-items: center; justify-content: center; padding: 1rem; }
+    .modal-push.activo { display: flex; }
+    .modal-push .panel { background: #fff; border-radius: 1rem; max-width: 520px; width: 100%; max-height: 90vh; overflow-y: auto; box-shadow: 0 25px 50px rgba(0,0,0,.25); }
+    .localis-flash-alerta { transition: opacity 0.5s ease; }
+  </style>
+</head>
+
+<body class="w-full min-h-screen flex flex-col justify-between" style="background: rgb(254, 251, 246);">
+
+  <div>
+    <!-- BARRA DE NAVEGACIÓN SUPERIOR -->
+    <header class="w-full bg-stone-900 border-b border-stone-800">
+      <nav class="flex items-center justify-between px-6 py-4 max-w-6xl w-full mx-auto">
+        <!-- Logo -->
+        <div class="flex items-center gap-3">
+          <a href="{{ url_for('index') }}" class="font-display text-white text-[28px] font-black tracking-tight">localis</a>
+          <span class="bg-amber-500/20 text-amber-400 text-[11px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">Panel comerciante</span>
+        </div>
+        
+        <!-- Enlaces de navegación -->
+        <div class="flex items-center gap-5">
+          <a href="https://wa.me/584125970507" target="_blank" rel="noopener"
+             class="text-sm font-medium text-emerald-400 hover:text-emerald-300 transition flex items-center gap-1.5">
+            <i data-lucide="message-circle" style="width:16px;height:16px;"></i> Soporte
+          </a>
+          <a href="{{ url_for('editar_comercio') }}" class="text-sm font-medium text-stone-300 hover:text-white transition flex items-center gap-1.5">
+            <i data-lucide="settings" style="width:16px;height:16px;"></i> Editar Datos
+          </a>
+          <a href="{{ url_for('index') }}" class="text-sm font-medium text-stone-300 hover:text-white transition flex items-center gap-1.5">
+            <i data-lucide="store" style="width:16px;height:16px;"></i> Ver Inicio
+          </a>
+          <a href="{{ url_for('logout') }}" class="px-4 py-2 rounded-full text-sm font-semibold transition bg-red-500/10 text-red-400 hover:bg-red-500/20 flex items-center gap-1.5">
+            <i data-lucide="log-out" style="width:16px;height:16px;"></i> Cerrar Sesión
+          </a>
+        </div>
+      </nav>
+    </header>
+
+    <!-- NOTIFICACIONES FLASH DE FLASK -->
+    {% with mensajes = get_flashed_messages(with_categories=true) %}
+      {% if mensajes %}
+        <div class="fixed top-4 right-4 z-50 space-y-2">
+          {% for categoria, mensaje in mensajes %}
+            <div class="p-4 rounded-xl shadow-lg text-white text-sm flex items-center gap-3 localis-flash-alerta {% if categoria == 'error' %}bg-red-500{% elif categoria == 'exito' %}bg-emerald-600{% else %}bg-amber-600{% endif %}">
+              <i data-lucide="info" style="width:18px;height:18px;"></i>
+              <span>{{ mensaje }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <!-- CONTENIDO PRINCIPAL -->
+    <main class="max-w-6xl mx-auto px-6 py-10 w-full space-y-10">
+
+      <!-- TARJETA PERFIL DEL COMERCIO -->
+      <section class="bg-white rounded-2xl p-6 md:p-8 shadow-sm border border-stone-200/80 card-hover">
+        <div class="flex flex-col md:flex-row items-center gap-6">
+          
+          <!-- Box Logo / Avatar -->
+          <div class="w-28 h-28 md:w-32 md:h-32 rounded-2xl bg-amber-50 border-2 border-amber-200 flex items-center justify-center flex-shrink-0 overflow-hidden relative shadow-inner">
+            {% if comercio.logo_url %}
+              <img src="{{ comercio.logo_completo or url_for('static', filename='uploads/' + comercio.logo_url) }}" alt="Logo de {{ comercio.nombre }}" class="w-full h-full object-cover">
+            {% else %}
+              <div class="text-center p-2 text-amber-700/60">
+                <i data-lucide="image" class="mx-auto mb-1" style="width:28px;height:28px;"></i>
+                <span class="text-[11px] font-bold uppercase tracking-wider block">Sin Logo</span>
+              </div>
+            {% endif %}
+          </div>
+
+          <!-- Detalles del Comercio -->
+          <div class="flex-1 text-center md:text-left space-y-2">
+            <div class="flex flex-wrap items-center justify-center md:justify-start gap-2">
+              <h2 class="font-display text-2xl md:text-3xl font-bold text-gray-900">{{ comercio.nombre }}</h2>
+              <span class="bg-amber-100 text-amber-800 text-[11px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">
+                {{ comercio.categoria or 'General' }}
+              </span>
+            </div>
+
+            <p class="text-stone-600 text-sm max-w-2xl leading-relaxed">
+              {{ comercio.descripcion or 'Sin descripción registrada para tu comercio todavía.' }}
+            </p>
+
+            <div class="pt-2 flex flex-wrap items-center justify-center md:justify-start gap-4 text-xs font-medium text-stone-500 border-t border-stone-100">
+              <div class="flex items-center gap-1.5">
+                <i data-lucide="phone" class="text-amber-600" style="width:15px;height:15px;"></i>
+                <span>{{ comercio.telefono or 'No registrado' }}</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <i data-lucide="map-pin" class="text-amber-600" style="width:15px;height:15px;"></i>
+                <span>{{ comercio.direccion or 'Dirección no configurada' }}</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <i data-lucide="credit-card" class="text-amber-600" style="width:15px;height:15px;"></i>
+                <span>Plan {{ plan_info.nombre }} · <span data-estado-suscripcion>{{ comercio.estado_pago or 'activo' }}</span></span>
+              </div>
+              {% if comercio.fecha_vencimiento %}
+              <div class="flex items-center gap-1.5">
+                <i data-lucide="calendar" class="text-amber-600" style="width:15px;height:15px;"></i>
+                <span>Vence: <span data-fecha-vencimiento>{{ comercio.fecha_vencimiento[:10] if comercio.fecha_vencimiento else '—' }}</span></span>
+              </div>
+              {% endif %}
+              <div class="flex items-center gap-1.5">
+                {% if comercio.visible == 1 %}
+                  <span class="inline-flex items-center gap-1 text-emerald-600 font-bold bg-emerald-50 px-2.5 py-0.5 rounded-md">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500"></span> Activo y Visible
+                  </span>
+                {% else %}
+                  <span class="inline-flex items-center gap-1 text-rose-600 font-bold bg-rose-50 px-2.5 py-0.5 rounded-md">
+                    <span class="w-2 h-2 rounded-full bg-rose-500"></span> Oculto / En revisión
+                  </span>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- PLANES Y SUSCRIPCIÓN -->
+      <section class="bg-white rounded-2xl p-6 shadow-sm border border-stone-200/80 space-y-4">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h3 class="font-display text-xl font-bold text-gray-900">Tu Plan y Suscripción</h3>
+            <p class="text-stone-500 text-xs mt-1">Plan actual: <strong>{{ plan_info.nombre }}</strong> · ${{ plan_info.precio_usd }}/mes</p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" onclick="abrirModalPlan('pro')" class="px-4 py-2 rounded-full bg-violet-600 text-white text-sm font-bold hover:bg-violet-500">Cambiar a Pro</button>
+            <button type="button" onclick="abrirModalPlan('business')" class="px-4 py-2 rounded-full bg-stone-900 text-white text-sm font-bold hover:bg-stone-800">Cambiar a Business</button>
+            <button type="button" onclick="abrirModalPlan('basica')" class="px-4 py-2 rounded-full border border-amber-400 text-amber-800 text-sm font-bold hover:bg-amber-50">Cambiar a Básica</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- CARGA MASIVA CSV / EXCEL -->
+      <section class="bg-amber-500/10 border border-amber-200 rounded-2xl p-6">
+        <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+          <div class="space-y-1">
+            <h4 class="font-display text-lg font-bold text-amber-950 flex items-center gap-2">
+              <i data-lucide="file-spreadsheet" class="text-amber-600" style="width:20px;height:20px;"></i>
+              Carga Masiva de Productos (CSV / Excel)
+            </h4>
+            <p class="text-stone-600 text-xs">
+              Sube un archivo <code class="bg-white/80 px-1.5 py-0.5 rounded border">.csv</code> o <code class="bg-white/80 px-1.5 py-0.5 rounded border">.xlsx</code>
+              con columnas: nombre, precio_usd, descripcion, codigo_barras, imagen_url.
+              <strong class="text-amber-800">Reemplaza todos los productos actuales.</strong>
+              La columna <code class="bg-white/80 px-1.5 py-0.5 rounded border">imagen_url</code> debe contener el enlace directo a la imagen.
+            </p>
+          </div>
+
+          <form action="{{ url_for('cargar_csv') }}" method="POST" enctype="multipart/form-data" class="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="file" name="archivo_csv" accept=".csv,.xlsx" required
+                   class="block w-full text-xs text-stone-600 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-amber-500 file:text-stone-900 hover:file:bg-amber-400 bg-white rounded-full border border-stone-200 cursor-pointer">
+            <button type="submit" class="w-full sm:w-auto bg-stone-900 text-white font-bold px-5 py-2 rounded-full text-xs hover:bg-stone-800 transition shadow-sm flex items-center justify-center gap-1.5 shrink-0">
+              <i data-lucide="upload" style="width:14px;height:14px;"></i> Subir Archivo
+            </button>
+          </form>
+        </div>
+      </section>
+
+      <!-- GESTIÓN DE PRODUCTOS -->
+      <section class="space-y-6">
+        
+        <!-- Header Acción -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h3 class="font-display text-2xl font-bold text-gray-900">Tus Artículos en Venta</h3>
+            <p class="text-stone-500 text-xs mt-0.5">Gestiona el inventario y precios que ven tus clientes</p>
+          </div>
+          <a href="{{ url_for('nuevo_producto') }}" class="bg-amber-500 text-stone-900 font-bold px-5 py-2.5 rounded-full text-sm hover:bg-amber-400 transition shadow-sm flex items-center gap-2">
+            <i data-lucide="plus-circle" style="width:18px;height:18px;"></i>
+            <span>Añadir Nuevo Producto</span>
+          </a>
+        </div>
+
+        <!-- Tabla / Contenedor de Inventario -->
+        <div class="bg-white rounded-2xl shadow-sm border border-stone-200/80 overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="bg-stone-50/80 border-b border-stone-200/80 text-stone-500 text-xs font-bold uppercase tracking-wider">
+                  <th class="py-4 px-6">Producto</th>
+                  <th class="py-4 px-6">Código de Barras</th>
+                  <th class="py-4 px-6">Descripción</th>
+                  <th class="py-4 px-6 text-right">Precio (USD)</th>
+                  <th class="py-4 px-6 text-right">Precio Ref (Bs.)</th>
+                  <th class="py-4 px-6 text-center">Acciones</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-stone-100 text-sm">
+                {% for producto in productos %}
+                  <tr class="hover:bg-amber-50/30 transition">
+                    <td class="py-4 px-6 font-semibold text-gray-900">
+                      {{ producto.nombre }}
+                    </td>
+                    <td class="py-4 px-6 text-stone-500 text-xs font-mono">
+                      {% if producto.codigo_barras %}
+                        <span class="bg-stone-100 text-stone-700 px-2 py-1 rounded border border-stone-200">
+                          {{ producto.codigo_barras }}
+                        </span>
+                      {% else %}
+                        <span class="text-stone-400 font-sans italic">Sin código</span>
+                      {% endif %}
+                    </td>
+                    <td class="py-4 px-6 text-stone-500 max-w-xs truncate">
+                      {{ producto.descripcion or 'Sin descripción' }}
+                    </td>
+                    <td class="py-4 px-6 text-right font-bold text-amber-600">
+                      ${{ "%.2f"|format(producto.precio_usd) }}
+                    </td>
+                    <td class="py-4 px-6 text-right font-semibold text-stone-400 text-xs">
+                      {{ "%.2f"|format(producto.precio_bs) }} Bs.
+                    </td>
+                    <td class="py-4 px-6 text-center">
+                      <div class="flex items-center justify-center gap-1">
+                        <!-- Editar -->
+                        <a href="{{ url_for('editar_producto', producto_id=producto.id) }}" class="p-2 rounded-lg text-amber-600 hover:bg-amber-50 transition" title="Editar Producto">
+                          <i data-lucide="pencil" style="width:18px;height:18px;"></i>
+                        </a>
+
+                        <!-- Eliminar -->
+                        <form action="{{ url_for('eliminar_producto_ruta', producto_id=producto.id) }}" method="POST" class="inline-block">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                          <button type="submit" onclick="return confirm('¿Seguro que deseas eliminar este producto?')" class="p-2 rounded-lg text-rose-600 hover:bg-rose-50 transition" title="Eliminar Producto">
+                            <i data-lucide="trash-2" style="width:18px;height:18px;"></i>
+                          </button>
+                        </form>
+                      </div>
+                    </td>
+                  </tr>
+                {% else %}
+                  <tr>
+                    <td colspan="6" class="py-12 px-6 text-center">
+                      <div class="max-w-sm mx-auto space-y-3">
+                        <div class="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mx-auto">
+                          <i data-lucide="package-open" style="width:24px;height:24px;"></i>
+                        </div>
+                        <p class="text-stone-500 font-medium text-sm">No has subido ningún producto todavía.</p>
+                        <p class="text-stone-400 text-xs">Haz clic en el botón superior o sube un archivo CSV para empezar a poblar tu catálogo local.</p>
+                      </div>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </section>
+
+    </main>
+  </div>
+
+  <!-- PIE DE PÁGINA -->
+  <footer class="w-full py-8 px-6 text-center mt-12" style="background: rgb(17, 17, 17);">
+    <p class="text-xs text-stone-500 mb-2">© 2026 Localis · Conectando comunidades con sus comercios.</p>
+    <a href="https://wa.me/584125970507" target="_blank" rel="noopener" class="text-xs text-emerald-400 hover:text-emerald-300">
+      Soporte técnico por WhatsApp
+    </a>
+  </footer>
+
+  <!-- MODAL: Bienvenida mes gratis -->
+  {% if avisos.bienvenida_prueba %}
+  <div id="modal-bienvenida" class="modal-push activo">
+    <div class="panel p-6 space-y-4">
+      <div class="text-center">
+        <div class="w-14 h-14 bg-amber-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+          <i data-lucide="party-popper" class="text-amber-600" style="width:28px;height:28px;"></i>
+        </div>
+        <h3 class="font-display text-2xl font-bold text-gray-900">¡Bienvenido a Localis!</h3>
+        <p class="text-stone-600 text-sm mt-2">Tu plan <strong>{{ avisos.plan_actual | capitalize }}</strong> incluye 30 días de prueba gratuita.</p>
+        <p class="text-amber-700 font-bold mt-1">Vence el {{ avisos.fecha_vencimiento }}</p>
+      </div>
+      <form action="{{ url_for('suscripcion_marcar_bienvenida') }}" method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="w-full py-3 rounded-full font-bold text-sm bg-amber-500 text-stone-900">¡Entendido!</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- MODAL: Suscripción vencida -->
+  {% if avisos.suscripcion_vencida %}
+  <div id="modal-vencido" class="modal-push activo" onclick="if(event.target===this)rechazarVencido()">
+    <div class="panel p-6 space-y-4 relative">
+      <button type="button" onclick="rechazarVencido()" class="absolute top-3 right-3 text-stone-400 hover:text-stone-700 text-xl">&times;</button>
+      <div class="text-center">
+        <div class="w-14 h-14 bg-red-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+          <i data-lucide="alert-triangle" class="text-red-600" style="width:28px;height:28px;"></i>
+        </div>
+        <h3 class="font-display text-2xl font-bold text-gray-900">Suscripción vencida</h3>
+        <p class="text-stone-600 text-sm mt-2">Tu plan venció el {{ avisos.fecha_vencimiento or '—' }}. Renueva para seguir visible en Localis.</p>
+      </div>
+      <div class="flex flex-col gap-2">
+        <button type="button" onclick="cerrarModal('modal-vencido'); abrirModalPlan('pro')" class="w-full py-3 rounded-full font-bold text-sm bg-amber-500 text-stone-900">Renovar / Pagar Plan</button>
+        <form id="form-rechazar-vencido" action="{{ url_for('suscripcion_rechazar_vencido') }}" method="POST">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="w-full py-3 rounded-full font-bold text-sm border border-stone-300 text-stone-600 hover:bg-stone-50">Rechazar / Continuar sin pagar</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- MODAL: Cambio de plan + Pago Móvil -->
+  <div id="modal-plan" class="modal-push">
+    <div class="panel p-6 space-y-5">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <h3 class="font-display text-xl font-bold text-gray-900" id="modal-plan-titulo">Cambiar plan</h3>
+          <p class="text-stone-500 text-xs mt-1" id="modal-plan-precio"></p>
+        </div>
+        <button type="button" onclick="cerrarModal('modal-plan')" class="text-stone-400 hover:text-stone-700 text-xl leading-none">&times;</button>
+      </div>
+
+      <ul id="modal-plan-beneficios" class="space-y-2 text-sm text-stone-700 bg-stone-50 rounded-xl p-4"></ul>
+
+      <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm space-y-1">
+        <p class="font-bold text-amber-900">Datos para Pago Móvil</p>
+        <p><span class="text-stone-500">Banco:</span> {{ pago_movil.banco }}</p>
+        <p><span class="text-stone-500">Cédula/RIF:</span> {{ pago_movil.cedula_rif }}</p>
+        <p><span class="text-stone-500">Teléfono:</span> {{ pago_movil.telefono }}</p>
+      </div>
+
+      <div id="contenedor-form-pago">
+      <form id="form-pago-movil" enctype="multipart/form-data" class="space-y-4">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="plan_tipo" id="input-plan-tipo" value="pro">
+
+        <div>
+          <label for="comprobante" class="block text-xs font-bold uppercase text-stone-600 mb-1">Captura del comprobante</label>
+          <input type="file" id="comprobante" name="comprobante" accept="image/png, image/jpeg, image/webp" required
+                 class="w-full text-xs text-stone-600 file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-amber-500 file:text-stone-900 hover:file:bg-amber-400 bg-white rounded-xl border border-stone-200 cursor-pointer">
+          <p class="text-[11px] text-stone-500 mt-1">Sube la captura del pago móvil. Validamos la referencia automáticamente con OCR.</p>
+        </div>
+
+        <div id="preview-comprobante" class="rounded-xl border border-dashed border-stone-200 bg-stone-50 p-3 min-h-[80px] flex items-center justify-center text-xs text-stone-400">
+          Vista previa del comprobante
+        </div>
+
+        <p class="text-xs text-stone-500">Si aún tienes días activos, se sumarán 30 días a tu fecha de vencimiento actual.</p>
+
+        <button type="submit" id="btn-verificar-pago"
+                class="w-full py-3 rounded-full font-bold text-sm bg-stone-900 text-white flex items-center justify-center gap-2 disabled:opacity-60">
+          <span id="btn-verificar-pago-spinner" class="hidden w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+          <span id="btn-verificar-pago-texto">Verificar comprobante y activar plan</span>
+        </button>
+      </form>
+      </div>
+
+      <div id="contenedor-pago-exito" class="hidden text-center space-y-3 py-4">
+        <div class="w-14 h-14 bg-emerald-100 rounded-2xl flex items-center justify-center mx-auto text-2xl">✓</div>
+        <p class="font-bold text-emerald-700">¡Pago verificado!</p>
+        <p class="text-sm text-stone-600">Tu tienda está <strong data-estado-suscripcion>activo</strong> con la nueva fecha de vencimiento aplicada.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Inicializar Iconos de Lucide -->
+  <script>
+    const planesBeneficios = {{ planes_beneficios | tojson }};
+
+    function cerrarModal(id) {
+      document.getElementById(id)?.classList.remove('activo');
+    }
+
+    function abrirModalPlan(codigo) {
+      const plan = planesBeneficios[codigo];
+      if (!plan) return;
+      document.getElementById('input-plan-tipo').value = codigo;
+      document.getElementById('modal-plan-titulo').textContent = 'Cambiar a ' + plan.nombre;
+      document.getElementById('modal-plan-precio').textContent = '$' + plan.precio_usd + ' USD / mes · ' + plan.limite_texto + ' productos';
+      const lista = document.getElementById('modal-plan-beneficios');
+      lista.innerHTML = (plan.beneficios || []).map(b => '<li class="flex gap-2"><span class="text-emerald-600">✓</span><span>' + b + '</span></li>').join('');
+      document.getElementById('modal-plan').classList.add('activo');
+      document.getElementById('contenedor-form-pago')?.classList.remove('hidden');
+      document.getElementById('contenedor-pago-exito')?.classList.add('hidden');
+      const formPago = document.getElementById('form-pago-movil');
+      if (formPago) formPago.reset();
+      const preview = document.getElementById('preview-comprobante');
+      if (preview) preview.innerHTML = 'Vista previa del comprobante';
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    function rechazarVencido() {
+      document.getElementById('form-rechazar-vencido')?.submit();
+    }
+
+    const planAbrirDesdeServidor = {{ abrir_pago | tojson }};
+    const paramsUrl = new URLSearchParams(window.location.search);
+    const planAbrir = planAbrirDesdeServidor || paramsUrl.get('abrir_pago');
+    if (planAbrir && typeof abrirModalPlan === 'function') {
+      abrirModalPlan(planAbrir);
+    }
+
+    lucide.createIcons();
+  </script>
+  <script src="{{ url_for('static', filename='js/localis.js') }}"></script>
+</body>
+</html>
