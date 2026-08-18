@@ -16,8 +16,8 @@ from backend.plans import (
 
 def verificar_vencimientos_comercios():
     """
-    Marca como vencidos los comercios cuya fecha de vencimiento ya pasó.
-    Se ejecuta al arranque de la aplicación.
+    Marca como vencidos y oculta del catálogo los comercios cuya fecha expiró.
+    Se ejecuta al arranque y periódicamente en requests autenticados.
     """
     try:
         with get_db_connection() as conexion:
@@ -25,7 +25,7 @@ def verificar_vencimientos_comercios():
             cursor.execute(
                 """
                 UPDATE comercios
-                SET estado_pago = 'vencido'
+                SET estado_pago = 'vencido', visible = 0
                 WHERE date(fecha_vencimiento) < date('now')
                   AND estado_pago IN ('activo', 'gratis')
                 """
@@ -35,6 +35,56 @@ def verificar_vencimientos_comercios():
     except Exception as e:
         print(f'Aviso verificación vencimientos: {e}')
         return 0
+
+
+def verificar_vencimiento_comercio(comercio_id):
+    """Sincroniza vencimiento de un comercio concreto. Retorna True si quedó vencido."""
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                UPDATE comercios
+                SET estado_pago = 'vencido', visible = 0
+                WHERE id = ?
+                  AND date(fecha_vencimiento) < date('now')
+                  AND estado_pago IN ('activo', 'gratis')
+                """,
+                (int(comercio_id),),
+            )
+            conexion.commit()
+            return cursor.rowcount > 0
+    except Exception as e:
+        print(f'Aviso verificación vencimiento comercio {comercio_id}: {e}')
+        return False
+
+
+def comercio_puede_gestionar_inventario(comercio_id):
+    """
+    Verifica si el comercio puede editar, eliminar o importar inventario.
+    Retorna (True, None) o (False, mensaje).
+    """
+    verificar_vencimiento_comercio(comercio_id)
+
+    with get_db_connection(row_factory=sqlite3.Row) as conexion:
+        cursor = conexion.cursor()
+        cursor.execute(
+            'SELECT estado_pago FROM comercios WHERE id = ?',
+            (int(comercio_id),),
+        )
+        fila = cursor.fetchone()
+
+    if not fila:
+        return False, 'Comercio no encontrado.'
+    estado = fila['estado_pago']
+    if estado == 'vencido':
+        return (
+            False,
+            'Tu suscripción ha vencido. Renueva tu plan para gestionar inventario.',
+        )
+    if estado == 'suspendido':
+        return False, 'Tu comercio está suspendido. Contacta a soporte técnico.'
+    return True, None
 
 
 def contar_productos_comercio(comercio_id):
@@ -76,6 +126,8 @@ def obtener_limite_productos_comercio(comercio_id):
 
 
 def puede_agregar_producto(comercio_id, cantidad_nueva=1):
+    verificar_vencimiento_comercio(comercio_id)
+
     with get_db_connection(row_factory=sqlite3.Row) as conexion:
         cursor = conexion.cursor()
         cursor.execute(
@@ -96,8 +148,6 @@ def puede_agregar_producto(comercio_id, cantidad_nueva=1):
         return False, 'Tu suscripción ha vencido. Renueva tu plan para seguir agregando productos.'
     if comercio['estado_pago'] == 'suspendido':
         return False, 'Tu comercio está suspendido. Contacta a soporte técnico.'
-    if comercio['visible'] == 0 and comercio['estado_pago'] == 'vencido':
-        return False, 'Tu tienda está oculta por vencimiento de suscripción.'
 
     limite = obtener_limite_productos_comercio(comercio_id)
     if es_limite_ilimitado(limite):
@@ -244,30 +294,98 @@ def _calcular_fecha_vencimiento_prorrateo(fecha_vencimiento_actual, dias=30):
     return _calcular_nueva_fecha_vencimiento(fecha_vencimiento_actual, dias)
 
 
-def registrar_pago_movil_plan(comercio_id, plan_tipo, referencia, fecha_transferencia):
-    """
-    Registra solicitud de pago móvil y activa el plan con prorrateo de días.
-    """
-    plan_tipo = (plan_tipo or 'basica').lower()
-    if plan_tipo not in PLANES or plan_tipo == 'gratis':
-        return False, 'Plan no válido para pago.'
+def _precio_usd_plan(plan):
+    return float(plan.get('precio') or plan.get('precio_usd') or 0)
 
-    referencia = (referencia or '').strip()
-    if not re.match(r'^\d{6}$', referencia):
-        return False, 'La referencia de pago móvil debe tener exactamente 6 dígitos.'
 
-    if not fecha_transferencia:
-        return False, 'Indica la fecha de la transferencia.'
+def calcular_monto_pago_plan(plan_tipo):
+    """Calcula montos USD y Bs según plan y tasa oficial del sistema."""
+    from backend.stores import obtener_tasa_dolar
 
     plan = obtener_plan_por_codigo(plan_tipo)
     if not plan:
-        return False, 'Plan no encontrado.'
+        return None
 
+    tasa = float(obtener_tasa_dolar() or 1.0)
+    monto_usd = _precio_usd_plan(plan)
+    return {
+        'plan_tipo': (plan_tipo or '').lower(),
+        'plan_nombre': plan.get('nombre', plan_tipo),
+        'monto_usd': monto_usd,
+        'tasa': tasa,
+        'monto_bs': round(monto_usd * tasa, 2),
+    }
+
+
+def _referencia_ya_usada(referencia, excluir_comercio_id=None):
+    with get_db_connection() as conexion:
+        cursor = conexion.cursor()
+        cursor.execute(
+            """
+            SELECT 1 FROM pagos
+            WHERE referencia = ? AND estado IN ('pendiente', 'aprobado')
+            LIMIT 1
+            """,
+            (referencia,),
+        )
+        if cursor.fetchone():
+            return True
+        cursor.execute(
+            """
+            SELECT 1 FROM solicitudes_pago
+            WHERE referencia = ? AND estado IN ('pendiente', 'aprobado')
+            LIMIT 1
+            """,
+            (referencia,),
+        )
+        return cursor.fetchone() is not None
+
+
+def registrar_pago_movil_plan(
+    comercio_id,
+    plan_tipo,
+    referencia,
+    fecha_transferencia,
+    banco_emisor=None,
+    telefono_pagador=None,
+):
+    """
+    Registra pago móvil reportado por el comercio, valida datos y activa el plan.
+    """
+    plan_tipo = (plan_tipo or 'basica').lower()
+    if plan_tipo not in PLANES or plan_tipo == 'gratis':
+        return False, 'Plan no válido para pago.', None
+
+    referencia = (referencia or '').strip()
+    if not re.match(r'^\d{6}$', referencia):
+        return False, 'La referencia de pago móvil debe tener exactamente 6 dígitos.', None
+
+    banco_emisor = (banco_emisor or '').strip()
+    if not banco_emisor:
+        return False, 'Indica el banco emisor del pago móvil.', None
+
+    telefono_pagador = (telefono_pagador or '').strip()
+    if len(re.sub(r'\D', '', telefono_pagador)) < 10:
+        return False, 'Indica un teléfono válido desde el cual realizaste el pago.', None
+
+    if not fecha_transferencia:
+        return False, 'Indica la fecha de la transferencia.', None
+
+    if _referencia_ya_usada(referencia):
+        return False, 'Esta referencia ya fue registrada en el sistema.', None
+
+    montos = calcular_monto_pago_plan(plan_tipo)
+    if not montos:
+        return False, 'Plan no encontrado.', None
+
+    plan = obtener_plan_por_codigo(plan_tipo)
     limite = limite_para_plan(plan_tipo)
     if es_limite_ilimitado(limite):
         limite = None
     plan_id = plan.get('id')
     dias = plan.get('dias_duracion') or 30
+    monto_usd = montos['monto_usd']
+    monto_bs = montos['monto_bs']
 
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
@@ -278,7 +396,7 @@ def registrar_pago_movil_plan(comercio_id, plan_tipo, referencia, fecha_transfer
             )
             comercio = cursor.fetchone()
             if not comercio:
-                return False, 'Comercio no encontrado.'
+                return False, 'Comercio no encontrado.', None
 
             nueva_fecha = _calcular_fecha_vencimiento_prorrateo(
                 comercio['fecha_vencimiento'], dias
@@ -301,7 +419,7 @@ def registrar_pago_movil_plan(comercio_id, plan_tipo, referencia, fecha_transfer
                 INSERT INTO solicitudes_pago (
                     comercio_id, plan_tipo, referencia, fecha_transferencia, estado
                 )
-                VALUES (?, ?, ?, ?, 'pendiente')
+                VALUES (?, ?, ?, ?, 'aprobado')
                 """,
                 (int(comercio_id), plan_tipo, referencia, fecha_transferencia),
             )
@@ -309,29 +427,49 @@ def registrar_pago_movil_plan(comercio_id, plan_tipo, referencia, fecha_transfer
             cursor.execute(
                 """
                 INSERT INTO pagos (
-                    tienda_id, plan_id, monto, metodo, referencia, estado
+                    tienda_id, plan_id, monto, metodo, referencia,
+                    banco_origen, telefono_pagador, estado
                 )
-                VALUES (?, ?, ?, 'pago_movil_manual', ?, 'pendiente')
+                VALUES (?, ?, ?, 'pago_movil', ?, ?, ?, 'aprobado')
                 """,
                 (
                     int(comercio_id),
                     plan_id,
-                    plan.get('precio', 0),
+                    monto_bs,
                     referencia,
+                    banco_emisor,
+                    telefono_pagador,
                 ),
             )
             conexion.commit()
 
         return (
             True,
-            f'Plan {plan["nombre"]} activado hasta {nueva_fecha}. '
-            f'Referencia {referencia} registrada para verificación.',
+            (
+                f'Pago registrado. Plan {plan["nombre"]} activo hasta {nueva_fecha}. '
+                f'Monto: ${monto_usd:.2f} USD ({monto_bs:.2f} Bs).'
+            ),
+            {
+                'referencia': referencia,
+                'plan_tipo': plan_tipo,
+                'fecha_vencimiento': nueva_fecha,
+                'estado': 'activo',
+                'monto_usd': monto_usd,
+                'monto_bs': monto_bs,
+                'tasa': montos['tasa'],
+            },
         )
     except Exception as e:
-        return False, f'Error al registrar pago: {e}'
+        return False, f'Error al registrar pago: {e}', None
 
 
-def activar_suscripcion_por_comprobante(comercio_id, plan_tipo, referencia):
+def activar_suscripcion_por_comprobante(
+    comercio_id,
+    plan_tipo,
+    referencia,
+    comprobante_url=None,
+    monto_ocr_bs=None,
+):
     """
     Valida referencia OCR, registra pago aprobado y renueva suscripción automáticamente.
     """
@@ -343,6 +481,13 @@ def activar_suscripcion_por_comprobante(comercio_id, plan_tipo, referencia):
     if not re.match(r'^\d{6}$', referencia):
         return False, 'No se detectó una referencia válida de 6 dígitos.', None
 
+    if _referencia_ya_usada(referencia):
+        return False, 'Esta referencia ya fue registrada en el sistema.', None
+
+    montos = calcular_monto_pago_plan(plan_tipo)
+    if not montos:
+        return False, 'Plan no encontrado.', None
+
     plan = obtener_plan_por_codigo(plan_tipo)
     if not plan:
         return False, 'Plan no encontrado.', None
@@ -352,7 +497,7 @@ def activar_suscripcion_por_comprobante(comercio_id, plan_tipo, referencia):
         limite = None
     plan_id = plan.get('id')
     dias = plan.get('dias_duracion') or 30
-    monto = plan.get('precio', plan.get('precio_usd', 0))
+    monto_bs = float(monto_ocr_bs or montos['monto_bs'])
 
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
@@ -384,11 +529,18 @@ def activar_suscripcion_por_comprobante(comercio_id, plan_tipo, referencia):
             cursor.execute(
                 """
                 INSERT INTO pagos (
-                    tienda_id, plan_id, monto, metodo, referencia, estado
+                    tienda_id, plan_id, monto, metodo, referencia,
+                    banco_origen, estado
                 )
-                VALUES (?, ?, ?, 'pago_movil_manual', ?, 'aprobado')
+                VALUES (?, ?, ?, 'pago_movil_ocr', ?, ?, 'aprobado')
                 """,
-                (int(comercio_id), plan_id, monto, referencia),
+                (
+                    int(comercio_id),
+                    plan_id,
+                    monto_bs,
+                    referencia,
+                    'Banco Caribe',
+                ),
             )
 
             cursor.execute(
@@ -410,18 +562,23 @@ def activar_suscripcion_por_comprobante(comercio_id, plan_tipo, referencia):
                 'plan_tipo': plan_tipo,
                 'fecha_vencimiento': nueva_fecha,
                 'estado': 'activo',
+                'monto_usd': montos['monto_usd'],
+                'monto_bs': monto_bs,
+                'tasa': montos['tasa'],
+                'comprobante_url': comprobante_url,
             },
         )
     except Exception as error:
         return False, f'Error al activar suscripción: {error}', None
 
 
-def obtener_datos_pago_movil():
-    """Lee configuración de pago móvil del sistema."""
-    from backend.stores import obtener_config
+def obtener_datos_pago_movil(plan_tipo=None):
+    """Lee configuración de pago móvil y montos calculados para un plan."""
+    from backend.stores import obtener_config, obtener_tasa_dolar
     from config import PAGO_MOVIL_DEFAULT
 
-    return {
+    tasa = float(obtener_tasa_dolar() or 1.0)
+    datos = {
         'banco': obtener_config('pago_movil_banco', PAGO_MOVIL_DEFAULT['banco']),
         'cedula_rif': obtener_config(
             'pago_movil_cedula', PAGO_MOVIL_DEFAULT['cedula_rif']
@@ -429,4 +586,10 @@ def obtener_datos_pago_movil():
         'telefono': obtener_config(
             'pago_movil_telefono', PAGO_MOVIL_DEFAULT['telefono']
         ),
+        'tasa': tasa,
     }
+    if plan_tipo:
+        montos = calcular_monto_pago_plan(plan_tipo)
+        if montos:
+            datos.update(montos)
+    return datos

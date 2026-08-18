@@ -12,6 +12,7 @@
   <!-- Fonts -->
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}">
   <style>
     body { font-family: 'DM Sans', sans-serif; }
     .font-display { font-family: 'Fraunces', serif; }
@@ -40,9 +41,9 @@
     <!-- NOTIFICACIONES FLASH DE FLASK -->
     {% with mensajes = get_flashed_messages(with_categories=true) %}
       {% if mensajes %}
-        <div class="fixed top-4 right-4 z-50 space-y-2">
+        <div class="fixed top-4 right-4 z-50 space-y-2 flash-mobile">
           {% for categoria, mensaje in mensajes %}
-            <div class="p-4 rounded-xl shadow-lg text-white text-sm flex items-center gap-3 {% if categoria == 'error' %}bg-red-500{% elif categoria == 'exito' %}bg-emerald-600{% else %}bg-amber-600{% endif %}">
+            <div class="p-4 rounded-xl shadow-lg text-white text-sm flex items-center gap-3 localis-flash-alerta flash-auto-dismiss {% if categoria == 'error' %}bg-red-500{% elif categoria == 'exito' %}bg-emerald-600{% else %}bg-amber-600{% endif %}">
               <i data-lucide="info" style="width:18px;height:18px;"></i>
               <span>{{ mensaje }}</span>
             </div>
@@ -200,5 +201,6 @@
       );
     });
   </script>
+  <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
 </body>
 </html>

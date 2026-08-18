@@ -20,7 +20,7 @@
     if (!contenedor) {
       contenedor = document.createElement('div');
       contenedor.id = contenedorId;
-      contenedor.className = 'fixed top-4 right-4 z-[300] space-y-2';
+      contenedor.className = 'fixed top-4 right-4 z-[300] space-y-2 flash-mobile';
       document.body.appendChild(contenedor);
     }
 
@@ -32,17 +32,17 @@
 
     const alerta = document.createElement('div');
     alerta.className =
-      'localis-alerta p-4 rounded-xl shadow-lg text-white text-sm flex items-center gap-3 transition-opacity duration-500 ' +
+      'localis-flash-alerta flash-auto-dismiss p-4 rounded-xl shadow-lg text-white text-sm flex items-center gap-3 transition-opacity duration-500 ' +
       (colores[tipo] || colores.info);
     alerta.textContent = mensaje;
     alerta.style.opacity = '1';
     contenedor.appendChild(alerta);
 
-    setTimeout(function () {
-      alerta.style.opacity = '0';
+    window.setTimeout(function () {
+      alerta.classList.add('localis-flash-saliendo');
     }, ALERTA_DURACION_MS - 500);
 
-    setTimeout(function () {
+    window.setTimeout(function () {
       alerta.remove();
       if (!contenedor.children.length) {
         contenedor.remove();
@@ -55,8 +55,7 @@
     if (!modal) {
       modal = document.createElement('div');
       modal.id = 'modal-limite-plan';
-      modal.className =
-        'modal-push activo';
+      modal.className = 'modal-push activo';
       modal.innerHTML =
         '<div class="panel p-6 space-y-4 max-w-md">' +
         '<div class="text-center">' +
@@ -92,14 +91,9 @@
   };
 
   function inicializarAlertasFlash() {
-    document.querySelectorAll('.localis-flash-alerta').forEach(function (nodo) {
-      setTimeout(function () {
-        nodo.style.opacity = '0';
-      }, ALERTA_DURACION_MS - 500);
-      setTimeout(function () {
-        nodo.remove();
-      }, ALERTA_DURACION_MS);
-    });
+    if (typeof window.inicializarAlertasAutoOcultas === 'function') {
+      window.inicializarAlertasAutoOcultas();
+    }
   }
 
   function actualizarEstadoTiendaEnPantalla(datos) {
@@ -116,13 +110,24 @@
     });
   }
 
+  function mostrarExitoPago(contenedorFormulario, contenedorExito, datos) {
+    if (contenedorFormulario) contenedorFormulario.classList.add('hidden');
+    if (contenedorExito) contenedorExito.classList.remove('hidden');
+    actualizarEstadoTiendaEnPantalla(datos);
+    if (typeof window.cerrarModal === 'function') {
+      window.setTimeout(function () {
+        window.cerrarModal('modal-plan');
+      }, 2500);
+    }
+  }
+
   function inicializarFormularioPagoMovil() {
     const formulario = document.getElementById('form-pago-movil');
     if (!formulario) return;
 
     const inputComprobante = document.getElementById('comprobante');
     const preview = document.getElementById('preview-comprobante');
-    const boton = document.getElementById('btn-verificar-pago');
+    const botonOcr = document.getElementById('btn-verificar-pago');
     const textoBoton = document.getElementById('btn-verificar-pago-texto');
     const spinner = document.getElementById('btn-verificar-pago-spinner');
     const contenedorFormulario = document.getElementById('contenedor-form-pago');
@@ -149,12 +154,12 @@
 
       const archivo = inputComprobante && inputComprobante.files && inputComprobante.files[0];
       if (!archivo) {
-        window.mostrarAlertaLocalis('Selecciona la captura del comprobante.', 'error');
+        window.mostrarAlertaLocalis('Debes adjuntar la captura del comprobante de pago.', 'error');
         return;
       }
 
-      if (boton) boton.disabled = true;
-      if (textoBoton) textoBoton.textContent = 'Verificando pago...';
+      if (botonOcr) botonOcr.disabled = true;
+      if (textoBoton) textoBoton.textContent = 'Verificando comprobante...';
       if (spinner) spinner.classList.remove('hidden');
 
       const formData = new FormData(formulario);
@@ -179,14 +184,7 @@
               resultado.datos.mensaje || 'Pago verificado correctamente.',
               'exito'
             );
-            if (contenedorFormulario) contenedorFormulario.classList.add('hidden');
-            if (contenedorExito) contenedorExito.classList.remove('hidden');
-            actualizarEstadoTiendaEnPantalla(resultado.datos);
-            if (typeof window.cerrarModal === 'function') {
-              setTimeout(function () {
-                window.cerrarModal('modal-plan');
-              }, 2500);
-            }
+            mostrarExitoPago(contenedorFormulario, contenedorExito, resultado.datos);
             return;
           }
 
@@ -199,7 +197,7 @@
           window.mostrarAlertaLocalis('Error de conexión al verificar el pago.', 'error');
         })
         .finally(function () {
-          if (boton) boton.disabled = false;
+          if (botonOcr) botonOcr.disabled = false;
           if (textoBoton) textoBoton.textContent = 'Verificar comprobante y activar plan';
           if (spinner) spinner.classList.add('hidden');
         });
@@ -237,7 +235,7 @@
               resultado.datos.mensaje || 'Producto agregado con éxito.',
               'exito'
             );
-            setTimeout(function () {
+            window.setTimeout(function () {
               window.location.href = formulario.dataset.redirect || '/comercio';
             }, 900);
             return;

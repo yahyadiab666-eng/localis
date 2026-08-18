@@ -8,6 +8,7 @@
   <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}">
   <style>
     body { font-family: 'DM Sans', sans-serif; }
     .font-display { font-family: 'Fraunces', serif; }
@@ -28,7 +29,7 @@
     {% if mensajes %}
       <div class="fixed top-4 right-4 z-50 space-y-2 flash-mobile">
         {% for categoria, mensaje in mensajes %}
-          <div class="p-4 rounded-lg shadow-md text-white text-sm {% if categoria == 'error' %}bg-red-500{% elif categoria == 'exito' %}bg-green-500{% else %}bg-blue-500{% endif %}">{{ mensaje }}</div>
+          <div class="p-4 rounded-lg shadow-md text-white text-sm localis-flash-alerta flash-auto-dismiss {% if categoria == 'error' %}bg-red-500{% elif categoria == 'exito' %}bg-green-500{% else %}bg-blue-500{% endif %}">{{ mensaje }}</div>
         {% endfor %}
       </div>
     {% endif %}
@@ -179,5 +180,6 @@
       if (e.key === 'Escape') cerrarModal();
     });
   </script>
+  <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
 </body>
 </html>

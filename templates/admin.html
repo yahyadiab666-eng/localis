@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Localis - Panel de Administración</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         body { background-color: #f4f6f9; color: #333; }
@@ -66,7 +67,9 @@
         }
         .btn-suspender { background: #dc3545; color: white; }
         .btn-activar { background: #28a745; color: white; }
+        .btn-eliminar { background: #6c757d; color: white; }
         .btn-resolver { background: #007bff; color: white; }
+        .acciones-comercio { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
         .ticket-item {
             padding: 1rem; border-bottom: 1px solid #e1e4e8;
             display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem;
@@ -90,7 +93,7 @@
       {% if messages %}
         <div class="alertas-contenedor">
           {% for category, message in messages %}
-            <div class="alerta alerta-{{ 'exito' if category == 'exito' else ('error' if category == 'error' else 'info') }}">{{ message }}</div>
+            <div class="alerta flash-auto-dismiss alerta-{{ 'exito' if category == 'exito' else ('error' if category == 'error' else 'info') }}">{{ message }}</div>
           {% endfor %}
         </div>
       {% endif %}
@@ -153,7 +156,7 @@
             <div style="padding: 1.5rem; border-bottom: 1px solid #e1e4e8;">
                 <h2 style="font-size:1.3rem;">Control de Comercios y Planes</h2>
                 <p style="font-size:0.85rem;color:#666;margin-top:0.5rem;">
-                    Planes: Gratis (30 días) · Básica ${{ planes.basica.precio_usd }} (50 prod.) · Pro ${{ planes.pro.precio_usd }} (200) · Business ${{ planes.business.precio_usd }} (ilimitado)
+                    Planes: Gratis (30 días, 50 prod.) · Básico ${{ planes.basica.precio_usd }} (100 prod.) · Pro ${{ planes.pro.precio_usd }} (300) · Business ${{ planes.business.precio_usd }} (ilimitado)
                 </p>
                 <form action="{{ url_for('panel_admin') }}" method="GET" class="busqueda-admin">
                     <input type="text" name="q" value="{{ q or '' }}" placeholder="Buscar por nombre, correo del dueño, RIF/Cédula o teléfono...">
@@ -185,8 +188,8 @@
                             <td><small>{{ comercio.correo_dueno or '—' }}</small><br><small>{{ comercio.documento_identidad or '' }}</small></td>
                             <td>{{ comercio.categoria or '—' }}</td>
                             <td>
-                                <span class="badge badge-{{ comercio.estado_pago or 'gratis' }}">{{ comercio.plan_tipo or 'gratis' }}</span>
-                                <br><small>{{ comercio.estado_pago or 'gratis' }}</small>
+                                <span class="badge badge-{{ comercio.estado_pago or 'gratis' }}">{{ comercio.plan_nombre or comercio.plan_tipo or 'gratis' }}</span>
+                                <br><small>Pago: {{ comercio.estado_pago or 'gratis' }}</small>
                             </td>
                             <td><small>{{ comercio.fecha_vencimiento or '—' }}</small></td>
                             <td>
@@ -197,24 +200,31 @@
                                 {% endif %}
                             </td>
                             <td>
-                                <form action="{{ url_for('cambiar_estado_comercio', comercio_id=comercio.id) }}" method="POST" style="display:inline;">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    {% if comercio.visible == 1 %}
-                                        <input type="hidden" name="nuevo_estado" value="0">
-                                        <input type="hidden" name="estado_pago" value="suspendido">
-                                        <button type="submit" class="btn-accion-tabla btn-suspender">Ocultar</button>
-                                    {% else %}
-                                        <input type="hidden" name="nuevo_estado" value="1">
-                                        <input type="hidden" name="estado_pago" value="activo">
-                                        <button type="submit" class="btn-accion-tabla btn-activar">Habilitar</button>
-                                    {% endif %}
-                                </form>
+                                <div class="acciones-comercio">
+                                {% if comercio.visible == 1 and comercio.estado_pago != 'suspendido' %}
+                                    <form action="{{ url_for('admin_suspender_comercio', comercio_id=comercio.id) }}" method="POST" style="display:inline;">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <button type="submit" class="btn-accion-tabla btn-suspender" title="Suspensión temporal">Suspender</button>
+                                    </form>
+                                {% else %}
+                                    <form action="{{ url_for('admin_reactivar_comercio', comercio_id=comercio.id) }}" method="POST" style="display:inline;">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <button type="submit" class="btn-accion-tabla btn-activar" title="Reactivar cuenta">Reactivar</button>
+                                    </form>
+                                {% endif %}
 
-                                <form action="{{ url_for('admin_cambiar_plan', comercio_id=comercio.id) }}" method="POST" class="plan-form" style="margin-top:6px;">
+                                <form action="{{ url_for('admin_eliminar_comercio', comercio_id=comercio.id) }}" method="POST" style="display:inline;"
+                                      onsubmit="return confirm('¿Eliminar definitivamente el comercio {{ comercio.nombre }}? Esta acción no se puede deshacer.');">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button type="submit" class="btn-accion-tabla btn-eliminar" title="Eliminación permanente">Eliminar</button>
+                                </form>
+                                </div>
+
+                                <form action="{{ url_for('admin_cambiar_plan', comercio_id=comercio.id) }}" method="POST" class="plan-form">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <select name="plan_tipo">
                                         <option value="gratis" {% if comercio.plan_tipo == 'gratis' %}selected{% endif %}>Gratis / Prueba</option>
-                                        <option value="basica" {% if comercio.plan_tipo == 'basica' %}selected{% endif %}>Básica</option>
+                                        <option value="basica" {% if comercio.plan_tipo == 'basica' %}selected{% endif %}>Básico</option>
                                         <option value="pro" {% if comercio.plan_tipo == 'pro' %}selected{% endif %}>Pro</option>
                                         <option value="business" {% if comercio.plan_tipo == 'business' %}selected{% endif %}>Business</option>
                                     </select>
@@ -238,5 +248,6 @@
             </div>
         </main>
     </div>
+<script src="{{ url_for('static', filename='js/flash.js') }}"></script>
 </body>
 </html>

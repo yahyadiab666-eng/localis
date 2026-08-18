@@ -8,6 +8,7 @@
   <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}">
   <style>
     body { font-family: 'DM Sans', sans-serif; }
     .font-display { font-family: 'Fraunces', serif; }
@@ -28,20 +29,36 @@
     <div class="bg-white rounded-2xl p-8 shadow-sm border border-stone-200 space-y-6">
       <div class="text-center">
         <h2 class="font-display text-3xl font-bold text-stone-900">Editar Datos del Comercio</h2>
-        <p class="text-stone-500 text-sm mt-1">Actualiza nombre, contacto, ubicación y logo.</p>
+        <p class="text-stone-500 text-sm mt-1">Actualiza nombre, contacto, ubicación, logo y banner.</p>
       </div>
 
       <form action="{{ url_for('editar_comercio') }}" method="POST" enctype="multipart/form-data" class="space-y-5">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-        <div>
-          <label class="block text-xs font-bold uppercase text-stone-700 mb-1.5">Logo / Foto de perfil</label>
-          {% if comercio.logo_url %}
-            <img src="{{ url_for('static', filename='uploads/' + comercio.logo_url) if not comercio.logo_url.startswith('/') else comercio.logo_url }}"
-                 alt="Logo actual" class="w-16 h-16 rounded-xl object-cover mb-2 border">
+        <div id="banner-tienda" class="space-y-3 pt-1 border-b border-stone-100 pb-5">
+          <label class="block text-xs font-bold uppercase text-stone-700">Banner de la tienda</label>
+          <p class="text-[11px] text-stone-500 leading-relaxed">
+            Imagen horizontal para la cabecera pública. Si no subes ninguna, se muestra un fondo naranja vacío.
+            No uses el logo aquí: son elementos distintos.
+          </p>
+          <div class="w-full h-28 rounded-xl overflow-hidden border border-amber-200"
+               style="background: linear-gradient(135deg, #f59e0b 0%, #ea580c 100%);">
+            {% if comercio.banner_completo %}
+              <img src="{{ comercio.banner_completo }}" alt="Banner actual" class="w-full h-full object-cover">
+            {% endif %}
+          </div>
+          <input type="file" name="banner" accept="image/*"
+                 class="w-full text-xs file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-amber-100 file:text-amber-800">
+        </div>
+
+        <div class="space-y-2">
+          <label class="block text-xs font-bold uppercase text-stone-700">Logo / Foto de perfil</label>
+          {% if comercio.logo_completo %}
+            <img src="{{ comercio.logo_completo }}"
+                 alt="Logo actual" class="w-16 h-16 rounded-xl object-cover mb-2 border border-stone-200">
           {% endif %}
           <input type="file" name="logo" accept="image/*"
-                 class="w-full text-xs file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-amber-100 file:text-amber-800">
+                 class="w-full text-xs file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-stone-100 file:text-stone-800">
         </div>
 
         <div>
@@ -120,5 +137,6 @@
       );
     });
   </script>
+  <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
 </body>
 </html>

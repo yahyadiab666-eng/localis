@@ -19,9 +19,9 @@ def _actualizar_imagen_producto(producto_id, url):
         conexion.commit()
 
 
-def procesar_imagenes_productos_en_lote(comercio_id, productos_info, upload_folder):
+def procesar_imagenes_productos_en_lote(comercio_id, productos_info):
     """
-    Procesa imágenes en paralelo y actualiza PostgreSQL.
+    Resuelve URLs de imágenes externas sin guardar en disco local.
     productos_info: lista de dicts con id, nombre, codigo_barras, descripcion, imagen_url
     """
     tareas = []
@@ -36,7 +36,6 @@ def procesar_imagenes_productos_en_lote(comercio_id, productos_info, upload_fold
                 'tipo': 'url',
                 'url': imagen_url,
                 'producto_id': prod_id,
-                'upload_folder': upload_folder,
                 'prefijo': f'prod_{comercio_id}',
             })
         else:
@@ -46,7 +45,6 @@ def procesar_imagenes_productos_en_lote(comercio_id, productos_info, upload_fold
                 'nombre': prod.get('nombre', ''),
                 'codigo_barras': prod.get('codigo_barras'),
                 'descripcion': prod.get('descripcion'),
-                'upload_folder': upload_folder,
                 'prefijo': f'prod_{comercio_id}',
             })
 
@@ -62,14 +60,12 @@ def procesar_imagenes_productos_en_lote(comercio_id, productos_info, upload_fold
     return actualizados
 
 
-def encolar_procesamiento_imagenes(comercio_id, productos_info, upload_folder):
+def encolar_procesamiento_imagenes(comercio_id, productos_info):
     """Lanza el procesamiento de imágenes en un hilo daemon (no bloquea la respuesta HTTP)."""
 
     def _worker():
         try:
-            n = procesar_imagenes_productos_en_lote(
-                comercio_id, productos_info, upload_folder
-            )
+            n = procesar_imagenes_productos_en_lote(comercio_id, productos_info)
             print(
                 f'[Localis] Imágenes procesadas en lote para comercio {comercio_id}: {n}'
             )

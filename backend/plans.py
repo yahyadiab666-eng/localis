@@ -12,15 +12,15 @@ PLANES = {
         'dias_duracion': 30,
     },
     'basica': {
-        'nombre': 'Básica',
+        'nombre': 'Plan Básico',
         'precio_usd': 10,
-        'limite_productos': 50,
+        'limite_productos': 100,
         'dias_duracion': 30,
     },
     'pro': {
         'nombre': 'Pro',
-        'precio_usd': 17,
-        'limite_productos': 200,
+        'precio_usd': 15,
+        'limite_productos': 300,
         'dias_duracion': 30,
     },
     'business': {
@@ -49,13 +49,13 @@ PLAN_BENEFICIOS = {
         'duracion': '30 días de prueba gratuita',
     },
     'basica': {
-        'productos': 'Hasta 50 productos',
+        'productos': 'Hasta 100 productos',
         'visibilidad': 'Presencia en catálogo público',
         'soporte': 'Soporte estándar',
         'duracion': 'Renovación mensual (30 días)',
     },
     'pro': {
-        'productos': 'Hasta 200 productos',
+        'productos': 'Hasta 300 productos',
         'visibilidad': 'Mayor visibilidad en búsquedas',
         'soporte': 'Soporte prioritario',
         'duracion': 'Renovación mensual (30 días)',
@@ -139,6 +139,53 @@ def limite_desde_plan_id(plan_id):
     except Exception:
         pass
     return 50
+
+
+def plan_recomendado_para_cantidad(plan_tipo_actual, cantidad_productos):
+    """Plan mínimo (superior al actual) que cubre la cantidad indicada."""
+    plan_tipo_actual = (plan_tipo_actual or 'gratis').lower()
+    if plan_tipo_actual not in ORDEN_PLANES:
+        plan_tipo_actual = 'gratis'
+
+    idx_actual = ORDEN_PLANES.index(plan_tipo_actual)
+    for codigo in ORDEN_PLANES[idx_actual + 1 :]:
+        limite = limite_para_plan(codigo)
+        if es_limite_ilimitado(limite) or cantidad_productos <= limite:
+            return codigo
+    return 'business'
+
+
+def mensaje_limite_importacion(plan_tipo_actual, cantidad_archivo, limite_actual):
+    """
+    Mensaje contextual cuando un CSV/Excel supera el límite del plan.
+    Retorna (mensaje, codigo_plan_sugerido).
+    """
+    plan_tipo_actual = (plan_tipo_actual or 'gratis').lower()
+    plan_actual = obtener_plan_por_codigo(plan_tipo_actual) or {}
+    nombre_actual = plan_actual.get('nombre', plan_tipo_actual)
+
+    plan_sugerido_codigo = plan_recomendado_para_cantidad(
+        plan_tipo_actual, cantidad_archivo
+    )
+    plan_sugerido = obtener_plan_por_codigo(plan_sugerido_codigo) or {}
+    nombre_sugerido = plan_sugerido.get('nombre', plan_sugerido_codigo)
+    precio_sugerido = float(
+        plan_sugerido.get('precio') or plan_sugerido.get('precio_usd') or 0
+    )
+    limite_sugerido = plan_sugerido.get('limite_productos')
+    if es_limite_ilimitado(limite_sugerido):
+        capacidad_sugerida = 'productos ilimitados'
+    else:
+        capacidad_sugerida = f'hasta {limite_sugerido} productos'
+
+    mensaje = (
+        f'Tu archivo contiene {cantidad_archivo} productos, pero tu plan '
+        f'{nombre_actual} permite hasta {limite_actual}. '
+        f'Actualiza al plan {nombre_sugerido} (${precio_sugerido:.0f}/mes, '
+        f'{capacidad_sugerida}) para importar todo tu inventario. '
+        f'La importación fue cancelada y no se modificó ningún producto.'
+    )
+    return mensaje, plan_sugerido_codigo
 
 
 def limite_para_plan(plan_tipo):

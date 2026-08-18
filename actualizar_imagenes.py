@@ -4,7 +4,6 @@ import sqlite3
 
 from backend.db import get_db_connection
 from backend.image_batch import procesar_imagenes_productos_en_lote
-from config import UPLOAD_FOLDER
 from database import DATABASE_URL
 
 
@@ -47,7 +46,7 @@ def actualizar_imagenes_global(forzar_todos=True):
 
     total = 0
     for comercio_id, productos in por_comercio.items():
-        n = procesar_imagenes_productos_en_lote(comercio_id, productos, UPLOAD_FOLDER)
+        n = procesar_imagenes_productos_en_lote(comercio_id, productos)
         total += n
         print(f'  Comercio {comercio_id}: {n} imágenes actualizadas')
 

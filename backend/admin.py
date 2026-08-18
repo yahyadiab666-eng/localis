@@ -218,6 +218,66 @@ def cambiar_visibilidad_comercio(admin_id, comercio_id, visible, estado_pago):
         return False, f'Error al cambiar visibilidad: {str(e)}'
 
 
+def suspender_comercio_temporal(admin_id, comercio_id):
+    """Suspensión temporal: oculta la tienda y marca estado suspendido."""
+    return cambiar_visibilidad_comercio(admin_id, comercio_id, 0, 'suspendido')
+
+
+def reactivar_comercio(admin_id, comercio_id):
+    """Reactiva un comercio suspendido u oculto."""
+    return cambiar_visibilidad_comercio(admin_id, comercio_id, 1, 'activo')
+
+
+def eliminar_comercio_definitivo(admin_id, comercio_id):
+    """Elimina un comercio y sus datos asociados de forma permanente."""
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+
+            cursor.execute(
+                'SELECT nombre FROM comercios WHERE id = ?',
+                (int(comercio_id),),
+            )
+            fila = cursor.fetchone()
+            if not fila:
+                return False, 'Comercio no encontrado.'
+            nombre_comercio = fila[0]
+
+            cursor.execute(
+                'DELETE FROM pagos WHERE tienda_id = ?', (int(comercio_id),)
+            )
+            cursor.execute(
+                'DELETE FROM solicitudes_pago WHERE comercio_id = ?',
+                (int(comercio_id),),
+            )
+            cursor.execute(
+                'DELETE FROM productos WHERE comercio_id = ?', (int(comercio_id),)
+            )
+            cursor.execute(
+                'DELETE FROM comercios WHERE id = ?', (int(comercio_id),)
+            )
+
+            if cursor.rowcount == 0:
+                conexion.rollback()
+                return False, 'No se pudo eliminar el comercio.'
+
+            cursor.execute(
+                """
+                INSERT INTO logs_auditoria (usuario_id, accion, detalles)
+                VALUES (?, 'Eliminación de comercio', ?)
+                """,
+                (
+                    admin_id,
+                    f'Comercio eliminado permanentemente: {nombre_comercio} (ID {comercio_id})',
+                ),
+            )
+            conexion.commit()
+
+        return True, f'El comercio "{nombre_comercio}" fue eliminado definitivamente.'
+    except Exception as e:
+        return False, f'Error al eliminar comercio: {str(e)}'
+
+
 def cambiar_plan_comercio(admin_id, comercio_id, plan_tipo, estado_pago=None):
     """Cambia el plan de suscripción de una tienda."""
     plan_tipo = (plan_tipo or 'basica').lower()
@@ -282,10 +342,12 @@ def obtener_todos_comercios_admin(busqueda=None):
                 SELECT c.id, c.nombre, c.telefono, c.visible, c.estado_pago,
                        c.plan_tipo, c.limite_productos, c.fecha_vencimiento,
                        c.documento_identidad, cat.nombre AS categoria,
-                       u.correo AS correo_dueno
+                       u.correo AS correo_dueno,
+                       COALESCE(p.nombre, c.plan_tipo) AS plan_nombre
                 FROM comercios c
                 LEFT JOIN categorias cat ON c.categoria_id = cat.id
                 LEFT JOIN usuarios u ON c.usuario_id = u.id
+                LEFT JOIN planes p ON c.plan_id = p.id
             """
             parametros = []
 
@@ -327,6 +389,7 @@ def confirmar_pago_suscripcion(comercio_id, plan_tipo, meses=1):
                 """
                 UPDATE comercios
                 SET plan_id = ?, plan_tipo = ?, limite_productos = ?, estado_pago = 'activo',
+                    visible = 1,
                     fecha_inicio_suscripcion = CURRENT_TIMESTAMP,
                     fecha_vencimiento = datetime('now', ?)
                 WHERE id = ?

@@ -1,0 +1,39 @@
+/* Alertas / flash messages — auto-dismiss y mobile */
+
+.localis-flash-alerta,
+.flash-auto-dismiss,
+.flash-mobile > div,
+.alertas-contenedor .alerta,
+.login-card .alerta {
+  transition: opacity 0.45s ease, transform 0.45s ease;
+  will-change: opacity, transform;
+}
+
+.localis-flash-alerta.localis-flash-saliendo,
+.flash-auto-dismiss.localis-flash-saliendo,
+.flash-mobile > div.localis-flash-saliendo,
+.alertas-contenedor .alerta.localis-flash-saliendo,
+.login-card .alerta.localis-flash-saliendo {
+  opacity: 0;
+  transform: translateY(-10px);
+  pointer-events: none;
+}
+
+.flash-mobile {
+  z-index: 300;
+  max-width: calc(100vw - 1.5rem);
+}
+
+@media (max-width: 768px) {
+  .flash-mobile {
+    left: 0.75rem !important;
+    right: 0.75rem !important;
+    top: 0.75rem !important;
+  }
+
+  .flash-mobile > div,
+  .localis-flash-alerta {
+    width: 100%;
+    font-size: 0.875rem;
+  }
+}

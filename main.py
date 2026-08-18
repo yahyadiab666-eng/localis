@@ -1,4 +1,5 @@
 import os
+import time
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
@@ -14,16 +15,20 @@ else:
 from functools import wraps
 
 from backend.supabase_client import SUPABASE_BUCKET_IMAGENES, supabase
-from backend.supabase_storage import subir_imagen_a_supabase
+from backend.supabase_storage import (
+    SupabaseUploadError,
+    subir_bytes_a_supabase,
+    subir_imagen_a_supabase,
+)
 if supabase:
     print('Supabase Storage + API configurados correctamente.')
 else:
-    print('Aviso: SUPABASE_URL o SUPABASE_KEY no configurados (solo almacenamiento local).')
+    print('Aviso: SUPABASE_URL o SUPABASE_KEY no configurados. Las subidas de imágenes fallarán.')
 
 import sqlite3
 
 from authlib.integrations.flask_client import OAuth
-from config import UPLOAD_FOLDER, WHATSAPP_SOPORTE, WHATSAPP_SOPORTE_URL
+from config import MAX_UPLOAD_BYTES, WHATSAPP_SOPORTE, WHATSAPP_SOPORTE_URL
 from flask import (
     Flask,
     flash,
@@ -37,6 +42,7 @@ from flask import (
 from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFError
 from flask_sqlalchemy import SQLAlchemy
+from werkzeug.exceptions import RequestEntityTooLarge
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -46,20 +52,24 @@ from backend.admin import (
     cambiar_plan_comercio,
     cambiar_visibilidad_comercio,
     confirmar_pago_suscripcion,
+    eliminar_comercio_definitivo,
     obtener_banner_principal,
     obtener_bandeja_tecnica,
     obtener_todos_comercios_admin,
+    reactivar_comercio,
     resolver_ticket_soporte,
+    suspender_comercio_temporal,
 )
 from backend.auth import obtener_o_crear_usuario_google
-from backend.images import comprimir_y_guardar
 from backend.image_search import obtener_url_imagen_automatica
 from backend.db import get_db_connection
 from database import init_db
 from backend.plans import PLANES, MENSAJE_LIMITE_PRODUCTOS, es_limite_ilimitado, obtener_beneficios_plan
-from backend.payment_ocr import extraer_referencia_desde_bytes
+from backend.payment_ocr import validar_comprobante_pago_movil
 from backend.subscriptions import (
     activar_suscripcion_por_comprobante,
+    calcular_monto_pago_plan,
+    comercio_puede_gestionar_inventario,
     contar_productos_comercio,
     marcar_bienvenida_vista,
     obtener_avisos_suscripcion,
@@ -67,6 +77,7 @@ from backend.subscriptions import (
     obtener_limite_productos_comercio,
     puede_agregar_producto,
     rechazar_renovacion_vencida,
+    verificar_vencimiento_comercio,
     verificar_vencimientos_comercios,
 )
 from backend.utils import normalizar_telefono_whatsapp, url_maps_comercio, url_whatsapp_comercio
@@ -99,10 +110,9 @@ app.secret_key = os.environ.get(
     'LOCALIS_SECRET_KEY', 'clave_secreta_localis_desarrollo'
 )
 
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['SUPABASE_CLIENT'] = supabase
 app.config['SUPABASE_BUCKET_IMAGENES'] = SUPABASE_BUCKET_IMAGENES
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_BYTES
 os.makedirs(os.path.join(BASE_DIR, 'static', 'images'), exist_ok=True)
 
 csrf = CSRFProtect(app)
@@ -124,6 +134,35 @@ def _inicializar_aplicacion():
 
 
 _inicializar_aplicacion()
+
+_ultima_verificacion_vencimientos_global = 0.0
+_INTERVALO_VENCIMIENTOS_SEG = 300
+
+
+@app.before_request
+def sincronizar_vencimientos_suscripcion():
+    """Revisa vencimientos globalmente y por comercio en rutas autenticadas."""
+    global _ultima_verificacion_vencimientos_global
+
+    ahora = time.time()
+    if ahora - _ultima_verificacion_vencimientos_global >= _INTERVALO_VENCIMIENTOS_SEG:
+        verificar_vencimientos_comercios()
+        _ultima_verificacion_vencimientos_global = ahora
+
+    if 'usuario_id' not in session:
+        return
+
+    rutas_comercio = (
+        '/comercio',
+        '/api/productos',
+        '/api/pagos',
+    )
+    if not any(request.path.startswith(ruta) for ruta in rutas_comercio):
+        return
+
+    comercio = obtener_comercio_por_usuario(session.get('usuario_id'))
+    if comercio:
+        verificar_vencimiento_comercio(comercio['id'])
 
 
 @app.after_request
@@ -150,18 +189,30 @@ if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
     )
 
 
-def _normalizar_logo_completo(comercio):
-    logo = comercio.get('logo_url')
-    if not logo:
-        comercio['logo_completo'] = comercio.get('logo_url')
+def _normalizar_imagenes_comercio(comercio):
+    """Normaliza logo y banner por separado (componentes independientes)."""
+    if not comercio:
         return comercio
-    if str(logo).startswith('http'):
-        comercio['logo_completo'] = logo
-    elif str(logo).startswith('/'):
+    comercio = dict(comercio)
+
+    logo = comercio.get('logo_url')
+    if logo and str(logo).startswith(('http://', 'https://', '/')):
         comercio['logo_completo'] = logo
     else:
-        comercio['logo_completo'] = f'/static/uploads/{logo}'
+        comercio['logo_completo'] = None
+
+    banner = comercio.get('banner_url') or comercio.get('imagen_portada')
+    if banner and str(banner).startswith(('http://', 'https://', '/')):
+        comercio['banner_completo'] = banner
+    else:
+        comercio['banner_completo'] = None
+
+    comercio['tiene_banner'] = bool(comercio.get('banner_completo'))
     return comercio
+
+
+def _normalizar_logo_completo(comercio):
+    return _normalizar_imagenes_comercio(comercio)
 
 
 def procesar_imagen_subida(
@@ -169,53 +220,45 @@ def procesar_imagen_subida(
     prefijo,
     carpeta='comercios',
     max_dimension=800,
-    solo_nombre_local=False,
 ):
-    """
-    Sube imagen a Supabase Storage (persistente) o disco local (desarrollo).
-    Retorna URL pública o ruta relativa según el destino.
-    """
+    """Sube imagen exclusivamente a Supabase Storage. Lanza SupabaseUploadError si falla."""
     if not file_storage or not getattr(file_storage, 'filename', ''):
         return None
 
-    if supabase:
-        url_publica = subir_imagen_a_supabase(
-            file_storage,
-            supabase,
-            prefijo=prefijo,
-            carpeta=carpeta,
-            max_dimension=max_dimension,
-        )
-        if url_publica:
-            return url_publica
+    from backend.images import validar_archivo_subida
 
-    url_local = comprimir_y_guardar(
+    error_validacion = validar_archivo_subida(file_storage)
+    if error_validacion:
+        raise SupabaseUploadError(error_validacion)
+
+    if not supabase:
+        raise SupabaseUploadError(
+            'Supabase Storage no está configurado. '
+            'Define SUPABASE_URL y SUPABASE_KEY en el entorno.'
+        )
+
+    return subir_imagen_a_supabase(
         file_storage,
-        app.config['UPLOAD_FOLDER'],
+        supabase,
         prefijo=prefijo,
+        carpeta=carpeta,
         max_dimension=max_dimension,
     )
-    if not url_local:
-        return None
-    if solo_nombre_local:
-        return url_local.replace('/static/uploads/', '')
-    return url_local
 
 
 def procesar_logo_comercio(file_storage, prefijo):
-    """Logo de comercio → bucket imágenes / uploads locales."""
+    """Logo de comercio → bucket imágenes en Supabase."""
     return procesar_imagen_subida(
         file_storage,
         prefijo=prefijo,
         carpeta='comercios',
-        solo_nombre_local=not bool(supabase),
     )
 
 
 def procesar_imagen_para_producto(
     file_storage, codigo_barras, nombre, descripcion, comercio_id
 ):
-    """Prioridad: Supabase/disco manual > búsqueda automática > default."""
+    """Prioridad: Supabase Storage > búsqueda automática > imagen default."""
     if file_storage and getattr(file_storage, 'filename', ''):
         url = procesar_imagen_subida(
             file_storage,
@@ -275,6 +318,25 @@ def admin_requerido(f):
     return decorada
 
 
+def admin_requerido_api(f):
+
+    @wraps(f)
+    def decorada(*args, **kwargs):
+        if 'usuario_id' not in session or not session.get('es_admin'):
+            return jsonify({'ok': False, 'mensaje': 'Acceso denegado.'}), 403
+        return f(*args, **kwargs)
+
+    return decorada
+
+
+def _bloquear_gestion_inventario(comercio, redirect_url='panel_comercio'):
+    ok, mensaje = comercio_puede_gestionar_inventario(comercio['id'])
+    if ok:
+        return None
+    flash(mensaje, 'error')
+    return redirect(url_for(redirect_url, abrir_pago='pro'))
+
+
 @app.errorhandler(404)
 def pagina_no_encontrada(e):
     return redirect(url_for('index'))
@@ -291,6 +353,18 @@ def error_csrf(e):
         'Tu sesión de formulario expiró o la petición no es segura. Inténtalo de nuevo.',
         'error',
     )
+    return redirect(request.referrer or url_for('index'))
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def error_archivo_demasiado_grande(e):
+    max_mb = MAX_UPLOAD_BYTES // (1024 * 1024)
+    mensaje = f'El archivo supera el tamaño máximo permitido ({max_mb} MB).'
+
+    if request.path.startswith('/api/'):
+        return jsonify({'error': mensaje}), 413
+
+    flash(mensaje, 'error')
     return redirect(request.referrer or url_for('index'))
 
 
@@ -361,7 +435,7 @@ def tienda_publica(comercio_id):
     )
     tasa_actual = obtener_tasa_dolar() or 1.0
 
-    comercio = _normalizar_logo_completo(dict(comercio))
+    comercio = _normalizar_imagenes_comercio(dict(comercio))
 
     comercio['whatsapp_url'] = url_whatsapp_comercio(
         comercio.get('telefono'),
@@ -500,15 +574,19 @@ def panel_comercio():
             'imagen_url': p['imagen_url'] or '/static/images/default-product.webp',
         })
 
-    comercio = _normalizar_logo_completo(dict(comercio_db))
+    comercio = _normalizar_imagenes_comercio(dict(comercio_db))
 
     plan_info = PLANES.get(comercio.get('plan_tipo', 'gratis'), PLANES['gratis'])
     avisos = obtener_avisos_suscripcion(comercio)
     pago_movil = obtener_datos_pago_movil()
-    planes_beneficios = {
-        codigo: obtener_beneficios_plan(codigo)
-        for codigo in ('basica', 'pro', 'business')
-    }
+    planes_beneficios = {}
+    for codigo in ('basica', 'pro', 'business'):
+        info = obtener_beneficios_plan(codigo)
+        montos = calcular_monto_pago_plan(codigo)
+        if montos:
+            info['monto_bs'] = montos['monto_bs']
+            info['tasa'] = montos['tasa']
+        planes_beneficios[codigo] = info
     conn.close()
 
     return render_template(
@@ -546,12 +624,30 @@ def editar_comercio():
         zona = request.form.get('zona', '').strip()
         maps_url = request.form.get('maps_url', '').strip()
         logo_archivo = request.files.get('logo')
+        banner_archivo = request.files.get('banner')
 
         logo_url = None
         if logo_archivo and logo_archivo.filename:
-            logo_url = procesar_logo_comercio(
-                logo_archivo, prefijo=f'logo_{comercio["id"]}'
-            )
+            try:
+                logo_url = procesar_logo_comercio(
+                    logo_archivo, prefijo=f'logo_{comercio["id"]}'
+                )
+            except SupabaseUploadError as error:
+                flash(str(error), 'error')
+                return redirect(url_for('editar_comercio'))
+
+        banner_url = None
+        if banner_archivo and banner_archivo.filename:
+            try:
+                banner_url = procesar_imagen_subida(
+                    banner_archivo,
+                    prefijo=f'banner_{comercio["id"]}',
+                    carpeta='banners',
+                    max_dimension=1920,
+                )
+            except SupabaseUploadError as error:
+                flash(str(error), 'error')
+                return redirect(url_for('editar_comercio'))
 
         if not nombre:
             flash('El nombre del comercio es obligatorio.', 'error')
@@ -567,11 +663,15 @@ def editar_comercio():
             zona=zona,
             maps_url=maps_url,
             logo_url=logo_url,
+            banner_url=banner_url,
         )
         flash(mensaje, 'exito' if exito else 'error')
         return redirect(url_for('panel_comercio'))
 
-    return render_template('editar_comercio.html', comercio=comercio)
+    return render_template(
+        'editar_comercio.html',
+        comercio=_normalizar_imagenes_comercio(comercio),
+    )
 
 
 @app.route('/comercio/crear', methods=['GET', 'POST'])
@@ -600,9 +700,13 @@ def crear_comercio():
 
     logo_url = None
     if logo_archivo and logo_archivo.filename:
-        logo_url = procesar_logo_comercio(
-            logo_archivo, prefijo=f'logo_nuevo_{usuario_id}'
-        )
+        try:
+            logo_url = procesar_logo_comercio(
+                logo_archivo, prefijo=f'logo_nuevo_{usuario_id}'
+            )
+        except SupabaseUploadError as error:
+            flash(str(error), 'error')
+            return redirect(url_for('crear_comercio'))
 
     exito, resultado = registrar_comercio_completo(
         usuario_id,
@@ -653,15 +757,22 @@ def nuevo_producto():
         ok, msg_limite = puede_agregar_producto(comercio['id'])
         if not ok:
             flash(msg_limite, 'error')
-            return redirect(url_for('panel_comercio'))
+            destino = url_for('panel_comercio')
+            if 'vencido' in msg_limite.lower() or 'límite' in msg_limite.lower():
+                destino = url_for('panel_comercio', abrir_pago='pro')
+            return redirect(destino)
 
-        imagen_url = procesar_imagen_para_producto(
-            imagen_archivo,
-            codigo_barras,
-            nombre,
-            descripcion,
-            comercio_id=comercio['id'],
-        )
+        try:
+            imagen_url = procesar_imagen_para_producto(
+                imagen_archivo,
+                codigo_barras,
+                nombre,
+                descripcion,
+                comercio_id=comercio['id'],
+            )
+        except SupabaseUploadError as error:
+            flash(str(error), 'error')
+            return redirect(url_for('nuevo_producto'))
 
         try:
             conn = get_db_connection()
@@ -702,6 +813,10 @@ def editar_producto(producto_id):
 
     comercio_id = comercio['id']
 
+    bloqueo = _bloquear_gestion_inventario(comercio)
+    if bloqueo:
+        return bloqueo
+
     if request.method == 'POST':
         nombre = request.form.get('nombre')
         precio_usd = request.form.get('precio_usd')
@@ -719,13 +834,17 @@ def editar_producto(producto_id):
         imagen_url = prod_previo['imagen_url'] if prod_previo else None
 
         if imagen_archivo and getattr(imagen_archivo, 'filename', ''):
-            imagen_url = procesar_imagen_para_producto(
-                imagen_archivo,
-                codigo_barras,
-                nombre,
-                descripcion,
-                comercio_id=comercio_id,
-            )
+            try:
+                imagen_url = procesar_imagen_para_producto(
+                    imagen_archivo,
+                    codigo_barras,
+                    nombre,
+                    descripcion,
+                    comercio_id=comercio_id,
+                )
+            except SupabaseUploadError as error:
+                flash(str(error), 'error')
+                return redirect(url_for('editar_producto', producto_id=producto_id))
         elif not imagen_url or imagen_url == '/static/images/default-product.webp':
             imagen_url = procesar_imagen_para_producto(
                 None, codigo_barras, nombre, descripcion, comercio_id=comercio_id
@@ -777,6 +896,10 @@ def eliminar_producto_ruta(producto_id):
         flash('Comercio no encontrado.', 'error')
         return redirect(url_for('panel_comercio'))
 
+    bloqueo = _bloquear_gestion_inventario(comercio)
+    if bloqueo:
+        return bloqueo
+
     exito, mensaje = eliminar_producto(producto_id, comercio['id'])
     flash(mensaje, 'exito' if exito else 'error')
     return redirect(url_for('panel_comercio'))
@@ -790,8 +913,22 @@ def cargar_csv():
         flash('Comercio no encontrado.', 'error')
         return redirect(url_for('panel_comercio'))
 
+    bloqueo = _bloquear_gestion_inventario(comercio)
+    if bloqueo:
+        return bloqueo
+
     archivo = request.files.get('archivo_csv')
-    exito, mensaje = procesar_csv_productos(comercio['id'], archivo)
+    exito, mensaje, meta = procesar_csv_productos(comercio['id'], archivo)
+
+    if not exito and meta and meta.get('plan_sugerido'):
+        flash(mensaje, 'limite_plan')
+        return redirect(
+            url_for(
+                'panel_comercio',
+                abrir_pago=meta['plan_sugerido'],
+            )
+        )
+
     flash(mensaje, 'exito' if exito else 'error')
     return redirect(url_for('panel_comercio'))
 
@@ -839,8 +976,8 @@ def suscripcion_solicitar_pago():
         plan_tipo = 'basica'
 
     flash(
-        'Sube la captura de tu comprobante en el modal para verificar el pago '
-        'automáticamente con OCR.',
+        'Realiza el pago móvil y sube la captura del comprobante en el modal. '
+        'El sistema validará referencia, monto y datos oficiales con OCR.',
         'info',
     )
     return redirect(url_for('panel_comercio', abrir_pago=plan_tipo))
@@ -883,13 +1020,16 @@ def api_crear_producto():
     except (TypeError, ValueError):
         return jsonify({'error': 'El precio debe ser un número válido.'}), 400
 
-    imagen_url = procesar_imagen_para_producto(
-        imagen_archivo,
-        codigo_barras,
-        nombre,
-        descripcion,
-        comercio_id=tienda_id,
-    )
+    try:
+        imagen_url = procesar_imagen_para_producto(
+            imagen_archivo,
+            codigo_barras,
+            nombre,
+            descripcion,
+            comercio_id=tienda_id,
+        )
+    except SupabaseUploadError as error:
+        return jsonify({'error': str(error)}), 503
 
     try:
         with get_db_connection() as conexion:
@@ -915,6 +1055,17 @@ def api_crear_producto():
         return jsonify({'error': f'Error al agregar producto: {error}'}), 500
 
 
+@app.route('/api/pagos/cotizacion')
+@login_requerido_api
+def api_cotizacion_pago():
+    plan_tipo = (request.args.get('plan') or 'basica').lower()
+    montos = calcular_monto_pago_plan(plan_tipo)
+    if not montos:
+        return jsonify({'error': 'Plan no válido.'}), 400
+    datos = obtener_datos_pago_movil(plan_tipo)
+    return jsonify({'ok': True, **datos, **montos}), 200
+
+
 @app.route('/api/pagos/verificar', methods=['POST'])
 @login_requerido_api
 def api_verificar_pago():
@@ -926,41 +1077,79 @@ def api_verificar_pago():
     archivo = request.files.get('comprobante')
 
     if not archivo or not archivo.filename:
-        return jsonify({'error': 'Debes adjuntar la captura del comprobante.'}), 400
+        return jsonify({'error': 'Debes adjuntar la captura del comprobante de pago.'}), 400
 
-    extension = archivo.filename.rsplit('.', 1)[-1].lower()
-    if extension not in {'png', 'jpg', 'jpeg', 'webp'}:
-        return jsonify({'error': 'Formato de imagen no permitido.'}), 400
+    from backend.images import comprimir_bytes_a_bytes, leer_bytes_limitados
 
-    data_bytes = archivo.read()
-    referencia, ms_ocr = extraer_referencia_desde_bytes(data_bytes)
+    data_bytes, error_lectura = leer_bytes_limitados(archivo)
+    if error_lectura:
+        return jsonify({'error': error_lectura}), 400
 
-    if not referencia:
+    montos = calcular_monto_pago_plan(plan_tipo)
+    if not montos:
+        return jsonify({'error': 'Plan no válido para pago.'}), 400
+
+    ocr = validar_comprobante_pago_movil(data_bytes, montos['monto_bs'])
+
+    if not ocr.get('ok'):
         return jsonify(
             {
-                'error': (
-                    'No se pudo leer la referencia de 6 dígitos en el comprobante. '
-                    'Intenta con una captura más nítida.'
-                ),
-                'ocr_ms': round(ms_ocr, 1),
+                'error': ' '.join(ocr.get('errores') or ['Comprobante no válido.']),
+                'ocr_ms': round(ocr.get('ms', 0), 1),
             }
         ), 400
 
+    referencia = ocr['referencia']
+    comprobante_url = None
+
+    try:
+        if not supabase:
+            raise SupabaseUploadError(
+                'Supabase Storage no está configurado para almacenar comprobantes.'
+            )
+
+        comprimido = comprimir_bytes_a_bytes(
+            data_bytes,
+            prefijo=f'pago_{comercio["id"]}',
+            max_dimension=1920,
+        )
+        if not comprimido:
+            raise SupabaseUploadError('No se pudo procesar la imagen del comprobante.')
+
+        payload, content_type, filename = comprimido
+        comprobante_url = subir_bytes_a_supabase(
+            payload,
+            supabase,
+            filename,
+            content_type=content_type,
+            carpeta='pagos',
+        )
+    except SupabaseUploadError as error:
+        return jsonify({'error': str(error)}), 503
+
     exito, mensaje, datos = activar_suscripcion_por_comprobante(
-        comercio['id'], plan_tipo, referencia
+        comercio['id'],
+        plan_tipo,
+        referencia,
+        comprobante_url=comprobante_url,
+        monto_ocr_bs=ocr.get('monto_bs'),
     )
 
     if not exito:
-        return jsonify({'error': mensaje, 'ocr_ms': round(ms_ocr, 1)}), 400
+        return jsonify({'error': mensaje, 'ocr_ms': round(ocr.get('ms', 0), 1)}), 400
 
     respuesta = {
         'ok': True,
         'mensaje': mensaje,
         'referencia': referencia,
-        'ocr_ms': round(ms_ocr, 1),
+        'ocr_ms': round(ocr.get('ms', 0), 1),
         'estado': datos.get('estado', 'activo'),
         'fecha_vencimiento': datos.get('fecha_vencimiento'),
         'plan_tipo': datos.get('plan_tipo', plan_tipo),
+        'monto_usd': datos.get('monto_usd'),
+        'monto_bs': datos.get('monto_bs'),
+        'tasa': datos.get('tasa'),
+        'comprobante_url': comprobante_url,
     }
     return jsonify(respuesta), 200
 
@@ -1010,16 +1199,16 @@ def admin_banner():
     admin_id = session.get('usuario_id')
 
     if banner_archivo and banner_archivo.filename:
-        banner_url = procesar_imagen_subida(
-            banner_archivo,
-            prefijo='banner_app',
-            carpeta='banners',
-            max_dimension=1920,
-        )
-        if banner_url:
+        try:
+            banner_url = procesar_imagen_subida(
+                banner_archivo,
+                prefijo='banner_app',
+                carpeta='banners',
+                max_dimension=1920,
+            )
             exito, mensaje = actualizar_banner_principal(admin_id, banner_url)
-        else:
-            exito, mensaje = False, 'No se pudo procesar la imagen del banner.'
+        except SupabaseUploadError as error:
+            exito, mensaje = False, str(error)
     else:
         exito, mensaje = False, 'Debes seleccionar una imagen.'
 
@@ -1036,6 +1225,34 @@ def cambiar_estado_comercio(comercio_id):
     )
     exito, mensaje = cambiar_visibilidad_comercio(
         session.get('usuario_id'), comercio_id, visible, estado_pago
+    )
+    flash(mensaje, 'exito' if exito else 'error')
+    return redirect(url_for('panel_admin'))
+
+
+@app.route('/admin/comercio/suspender/<int:comercio_id>', methods=['POST'])
+@admin_requerido
+def admin_suspender_comercio(comercio_id):
+    exito, mensaje = suspender_comercio_temporal(
+        session.get('usuario_id'), comercio_id
+    )
+    flash(mensaje, 'exito' if exito else 'error')
+    return redirect(url_for('panel_admin'))
+
+
+@app.route('/admin/comercio/reactivar/<int:comercio_id>', methods=['POST'])
+@admin_requerido
+def admin_reactivar_comercio(comercio_id):
+    exito, mensaje = reactivar_comercio(session.get('usuario_id'), comercio_id)
+    flash(mensaje, 'exito' if exito else 'error')
+    return redirect(url_for('panel_admin'))
+
+
+@app.route('/admin/comercio/eliminar/<int:comercio_id>', methods=['POST'])
+@admin_requerido
+def admin_eliminar_comercio(comercio_id):
+    exito, mensaje = eliminar_comercio_definitivo(
+        session.get('usuario_id'), comercio_id
     )
     flash(mensaje, 'exito' if exito else 'error')
     return redirect(url_for('panel_admin'))
@@ -1062,8 +1279,9 @@ def admin_resolver_ticket(ticket_id):
 
 
 @app.route('/api/suscripcion/confirmar-pago', methods=['POST'])
+@admin_requerido_api
 def api_confirmar_pago():
-    """Endpoint preparado para integración con pasarela de pago."""
+    """Confirmación manual de pago — solo administradores."""
     data = request.get_json(silent=True) or {}
     comercio_id = data.get('comercio_id')
     plan_tipo = data.get('plan_tipo', 'basica')

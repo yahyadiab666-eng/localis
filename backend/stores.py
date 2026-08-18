@@ -1,25 +1,35 @@
-import csv
-import io
 import os
 import sqlite3
 
-import openpyxl
 import psycopg2
 
 from backend.db import get_db_connection
 from backend.image_batch import DEFAULT_IMAGEN
-from backend.plans import PLAN_GRATIS_CODIGO, limite_para_plan, obtener_plan_por_codigo, validar_cantidad_productos
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp'}
-MAX_FILE_SIZE = 5 * 1024 * 1024
+from backend.inventory_import import (
+    cargar_archivo_inventario,
+    detectar_mapeo_columnas,
+    iter_lotes_productos,
+    contar_productos_validos,
+    leer_encabezados_inventario,
+    mensaje_error_importacion,
+    persistir_importacion_por_lotes,
+)
+from backend.plans import (
+    MENSAJE_LIMITE_PRODUCTOS,
+    PLAN_GRATIS_CODIGO,
+    es_limite_ilimitado,
+    limite_para_plan,
+    mensaje_limite_importacion,
+    obtener_plan_por_codigo,
+)
+from backend.subscriptions import (
+    comercio_puede_gestionar_inventario,
+    obtener_limite_productos_comercio,
+)
 
-
-def archivo_permitido(filename):
-    return (
-        '.' in filename
-        and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-    )
-
-
+_FILTRO_COMERCIO_PUBLICO = (
+    " AND c.visible = 1 AND c.estado_pago IN ('activo', 'gratis')"
+)
 def obtener_tasa_dolar():
     try:
         with get_db_connection() as conexion:
@@ -49,11 +59,9 @@ def obtener_config(clave, default=None):
 def _normalizar_imagen_url(img):
     if not img or img == '__PENDING__':
         return '/static/images/default-product.webp'
-    if img.startswith('http://') or img.startswith('https://'):
+    if img.startswith(('http://', 'https://', '/')):
         return img
-    if img.startswith('/static/'):
-        return img
-    return f'/static/uploads/{img}'
+    return '/static/images/default-product.webp'
 
 
 def _construir_filtro_palabras(palabra_clave):
@@ -162,50 +170,49 @@ def actualizar_datos_comercio(
     zona=None,
     maps_url=None,
     logo_url=None,
+    banner_url=None,
 ):
     try:
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
 
+            campos = [
+                'nombre = ?',
+                'telefono = ?',
+                'direccion = ?',
+                'descripcion = ?',
+                'ciudad = ?',
+                'zona = ?',
+                'maps_url = ?',
+            ]
+            valores = [
+                nombre,
+                telefono,
+                direccion,
+                descripcion,
+                ciudad,
+                zona,
+                maps_url,
+            ]
+
             if logo_url:
-                cursor.execute(
-                    """
-                    UPDATE comercios
-                    SET nombre = ?, telefono = ?, direccion = ?, descripcion = ?,
-                        ciudad = ?, zona = ?, maps_url = ?, logo_url = ?
-                    WHERE id = ?
-                    """,
-                    (
-                        nombre,
-                        telefono,
-                        direccion,
-                        descripcion,
-                        ciudad,
-                        zona,
-                        maps_url,
-                        logo_url,
-                        comercio_id,
-                    ),
-                )
-            else:
-                cursor.execute(
-                    """
-                    UPDATE comercios
-                    SET nombre = ?, telefono = ?, direccion = ?, descripcion = ?,
-                        ciudad = ?, zona = ?, maps_url = ?
-                    WHERE id = ?
-                    """,
-                    (
-                        nombre,
-                        telefono,
-                        direccion,
-                        descripcion,
-                        ciudad,
-                        zona,
-                        maps_url,
-                        comercio_id,
-                    ),
-                )
+                campos.append('logo_url = ?')
+                valores.append(logo_url)
+
+            if banner_url:
+                campos.append('banner_url = ?')
+                campos.append('imagen_portada = ?')
+                valores.extend([banner_url, banner_url])
+
+            valores.append(comercio_id)
+            cursor.execute(
+                f"""
+                UPDATE comercios
+                SET {', '.join(campos)}
+                WHERE id = ?
+                """,
+                tuple(valores),
+            )
 
             conexion.commit()
             return cursor.rowcount > 0, 'Datos del comercio actualizados.'
@@ -225,7 +232,7 @@ def obtener_comercio_por_id(comercio_id, solo_visible=True):
                 WHERE c.id = ?
             """
             if solo_visible:
-                query += ' AND c.visible = 1'
+                query += _FILTRO_COMERCIO_PUBLICO
 
             cursor.execute(query, (comercio_id,))
             fila = cursor.fetchone()
@@ -259,8 +266,8 @@ def buscar_y_filtrar_comercios(
                 SELECT c.*, cat.nombre AS categoria_nombre
                 FROM comercios c
                 LEFT JOIN categorias cat ON c.categoria_id = cat.id
-                WHERE c.visible = 1
-            """
+                WHERE 1=1
+            """ + _FILTRO_COMERCIO_PUBLICO
             parametros = []
 
             if palabra_clave:
@@ -308,8 +315,8 @@ def buscar_y_filtrar_productos(
                 FROM productos p
                 JOIN comercios c ON p.comercio_id = c.id
                 LEFT JOIN categorias cat ON c.categoria_id = cat.id
-                WHERE c.visible = 1
-            """
+                WHERE 1=1
+            """ + _FILTRO_COMERCIO_PUBLICO
             parametros = []
 
             if comercio_id:
@@ -370,6 +377,7 @@ def obtener_producto_publico(producto_id):
                 FROM productos p
                 JOIN comercios c ON p.comercio_id = c.id
                 WHERE p.id = ? AND c.visible = 1
+                  AND c.estado_pago IN ('activo', 'gratis')
                 """,
                 (producto_id,),
             )
@@ -467,145 +475,78 @@ def eliminar_producto(producto_id, comercio_id):
         return False, f'Error al eliminar el producto: {str(e)}'
 
 
-def _leer_filas_archivo(archivo):
-    extension = archivo.filename.rsplit('.', 1)[-1].lower()
-    filas = []
+def procesar_csv_productos(comercio_id, archivo_csv):
+    """
+    Importador inteligente con reemplazo total del inventario.
+    Procesa por lotes en memoria acotada y transacciones PostgreSQL seguras.
+    """
+    try:
+        data, extension, error_lectura = cargar_archivo_inventario(archivo_csv)
+        if error_lectura:
+            return False, error_lectura, None
 
-    if extension == 'xlsx':
-        wb = openpyxl.load_workbook(
-            filename=io.BytesIO(archivo.read()), data_only=True
+        encabezados, error_enc = leer_encabezados_inventario(data, extension)
+        if error_enc:
+            return False, error_enc, None
+
+        mapeo, meta, error_mapeo = detectar_mapeo_columnas(encabezados)
+        if error_mapeo:
+            return False, error_mapeo, None
+
+        ok, msg = comercio_puede_gestionar_inventario(comercio_id)
+        if not ok:
+            return False, msg, None
+
+        tasa = float(obtener_tasa_dolar() or 1.0)
+        total_validos = contar_productos_validos(
+            data,
+            extension,
+            encabezados,
+            mapeo,
+            meta,
+            tasa_dolar=tasa,
+            imagen_default=DEFAULT_IMAGEN,
         )
-        hoja = wb.active
-        encabezados = [
-            str(cell.value or '').strip().lower() for cell in hoja[1]
-        ]
-        for row in hoja.iter_rows(min_row=2, values_only=True):
-            if not any(row):
-                continue
-            filas.append(dict(zip(encabezados, row)))
-    elif extension == 'csv':
-        contenido = archivo.read().decode('utf-8-sig')
-        reader = csv.DictReader(io.StringIO(contenido))
-        filas = [
-            {
-                (clave or '').strip().lower(): valor
-                for clave, valor in fila.items()
-            }
-            for fila in reader
-        ]
-    else:
-        return None, 'El archivo debe tener extensión .csv o .xlsx.'
+        if total_validos == 0:
+            return False, (
+                'No se encontraron filas válidas con nombre y precio. '
+                'Revisa que los datos no estén vacíos y que el precio use formato numérico.'
+            ), None
 
-    return filas, None
-
-
-def _parsear_fila_producto(fila):
-    nombre = str(fila.get('nombre') or '').strip()
-    precio_usd_raw = str(fila.get('precio_usd') or '0').strip().replace(',', '.')
-
-    if not nombre or nombre == 'None' or not precio_usd_raw:
-        return None
-
-    try:
-        precio_usd = float(precio_usd_raw)
-    except ValueError:
-        return None
-
-    descripcion = str(fila.get('descripcion') or '').strip()
-    if descripcion == 'None':
-        descripcion = ''
-
-    codigo_barras = str(fila.get('codigo_barras') or '').strip()
-    if not codigo_barras or codigo_barras == 'None':
-        codigo_barras = None
-
-    imagen_url = str(fila.get('imagen_url') or fila.get('imagen') or '').strip()
-    if not imagen_url or imagen_url == 'None':
-        imagen_url = DEFAULT_IMAGEN
-
-    return {
-        'nombre': nombre,
-        'descripcion': descripcion,
-        'precio_usd': precio_usd,
-        'codigo_barras': codigo_barras,
-        'imagen_url': imagen_url,
-    }
-
-
-def procesar_csv_productos(comercio_id, archivo_csv, upload_folder=None):
-    """
-    Carga masiva con reemplazo total.
-    Guarda la URL de imagen del CSV/Excel tal cual en imagen_url (sin descargas).
-    """
-    del upload_folder  # Conservado por compatibilidad con llamadas existentes.
-
-    if not archivo_csv or archivo_csv.filename == '':
-        return False, 'No se adjuntó ningún archivo.'
-
-    extension = archivo_csv.filename.rsplit('.', 1)[-1].lower()
-    if extension not in ['csv', 'xlsx']:
-        return False, 'El archivo debe tener extensión .csv o .xlsx.'
-
-    try:
-        filas, error = _leer_filas_archivo(archivo_csv)
-        if error:
-            return False, error
-
-        productos_validos = []
-
-        for fila in filas:
-            parsed = _parsear_fila_producto(fila)
-            if parsed:
-                productos_validos.append(parsed)
-
-        if not productos_validos:
-            return False, 'El archivo está vacío o no contiene filas válidas.'
-
-        with get_db_connection(row_factory=sqlite3.Row) as conexion:
-            cursor = conexion.cursor()
-
-            cursor.execute(
-                'SELECT plan_tipo, limite_productos FROM comercios WHERE id = ?',
-                (comercio_id,),
-            )
-            comercio = cursor.fetchone()
-            plan_tipo = comercio['plan_tipo'] if comercio else 'basica'
-
-            ok, msg = validar_cantidad_productos(plan_tipo, len(productos_validos))
-            if not ok:
-                return False, msg
-
-            cursor.execute(
-                'DELETE FROM productos WHERE comercio_id = ?', (comercio_id,)
-            )
-
-            insertados = 0
-            for prod in productos_validos:
+        limite = obtener_limite_productos_comercio(comercio_id)
+        if not es_limite_ilimitado(limite) and total_validos > limite:
+            with get_db_connection(row_factory=sqlite3.Row) as conexion:
+                cursor = conexion.cursor()
                 cursor.execute(
-                    """
-                    INSERT INTO productos (
-                        comercio_id, nombre, descripcion, precio_usd,
-                        codigo_barras, imagen_url
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        comercio_id,
-                        prod['nombre'],
-                        prod['descripcion'],
-                        prod['precio_usd'],
-                        prod['codigo_barras'],
-                        prod['imagen_url'],
-                    ),
+                    'SELECT plan_tipo FROM comercios WHERE id = ?',
+                    (int(comercio_id),),
                 )
-                insertados += 1
+                fila = cursor.fetchone()
+            plan_tipo = (fila['plan_tipo'] if fila else 'gratis') or 'gratis'
+            mensaje, plan_sugerido = mensaje_limite_importacion(
+                plan_tipo, total_validos, limite
+            )
+            return False, mensaje, {'plan_sugerido': plan_sugerido}
 
-            conexion.commit()
+        def _generador_lotes():
+            return iter_lotes_productos(
+                data,
+                extension,
+                encabezados,
+                mapeo,
+                meta,
+                tasa_dolar=tasa,
+                imagen_default=DEFAULT_IMAGEN,
+            )
+
+        insertados = persistir_importacion_por_lotes(comercio_id, _generador_lotes)
 
         return (
             True,
-            f'Carga completada: {insertados} productos importados con sus URLs de imagen.',
+            f'Importación completada: {insertados} productos cargados. '
+            'Columnas reconocidas automáticamente desde la primera fila.',
+            None,
         )
 
-    except Exception as e:
-        return False, f'Error al procesar el archivo: {str(e)}'
+    except Exception as exc:
+        return False, mensaje_error_importacion(exc), None

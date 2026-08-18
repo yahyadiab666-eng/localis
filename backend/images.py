@@ -5,9 +5,10 @@ import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import requests
 from PIL import Image
 from werkzeug.utils import secure_filename
+
+from config import MAX_UPLOAD_BYTES
 
 MAX_DIMENSION = 800
 QUALITY = 80
@@ -19,6 +20,70 @@ def archivo_imagen_valido(filename):
     if not filename or '.' not in filename:
         return False
     return filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def _obtener_tamano_subida(file_storage):
+    """Intenta obtener el tamaño del archivo sin leerlo completo a memoria."""
+    content_length = getattr(file_storage, 'content_length', None)
+    if content_length is not None:
+        return content_length
+
+    stream = getattr(file_storage, 'stream', None)
+    if stream is None:
+        return None
+
+    try:
+        pos = stream.tell()
+        stream.seek(0, os.SEEK_END)
+        size = stream.tell()
+        stream.seek(pos)
+        return size
+    except Exception:
+        return None
+
+
+def validar_archivo_subida(file_storage, max_bytes=None):
+    """
+    Valida extensión y tamaño antes de procesar en memoria o subir a Supabase.
+    Retorna None si es válido, o un mensaje de error en español.
+    """
+    max_bytes = max_bytes or MAX_UPLOAD_BYTES
+
+    if not file_storage or not getattr(file_storage, 'filename', ''):
+        return 'No se recibió ningún archivo.'
+
+    if not archivo_imagen_valido(file_storage.filename):
+        return 'Formato de imagen no permitido. Usa PNG, JPG o WebP.'
+
+    tamano = _obtener_tamano_subida(file_storage)
+    if tamano is not None and tamano > max_bytes:
+        max_mb = max_bytes // (1024 * 1024)
+        return f'El archivo supera el tamaño máximo permitido ({max_mb} MB).'
+
+    return None
+
+
+def leer_bytes_limitados(file_storage, max_bytes=None):
+    """
+    Lee bytes del archivo validando extensión y tope de tamaño.
+    Retorna (bytes, None) o (None, mensaje_error).
+    """
+    max_bytes = max_bytes or MAX_UPLOAD_BYTES
+    error = validar_archivo_subida(file_storage, max_bytes=max_bytes)
+    if error:
+        return None, error
+
+    try:
+        stream = file_storage.stream
+        stream.seek(0)
+        data = stream.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            max_mb = max_bytes // (1024 * 1024)
+            return None, f'El archivo supera el tamaño máximo permitido ({max_mb} MB).'
+        stream.seek(0)
+        return data, None
+    except Exception as error:
+        return None, f'No se pudo leer el archivo: {error}'
 
 
 def _preparar_imagen(img):
@@ -71,6 +136,26 @@ def comprimir_pil_a_bytes(
         return None
 
 
+def comprimir_bytes_a_bytes(
+    data_bytes,
+    prefijo='img',
+    max_dimension=MAX_DIMENSION,
+    quality=QUALITY,
+    formato='WEBP',
+):
+    """Comprime bytes de imagen y retorna (bytes, content_type, filename) o None."""
+    if not data_bytes:
+        return None
+    try:
+        img = Image.open(io.BytesIO(data_bytes))
+        return comprimir_pil_a_bytes(
+            img, prefijo=prefijo, max_dimension=max_dimension, quality=quality, formato=formato
+        )
+    except Exception as e:
+        print(f'Error al comprimir bytes de imagen: {e}')
+        return None
+
+
 def comprimir_file_storage_a_bytes(
     file_storage,
     prefijo='img',
@@ -79,9 +164,12 @@ def comprimir_file_storage_a_bytes(
     formato='WEBP',
 ):
     """Comprime un archivo subido y retorna (bytes, content_type, filename) o None."""
-    if not file_storage or not getattr(file_storage, 'filename', ''):
+    error = validar_archivo_subida(file_storage)
+    if error:
+        print(f'Archivo rechazado: {error}')
         return None
-    if not archivo_imagen_valido(file_storage.filename):
+
+    if not file_storage or not getattr(file_storage, 'filename', ''):
         return None
 
     nombre_original = secure_filename(file_storage.filename)
@@ -100,142 +188,20 @@ def comprimir_file_storage_a_bytes(
         return None
 
 
-def comprimir_pil_a_archivo(
-    img,
-    upload_folder,
-    prefijo='img',
-    max_dimension=MAX_DIMENSION,
-    quality=QUALITY,
-    formato='WEBP',
-):
-    """Comprime un objeto PIL y lo guarda como WebP o JPEG. Retorna ruta web o None."""
-    try:
-        img = _preparar_imagen(img)
-        img.thumbnail((max_dimension, max_dimension))
-
-        extension = 'webp' if formato.upper() == 'WEBP' else 'jpg'
-        filename = _nombre_archivo_seguro(prefijo, extension)
-        filepath = os.path.join(upload_folder, filename)
-        os.makedirs(upload_folder, exist_ok=True)
-
-        if extension == 'webp':
-            img.save(filepath, 'WEBP', quality=quality, optimize=True)
-        else:
-            img.save(filepath, 'JPEG', quality=quality, optimize=True)
-
-        return f'/static/uploads/{filename}'
-    except Exception as e:
-        print(f'Error al comprimir imagen en memoria: {e}')
-        return None
-
-
-def comprimir_bytes(
-    data,
-    upload_folder,
-    prefijo='img',
-    max_dimension=MAX_DIMENSION,
-    quality=QUALITY,
-):
-    """Comprime bytes de imagen en memoria y guarda WebP."""
-    try:
-        img = Image.open(io.BytesIO(data))
-        return comprimir_pil_a_archivo(
-            img, upload_folder, prefijo, max_dimension, quality
-        )
-    except Exception as e:
-        print(f'Error al comprimir bytes: {e}')
-        return None
-
-
-def comprimir_y_guardar(
-    file_storage,
-    upload_folder,
-    prefijo='img',
-    max_dimension=MAX_DIMENSION,
-    quality=QUALITY,
-    formato='WEBP',
-):
-    """
-    Comprime y guarda una imagen subida.
-    Retorna la ruta web (/static/uploads/...) o None si falla.
-    """
-    if not file_storage or not getattr(file_storage, 'filename', ''):
-        return None
-
-    if not archivo_imagen_valido(file_storage.filename):
-        return None
-
-    nombre_original = secure_filename(file_storage.filename)
-    if not nombre_original:
-        return None
-
-    try:
-        img = Image.open(file_storage.stream)
-        prefijo_base = prefijo or nombre_original.rsplit('.', 1)[0]
-        return comprimir_pil_a_archivo(
-            img, upload_folder, prefijo_base, max_dimension, quality, formato
-        )
-    except Exception as e:
-        print(f'Error al comprimir imagen: {e}')
-        return None
-
-
-def descargar_y_comprimir_url(
-    url,
-    upload_folder,
-    prefijo='img',
-    max_dimension=MAX_DIMENSION,
-    quality=QUALITY,
-    timeout=6,
-):
-    """Descarga una URL externa, comprime en memoria y guarda localmente."""
-    if not url or not url.startswith('http'):
-        return None
-    try:
-        res = requests.get(
-            url,
-            timeout=timeout,
-            headers={
-                'User-Agent': (
-                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                    'AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
-                )
-            },
-        )
-        if res.status_code != 200 or not res.content:
-            return None
-        return comprimir_bytes(
-            res.content, upload_folder, prefijo, max_dimension, quality
-        )
-    except Exception as e:
-        print(f'Error descargando imagen {url[:60]}: {e}')
-        return None
-
-
 def procesar_tarea_imagen(tarea):
     """
-    Ejecuta una tarea de imagen en un worker.
-    tarea: dict con keys tipo ('buscar'|'url'|'archivo'), upload_folder, prefijo,
-           y datos específicos.
+    Ejecuta una tarea de imagen en un worker sin almacenamiento local.
     Retorna dict con producto_id (opcional) y url resultante.
     """
-    upload_folder = tarea['upload_folder']
     prefijo = tarea.get('prefijo', 'img')
     producto_id = tarea.get('producto_id')
-
     url = None
     tipo = tarea.get('tipo')
 
     if tipo == 'url' and tarea.get('url'):
         url_externa = tarea['url']
-        if url_externa.startswith('/static/'):
+        if url_externa.startswith('http'):
             url = url_externa
-        elif url_externa.startswith('http'):
-            url = descargar_y_comprimir_url(
-                url_externa, upload_folder, prefijo=prefijo
-            )
-            if not url:
-                url = url_externa
         else:
             url = url_externa
 
@@ -248,12 +214,7 @@ def procesar_tarea_imagen(tarea):
             descripcion=tarea.get('descripcion'),
             modo_rapido=True,
         )
-        if url_encontrada and url_encontrada.startswith('http'):
-            url = descargar_y_comprimir_url(
-                url_encontrada, upload_folder, prefijo=prefijo
-            ) or url_encontrada
-        else:
-            url = url_encontrada or '/static/images/default-product.webp'
+        url = url_encontrada or '/static/images/default-product.webp'
 
     return {'producto_id': producto_id, 'url': url}
 

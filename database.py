@@ -1,9 +1,22 @@
 """Esquema PostgreSQL (Supabase), conexión vía psycopg2 e init_db()."""
 
 import os
+import time
 
 import psycopg2
+from psycopg2 import OperationalError, pool
+from psycopg2.extensions import TRANSACTION_STATUS_INERROR
 from psycopg2.extras import RealDictCursor
+from psycopg2.pool import PoolError
+
+DB_CONNECT_TIMEOUT = int(os.getenv('DB_CONNECT_TIMEOUT', '10'))
+DB_POOL_MIN = int(os.getenv('DB_POOL_MIN', '2'))
+DB_POOL_MAX = int(os.getenv('DB_POOL_MAX', '20'))
+DB_STATEMENT_TIMEOUT_MS = int(os.getenv('DB_STATEMENT_TIMEOUT_MS', '120000'))
+DB_RETRY_ATTEMPTS = int(os.getenv('DB_RETRY_ATTEMPTS', '3'))
+DB_RETRY_BASE_DELAY = float(os.getenv('DB_RETRY_BASE_DELAY', '0.08'))
+
+_connection_pool = None
 
 def normalize_database_url(url):
     """Convierte postgres:// a postgresql:// (requerido por SQLAlchemy)."""
@@ -50,8 +63,8 @@ COLUMNAS_COMERCIOS = [
 
 PLANES_SEED = [
     ('gratis', 'Plan Gratis / Prueba', 0, 50, 0, 30, 0, 1),
-    ('basica', 'Básica', 10, 50, 0, 30, 0, 1),
-    ('pro', 'Pro', 17, 200, 1, 30, 1, 1),
+    ('basica', 'Plan Básico', 10, 100, 0, 30, 0, 1),
+    ('pro', 'Pro', 15, 300, 1, 30, 1, 1),
     ('business', 'Business', 35, None, 1, 30, 0, 1),
 ]
 
@@ -99,9 +112,11 @@ class _PgCursor:
 
 
 class _PgConnection:
-    def __init__(self, conn, dict_rows=False):
+    def __init__(self, conn, dict_rows=False, from_pool=False):
         self._conn = conn
         self._dict_rows = dict_rows
+        self._from_pool = from_pool
+        self._closed = False
 
     def cursor(self):
         if self._dict_rows:
@@ -115,25 +130,122 @@ class _PgConnection:
         self._conn.rollback()
 
     def close(self):
-        self._conn.close()
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            if self._conn.get_transaction_status() == TRANSACTION_STATUS_INERROR:
+                self._conn.rollback()
+        except Exception:
+            pass
+        try:
+            if self._from_pool and _connection_pool is not None:
+                _connection_pool.putconn(self._conn)
+            else:
+                self._conn.close()
+        except Exception:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type:
-            self.rollback()
-        else:
-            self.commit()
-        self.close()
+        try:
+            if exc_type:
+                self.rollback()
+            else:
+                self.commit()
+        finally:
+            self.close()
         return False
 
 
+def _obtener_pool():
+    global _connection_pool
+    if _connection_pool is None:
+        _require_database_url()
+        _connection_pool = pool.ThreadedConnectionPool(
+            minconn=DB_POOL_MIN,
+            maxconn=DB_POOL_MAX,
+            dsn=DATABASE_URL,
+            connect_timeout=DB_CONNECT_TIMEOUT,
+        )
+    return _connection_pool
+
+
+def _preparar_conexion_pg(pg_conn):
+    pg_conn.autocommit = False
+    if DB_STATEMENT_TIMEOUT_MS > 0:
+        with pg_conn.cursor() as cur:
+            cur.execute('SET statement_timeout = %s', (DB_STATEMENT_TIMEOUT_MS,))
+
+
+def es_error_bd_transitorio(exc):
+    if not isinstance(exc, OperationalError):
+        return False
+    pgcode = getattr(exc, 'pgcode', None)
+    if pgcode in ('40001', '40P01', '55P03', '57014'):
+        return True
+    mensaje = str(exc).lower()
+    return any(
+        token in mensaje
+        for token in (
+            'deadlock',
+            'lock timeout',
+            'could not serialize',
+            'connection reset',
+            'server closed the connection',
+        )
+    )
+
+
 def get_db_connection(row_factory=None):
-    """Abre conexión externa a PostgreSQL (Supabase) usando DATABASE_URL."""
+    """Obtiene conexión del pool PostgreSQL (concurrencia segura vía Supabase/Postgres)."""
     _require_database_url()
-    conn = psycopg2.connect(DATABASE_URL)
-    return _PgConnection(conn, dict_rows=row_factory is not None)
+    try:
+        pg_conn = _obtener_pool().getconn()
+    except PoolError as exc:
+        raise RuntimeError(
+            'No hay conexiones de base de datos disponibles en este momento. '
+            'Intenta de nuevo en unos segundos.'
+        ) from exc
+    _preparar_conexion_pg(pg_conn)
+    return _PgConnection(pg_conn, dict_rows=row_factory is not None, from_pool=True)
+
+
+def ejecutar_con_reintentos_bd(operacion, reintentos=None):
+    """
+    Ejecuta operacion(conexion) con reintentos ante bloqueos/deadlocks transitorios.
+    operacion debe hacer commit explícito si corresponde; la conexión siempre se cierra.
+    """
+    intentos = reintentos if reintentos is not None else DB_RETRY_ATTEMPTS
+    ultimo_error = None
+
+    for intento in range(intentos):
+        conexion = get_db_connection()
+        try:
+            resultado = operacion(conexion)
+            conexion.commit()
+            return resultado
+        except Exception as exc:
+            ultimo_error = exc
+            try:
+                conexion.rollback()
+            except Exception:
+                pass
+            if intento < intentos - 1 and es_error_bd_transitorio(exc):
+                time.sleep(DB_RETRY_BASE_DELAY * (2 ** intento))
+                continue
+            raise
+        finally:
+            conexion.close()
+
+    if ultimo_error:
+        raise ultimo_error
+    return None
 
 
 def _columnas_existentes(cursor, tabla):
@@ -313,7 +425,14 @@ def _crear_tabla_planes(cursor):
             (codigo, nombre, precio, limite_productos, soporte_prioritario,
              dias_duracion, destacado, activo)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (codigo) DO NOTHING
+            ON CONFLICT (codigo) DO UPDATE SET
+                nombre = EXCLUDED.nombre,
+                precio = EXCLUDED.precio,
+                limite_productos = EXCLUDED.limite_productos,
+                soporte_prioritario = EXCLUDED.soporte_prioritario,
+                dias_duracion = EXCLUDED.dias_duracion,
+                destacado = EXCLUDED.destacado,
+                activo = EXCLUDED.activo
             """,
             fila,
         )
@@ -433,9 +552,9 @@ def _sembrar_configuracion(cursor):
         ('tasa_dolar', '36.50'),
         ('banner_principal', '/static/images/default-banner.jpg'),
         ('whatsapp_soporte', '584125970507'),
-        ('pago_movil_banco', 'Banesco'),
-        ('pago_movil_cedula', 'J-501234567'),
-        ('pago_movil_telefono', '04125970507'),
+        ('pago_movil_banco', 'Banco Caribe'),
+        ('pago_movil_cedula', '30209716'),
+        ('pago_movil_telefono', '04127957989'),
     ]
     for clave, valor in defaults:
         cursor.execute(

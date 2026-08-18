@@ -29,8 +29,8 @@ CREATE TABLE IF NOT EXISTS planes (
 
 INSERT OR IGNORE INTO planes (codigo, nombre, precio, limite_productos, soporte_prioritario, dias_duracion, destacado, activo) VALUES
     ('gratis', 'Plan Gratis / Prueba', 0, 50, 0, 30, 0, 1),
-    ('basica', 'Básica', 10, 50, 0, 30, 0, 1),
-    ('pro', 'Pro', 17, 200, 1, 30, 1, 1),
+    ('basica', 'Plan Básico', 10, 100, 0, 30, 0, 1),
+    ('pro', 'Pro', 15, 300, 1, 30, 1, 1),
     ('business', 'Business', 35, NULL, 1, 30, 0, 1);
 
 -- ==========================================
@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS productos (
     nombre TEXT NOT NULL,
     precio_usd REAL NOT NULL, 
     descripcion TEXT,
-    imagen_url TEXT, -- Nombre del archivo o ruta guardada en static/uploads
+    imagen_url TEXT, -- URL pública (Supabase Storage), externa o asset estático
     stock INTEGER DEFAULT 0,
     codigo_barras TEXT,
     FOREIGN KEY (comercio_id) REFERENCES comercios(id) ON DELETE CASCADE

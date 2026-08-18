@@ -13,6 +13,7 @@
   <!-- Fonts -->
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}">
   
   <style>
     body { font-family: 'DM Sans', sans-serif; }
@@ -23,6 +24,24 @@
     .modal-push.activo { display: flex; }
     .modal-push .panel { background: #fff; border-radius: 1rem; max-width: 520px; width: 100%; max-height: 90vh; overflow-y: auto; box-shadow: 0 25px 50px rgba(0,0,0,.25); }
     .localis-flash-alerta { transition: opacity 0.5s ease; }
+    .comercio-banner-box {
+      width: 100%;
+      height: 10rem;
+      border-radius: 1rem;
+      overflow: hidden;
+      background: linear-gradient(135deg, #f59e0b 0%, #ea580c 100%);
+      border: 1px solid rgba(234, 88, 12, 0.35);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+    }
+    @media (min-width: 768px) {
+      .comercio-banner-box { height: 11.5rem; }
+    }
+    .comercio-banner-box .comercio-banner-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
   </style>
 </head>
 
@@ -60,12 +79,36 @@
     <!-- NOTIFICACIONES FLASH DE FLASK -->
     {% with mensajes = get_flashed_messages(with_categories=true) %}
       {% if mensajes %}
-        <div class="fixed top-4 right-4 z-50 space-y-2 flash-mobile">
+        <div class="fixed top-4 right-4 z-50 space-y-2 flash-mobile max-w-md">
           {% for categoria, mensaje in mensajes %}
-            <div class="p-4 rounded-xl shadow-lg text-white text-sm flex items-center gap-3 localis-flash-alerta {% if categoria == 'error' %}bg-red-500{% elif categoria == 'exito' %}bg-emerald-600{% else %}bg-amber-600{% endif %}">
+            {% if categoria == 'limite_plan' %}
+            <div class="p-4 rounded-xl shadow-lg text-stone-900 text-sm localis-flash-alerta flash-persist bg-amber-50 border-2 border-amber-400">
+              <div class="flex gap-3">
+                <i data-lucide="alert-triangle" class="text-amber-600 shrink-0" style="width:20px;height:20px;"></i>
+                <div class="space-y-3">
+                  <p class="leading-relaxed">{{ mensaje }}</p>
+                  {% if abrir_pago %}
+                  <button type="button"
+                          onclick="abrirModalPlan('{{ abrir_pago }}')"
+                          class="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-stone-900 font-bold px-4 py-2 rounded-full text-xs transition shadow-sm">
+                    <i data-lucide="credit-card" style="width:14px;height:14px;"></i>
+                    Actualizar a plan {{ planes_beneficios[abrir_pago].nombre if abrir_pago in planes_beneficios else abrir_pago }}
+                  </button>
+                  {% else %}
+                  <a href="#seccion-planes"
+                     class="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-stone-900 font-bold px-4 py-2 rounded-full text-xs transition shadow-sm">
+                    Ver planes disponibles
+                  </a>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+            {% else %}
+            <div class="p-4 rounded-xl shadow-lg text-white text-sm flex items-center gap-3 localis-flash-alerta flash-auto-dismiss {% if categoria == 'error' %}bg-red-500{% elif categoria == 'exito' %}bg-emerald-600{% else %}bg-amber-600{% endif %}">
               <i data-lucide="info" style="width:18px;height:18px;"></i>
               <span>{{ mensaje }}</span>
             </div>
+            {% endif %}
           {% endfor %}
         </div>
       {% endif %}
@@ -74,18 +117,38 @@
     <!-- CONTENIDO PRINCIPAL -->
     <main class="max-w-6xl mx-auto px-6 py-10 w-full space-y-10">
 
-      <!-- TARJETA PERFIL DEL COMERCIO -->
+      <!-- BANNER DE TIENDA (independiente del logo y modales de bienvenida) -->
+      <section class="space-y-3" aria-label="Banner de la tienda">
+        <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+          <div>
+            <h3 class="font-display text-lg font-bold text-gray-900">Banner de tu tienda</h3>
+            <p class="text-stone-500 text-xs mt-0.5">Rectángulo horizontal visible en tu página pública. Es independiente de tu logo.</p>
+          </div>
+          <a href="{{ url_for('editar_comercio') }}#banner-tienda"
+             class="inline-flex items-center gap-1.5 text-xs font-bold text-amber-800 hover:text-amber-900 bg-amber-100 px-3 py-1.5 rounded-full shrink-0">
+            <i data-lucide="image-plus" style="width:14px;height:14px;"></i>
+            {% if comercio.tiene_banner %}Cambiar banner{% else %}Subir banner{% endif %}
+          </a>
+        </div>
+        <div class="comercio-banner-box" role="img" aria-label="{% if comercio.tiene_banner %}Banner personalizado{% else %}Banner predeterminado naranja{% endif %}">
+          {% if comercio.banner_completo %}
+            <img src="{{ comercio.banner_completo }}" alt="Banner de {{ comercio.nombre }}" class="comercio-banner-img">
+          {% endif %}
+        </div>
+      </section>
+
+      <!-- TARJETA PERFIL DEL COMERCIO (logo — no es el banner) -->
       <section class="bg-white rounded-2xl p-6 md:p-8 shadow-sm border border-stone-200/80 card-hover">
         <div class="flex flex-col md:flex-row items-center gap-6">
           
-          <!-- Box Logo / Avatar -->
-          <div class="w-28 h-28 md:w-32 md:h-32 rounded-2xl bg-amber-50 border-2 border-amber-200 flex items-center justify-center flex-shrink-0 overflow-hidden relative shadow-inner">
-            {% if comercio.logo_url %}
-              <img src="{{ comercio.logo_completo or url_for('static', filename='uploads/' + comercio.logo_url) }}" alt="Logo de {{ comercio.nombre }}" class="w-full h-full object-cover">
+          <!-- Box Logo / Avatar (independiente del banner) -->
+          <div class="w-28 h-28 md:w-32 md:h-32 rounded-2xl bg-stone-100 border-2 border-stone-200 flex items-center justify-center flex-shrink-0 overflow-hidden relative shadow-inner">
+            {% if comercio.logo_completo %}
+              <img src="{{ comercio.logo_completo }}" alt="Logo de {{ comercio.nombre }}" class="w-full h-full object-cover">
             {% else %}
-              <div class="text-center p-2 text-amber-700/60">
-                <i data-lucide="image" class="mx-auto mb-1" style="width:28px;height:28px;"></i>
-                <span class="text-[11px] font-bold uppercase tracking-wider block">Sin Logo</span>
+              <div class="text-center p-2 text-stone-400">
+                <i data-lucide="store" class="mx-auto mb-1" style="width:28px;height:28px;"></i>
+                <span class="text-[11px] font-bold uppercase tracking-wider block">Sin logo</span>
               </div>
             {% endif %}
           </div>
@@ -140,7 +203,7 @@
       </section>
 
       <!-- PLANES Y SUSCRIPCIÓN -->
-      <section class="bg-white rounded-2xl p-6 shadow-sm border border-stone-200/80 space-y-4">
+      <section id="seccion-planes" class="bg-white rounded-2xl p-6 shadow-sm border border-stone-200/80 space-y-4">
         <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h3 class="font-display text-xl font-bold text-gray-900">Tu Plan y Suscripción</h3>
@@ -149,7 +212,7 @@
           <div class="flex flex-wrap gap-2 comercio-plan-buttons">
             <button type="button" onclick="abrirModalPlan('pro')" class="px-4 py-2 rounded-full bg-violet-600 text-white text-sm font-bold hover:bg-violet-500">Cambiar a Pro</button>
             <button type="button" onclick="abrirModalPlan('business')" class="px-4 py-2 rounded-full bg-stone-900 text-white text-sm font-bold hover:bg-stone-800">Cambiar a Business</button>
-            <button type="button" onclick="abrirModalPlan('basica')" class="px-4 py-2 rounded-full border border-amber-400 text-amber-800 text-sm font-bold hover:bg-amber-50">Cambiar a Básica</button>
+            <button type="button" onclick="abrirModalPlan('basica')" class="px-4 py-2 rounded-full border border-amber-400 text-amber-800 text-sm font-bold hover:bg-amber-50">Cambiar a Básico</button>
           </div>
         </div>
       </section>
@@ -160,13 +223,14 @@
           <div class="space-y-1">
             <h4 class="font-display text-lg font-bold text-amber-950 flex items-center gap-2">
               <i data-lucide="file-spreadsheet" class="text-amber-600" style="width:20px;height:20px;"></i>
-              Carga Masiva de Productos (CSV / Excel)
+              Importador Inteligente (CSV / Excel)
             </h4>
             <p class="text-stone-600 text-xs">
-              Sube un archivo <code class="bg-white/80 px-1.5 py-0.5 rounded border">.csv</code> o <code class="bg-white/80 px-1.5 py-0.5 rounded border">.xlsx</code>
-              con columnas: nombre, precio_usd, descripcion, codigo_barras, imagen_url.
+              Sube un archivo <code class="bg-white/80 px-1.5 py-0.5 rounded border">.csv</code> o <code class="bg-white/80 px-1.5 py-0.5 rounded border">.xlsx</code>.
+              El sistema detecta automáticamente las columnas (nombre, precio, stock, código de barras, imagen…).
               <strong class="text-amber-800">Reemplaza todos los productos actuales.</strong>
-              La columna <code class="bg-white/80 px-1.5 py-0.5 rounded border">imagen_url</code> debe contener el enlace directo a la imagen.
+              Obligatorios: nombre y precio. Máx. 15 MB por archivo.
+              Si el servidor está ocupado, espera unos segundos e intenta de nuevo.
             </p>
           </div>
 
@@ -343,6 +407,11 @@
         <p><span class="text-stone-500">Banco:</span> {{ pago_movil.banco }}</p>
         <p><span class="text-stone-500">Cédula/RIF:</span> {{ pago_movil.cedula_rif }}</p>
         <p><span class="text-stone-500">Teléfono:</span> {{ pago_movil.telefono }}</p>
+        <p class="pt-2 border-t border-amber-200 mt-2">
+          <span class="text-stone-500">Tasa BCV:</span>
+          <strong>{{ tasa }} Bs/USD</strong>
+        </p>
+        <p id="modal-plan-monto-bs" class="font-bold text-amber-900 text-base"></p>
       </div>
 
       <div id="contenedor-form-pago">
@@ -354,7 +423,10 @@
           <label for="comprobante" class="block text-xs font-bold uppercase text-stone-600 mb-1">Captura del comprobante</label>
           <input type="file" id="comprobante" name="comprobante" accept="image/png, image/jpeg, image/webp" required
                  class="w-full text-xs text-stone-600 file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-amber-500 file:text-stone-900 hover:file:bg-amber-400 bg-white rounded-xl border border-stone-200 cursor-pointer">
-          <p class="text-[11px] text-stone-500 mt-1">Sube la captura del pago móvil. Validamos la referencia automáticamente con OCR.</p>
+          <p class="text-[11px] text-stone-500 mt-1">
+            Sube la captura del pago móvil. Validamos con OCR la referencia, el monto en Bs
+            y que el destino sea {{ pago_movil.banco }} (RIF {{ pago_movil.cedula_rif }}).
+          </p>
         </div>
 
         <div id="preview-comprobante" class="rounded-xl border border-dashed border-stone-200 bg-stone-50 p-3 min-h-[80px] flex items-center justify-center text-xs text-stone-400">
@@ -364,7 +436,7 @@
         <p class="text-xs text-stone-500">Si aún tienes días activos, se sumarán 30 días a tu fecha de vencimiento actual.</p>
 
         <button type="submit" id="btn-verificar-pago"
-                class="w-full py-3 rounded-full font-bold text-sm bg-stone-900 text-white flex items-center justify-center gap-2 disabled:opacity-60">
+                class="w-full py-3 rounded-full font-bold text-sm bg-stone-900 text-white flex items-center justify-center gap-2 disabled:opacity-60 btn-touch">
           <span id="btn-verificar-pago-spinner" class="hidden w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
           <span id="btn-verificar-pago-texto">Verificar comprobante y activar plan</span>
         </button>
@@ -382,9 +454,22 @@
   <!-- Inicializar Iconos de Lucide -->
   <script>
     const planesBeneficios = {{ planes_beneficios | tojson }};
+    const TASA_CAMBIO = {{ tasa }};
 
     function cerrarModal(id) {
       document.getElementById(id)?.classList.remove('activo');
+    }
+
+    function actualizarMontoPlan(codigo) {
+      const plan = planesBeneficios[codigo];
+      const montoBsEl = document.getElementById('modal-plan-monto-bs');
+      if (!plan || !montoBsEl) return;
+      const montoBs = plan.monto_bs != null
+        ? plan.monto_bs
+        : (plan.precio_usd * TASA_CAMBIO);
+      montoBsEl.textContent =
+        'Monto a pagar: ' + Number(montoBs).toFixed(2) + ' Bs (' +
+        Number(plan.precio_usd).toFixed(2) + ' USD)';
     }
 
     function abrirModalPlan(codigo) {
@@ -392,7 +477,9 @@
       if (!plan) return;
       document.getElementById('input-plan-tipo').value = codigo;
       document.getElementById('modal-plan-titulo').textContent = 'Cambiar a ' + plan.nombre;
-      document.getElementById('modal-plan-precio').textContent = '$' + plan.precio_usd + ' USD / mes · ' + plan.limite_texto + ' productos';
+      document.getElementById('modal-plan-precio').textContent =
+        '$' + plan.precio_usd + ' USD / mes · ' + plan.limite_texto + ' productos';
+      actualizarMontoPlan(codigo);
       const lista = document.getElementById('modal-plan-beneficios');
       lista.innerHTML = (plan.beneficios || []).map(b => '<li class="flex gap-2"><span class="text-emerald-600">✓</span><span>' + b + '</span></li>').join('');
       document.getElementById('modal-plan').classList.add('activo');
@@ -418,6 +505,7 @@
 
     lucide.createIcons();
   </script>
+  <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
   <script src="{{ url_for('static', filename='js/localis.js') }}"></script>
 </body>
 </html>
