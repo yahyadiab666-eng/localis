@@ -85,12 +85,12 @@ from backend.stores import (
 
 app = Flask(__name__)
 
-database_url = os.getenv('DATABASE_URL')
-if database_url:
-    database_url = database_url.strip()
-    if database_url.startswith('postgres://'):
-        database_url = database_url.replace('postgres://', 'postgresql://', 1)
-app.config['SQLALCHEMY_DATABASE_URI'] = database_url or 'postgresql://localhost/localis'
+db_url = os.environ.get('DATABASE_URL')
+if db_url:
+    db_url = db_url.strip()
+    if db_url.startswith('postgres://'):
+        db_url = db_url.replace('postgres://', 'postgresql://', 1)
+app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
@@ -115,7 +115,7 @@ DEFAULT_BANNER = (
 
 def _inicializar_aplicacion():
     """Migraciones y verificación de vencimientos al cargar la app."""
-    if database_url:
+    if db_url:
         print('Base de datos: PostgreSQL (DATABASE_URL / Supabase SQL).')
     else:
         print('Aviso: DATABASE_URL no configurada.')
