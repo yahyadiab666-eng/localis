@@ -329,10 +329,7 @@ def _ejecutar_ddl(cursor, ddl):
 
 
 def _ejecutar_schema_base(cursor):
-    """Crea tablas base si aún no existen (PostgreSQL)."""
-    if _tabla_existe(cursor, 'usuarios'):
-        return
-
+    """Crea tablas base con CREATE TABLE IF NOT EXISTS (PostgreSQL)."""
     ddl_base = """
     CREATE TABLE IF NOT EXISTS usuarios (
         id SERIAL PRIMARY KEY,
@@ -434,6 +431,24 @@ def _ejecutar_schema_base(cursor):
             """,
             (nombre,),
         )
+
+
+def _crear_tabla_soporte_y_reportes(cursor):
+    """Garantiza la tabla de tickets aunque el resto del esquema ya exista."""
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS soporte_y_reportes (
+            id SERIAL PRIMARY KEY,
+            usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+            tipo TEXT NOT NULL,
+            correo TEXT NOT NULL,
+            mensaje TEXT NOT NULL,
+            referencia_id INTEGER,
+            fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            estado TEXT DEFAULT 'pendiente'
+        )
+        """
+    )
 
 
 def _crear_tabla_planes(cursor):
@@ -633,6 +648,7 @@ def init_db():
 
             _ejecutar_schema_base(cursor)
             _crear_tabla_planes(cursor)
+            _crear_tabla_soporte_y_reportes(cursor)
             _migrar_columnas_comercios(cursor)
             _asignar_plan_id_existentes(cursor)
             _crear_tabla_pagos(cursor)
