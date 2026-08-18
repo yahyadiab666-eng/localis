@@ -129,7 +129,7 @@ def registrar_comercio_completo(
                     estado_pago, fecha_inicio_suscripcion, fecha_vencimiento
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo',
-                        CURRENT_TIMESTAMP, date('now', '+30 days'))
+                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '30 days')
                 """,
                 (
                     usuario_id,

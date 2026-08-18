@@ -299,9 +299,11 @@ def cambiar_plan_comercio(admin_id, comercio_id, plan_tipo, estado_pago=None):
                     UPDATE comercios
                     SET plan_id = ?, plan_tipo = ?, limite_productos = ?, estado_pago = ?,
                         fecha_inicio_suscripcion = CURRENT_TIMESTAMP,
-                        fecha_vencimiento = date('now', '+' || COALESCE(
-                            (SELECT dias_duracion FROM planes WHERE id = ?), 30
-                        ) || ' days')
+                        fecha_vencimiento = CURRENT_TIMESTAMP + (
+                            COALESCE(
+                                (SELECT dias_duracion FROM planes WHERE id = ?), 30
+                            ) * INTERVAL '1 day'
+                        )
                     WHERE id = ?
                     """,
                     (plan_id, plan_tipo, limite, estado_pago, plan_id, int(comercio_id)),
@@ -391,10 +393,10 @@ def confirmar_pago_suscripcion(comercio_id, plan_tipo, meses=1):
                 SET plan_id = ?, plan_tipo = ?, limite_productos = ?, estado_pago = 'activo',
                     visible = 1,
                     fecha_inicio_suscripcion = CURRENT_TIMESTAMP,
-                    fecha_vencimiento = datetime('now', ?)
+                    fecha_vencimiento = CURRENT_TIMESTAMP + (? * INTERVAL '1 month')
                 WHERE id = ?
                 """,
-                (plan_id, plan_tipo, limite, f'+{meses} months', int(comercio_id)),
+                (plan_id, plan_tipo, limite, int(meses), int(comercio_id)),
             )
             if cursor.rowcount == 0:
                 conexion.commit()

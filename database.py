@@ -271,7 +271,7 @@ def _require_database_url():
 
 def _adapt_sql(query):
     """Compatibilidad con consultas legacy que usaban placeholders de SQLite (?)."""
-    return query.replace('?', '%s').replace("date('now')", 'CURRENT_DATE')
+    return query.replace('?', '%s')
 
 
 class _PgCursor:

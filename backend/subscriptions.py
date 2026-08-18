@@ -26,7 +26,7 @@ def verificar_vencimientos_comercios():
                 """
                 UPDATE comercios
                 SET estado_pago = 'vencido', visible = 0
-                WHERE date(fecha_vencimiento) < date('now')
+                WHERE CAST(fecha_vencimiento AS DATE) < CURRENT_DATE
                   AND estado_pago IN ('activo', 'gratis')
                 """
             )
@@ -47,7 +47,7 @@ def verificar_vencimiento_comercio(comercio_id):
                 UPDATE comercios
                 SET estado_pago = 'vencido', visible = 0
                 WHERE id = ?
-                  AND date(fecha_vencimiento) < date('now')
+                  AND CAST(fecha_vencimiento AS DATE) < CURRENT_DATE
                   AND estado_pago IN ('activo', 'gratis')
                 """,
                 (int(comercio_id),),
@@ -548,7 +548,7 @@ def activar_suscripcion_por_comprobante(
                 INSERT INTO solicitudes_pago (
                     comercio_id, plan_tipo, referencia, fecha_transferencia, estado
                 )
-                VALUES (?, ?, ?, date('now'), 'aprobado')
+                VALUES (?, ?, ?, CURRENT_DATE, 'aprobado')
                 """,
                 (int(comercio_id), plan_tipo, referencia),
             )
