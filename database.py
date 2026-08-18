@@ -2,6 +2,7 @@
 
 import os
 import time
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import psycopg2
 from psycopg2 import OperationalError, pool
@@ -18,12 +19,51 @@ DB_RETRY_BASE_DELAY = float(os.getenv('DB_RETRY_BASE_DELAY', '0.08'))
 
 _connection_pool = None
 
+# Parámetros válidos en URIs libpq/psycopg2. El resto (p. ej. pgbouncer=true de Supabase) se descarta.
+_PARAMS_URI_PERMITIDOS = frozenset({
+    'application_name',
+    'channel_binding',
+    'connect_timeout',
+    'gssencmode',
+    'krbsrvname',
+    'options',
+    'service',
+    'sslcert',
+    'sslcrl',
+    'sslkey',
+    'sslmode',
+    'sslrootcert',
+    'target_session_attrs',
+})
+
+
 def normalize_database_url(url):
-    """Convierte postgres:// a postgresql:// (requerido por SQLAlchemy)."""
+    """
+    Normaliza DATABASE_URL para psycopg2/SQLAlchemy:
+    - Convierte postgres:// → postgresql://
+    - Elimina parámetros de consulta no soportados (?pgbouncer=true, etc.)
+    """
     valor = (url or '').strip()
+    if not valor:
+        return ''
+
     if valor.startswith('postgres://'):
-        return valor.replace('postgres://', 'postgresql://', 1)
-    return valor
+        valor = valor.replace('postgres://', 'postgresql://', 1)
+
+    parsed = urlparse(valor)
+    if not parsed.scheme.startswith('postgres'):
+        return valor
+
+    if not parsed.query:
+        return valor
+
+    params_limpios = []
+    for clave, param_valor in parse_qsl(parsed.query, keep_blank_values=True):
+        if clave.lower() in _PARAMS_URI_PERMITIDOS:
+            params_limpios.append((clave, param_valor))
+
+    query_limpia = urlencode(params_limpios)
+    return urlunparse(parsed._replace(query=query_limpia))
 
 
 DATABASE_URL = normalize_database_url(os.getenv('DATABASE_URL'))

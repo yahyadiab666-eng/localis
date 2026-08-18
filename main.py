@@ -63,7 +63,7 @@ from backend.admin import (
 from backend.auth import obtener_o_crear_usuario_google
 from backend.image_search import obtener_url_imagen_automatica
 from backend.db import get_db_connection
-from database import init_db
+from database import init_db, normalize_database_url
 from backend.plans import PLANES, MENSAJE_LIMITE_PRODUCTOS, es_limite_ilimitado, obtener_beneficios_plan
 from backend.payment_ocr import validar_comprobante_pago_movil
 from backend.subscriptions import (
@@ -97,11 +97,7 @@ from backend.stores import (
 app = Flask(__name__)
 
 # Asegurar limpieza directa en el entorno de Flask
-db_url = os.environ.get('DATABASE_URL', '')
-if db_url:
-    db_url = db_url.strip()
-    if db_url.startswith('postgres://'):
-        db_url = db_url.replace('postgres://', 'postgresql://', 1)
+db_url = normalize_database_url(os.environ.get('DATABASE_URL', ''))
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url or 'postgresql://localhost/localis'
 
 db = SQLAlchemy(app)
