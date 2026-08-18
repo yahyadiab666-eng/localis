@@ -1004,6 +1004,8 @@ def api_confirmar_pago():
     return jsonify({'ok': exito, 'mensaje': mensaje}), 200 if exito else 400
 
 
+port = int(os.environ.get('PORT', 5000))
+
 if __name__ == '__main__':
     inicializar_base_de_datos()
-    app.run(debug=True, port=5000)
+    app.run(host='0.0.0.0', port=port)
