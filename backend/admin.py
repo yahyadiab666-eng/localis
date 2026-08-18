@@ -39,7 +39,6 @@ def crear_ticket_soporte_o_reporte(
     try:
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
-            cursor.execute('PRAGMA foreign_keys = ON;')
             cursor.execute(
                 """
                 INSERT INTO soporte_y_reportes (usuario_id, tipo, correo, mensaje, referencia_id, estado)
@@ -97,8 +96,6 @@ def actualizar_tasa_dolar(admin_id, nueva_tasa):
         tasa_limpia = float(nueva_tasa)
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
-            cursor.execute('PRAGMA foreign_keys = ON;')
-
             cursor.execute(
                 "SELECT valor FROM configuracion_sistema WHERE clave = 'tasa_dolar'"
             )
@@ -109,7 +106,7 @@ def actualizar_tasa_dolar(admin_id, nueva_tasa):
                 """
                 INSERT INTO configuracion_sistema (clave, valor)
                 VALUES ('tasa_dolar', ?)
-                ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor
+                ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor
                 """,
                 (str(tasa_limpia),),
             )
@@ -159,7 +156,7 @@ def actualizar_banner_principal(admin_id, banner_url):
                 """
                 INSERT INTO configuracion_sistema (clave, valor)
                 VALUES ('banner_principal', ?)
-                ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor
+                ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor
                 """,
                 (banner_url,),
             )
@@ -180,8 +177,6 @@ def cambiar_visibilidad_comercio(admin_id, comercio_id, visible, estado_pago):
     try:
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
-            cursor.execute('PRAGMA foreign_keys = ON;')
-
             cursor.execute(
                 'SELECT nombre FROM comercios WHERE id = ?', (int(comercio_id),)
             )

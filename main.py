@@ -121,12 +121,15 @@ DEFAULT_BANNER = (
 
 def _inicializar_aplicacion():
     """Migraciones y verificación de vencimientos al cargar la app."""
-    if db_url:
-        print('Base de datos: PostgreSQL (DATABASE_URL / Supabase SQL).')
-    else:
-        print('Aviso: DATABASE_URL no configurada.')
-    init_db()
-    verificar_vencimientos_comercios()
+    try:
+        if db_url:
+            print('Base de datos: PostgreSQL (DATABASE_URL / Supabase SQL).')
+        else:
+            print('Aviso: DATABASE_URL no configurada.')
+        init_db()
+        verificar_vencimientos_comercios()
+    except Exception as error:
+        print(f'Error al inicializar la aplicación: {error}')
 
 
 _inicializar_aplicacion()
@@ -140,25 +143,28 @@ def sincronizar_vencimientos_suscripcion():
     """Revisa vencimientos globalmente y por comercio en rutas autenticadas."""
     global _ultima_verificacion_vencimientos_global
 
-    ahora = time.time()
-    if ahora - _ultima_verificacion_vencimientos_global >= _INTERVALO_VENCIMIENTOS_SEG:
-        verificar_vencimientos_comercios()
-        _ultima_verificacion_vencimientos_global = ahora
+    try:
+        ahora = time.time()
+        if ahora - _ultima_verificacion_vencimientos_global >= _INTERVALO_VENCIMIENTOS_SEG:
+            verificar_vencimientos_comercios()
+            _ultima_verificacion_vencimientos_global = ahora
 
-    if 'usuario_id' not in session:
-        return
+        if 'usuario_id' not in session:
+            return
 
-    rutas_comercio = (
-        '/comercio',
-        '/api/productos',
-        '/api/pagos',
-    )
-    if not any(request.path.startswith(ruta) for ruta in rutas_comercio):
-        return
+        rutas_comercio = (
+            '/comercio',
+            '/api/productos',
+            '/api/pagos',
+        )
+        if not any(request.path.startswith(ruta) for ruta in rutas_comercio):
+            return
 
-    comercio = obtener_comercio_por_usuario(session.get('usuario_id'))
-    if comercio:
-        verificar_vencimiento_comercio(comercio['id'])
+        comercio = obtener_comercio_por_usuario(session.get('usuario_id'))
+        if comercio:
+            verificar_vencimiento_comercio(comercio['id'])
+    except Exception as error:
+        print(f'Aviso sincronización de vencimientos: {error}')
 
 
 @app.after_request
@@ -454,30 +460,42 @@ def login():
 
 @app.route('/login/google')
 def login_google():
-    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-        flash('Inicio de sesión con Google no está configurado.', 'error')
+    try:
+        if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+            flash('Inicio de sesión con Google no está configurado.', 'error')
+            return redirect(url_for('login'))
+        if not google:
+            flash('No se pudo inicializar el cliente OAuth de Google.', 'error')
+            return redirect(url_for('login'))
+        redirect_uri = url_for('google_callback', _external=True)
+        return google.authorize_redirect(redirect_uri)
+    except Exception as error:
+        flash(f'No se pudo iniciar sesión con Google: {error}', 'error')
         return redirect(url_for('login'))
-    if not google:
-        flash('No se pudo inicializar el cliente OAuth de Google.', 'error')
-        return redirect(url_for('login'))
-    redirect_uri = url_for('google_callback', _external=True)
-    return google.authorize_redirect(redirect_uri)
 
 
 @app.route('/login/google/callback')
 def google_callback():
-    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-        flash('Inicio de sesión con Google no está configurado.', 'error')
-        return redirect(url_for('login'))
-    if not google:
-        flash('No se pudo inicializar el cliente OAuth de Google.', 'error')
-        return redirect(url_for('login'))
-    token = google.authorize_access_token()
-    google_info = token.get('userinfo')
+    try:
+        if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+            flash('Inicio de sesión con Google no está configurado.', 'error')
+            return redirect(url_for('login'))
+        if not google:
+            flash('No se pudo inicializar el cliente OAuth de Google.', 'error')
+            return redirect(url_for('login'))
 
-    exito, usuario_o_error = obtener_o_crear_usuario_google(google_info)
+        token = google.authorize_access_token()
+        google_info = token.get('userinfo') if token else None
 
-    if exito:
+        exito, usuario_o_error = obtener_o_crear_usuario_google(google_info)
+
+        if not exito or not isinstance(usuario_o_error, dict) or not usuario_o_error.get('id'):
+            flash(
+                f'Error en inicio de sesión con Google: {usuario_o_error}',
+                'error',
+            )
+            return redirect(url_for('login'))
+
         session['usuario_id'] = usuario_o_error['id']
         session['username'] = usuario_o_error['nombre']
         session['correo'] = usuario_o_error['correo']
@@ -493,9 +511,9 @@ def google_callback():
             return redirect(url_for('panel_comercio'))
 
         return redirect(url_for('index'))
-
-    flash(f'Error en inicio de sesión con Google: {usuario_o_error}', 'error')
-    return redirect(url_for('login'))
+    except Exception as error:
+        flash(f'Error en inicio de sesión con Google: {error}', 'error')
+        return redirect(url_for('login'))
 
 
 @app.route('/logout')
@@ -514,89 +532,96 @@ def logout():
 @login_requerido
 def panel_comercio():
     usuario_id = session.get('usuario_id')
-    tasa_actual = obtener_tasa_dolar() or 1.0
-    whatsapp = obtener_config('whatsapp_soporte', WHATSAPP_SOPORTE)
+    try:
+        tasa_actual = obtener_tasa_dolar() or 1.0
+        whatsapp = obtener_config('whatsapp_soporte', WHATSAPP_SOPORTE)
 
-    conn = get_db_connection(row_factory=sqlite3.Row)
-    cursor = conn.cursor()
+        with get_db_connection(row_factory=sqlite3.Row) as conn:
+            cursor = conn.cursor()
 
-    cursor.execute('SELECT id FROM usuarios WHERE id = ?', (usuario_id,))
-    if not cursor.fetchone():
-        conn.close()
-        session.clear()
+            cursor.execute('SELECT id FROM usuarios WHERE id = ?', (usuario_id,))
+            if not cursor.fetchone():
+                session.clear()
+                flash(
+                    'La sesión ya no existe en la base de datos. Por favor inicia sesión nuevamente.',
+                    'error',
+                )
+                return redirect(url_for('login'))
+
+            cursor.execute(
+                '''
+                SELECT c.*, cat.nombre as categoria
+                FROM comercios c
+                LEFT JOIN categorias cat ON c.categoria_id = cat.id
+                WHERE c.usuario_id = ?
+                ''',
+                (usuario_id,),
+            )
+            comercio_db = cursor.fetchone()
+
+            if not comercio_db:
+                cursor.execute('SELECT id, nombre FROM categorias')
+                categorias = [dict(c) for c in cursor.fetchall()]
+                return render_template(
+                    'registro_comercio.html', categorias=categorias
+                )
+
+            cursor.execute(
+                '''
+                SELECT id, nombre, descripcion, precio_usd, codigo_barras, imagen_url
+                FROM productos WHERE comercio_id = ?
+                ''',
+                (comercio_db['id'],),
+            )
+            productos_db = cursor.fetchall()
+
+        productos = []
+        for p in productos_db:
+            productos.append({
+                'id': p['id'],
+                'nombre': p['nombre'],
+                'descripcion': p['descripcion'] or 'Sin descripción',
+                'precio_usd': p['precio_usd'],
+                'precio_bs': round(p['precio_usd'] * tasa_actual, 2),
+                'codigo_barras': p['codigo_barras'] or 'Sin código',
+                'imagen_url': p['imagen_url'] or '/static/images/default-product.webp',
+            })
+
+        comercio = _normalizar_imagenes_comercio(dict(comercio_db))
+
+        plan_info = PLANES.get(comercio.get('plan_tipo', 'gratis'), PLANES['gratis'])
+        avisos = obtener_avisos_suscripcion(comercio)
+        pago_movil = obtener_datos_pago_movil()
+        planes_beneficios = {}
+        for codigo in ('basica', 'pro', 'business'):
+            info = obtener_beneficios_plan(codigo)
+            montos = calcular_monto_pago_plan(codigo)
+            if montos:
+                info['monto_bs'] = montos['monto_bs']
+                info['tasa'] = montos['tasa']
+            planes_beneficios[codigo] = info
+
+        return render_template(
+            'comercio.html',
+            comercio=comercio,
+            productos=productos,
+            tasa=tasa_actual,
+            whatsapp=whatsapp,
+            whatsapp_url=WHATSAPP_SOPORTE_URL,
+            plan_info=plan_info,
+            avisos=avisos,
+            pago_movil=pago_movil,
+            planes=PLANES,
+            planes_beneficios=planes_beneficios,
+            abrir_pago=request.args.get('abrir_pago'),
+        )
+    except Exception as error:
+        print(f'Error al cargar panel de comercio: {error}')
         flash(
-            'La sesión ya no existe en la base de datos. Por favor inicia sesión nuevamente.',
+            'No se pudo cargar el panel del comercio. Intenta iniciar sesión de nuevo.',
             'error',
         )
-        return redirect(url_for('login'))
-
-    cursor.execute(
-        '''
-        SELECT c.*, cat.nombre as categoria
-        FROM comercios c
-        LEFT JOIN categorias cat ON c.categoria_id = cat.id
-        WHERE c.usuario_id = ?
-        ''',
-        (usuario_id,),
-    )
-    comercio_db = cursor.fetchone()
-
-    if not comercio_db:
-        cursor.execute('SELECT id, nombre FROM categorias')
-        categorias = [dict(c) for c in cursor.fetchall()]
-        conn.close()
-        return render_template('registro_comercio.html', categorias=categorias)
-
-    cursor.execute(
-        '''
-        SELECT id, nombre, descripcion, precio_usd, codigo_barras, imagen_url
-        FROM productos WHERE comercio_id = ?
-        ''',
-        (comercio_db['id'],),
-    )
-    productos_db = cursor.fetchall()
-
-    productos = []
-    for p in productos_db:
-        productos.append({
-            'id': p['id'],
-            'nombre': p['nombre'],
-            'descripcion': p['descripcion'] or 'Sin descripción',
-            'precio_usd': p['precio_usd'],
-            'precio_bs': round(p['precio_usd'] * tasa_actual, 2),
-            'codigo_barras': p['codigo_barras'] or 'Sin código',
-            'imagen_url': p['imagen_url'] or '/static/images/default-product.webp',
-        })
-
-    comercio = _normalizar_imagenes_comercio(dict(comercio_db))
-
-    plan_info = PLANES.get(comercio.get('plan_tipo', 'gratis'), PLANES['gratis'])
-    avisos = obtener_avisos_suscripcion(comercio)
-    pago_movil = obtener_datos_pago_movil()
-    planes_beneficios = {}
-    for codigo in ('basica', 'pro', 'business'):
-        info = obtener_beneficios_plan(codigo)
-        montos = calcular_monto_pago_plan(codigo)
-        if montos:
-            info['monto_bs'] = montos['monto_bs']
-            info['tasa'] = montos['tasa']
-        planes_beneficios[codigo] = info
-    conn.close()
-
-    return render_template(
-        'comercio.html',
-        comercio=comercio,
-        productos=productos,
-        tasa=tasa_actual,
-        whatsapp=whatsapp,
-        whatsapp_url=WHATSAPP_SOPORTE_URL,
-        plan_info=plan_info,
-        avisos=avisos,
-        pago_movil=pago_movil,
-        planes=PLANES,
-        planes_beneficios=planes_beneficios,
-        abrir_pago=request.args.get('abrir_pago'),
-    )
+        return redirect(url_for('index'))
 
 
 @app.route('/comercio/editar', methods=['GET', 'POST'])
@@ -671,59 +696,65 @@ def editar_comercio():
 @app.route('/comercio/crear', methods=['GET', 'POST'])
 @login_requerido
 def crear_comercio():
-    if request.method == 'GET':
-        conn = get_db_connection(row_factory=sqlite3.Row)
-        cursor = conn.cursor()
-        cursor.execute('SELECT id, nombre FROM categorias')
-        categorias = [dict(c) for c in cursor.fetchall()]
-        conn.close()
-        return render_template('registro_comercio.html', categorias=categorias)
+    try:
+        if request.method == 'GET':
+            with get_db_connection(row_factory=sqlite3.Row) as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT id, nombre FROM categorias')
+                categorias = [dict(c) for c in cursor.fetchall()]
+            return render_template('registro_comercio.html', categorias=categorias)
 
-    usuario_id = session.get('usuario_id')
-    nombre = request.form.get('nombre', '').strip()
-    descripcion = request.form.get('descripcion', '').strip()
-    telefono = request.form.get('telefono', '').strip()
-    direccion = request.form.get('direccion', '').strip()
-    ciudad = request.form.get('ciudad', '').strip()
-    zona = request.form.get('zona', '').strip()
-    maps_url = request.form.get('maps_url', '').strip()
-    documento_identidad = request.form.get('documento_identidad', '').strip()
-    categoria_raw = request.form.get('categoria_id')
-    categoria_id = int(categoria_raw) if categoria_raw and categoria_raw.isdigit() else 1
-    logo_archivo = request.files.get('logo')
-
-    logo_url = None
-    if logo_archivo and logo_archivo.filename:
-        try:
-            logo_url = procesar_logo_comercio(
-                logo_archivo, prefijo=f'logo_nuevo_{usuario_id}'
-            )
-        except SupabaseUploadError as error:
-            flash(str(error), 'error')
-            return redirect(url_for('crear_comercio'))
-
-    exito, resultado = registrar_comercio_completo(
-        usuario_id,
-        nombre,
-        descripcion,
-        telefono,
-        direccion,
-        categoria_id,
-        logo_url=logo_url,
-        ciudad=ciudad or None,
-        zona=zona or None,
-        maps_url=maps_url or None,
-        documento_identidad=documento_identidad or None,
-    )
-
-    if exito:
-        flash(
-            'Comercio registrado con éxito. Tienes 30 días de prueba gratuita.',
-            'exito',
+        usuario_id = session.get('usuario_id')
+        nombre = request.form.get('nombre', '').strip()
+        descripcion = request.form.get('descripcion', '').strip()
+        telefono = request.form.get('telefono', '').strip()
+        direccion = request.form.get('direccion', '').strip()
+        ciudad = request.form.get('ciudad', '').strip()
+        zona = request.form.get('zona', '').strip()
+        maps_url = request.form.get('maps_url', '').strip()
+        documento_identidad = request.form.get('documento_identidad', '').strip()
+        categoria_raw = request.form.get('categoria_id')
+        categoria_id = (
+            int(categoria_raw) if categoria_raw and categoria_raw.isdigit() else 1
         )
-    else:
-        flash(resultado, 'error')
-    return redirect(url_for('panel_comercio'))
+        logo_archivo = request.files.get('logo')
+
+        logo_url = None
+        if logo_archivo and logo_archivo.filename:
+            try:
+                logo_url = procesar_logo_comercio(
+                    logo_archivo, prefijo=f'logo_nuevo_{usuario_id}'
+                )
+            except SupabaseUploadError as error:
+                flash(str(error), 'error')
+                return redirect(url_for('crear_comercio'))
+
+        exito, resultado = registrar_comercio_completo(
+            usuario_id,
+            nombre,
+            descripcion,
+            telefono,
+            direccion,
+            categoria_id,
+            logo_url=logo_url,
+            ciudad=ciudad or None,
+            zona=zona or None,
+            maps_url=maps_url or None,
+            documento_identidad=documento_identidad or None,
+        )
+
+        if exito:
+            flash(
+                'Comercio registrado con éxito. Tienes 30 días de prueba gratuita.',
+                'exito',
+            )
+        else:
+            flash(resultado, 'error')
+        return redirect(url_for('panel_comercio'))
+    except Exception as error:
+        print(f'Error al registrar comercio: {error}')
+        flash(f'No se pudo registrar el comercio: {error}', 'error')
+        return redirect(url_for('panel_comercio'))
 
 
 @app.route('/comercio/producto/nuevo', methods=['GET', 'POST'])
@@ -1031,10 +1062,12 @@ def api_crear_producto():
                 '''
                 INSERT INTO productos (comercio_id, nombre, descripcion, precio_usd, codigo_barras, imagen_url)
                 VALUES (?, ?, ?, ?, ?, ?)
+                RETURNING id
                 ''',
                 (tienda_id, nombre, descripcion, precio_usd, codigo_barras, imagen_url),
             )
-            producto_id = cursor.lastrowid
+            fila = cursor.fetchone()
+            producto_id = fila[0] if fila else None
             conexion.commit()
 
         return jsonify(

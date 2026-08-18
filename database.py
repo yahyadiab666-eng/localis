@@ -270,8 +270,11 @@ def _require_database_url():
 
 
 def _adapt_sql(query):
-    """Compatibilidad con consultas legacy que usaban placeholders de SQLite (?)."""
-    return query.replace('?', '%s')
+    """Compatibilidad con consultas legacy de SQLite (?, ON CONFLICT, EXCLUDED)."""
+    sql = query.replace('?', '%s')
+    sql = sql.replace('ON CONFLICT(', 'ON CONFLICT (')
+    sql = sql.replace('excluded.', 'EXCLUDED.')
+    return sql
 
 
 class _PgCursor:
@@ -297,6 +300,11 @@ class _PgCursor:
     @property
     def rowcount(self):
         return self._cursor.rowcount
+
+    @property
+    def lastrowid(self):
+        """En PostgreSQL lastrowid no aplica a SERIAL; usar INSERT ... RETURNING id."""
+        return getattr(self._cursor, 'lastrowid', None) or None
 
 
 class _PgConnection:
