@@ -380,14 +380,12 @@ def inicializar_base_de_datos():
 def index():
     palabra_clave = request.args.get('q', '').strip()
     categoria = request.args.get('categoria', '').strip()
-    delivery = request.args.get('delivery', '').strip()
 
-    hay_filtros = bool(palabra_clave or categoria or delivery)
+    hay_filtros = bool(palabra_clave or categoria)
 
     productos = buscar_y_filtrar_productos(
         palabra_clave=palabra_clave,
         categoria_nombre=categoria,
-        delivery=delivery,
         limit=None if hay_filtros else 30,
         orden_aleatorio=not hay_filtros,
     )
@@ -711,7 +709,6 @@ def crear_comercio():
         telefono,
         direccion,
         categoria_id,
-        0,
         logo_url=logo_url,
         ciudad=ciudad or None,
         zona=zona or None,

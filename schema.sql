@@ -56,7 +56,6 @@ CREATE TABLE IF NOT EXISTS comercios (
     documento_identidad TEXT,
     logo_url TEXT,
     banner_url TEXT,
-    delivery INTEGER DEFAULT 0, -- 0 = No, 1 = Sí
     direccion TEXT,
     ciudad TEXT,
     zona TEXT,

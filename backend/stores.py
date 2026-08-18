@@ -100,7 +100,6 @@ def registrar_comercio_completo(
     telefono,
     direccion,
     categoria_id,
-    delivery,
     logo_url=None,
     ciudad=None,
     zona=None,
@@ -125,11 +124,11 @@ def registrar_comercio_completo(
                 """
                 INSERT INTO comercios (
                     usuario_id, nombre, descripcion, telefono, direccion,
-                    logo_url, delivery, categoria_id, ciudad, zona, maps_url,
+                    logo_url, categoria_id, ciudad, zona, maps_url,
                     documento_identidad, plan_id, plan_tipo, limite_productos,
                     estado_pago, fecha_inicio_suscripcion, fecha_vencimiento
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo',
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo',
                         CURRENT_TIMESTAMP, date('now', '+30 days'))
                 """,
                 (
@@ -139,7 +138,6 @@ def registrar_comercio_completo(
                     telefono,
                     direccion,
                     logo_url,
-                    delivery,
                     categoria_id,
                     ciudad,
                     zona,
@@ -256,7 +254,7 @@ def obtener_comercio_por_usuario(usuario_id):
 
 
 def buscar_y_filtrar_comercios(
-    palabra_clave=None, categoria_id=None, delivery=None
+    palabra_clave=None, categoria_id=None
 ):
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
@@ -279,10 +277,6 @@ def buscar_y_filtrar_comercios(
                 query += ' AND c.categoria_id = ?'
                 parametros.append(categoria_id)
 
-            if delivery is not None and delivery != '':
-                query += ' AND c.delivery = ?'
-                parametros.append(int(delivery))
-
             cursor.execute(query, parametros)
             return [dict(f) for f in cursor.fetchall()]
     except Exception as e:
@@ -298,7 +292,6 @@ def buscar_y_filtrar_comercios(
 def buscar_y_filtrar_productos(
     palabra_clave=None,
     categoria_nombre=None,
-    delivery=None,
     comercio_id=None,
     limit=None,
     orden_aleatorio=False,
@@ -310,7 +303,7 @@ def buscar_y_filtrar_productos(
 
             query = """
                 SELECT p.*, c.nombre AS comercio_nombre, c.telefono AS comercio_telefono,
-                       c.delivery AS comercio_delivery, c.id AS comercio_id,
+                       c.id AS comercio_id,
                        cat.nombre AS categoria_nombre
                 FROM productos p
                 JOIN comercios c ON p.comercio_id = c.id
@@ -333,10 +326,6 @@ def buscar_y_filtrar_productos(
             if categoria_nombre:
                 query += ' AND cat.nombre = ?'
                 parametros.append(categoria_nombre)
-
-            if delivery is not None and delivery != '':
-                query += ' AND c.delivery = ?'
-                parametros.append(int(delivery))
 
             if orden_aleatorio:
                 query += ' ORDER BY RANDOM()'

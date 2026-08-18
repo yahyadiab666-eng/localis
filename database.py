@@ -357,7 +357,6 @@ def _ejecutar_schema_base(cursor):
         documento_identidad TEXT,
         logo_url TEXT,
         banner_url TEXT,
-        delivery INTEGER DEFAULT 0,
         direccion TEXT,
         ciudad TEXT,
         zona TEXT,
