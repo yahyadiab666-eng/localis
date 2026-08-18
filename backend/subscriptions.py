@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 from backend.db import get_db_connection
 from backend.plans import (
     PLANES,
+    MENSAJE_LIMITE_PRODUCTOS,
+    es_limite_ilimitado,
     obtener_plan_por_codigo,
     limite_desde_plan_id,
     limite_para_plan,
@@ -63,6 +65,8 @@ def obtener_limite_productos_comercio(comercio_id):
     if not fila:
         return 50
     if fila['plan_limite'] is not None:
+        if es_limite_ilimitado(fila['plan_limite']):
+            return -1
         return fila['plan_limite']
     if fila['limite_productos'] is not None:
         return fila['limite_productos']
@@ -96,16 +100,12 @@ def puede_agregar_producto(comercio_id, cantidad_nueva=1):
         return False, 'Tu tienda está oculta por vencimiento de suscripción.'
 
     limite = obtener_limite_productos_comercio(comercio_id)
-    if limite is None:
+    if es_limite_ilimitado(limite):
         return True, None
 
     actual = contar_productos_comercio(comercio_id)
     if actual + cantidad_nueva > limite:
-        return (
-            False,
-            f'Has alcanzado el límite de {limite} productos de tu plan '
-            f'{comercio["plan_nombre"]}. Actualiza tu plan para agregar más.',
-        )
+        return False, MENSAJE_LIMITE_PRODUCTOS
     return True, None
 
 
@@ -224,22 +224,24 @@ def rechazar_renovacion_vencida(comercio_id):
         return False, f'Error al actualizar estado: {e}'
 
 
-def _calcular_fecha_vencimiento_prorrateo(fecha_vencimiento_actual, dias=30):
-    """
-    Si aún hay días activos, suma 30 días a la fecha de vencimiento actual.
-    Si ya venció, suma 30 días desde hoy.
-    """
+def _calcular_nueva_fecha_vencimiento(fecha_vencimiento_actual, dias=30):
+    """max(fecha_actual, fecha_vencimiento_actual) + dias."""
     hoy = datetime.now().date()
+    base = hoy
     if fecha_vencimiento_actual:
         try:
-            base = datetime.strptime(str(fecha_vencimiento_actual)[:10], '%Y-%m-%d').date()
-            if base >= hoy:
-                from datetime import timedelta
-                return (base + timedelta(days=dias)).strftime('%Y-%m-%d')
+            vencimiento = datetime.strptime(
+                str(fecha_vencimiento_actual)[:10], '%Y-%m-%d'
+            ).date()
+            base = max(hoy, vencimiento)
         except ValueError:
             pass
-    from datetime import timedelta
-    return (hoy + timedelta(days=dias)).strftime('%Y-%m-%d')
+    return (base + timedelta(days=dias)).strftime('%Y-%m-%d')
+
+
+def _calcular_fecha_vencimiento_prorrateo(fecha_vencimiento_actual, dias=30):
+    """Compatibilidad: delega en la regla max(hoy, vencimiento) + dias."""
+    return _calcular_nueva_fecha_vencimiento(fecha_vencimiento_actual, dias)
 
 
 def registrar_pago_movil_plan(comercio_id, plan_tipo, referencia, fecha_transferencia):
@@ -262,6 +264,8 @@ def registrar_pago_movil_plan(comercio_id, plan_tipo, referencia, fecha_transfer
         return False, 'Plan no encontrado.'
 
     limite = limite_para_plan(plan_tipo)
+    if es_limite_ilimitado(limite):
+        limite = None
     plan_id = plan.get('id')
     dias = plan.get('dias_duracion') or 30
 
@@ -325,6 +329,91 @@ def registrar_pago_movil_plan(comercio_id, plan_tipo, referencia, fecha_transfer
         )
     except Exception as e:
         return False, f'Error al registrar pago: {e}'
+
+
+def activar_suscripcion_por_comprobante(comercio_id, plan_tipo, referencia):
+    """
+    Valida referencia OCR, registra pago aprobado y renueva suscripción automáticamente.
+    """
+    plan_tipo = (plan_tipo or 'basica').lower()
+    if plan_tipo not in PLANES or plan_tipo == 'gratis':
+        return False, 'Plan no válido para pago.', None
+
+    referencia = (referencia or '').strip()
+    if not re.match(r'^\d{6}$', referencia):
+        return False, 'No se detectó una referencia válida de 6 dígitos.', None
+
+    plan = obtener_plan_por_codigo(plan_tipo)
+    if not plan:
+        return False, 'Plan no encontrado.', None
+
+    limite = limite_para_plan(plan_tipo)
+    if es_limite_ilimitado(limite):
+        limite = None
+    plan_id = plan.get('id')
+    dias = plan.get('dias_duracion') or 30
+    monto = plan.get('precio', plan.get('precio_usd', 0))
+
+    try:
+        with get_db_connection(row_factory=sqlite3.Row) as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                'SELECT fecha_vencimiento FROM comercios WHERE id = ?',
+                (int(comercio_id),),
+            )
+            comercio = cursor.fetchone()
+            if not comercio:
+                return False, 'Comercio no encontrado.', None
+
+            nueva_fecha = _calcular_nueva_fecha_vencimiento(
+                comercio['fecha_vencimiento'], dias
+            )
+
+            cursor.execute(
+                """
+                UPDATE comercios
+                SET plan_id = ?, plan_tipo = ?, limite_productos = ?,
+                    estado_pago = 'activo', visible = 1,
+                    fecha_inicio_suscripcion = CURRENT_TIMESTAMP,
+                    fecha_vencimiento = ?
+                WHERE id = ?
+                """,
+                (plan_id, plan_tipo, limite, nueva_fecha, int(comercio_id)),
+            )
+
+            cursor.execute(
+                """
+                INSERT INTO pagos (
+                    tienda_id, plan_id, monto, metodo, referencia, estado
+                )
+                VALUES (?, ?, ?, 'pago_movil_manual', ?, 'aprobado')
+                """,
+                (int(comercio_id), plan_id, monto, referencia),
+            )
+
+            cursor.execute(
+                """
+                INSERT INTO solicitudes_pago (
+                    comercio_id, plan_tipo, referencia, fecha_transferencia, estado
+                )
+                VALUES (?, ?, ?, date('now'), 'aprobado')
+                """,
+                (int(comercio_id), plan_tipo, referencia),
+            )
+            conexion.commit()
+
+        return (
+            True,
+            f'Pago verificado. Plan {plan["nombre"]} activo hasta {nueva_fecha}.',
+            {
+                'referencia': referencia,
+                'plan_tipo': plan_tipo,
+                'fecha_vencimiento': nueva_fecha,
+                'estado': 'activo',
+            },
+        )
+    except Exception as error:
+        return False, f'Error al activar suscripción: {error}', None
 
 
 def obtener_datos_pago_movil():

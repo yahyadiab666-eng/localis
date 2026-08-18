@@ -11,15 +11,31 @@ PLANES = {
         'limite_productos': 50,
         'dias_duracion': 30,
     },
-    'basica': {'nombre': 'Básica', 'precio_usd': 10, 'limite_productos': 50, 'dias_duracion': 30},
-    'pro': {'nombre': 'Pro', 'precio_usd': 17, 'limite_productos': 200, 'dias_duracion': 30},
+    'basica': {
+        'nombre': 'Básica',
+        'precio_usd': 10,
+        'limite_productos': 50,
+        'dias_duracion': 30,
+    },
+    'pro': {
+        'nombre': 'Pro',
+        'precio_usd': 17,
+        'limite_productos': 200,
+        'dias_duracion': 30,
+    },
     'business': {
         'nombre': 'Business',
         'precio_usd': 35,
-        'limite_productos': None,
+        'limite_productos': -1,
         'dias_duracion': 30,
     },
 }
+
+LIMITE_ILIMITADO = -1
+MENSAJE_LIMITE_PRODUCTOS = (
+    'Has alcanzado el límite de productos de tu plan actual. '
+    'Actualiza tu suscripción para seguir publicando.'
+)
 
 PLAN_GRATIS_CODIGO = 'gratis'
 
@@ -53,6 +69,10 @@ PLAN_BENEFICIOS = {
 }
 
 
+def es_limite_ilimitado(limite):
+    return limite is None or limite < 0
+
+
 def obtener_beneficios_plan(codigo):
     plan = PLANES.get(codigo, {})
     extras = PLAN_BENEFICIOS.get(codigo, {})
@@ -62,7 +82,7 @@ def obtener_beneficios_plan(codigo):
         'nombre': plan.get('nombre', codigo),
         'precio_usd': plan.get('precio_usd', 0),
         'limite_productos': limite,
-        'limite_texto': 'Ilimitados' if limite is None else str(limite),
+        'limite_texto': 'Ilimitados' if es_limite_ilimitado(limite) else str(limite),
         'beneficios': list(extras.values()),
         **extras,
     }
@@ -122,11 +142,14 @@ def limite_desde_plan_id(plan_id):
 
 
 def limite_para_plan(plan_tipo):
-    """Retorna el límite de productos; None = ilimitado."""
+    """Retorna el límite de productos; -1 = ilimitado."""
     plan = obtener_plan_por_codigo(plan_tipo or 'basica')
     if not plan:
         return 50
-    return plan.get('limite_productos')
+    limite = plan.get('limite_productos')
+    if limite is None:
+        return LIMITE_ILIMITADO
+    return limite
 
 
 def validar_cantidad_productos(plan_tipo, cantidad):
@@ -135,7 +158,7 @@ def validar_cantidad_productos(plan_tipo, cantidad):
     Retorna (True, None) o (False, mensaje_error).
     """
     limite = limite_para_plan(plan_tipo)
-    if limite is None:
+    if es_limite_ilimitado(limite):
         return True, None
     if cantidad > limite:
         plan_nombre = obtener_plan_por_codigo(plan_tipo).get('nombre', plan_tipo)

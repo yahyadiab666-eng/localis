@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>{{ 'Editar Producto' if producto else 'Añadir Producto' }} - Localis</title>
   
   <!-- Tailwind CSS & Lucide Icons -->
@@ -15,6 +16,10 @@
   <style>
     body { font-family: 'DM Sans', sans-serif; }
     .font-display { font-family: 'Fraunces', serif; }
+    .localis-flash-alerta { transition: opacity 0.5s ease; }
+    .modal-push { display: none; position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.55); align-items: center; justify-content: center; padding: 1rem; }
+    .modal-push.activo { display: flex; }
+    .modal-push .panel { background: #fff; border-radius: 1rem; max-width: 520px; width: 100%; padding: 1.5rem; box-shadow: 0 25px 50px rgba(0,0,0,.25); }
   </style>
 </head>
 
@@ -44,7 +49,7 @@
       {% if mensajes %}
         <div class="fixed top-4 right-4 z-50 space-y-2">
           {% for categoria, mensaje in mensajes %}
-            <div class="p-4 rounded-xl shadow-lg text-white text-sm flex items-center gap-3 {% if categoria == 'error' %}bg-red-500{% elif categoria == 'exito' %}bg-emerald-600{% else %}bg-amber-600{% endif %}">
+            <div class="p-4 rounded-xl shadow-lg text-white text-sm flex items-center gap-3 localis-flash-alerta {% if categoria == 'error' %}bg-red-500{% elif categoria == 'exito' %}bg-emerald-600{% else %}bg-amber-600{% endif %}">
               <i data-lucide="info" style="width:18px;height:18px;"></i>
               <span>{{ mensaje }}</span>
             </div>
@@ -71,7 +76,10 @@
           </p>
         </div>
 
-        <form action="{{ url_for('editar_producto', producto_id=producto.id) if producto else url_for('nuevo_producto') }}" method="POST" enctype="multipart/form-data" class="space-y-5">
+        <form id="{% if producto %}form-producto-editar{% else %}form-producto-api{% endif %}"
+              action="{{ url_for('editar_producto', producto_id=producto.id) if producto else url_for('nuevo_producto') }}"
+              method="POST" enctype="multipart/form-data" class="space-y-5"
+              {% if not producto %}data-redirect="{{ url_for('panel_comercio') }}"{% endif %}>
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
           <!-- Nombre del Producto -->
@@ -153,5 +161,6 @@
   <script>
     lucide.createIcons();
   </script>
+  <script src="{{ url_for('static', filename='js/localis.js') }}"></script>
 </body>
 </html>

@@ -1,5 +1,13 @@
 from functools import wraps
 import os
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')
+GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET')
+
 import sqlite3
 
 from authlib.integrations.flask_client import OAuth
@@ -35,14 +43,17 @@ from backend.images import comprimir_y_guardar
 from backend.image_search import obtener_url_imagen_automatica
 from backend.db import get_db_connection
 from database import init_db
-from backend.plans import PLANES, obtener_beneficios_plan
+from backend.plans import PLANES, MENSAJE_LIMITE_PRODUCTOS, es_limite_ilimitado, obtener_beneficios_plan
+from backend.payment_ocr import extraer_referencia_desde_bytes
 from backend.subscriptions import (
+    activar_suscripcion_por_comprobante,
+    contar_productos_comercio,
     marcar_bienvenida_vista,
     obtener_avisos_suscripcion,
     obtener_datos_pago_movil,
+    obtener_limite_productos_comercio,
     puede_agregar_producto,
     rechazar_renovacion_vencida,
-    registrar_pago_movil_plan,
     verificar_vencimientos_comercios,
 )
 from backend.utils import normalizar_telefono_whatsapp, url_maps_comercio, url_whatsapp_comercio
@@ -98,13 +109,20 @@ def agregar_cache_estaticos(response):
     return response
 
 oauth = OAuth(app)
-google = oauth.register(
-    name='google',
-    client_id='615657603931-6pk4ufd4hre532skvq3g5t7et3ds4k77.apps.googleusercontent.com',
-    client_secret='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',
-    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
-    client_kwargs={'scope': 'openid email profile'},
-)
+if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+    google = oauth.register(
+        name='google',
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+        server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+        client_kwargs={'scope': 'openid email profile'},
+    )
+else:
+    google = None
+    print(
+        'Aviso: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET no configurados. '
+        'Define las variables en .env para habilitar OAuth.'
+    )
 
 
 def procesar_imagen_para_producto(
@@ -139,6 +157,17 @@ def login_requerido(f):
         if 'usuario_id' not in session:
             flash('Debes iniciar sesión para acceder a esta sección.', 'error')
             return redirect(url_for('login'))
+        return f(*args, **kwargs)
+
+    return decorada
+
+
+def login_requerido_api(f):
+
+    @wraps(f)
+    def decorada(*args, **kwargs):
+        if 'usuario_id' not in session:
+            return jsonify({'error': 'Debes iniciar sesión.'}), 401
         return f(*args, **kwargs)
 
     return decorada
@@ -273,12 +302,18 @@ def login():
 
 @app.route('/login/google')
 def login_google():
+    if not google:
+        flash('Inicio de sesión con Google no está configurado.', 'error')
+        return redirect(url_for('login'))
     redirect_uri = url_for('google_callback', _external=True)
     return google.authorize_redirect(redirect_uri)
 
 
 @app.route('/login/google/callback')
 def google_callback():
+    if not google:
+        flash('Inicio de sesión con Google no está configurado.', 'error')
+        return redirect(url_for('login'))
     token = google.authorize_access_token()
     google_info = token.get('userinfo')
 
@@ -406,6 +441,7 @@ def panel_comercio():
         pago_movil=pago_movil,
         planes=PLANES,
         planes_beneficios=planes_beneficios,
+        abrir_pago=request.args.get('abrir_pago'),
     )
 
 
@@ -710,23 +746,151 @@ def suscripcion_rechazar_vencido():
     return redirect(url_for('panel_comercio'))
 
 
-@app.route('/comercio/suscripcion/solicitar-pago', methods=['POST'])
+@app.route('/comercio/suscripcion/solicitar-pago', methods=['GET', 'POST'])
 @login_requerido
 def suscripcion_solicitar_pago():
+    """
+    Ruta legacy conservada por compatibilidad.
+    Redirige al panel de comercio y abre el modal de pago OCR automático.
+    """
     comercio = obtener_comercio_por_usuario(session.get('usuario_id'))
     if not comercio:
         flash('Comercio no encontrado.', 'error')
         return redirect(url_for('panel_comercio'))
 
-    plan_tipo = request.form.get('plan_tipo', 'basica')
-    referencia = request.form.get('referencia', '').strip()
-    fecha_transferencia = request.form.get('fecha_transferencia', '').strip()
+    plan_tipo = (
+        request.form.get('plan_tipo')
+        or request.args.get('plan_tipo')
+        or 'basica'
+    ).lower()
+    if plan_tipo not in PLANES or plan_tipo == 'gratis':
+        plan_tipo = 'basica'
 
-    exito, mensaje = registrar_pago_movil_plan(
-        comercio['id'], plan_tipo, referencia, fecha_transferencia
+    flash(
+        'Sube la captura de tu comprobante en el modal para verificar el pago '
+        'automáticamente con OCR.',
+        'info',
     )
-    flash(mensaje, 'exito' if exito else 'error')
-    return redirect(url_for('panel_comercio'))
+    return redirect(url_for('panel_comercio', abrir_pago=plan_tipo))
+
+
+# ==========================================
+# API REST (JSON)
+# ==========================================
+
+
+@app.route('/api/productos/crear', methods=['POST'])
+@login_requerido_api
+def api_crear_producto():
+    comercio = obtener_comercio_por_usuario(session.get('usuario_id'))
+    if not comercio:
+        return jsonify({'error': 'Comercio no encontrado.'}), 404
+
+    tienda_id = comercio['id']
+    limite = obtener_limite_productos_comercio(tienda_id)
+    total_productos = contar_productos_comercio(tienda_id)
+
+    if not es_limite_ilimitado(limite) and total_productos >= limite:
+        return jsonify({'error': MENSAJE_LIMITE_PRODUCTOS}), 400
+
+    ok_estado, msg_estado = puede_agregar_producto(tienda_id)
+    if not ok_estado:
+        return jsonify({'error': msg_estado}), 400
+
+    nombre = (request.form.get('nombre') or '').strip()
+    descripcion = (request.form.get('descripcion') or '').strip()
+    precio_raw = request.form.get('precio_usd')
+    codigo_barras = (request.form.get('codigo_barras') or '').strip() or None
+    imagen_archivo = request.files.get('imagen')
+
+    if not nombre or not precio_raw:
+        return jsonify({'error': 'El nombre y el precio son obligatorios.'}), 400
+
+    try:
+        precio_usd = float(precio_raw)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'El precio debe ser un número válido.'}), 400
+
+    imagen_url = procesar_imagen_para_producto(
+        imagen_archivo,
+        codigo_barras,
+        nombre,
+        descripcion,
+        comercio_id=tienda_id,
+    )
+
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                '''
+                INSERT INTO productos (comercio_id, nombre, descripcion, precio_usd, codigo_barras, imagen_url)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ''',
+                (tienda_id, nombre, descripcion, precio_usd, codigo_barras, imagen_url),
+            )
+            producto_id = cursor.lastrowid
+            conexion.commit()
+
+        return jsonify(
+            {
+                'ok': True,
+                'mensaje': 'Producto agregado con éxito.',
+                'producto_id': producto_id,
+            }
+        ), 201
+    except Exception as error:
+        return jsonify({'error': f'Error al agregar producto: {error}'}), 500
+
+
+@app.route('/api/pagos/verificar', methods=['POST'])
+@login_requerido_api
+def api_verificar_pago():
+    comercio = obtener_comercio_por_usuario(session.get('usuario_id'))
+    if not comercio:
+        return jsonify({'error': 'Comercio no encontrado.'}), 404
+
+    plan_tipo = (request.form.get('plan_tipo') or 'basica').lower()
+    archivo = request.files.get('comprobante')
+
+    if not archivo or not archivo.filename:
+        return jsonify({'error': 'Debes adjuntar la captura del comprobante.'}), 400
+
+    extension = archivo.filename.rsplit('.', 1)[-1].lower()
+    if extension not in {'png', 'jpg', 'jpeg', 'webp'}:
+        return jsonify({'error': 'Formato de imagen no permitido.'}), 400
+
+    data_bytes = archivo.read()
+    referencia, ms_ocr = extraer_referencia_desde_bytes(data_bytes)
+
+    if not referencia:
+        return jsonify(
+            {
+                'error': (
+                    'No se pudo leer la referencia de 6 dígitos en el comprobante. '
+                    'Intenta con una captura más nítida.'
+                ),
+                'ocr_ms': round(ms_ocr, 1),
+            }
+        ), 400
+
+    exito, mensaje, datos = activar_suscripcion_por_comprobante(
+        comercio['id'], plan_tipo, referencia
+    )
+
+    if not exito:
+        return jsonify({'error': mensaje, 'ocr_ms': round(ms_ocr, 1)}), 400
+
+    respuesta = {
+        'ok': True,
+        'mensaje': mensaje,
+        'referencia': referencia,
+        'ocr_ms': round(ms_ocr, 1),
+        'estado': datos.get('estado', 'activo'),
+        'fecha_vencimiento': datos.get('fecha_vencimiento'),
+        'plan_tipo': datos.get('plan_tipo', plan_tipo),
+    }
+    return jsonify(respuesta), 200
 
 
 # ==========================================
