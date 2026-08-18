@@ -85,13 +85,13 @@ from backend.stores import (
 
 app = Flask(__name__)
 
-db_url = os.environ.get('DATABASE_URL')
+# Asegurar limpieza directa en el entorno de Flask
+db_url = os.environ.get('DATABASE_URL', '')
 if db_url:
     db_url = db_url.strip()
     if db_url.startswith('postgres://'):
         db_url = db_url.replace('postgres://', 'postgresql://', 1)
-app.config['SQLALCHEMY_DATABASE_URI'] = db_url
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_DATABASE_URI'] = db_url or 'postgresql://localhost/localis'
 
 db = SQLAlchemy(app)
 
