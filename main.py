@@ -12,10 +12,18 @@ else:
     print('Google OAuth configurado correctamente.')
 
 from functools import wraps
+
+from backend.supabase_client import SUPABASE_BUCKET_IMAGENES, supabase
+from backend.supabase_storage import subir_imagen_a_supabase
+if supabase:
+    print('Supabase Storage + API configurados correctamente.')
+else:
+    print('Aviso: SUPABASE_URL o SUPABASE_KEY no configurados (solo almacenamiento local).')
+
 import sqlite3
 
 from authlib.integrations.flask_client import OAuth
-from config import DATABASE_FILE, UPLOAD_FOLDER, WHATSAPP_SOPORTE, WHATSAPP_SOPORTE_URL
+from config import UPLOAD_FOLDER, WHATSAPP_SOPORTE, WHATSAPP_SOPORTE_URL
 from flask import (
     Flask,
     flash,
@@ -28,6 +36,7 @@ from flask import (
 )
 from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFError
+from flask_sqlalchemy import SQLAlchemy
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -76,11 +85,26 @@ from backend.stores import (
 
 app = Flask(__name__)
 
+# Configuración de base de datos (Supabase PostgreSQL)
+db_url = os.getenv('DATABASE_URL')
+if db_url and db_url.startswith('postgres://'):
+    db_url = db_url.replace('postgres://', 'postgresql://', 1)
+
+if not db_url:
+    print('Aviso: DATABASE_URL no configurada. La app requiere PostgreSQL (Supabase).')
+
+app.config['SQLALCHEMY_DATABASE_URI'] = db_url or 'postgresql://localhost/localis'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+
 app.secret_key = os.environ.get(
     'LOCALIS_SECRET_KEY', 'clave_secreta_localis_desarrollo'
 )
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['SUPABASE_CLIENT'] = supabase
+app.config['SUPABASE_BUCKET_IMAGENES'] = SUPABASE_BUCKET_IMAGENES
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(os.path.join(BASE_DIR, 'static', 'images'), exist_ok=True)
 
@@ -94,6 +118,10 @@ DEFAULT_BANNER = (
 
 def _inicializar_aplicacion():
     """Migraciones y verificación de vencimientos al cargar la app."""
+    if db_url:
+        print('Base de datos: PostgreSQL (DATABASE_URL / Supabase SQL).')
+    else:
+        print('Aviso: DATABASE_URL no configurada.')
     init_db()
     verificar_vencimientos_comercios()
 
@@ -125,15 +153,77 @@ if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
     )
 
 
+def _normalizar_logo_completo(comercio):
+    logo = comercio.get('logo_url')
+    if not logo:
+        comercio['logo_completo'] = comercio.get('logo_url')
+        return comercio
+    if str(logo).startswith('http'):
+        comercio['logo_completo'] = logo
+    elif str(logo).startswith('/'):
+        comercio['logo_completo'] = logo
+    else:
+        comercio['logo_completo'] = f'/static/uploads/{logo}'
+    return comercio
+
+
+def procesar_imagen_subida(
+    file_storage,
+    prefijo,
+    carpeta='comercios',
+    max_dimension=800,
+    solo_nombre_local=False,
+):
+    """
+    Sube imagen a Supabase Storage (persistente) o disco local (desarrollo).
+    Retorna URL pública o ruta relativa según el destino.
+    """
+    if not file_storage or not getattr(file_storage, 'filename', ''):
+        return None
+
+    if supabase:
+        url_publica = subir_imagen_a_supabase(
+            file_storage,
+            supabase,
+            prefijo=prefijo,
+            carpeta=carpeta,
+            max_dimension=max_dimension,
+        )
+        if url_publica:
+            return url_publica
+
+    url_local = comprimir_y_guardar(
+        file_storage,
+        app.config['UPLOAD_FOLDER'],
+        prefijo=prefijo,
+        max_dimension=max_dimension,
+    )
+    if not url_local:
+        return None
+    if solo_nombre_local:
+        return url_local.replace('/static/uploads/', '')
+    return url_local
+
+
+def procesar_logo_comercio(file_storage, prefijo):
+    """Logo de comercio → bucket imágenes / uploads locales."""
+    return procesar_imagen_subida(
+        file_storage,
+        prefijo=prefijo,
+        carpeta='comercios',
+        solo_nombre_local=not bool(supabase),
+    )
+
+
 def procesar_imagen_para_producto(
     file_storage, codigo_barras, nombre, descripcion, comercio_id
 ):
-    """Prioridad: imagen manual comprimida > búsqueda por código/nombre > default."""
+    """Prioridad: Supabase/disco manual > búsqueda automática > default."""
     if file_storage and getattr(file_storage, 'filename', ''):
-        url = comprimir_y_guardar(
+        url = procesar_imagen_subida(
             file_storage,
-            app.config['UPLOAD_FOLDER'],
             prefijo=f'manual_{comercio_id}',
+            carpeta='productos',
         )
         if url:
             return url
@@ -274,10 +364,7 @@ def tienda_publica(comercio_id):
     )
     tasa_actual = obtener_tasa_dolar() or 1.0
 
-    if comercio.get('logo_url') and not comercio['logo_url'].startswith('/'):
-        comercio['logo_completo'] = f"/static/uploads/{comercio['logo_url']}"
-    else:
-        comercio['logo_completo'] = comercio.get('logo_url')
+    comercio = _normalizar_logo_completo(dict(comercio))
 
     comercio['whatsapp_url'] = url_whatsapp_comercio(
         comercio.get('telefono'),
@@ -416,11 +503,7 @@ def panel_comercio():
             'imagen_url': p['imagen_url'] or '/static/images/default-product.webp',
         })
 
-    comercio = dict(comercio_db)
-    if comercio.get('logo_url') and not str(comercio['logo_url']).startswith('/'):
-        comercio['logo_completo'] = f"/static/uploads/{comercio['logo_url']}"
-    else:
-        comercio['logo_completo'] = comercio.get('logo_url')
+    comercio = _normalizar_logo_completo(dict(comercio_db))
 
     plan_info = PLANES.get(comercio.get('plan_tipo', 'gratis'), PLANES['gratis'])
     avisos = obtener_avisos_suscripcion(comercio)
@@ -469,13 +552,9 @@ def editar_comercio():
 
         logo_url = None
         if logo_archivo and logo_archivo.filename:
-            logo_url = comprimir_y_guardar(
-                logo_archivo,
-                app.config['UPLOAD_FOLDER'],
-                prefijo=f'logo_{comercio["id"]}',
+            logo_url = procesar_logo_comercio(
+                logo_archivo, prefijo=f'logo_{comercio["id"]}'
             )
-            if logo_url:
-                logo_url = logo_url.replace('/static/uploads/', '')
 
         if not nombre:
             flash('El nombre del comercio es obligatorio.', 'error')
@@ -524,13 +603,9 @@ def crear_comercio():
 
     logo_url = None
     if logo_archivo and logo_archivo.filename:
-        logo_url = comprimir_y_guardar(
-            logo_archivo,
-            app.config['UPLOAD_FOLDER'],
-            prefijo=f'logo_nuevo_{usuario_id}',
+        logo_url = procesar_logo_comercio(
+            logo_archivo, prefijo=f'logo_nuevo_{usuario_id}'
         )
-        if logo_url:
-            logo_url = logo_url.replace('/static/uploads/', '')
 
     exito, resultado = registrar_comercio_completo(
         usuario_id,
@@ -938,10 +1013,10 @@ def admin_banner():
     admin_id = session.get('usuario_id')
 
     if banner_archivo and banner_archivo.filename:
-        banner_url = comprimir_y_guardar(
+        banner_url = procesar_imagen_subida(
             banner_archivo,
-            app.config['UPLOAD_FOLDER'],
             prefijo='banner_app',
+            carpeta='banners',
             max_dimension=1920,
         )
         if banner_url:

@@ -42,6 +42,64 @@ def _nombre_archivo_seguro(prefijo, extension='webp'):
     return f'{prefijo_limpio}_{token}.{extension}'
 
 
+def comprimir_pil_a_bytes(
+    img,
+    prefijo='img',
+    max_dimension=MAX_DIMENSION,
+    quality=QUALITY,
+    formato='WEBP',
+):
+    """Comprime un objeto PIL y retorna (bytes, content_type, filename) o None."""
+    try:
+        img = _preparar_imagen(img)
+        img.thumbnail((max_dimension, max_dimension))
+
+        extension = 'webp' if formato.upper() == 'WEBP' else 'jpg'
+        filename = _nombre_archivo_seguro(prefijo, extension)
+        buffer = io.BytesIO()
+
+        if extension == 'webp':
+            img.save(buffer, 'WEBP', quality=quality, optimize=True)
+            content_type = 'image/webp'
+        else:
+            img.save(buffer, 'JPEG', quality=quality, optimize=True)
+            content_type = 'image/jpeg'
+
+        return buffer.getvalue(), content_type, filename
+    except Exception as e:
+        print(f'Error al comprimir imagen a bytes: {e}')
+        return None
+
+
+def comprimir_file_storage_a_bytes(
+    file_storage,
+    prefijo='img',
+    max_dimension=MAX_DIMENSION,
+    quality=QUALITY,
+    formato='WEBP',
+):
+    """Comprime un archivo subido y retorna (bytes, content_type, filename) o None."""
+    if not file_storage or not getattr(file_storage, 'filename', ''):
+        return None
+    if not archivo_imagen_valido(file_storage.filename):
+        return None
+
+    nombre_original = secure_filename(file_storage.filename)
+    if not nombre_original:
+        return None
+
+    try:
+        file_storage.stream.seek(0)
+        img = Image.open(file_storage.stream)
+        prefijo_base = prefijo or nombre_original.rsplit('.', 1)[0]
+        return comprimir_pil_a_bytes(
+            img, prefijo_base, max_dimension, quality, formato
+        )
+    except Exception as e:
+        print(f'Error al comprimir archivo a bytes: {e}')
+        return None
+
+
 def comprimir_pil_a_archivo(
     img,
     upload_folder,

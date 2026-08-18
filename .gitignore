@@ -1,9 +1,4 @@
 ﻿.env
-localis.db
-test_localis.db
-*.db-journal
-*.db-wal
-*.db-shm
 __pycache__/
 *.pyc
 instance/

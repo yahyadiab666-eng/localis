@@ -1,0 +1,133 @@
+/* Localis — utilidades responsive mobile-first */
+
+@media (max-width: 768px) {
+  .hero-header {
+    min-height: 52vh !important;
+    height: auto !important;
+    padding-bottom: 2rem;
+  }
+
+  .hero-header h2 {
+    font-size: 1.75rem !important;
+    line-height: 1.2 !important;
+  }
+
+  .hero-header p {
+    font-size: 0.95rem !important;
+  }
+
+  .hero-header nav {
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+  }
+
+  .hero-header nav a.font-display {
+    font-size: 1.35rem !important;
+  }
+
+  .banner-destacado {
+    min-height: 140px;
+    padding: 1.25rem !important;
+  }
+
+  .banner-destacado h4 {
+    font-size: 1.25rem !important;
+  }
+
+  .nav-comercio-links {
+    flex-wrap: wrap;
+    gap: 0.5rem !important;
+    justify-content: center;
+  }
+
+  .nav-comercio-links a,
+  .nav-comercio-links button {
+    font-size: 0.75rem !important;
+    padding: 0.45rem 0.75rem !important;
+  }
+
+  .nav-comercio-top {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 0.75rem;
+  }
+
+  .tabla-responsive {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tabla-responsive table {
+    min-width: 640px;
+  }
+
+  .grid-productos-mobile {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 0.75rem !important;
+  }
+
+  .card-producto-mobile .h-40,
+  .card-producto-mobile .h-36 {
+    height: 7.5rem !important;
+  }
+
+  .modal-push .panel {
+    max-height: 92vh;
+    margin: 0.5rem;
+  }
+
+  .flash-mobile {
+    left: 0.75rem !important;
+    right: 0.75rem !important;
+    top: 0.75rem !important;
+  }
+
+  .flash-mobile > div {
+    width: 100%;
+  }
+
+  .admin-header-mobile {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 0.75rem;
+    padding: 1rem !important;
+  }
+
+  .admin-nav-mobile {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .admin-nav-mobile a {
+    margin-left: 0 !important;
+    font-size: 0.85rem;
+  }
+
+  .busqueda-admin {
+    flex-direction: column;
+  }
+
+  .btn-touch {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 480px) {
+  .grid-productos-mobile {
+    grid-template-columns: 1fr !important;
+  }
+
+  .hero-header h2 {
+    font-size: 1.5rem !important;
+  }
+
+  .comercio-plan-buttons {
+    flex-direction: column;
+  }
+
+  .comercio-plan-buttons button {
+    width: 100%;
+  }
+}

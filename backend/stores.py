@@ -4,6 +4,7 @@ import os
 import sqlite3
 
 import openpyxl
+import psycopg2
 
 from backend.db import get_db_connection
 from backend.image_batch import DEFAULT_IMAGEN
@@ -145,7 +146,7 @@ def registrar_comercio_completo(
             conexion.commit()
             return True, 'Comercio registrado con éxito.'
 
-    except sqlite3.IntegrityError as e:
+    except psycopg2.IntegrityError as e:
         return False, f'Error: Integridad referencial violada. Detalle: {e}'
     except Exception as e:
         return False, f'Error al registrar: {str(e)}'

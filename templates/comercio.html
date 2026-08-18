@@ -12,6 +12,7 @@
   
   <!-- Fonts -->
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
   
   <style>
     body { font-family: 'DM Sans', sans-serif; }
@@ -30,7 +31,7 @@
   <div>
     <!-- BARRA DE NAVEGACIÓN SUPERIOR -->
     <header class="w-full bg-stone-900 border-b border-stone-800">
-      <nav class="flex items-center justify-between px-6 py-4 max-w-6xl w-full mx-auto">
+      <nav class="nav-comercio-top flex items-center justify-between px-6 py-4 max-w-6xl w-full mx-auto">
         <!-- Logo -->
         <div class="flex items-center gap-3">
           <a href="{{ url_for('index') }}" class="font-display text-white text-[28px] font-black tracking-tight">localis</a>
@@ -38,7 +39,7 @@
         </div>
         
         <!-- Enlaces de navegación -->
-        <div class="flex items-center gap-5">
+        <div class="nav-comercio-links flex items-center gap-5">
           <a href="https://wa.me/584125970507" target="_blank" rel="noopener"
              class="text-sm font-medium text-emerald-400 hover:text-emerald-300 transition flex items-center gap-1.5">
             <i data-lucide="message-circle" style="width:16px;height:16px;"></i> Soporte
@@ -59,7 +60,7 @@
     <!-- NOTIFICACIONES FLASH DE FLASK -->
     {% with mensajes = get_flashed_messages(with_categories=true) %}
       {% if mensajes %}
-        <div class="fixed top-4 right-4 z-50 space-y-2">
+        <div class="fixed top-4 right-4 z-50 space-y-2 flash-mobile">
           {% for categoria, mensaje in mensajes %}
             <div class="p-4 rounded-xl shadow-lg text-white text-sm flex items-center gap-3 localis-flash-alerta {% if categoria == 'error' %}bg-red-500{% elif categoria == 'exito' %}bg-emerald-600{% else %}bg-amber-600{% endif %}">
               <i data-lucide="info" style="width:18px;height:18px;"></i>
@@ -145,7 +146,7 @@
             <h3 class="font-display text-xl font-bold text-gray-900">Tu Plan y Suscripción</h3>
             <p class="text-stone-500 text-xs mt-1">Plan actual: <strong>{{ plan_info.nombre }}</strong> · ${{ plan_info.precio_usd }}/mes</p>
           </div>
-          <div class="flex flex-wrap gap-2">
+          <div class="flex flex-wrap gap-2 comercio-plan-buttons">
             <button type="button" onclick="abrirModalPlan('pro')" class="px-4 py-2 rounded-full bg-violet-600 text-white text-sm font-bold hover:bg-violet-500">Cambiar a Pro</button>
             <button type="button" onclick="abrirModalPlan('business')" class="px-4 py-2 rounded-full bg-stone-900 text-white text-sm font-bold hover:bg-stone-800">Cambiar a Business</button>
             <button type="button" onclick="abrirModalPlan('basica')" class="px-4 py-2 rounded-full border border-amber-400 text-amber-800 text-sm font-bold hover:bg-amber-50">Cambiar a Básica</button>
@@ -197,7 +198,7 @@
 
         <!-- Tabla / Contenedor de Inventario -->
         <div class="bg-white rounded-2xl shadow-sm border border-stone-200/80 overflow-hidden">
-          <div class="overflow-x-auto">
+          <div class="overflow-x-auto tabla-responsive">
             <table class="w-full text-left border-collapse">
               <thead>
                 <tr class="bg-stone-50/80 border-b border-stone-200/80 text-stone-500 text-xs font-bold uppercase tracking-wider">

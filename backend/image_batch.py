@@ -21,7 +21,7 @@ def _actualizar_imagen_producto(producto_id, url):
 
 def procesar_imagenes_productos_en_lote(comercio_id, productos_info, upload_folder):
     """
-    Procesa imágenes en paralelo y actualiza SQLite.
+    Procesa imágenes en paralelo y actualiza PostgreSQL.
     productos_info: lista de dicts con id, nombre, codigo_barras, descripcion, imagen_url
     """
     tareas = []

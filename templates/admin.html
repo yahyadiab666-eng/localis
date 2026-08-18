@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Localis - Panel de Administración</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         body { background-color: #f4f6f9; color: #333; }
@@ -76,9 +77,9 @@
 </head>
 <body>
 
-    <header>
+    <header class="admin-header-mobile">
         <h1>Localis | Panel Admin</h1>
-        <div class="nav-links">
+        <div class="nav-links admin-nav-mobile">
             <a href="https://wa.me/584125970507" target="_blank" class="wa-link">WhatsApp Soporte</a>
             <a href="{{ url_for('index') }}">Ver Sitio Público</a>
             <a href="{{ url_for('logout') }}" style="color: #ffc107;">Cerrar Sesión</a>
@@ -111,12 +112,13 @@
             </aside>
 
             <aside class="card">
-                <h2>Banner Promocional (App Cliente)</h2>
+                <h2>Banner sección destacada (barra naranja)</h2>
+                <p style="font-size: 0.85rem; color: #666; margin-bottom: 1rem;">Esta imagen aparece en la franja promocional naranja del inicio público, no en el encabezado superior. Se guarda en Supabase Storage.</p>
                 <img src="{{ banner_url }}" alt="Banner actual" class="banner-preview" onerror="this.style.display='none'">
                 <form action="{{ url_for('admin_banner') }}" method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="form-group">
-                        <label for="banner">Nueva imagen de banner</label>
+                        <label for="banner">Nueva imagen para la sección destacada</label>
                         <input type="file" id="banner" name="banner" accept="image/*" required>
                     </div>
                     <button type="submit" class="btn-primario">Actualizar Banner</button>
@@ -161,7 +163,7 @@
                     {% endif %}
                 </form>
             </div>
-            <div class="tabla-contenedor">
+            <div class="tabla-contenedor tabla-responsive">
                 <table>
                     <thead>
                         <tr>

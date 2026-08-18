@@ -7,6 +7,7 @@
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
   <style>
     body { font-family: 'DM Sans', sans-serif; }
     .font-display { font-family: 'Fraunces', serif; }
@@ -97,9 +98,9 @@
     {% set default_img = url_for('static', filename='images/default-product.webp') %}
 
     {% if productos %}
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-5">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-5 grid-productos-mobile">
         {% for producto in productos %}
-          <div class="rounded-xl overflow-hidden bg-white shadow border border-stone-100">
+          <div class="card-producto-mobile rounded-xl overflow-hidden bg-white shadow border border-stone-100">
             <div class="h-36 bg-gray-100">
               <img src="{{ producto.imagen_url or default_img }}" alt="{{ producto.nombre }}"
                    class="w-full h-full object-cover" loading="lazy"
@@ -140,4 +141,4 @@
   </script>
 </body>
 </html>
-
+

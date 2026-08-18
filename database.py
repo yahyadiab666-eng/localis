@@ -1,10 +1,13 @@
-"""Esquema SQLite, migraciones incrementales e índices de rendimiento."""
+"""Esquema PostgreSQL (Supabase), conexión vía psycopg2 e init_db()."""
 
 import os
-import sqlite3
 
-from config import DATABASE_FILE, RUTA_SCHEMA
-from backend.db import get_db_connection
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
+DATABASE_URL = (os.getenv('DATABASE_URL') or '').strip()
+if DATABASE_URL.startswith('postgres://'):
+    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
 
 TABLAS_PERMITIDAS = frozenset({
     'usuarios',
@@ -31,7 +34,7 @@ COLUMNAS_COMERCIOS = [
     ('documento_identidad', 'TEXT'),
     ('plan_id', 'INTEGER DEFAULT 1'),
     ('plan_tipo', "TEXT DEFAULT 'gratis'"),
-    ('fecha_inicio_suscripcion', 'DATETIME'),
+    ('fecha_inicio_suscripcion', 'TIMESTAMP'),
     ('fecha_vencimiento', 'DATE'),
     ('limite_productos', 'INTEGER DEFAULT 50'),
     ('estado_pago', "TEXT DEFAULT 'activo'"),
@@ -47,16 +50,108 @@ PLANES_SEED = [
 ]
 
 
+def using_postgres():
+    return bool(DATABASE_URL)
+
+
+def _require_database_url():
+    if not DATABASE_URL:
+        raise RuntimeError(
+            'DATABASE_URL no está configurada. '
+            'Define la cadena de conexión PostgreSQL de Supabase en tu entorno.'
+        )
+
+
+def _adapt_sql(query):
+    """Compatibilidad con consultas legacy que usaban placeholders de SQLite (?)."""
+    return query.replace('?', '%s').replace("date('now')", 'CURRENT_DATE')
+
+
+class _PgCursor:
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def execute(self, query, params=()):
+        if query.strip().upper().startswith('PRAGMA'):
+            return self
+        self._cursor.execute(_adapt_sql(query), params or None)
+        return self
+
+    def executemany(self, query, params_seq):
+        self._cursor.executemany(_adapt_sql(query), params_seq)
+        return self
+
+    def fetchone(self):
+        return self._cursor.fetchone()
+
+    def fetchall(self):
+        return self._cursor.fetchall()
+
+    @property
+    def rowcount(self):
+        return self._cursor.rowcount
+
+
+class _PgConnection:
+    def __init__(self, conn, dict_rows=False):
+        self._conn = conn
+        self._dict_rows = dict_rows
+
+    def cursor(self):
+        if self._dict_rows:
+            return _PgCursor(self._conn.cursor(cursor_factory=RealDictCursor))
+        return _PgCursor(self._conn.cursor())
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+    def close(self):
+        self._conn.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type:
+            self.rollback()
+        else:
+            self.commit()
+        self.close()
+        return False
+
+
+def get_db_connection(row_factory=None):
+    """Abre conexión externa a PostgreSQL (Supabase) usando DATABASE_URL."""
+    _require_database_url()
+    conn = psycopg2.connect(DATABASE_URL)
+    return _PgConnection(conn, dict_rows=row_factory is not None)
+
+
 def _columnas_existentes(cursor, tabla):
     if tabla not in TABLAS_PERMITIDAS:
         raise ValueError(f'Tabla no permitida para introspección: {tabla}')
-    cursor.execute(f'PRAGMA table_info({tabla})')
-    return {row[1] for row in cursor.fetchall()}
+    cursor.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = %s
+        """,
+        (tabla,),
+    )
+    return {row[0] for row in cursor.fetchall()}
 
 
 def _tabla_existe(cursor, tabla):
     cursor.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
+        """
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = %s
+        LIMIT 1
+        """,
         (tabla,),
     )
     return cursor.fetchone() is not None
@@ -68,21 +163,131 @@ def _agregar_columna_si_falta(cursor, tabla, nombre, tipo_sql):
         cursor.execute(f'ALTER TABLE {tabla} ADD COLUMN {nombre} {tipo_sql}')
 
 
+def _ejecutar_ddl(cursor, ddl):
+    for statement in ddl.split(';'):
+        sql = statement.strip()
+        if sql:
+            cursor.execute(sql)
+
+
 def _ejecutar_schema_base(cursor):
-    if os.path.exists(RUTA_SCHEMA):
-        with open(RUTA_SCHEMA, 'r', encoding='utf-8') as archivo:
-            cursor.executescript(archivo.read())
+    """Crea tablas base si aún no existen (PostgreSQL)."""
+    if _tabla_existe(cursor, 'usuarios'):
+        return
+
+    ddl_base = """
+    CREATE TABLE IF NOT EXISTS usuarios (
+        id SERIAL PRIMARY KEY,
+        nombre TEXT NOT NULL,
+        correo TEXT UNIQUE NOT NULL,
+        contrasena TEXT,
+        foto_url TEXT,
+        rol TEXT DEFAULT 'comerciante'
+    );
+
+    CREATE TABLE IF NOT EXISTS categorias (
+        id SERIAL PRIMARY KEY,
+        nombre TEXT UNIQUE NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS comercios (
+        id SERIAL PRIMARY KEY,
+        usuario_id INTEGER REFERENCES usuarios(id) ON DELETE CASCADE,
+        nombre TEXT NOT NULL,
+        descripcion TEXT,
+        telefono TEXT,
+        documento_identidad TEXT,
+        logo_url TEXT,
+        banner_url TEXT,
+        delivery INTEGER DEFAULT 0,
+        direccion TEXT,
+        ciudad TEXT,
+        zona TEXT,
+        maps_url TEXT,
+        categoria_id INTEGER REFERENCES categorias(id) ON DELETE SET NULL,
+        plan_id INTEGER,
+        plan_tipo TEXT DEFAULT 'gratis',
+        fecha_inicio_suscripcion TIMESTAMP,
+        fecha_vencimiento TIMESTAMP,
+        limite_productos INTEGER DEFAULT 50,
+        estado_pago TEXT DEFAULT 'activo',
+        fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        aviso_bienvenida_visto INTEGER DEFAULT 0,
+        visible INTEGER DEFAULT 1
+    );
+
+    CREATE TABLE IF NOT EXISTS sucursales (
+        id SERIAL PRIMARY KEY,
+        comercio_id INTEGER REFERENCES comercios(id) ON DELETE CASCADE,
+        direccion TEXT NOT NULL,
+        coordinates_maps TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS productos (
+        id SERIAL PRIMARY KEY,
+        comercio_id INTEGER REFERENCES comercios(id) ON DELETE CASCADE,
+        nombre TEXT NOT NULL,
+        precio_usd DOUBLE PRECISION NOT NULL,
+        descripcion TEXT,
+        imagen_url TEXT,
+        stock INTEGER DEFAULT 0,
+        codigo_barras TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS soporte_y_reportes (
+        id SERIAL PRIMARY KEY,
+        usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+        tipo TEXT NOT NULL,
+        correo TEXT NOT NULL,
+        mensaje TEXT NOT NULL,
+        referencia_id INTEGER,
+        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        estado TEXT DEFAULT 'pendiente'
+    );
+
+    CREATE TABLE IF NOT EXISTS configuracion_sistema (
+        clave TEXT PRIMARY KEY,
+        valor TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS logs_auditoria (
+        id SERIAL PRIMARY KEY,
+        usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+        accion TEXT NOT NULL,
+        detalles TEXT,
+        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS intentos_login (
+        id SERIAL PRIMARY KEY,
+        correo_intentado TEXT NOT NULL,
+        ip_direccion TEXT DEFAULT '127.0.0.1',
+        intentos INTEGER DEFAULT 1,
+        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """
+    _ejecutar_ddl(cursor, ddl_base)
+
+    for nombre in ('Alimentos', 'Ropa', 'Tecnología', 'Otros'):
+        cursor.execute(
+            """
+            INSERT INTO categorias (nombre)
+            VALUES (%s)
+            ON CONFLICT (nombre) DO NOTHING
+            """,
+            (nombre,),
+        )
 
 
 def _crear_tabla_planes(cursor):
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS planes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             codigo TEXT UNIQUE,
             nombre TEXT UNIQUE NOT NULL,
-            precio REAL NOT NULL,
-            limite_productos INTEGER NOT NULL,
+            precio DOUBLE PRECISION NOT NULL,
+            limite_productos INTEGER,
             soporte_prioritario INTEGER DEFAULT 0,
             dias_duracion INTEGER DEFAULT 30,
             destacado INTEGER DEFAULT 0,
@@ -98,10 +303,11 @@ def _crear_tabla_planes(cursor):
     for fila in PLANES_SEED:
         cursor.execute(
             """
-            INSERT OR IGNORE INTO planes
+            INSERT INTO planes
             (codigo, nombre, precio, limite_productos, soporte_prioritario,
              dias_duracion, destacado, activo)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (codigo) DO NOTHING
             """,
             fila,
         )
@@ -111,29 +317,26 @@ def _crear_tabla_pagos(cursor):
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS pagos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tienda_id INTEGER NOT NULL,
-            plan_id INTEGER NOT NULL,
-            monto REAL NOT NULL,
+            id SERIAL PRIMARY KEY,
+            tienda_id INTEGER NOT NULL REFERENCES comercios(id),
+            plan_id INTEGER NOT NULL REFERENCES planes(id),
+            monto DOUBLE PRECISION NOT NULL,
             metodo TEXT NOT NULL,
             referencia TEXT,
             banco_origen TEXT,
             cedula_pagador TEXT,
             telefono_pagador TEXT,
             estado TEXT DEFAULT 'pendiente',
-            fecha_pago DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (tienda_id) REFERENCES comercios(id),
-            FOREIGN KEY (plan_id) REFERENCES planes(id)
+            fecha_pago TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
 
 
 def _crear_vista_tiendas(cursor):
-    """Vista de suscripción sobre comercios (alias tiendas)."""
     cursor.execute(
         """
-        CREATE VIEW IF NOT EXISTS tiendas AS
+        CREATE OR REPLACE VIEW tiendas AS
         SELECT
             id,
             usuario_id,
@@ -194,7 +397,7 @@ def _asignar_plan_id_existentes(cursor):
         if codigo not in mapa:
             codigo = 'gratis'
         cursor.execute(
-            'UPDATE comercios SET plan_id = ? WHERE id = ?',
+            'UPDATE comercios SET plan_id = %s WHERE id = %s',
             (mapa.get(codigo, 1), comercio_id),
         )
 
@@ -220,33 +423,20 @@ def _crear_indices(cursor):
 
 
 def _sembrar_configuracion(cursor):
-    cursor.execute(
-        """
-        INSERT OR IGNORE INTO configuracion_sistema (clave, valor)
-        VALUES ('tasa_dolar', '36.50')
-        """
-    )
-    cursor.execute(
-        """
-        INSERT OR IGNORE INTO configuracion_sistema (clave, valor)
-        VALUES ('banner_principal', '/static/images/default-banner.jpg')
-        """
-    )
-    cursor.execute(
-        """
-        INSERT OR IGNORE INTO configuracion_sistema (clave, valor)
-        VALUES ('whatsapp_soporte', '584125970507')
-        """
-    )
-    for clave, valor in [
+    defaults = [
+        ('tasa_dolar', '36.50'),
+        ('banner_principal', '/static/images/default-banner.jpg'),
+        ('whatsapp_soporte', '584125970507'),
         ('pago_movil_banco', 'Banesco'),
         ('pago_movil_cedula', 'J-501234567'),
         ('pago_movil_telefono', '04125970507'),
-    ]:
+    ]
+    for clave, valor in defaults:
         cursor.execute(
             """
-            INSERT OR IGNORE INTO configuracion_sistema (clave, valor)
-            VALUES (?, ?)
+            INSERT INTO configuracion_sistema (clave, valor)
+            VALUES (%s, %s)
+            ON CONFLICT (clave) DO NOTHING
             """,
             (clave, valor),
         )
@@ -254,14 +444,13 @@ def _sembrar_configuracion(cursor):
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS solicitudes_pago (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            comercio_id INTEGER NOT NULL,
+            id SERIAL PRIMARY KEY,
+            comercio_id INTEGER NOT NULL REFERENCES comercios(id) ON DELETE CASCADE,
             plan_tipo TEXT NOT NULL,
             referencia TEXT NOT NULL,
             fecha_transferencia TEXT NOT NULL,
             estado TEXT DEFAULT 'pendiente',
-            fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (comercio_id) REFERENCES comercios(id) ON DELETE CASCADE
+            fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
@@ -269,15 +458,14 @@ def _sembrar_configuracion(cursor):
 
 def init_db():
     """
-    Inicializa o actualiza la base de datos sin destruir datos existentes.
-    No utiliza DROP TABLE IF EXISTS.
+    Inicializa o actualiza la base PostgreSQL en Supabase sin destruir datos.
+    Requiere DATABASE_URL en el entorno.
     """
-    os.makedirs(os.path.dirname(DATABASE_FILE), exist_ok=True)
+    _require_database_url()
 
     try:
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
-            cursor.execute('PRAGMA foreign_keys = ON;')
 
             _ejecutar_schema_base(cursor)
             _crear_tabla_planes(cursor)
@@ -297,6 +485,6 @@ def init_db():
 
 if __name__ == '__main__':
     if init_db():
-        print('Base de datos localis.db inicializada/actualizada correctamente.')
+        print('Base de datos PostgreSQL (Supabase) inicializada/actualizada correctamente.')
     else:
         print('No se pudo completar init_db().')

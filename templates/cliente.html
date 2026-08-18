@@ -7,6 +7,7 @@
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
   <style>
     body { font-family: 'DM Sans', sans-serif; }
     .font-display { font-family: 'Fraunces', serif; }
@@ -14,13 +15,18 @@
     .card-hover:hover { transform: translateY(-4px); box-shadow: 0 12px 32px rgba(0,0,0,0.12); }
     #modal-producto { display: none; }
     #modal-producto.activo { display: flex; }
+    .banner-destacado-bg {
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+    }
   </style>
 </head>
 <body class="w-full min-h-screen" style="background: rgb(254, 251, 246);">
 
   {% with mensajes = get_flashed_messages(with_categories=true) %}
     {% if mensajes %}
-      <div class="fixed top-4 right-4 z-50 space-y-2">
+      <div class="fixed top-4 right-4 z-50 space-y-2 flash-mobile">
         {% for categoria, mensaje in mensajes %}
           <div class="p-4 rounded-lg shadow-md text-white text-sm {% if categoria == 'error' %}bg-red-500{% elif categoria == 'exito' %}bg-green-500{% else %}bg-blue-500{% endif %}">{{ mensaje }}</div>
         {% endfor %}
@@ -28,16 +34,15 @@
     {% endif %}
   {% endwith %}
 
-  <header class="relative w-full overflow-hidden flex flex-col justify-between" style="height: 70vh;">
+  <header class="hero-header relative w-full overflow-hidden flex flex-col justify-between" style="height: 70vh;">
     <div class="absolute inset-0 w-full h-full">
-      <img class="w-full h-full object-cover" src="{{ banner_url }}" alt="Banner Localis"
-           onerror="this.onerror=null;this.src='{{ default_banner }}';">
+      <img class="w-full h-full object-cover" src="{{ default_banner }}" alt="Localis">
     </div>
     <div class="absolute inset-0 bg-gradient-to-b from-black/60 via-black/40 to-black/70"></div>
 
     <nav class="relative z-10 flex items-center justify-between px-6 py-5 max-w-6xl w-full mx-auto">
       <a href="{{ url_for('index') }}" class="font-display text-white text-[28px] font-black tracking-tight">localis</a>
-      <a href="{{ url_for('login') }}" class="px-4 py-2 rounded-full text-sm font-semibold transition hover:bg-amber-500" style="background: rgb(245, 158, 11); color: rgb(26, 26, 26);">Registrar comercio</a>
+      <a href="{{ url_for('login') }}" class="btn-touch px-4 py-2 rounded-full text-sm font-semibold transition hover:bg-amber-500" style="background: rgb(245, 158, 11); color: rgb(26, 26, 26);">Registrar comercio</a>
     </nav>
 
     <div class="relative z-10 flex flex-col items-center justify-center text-center px-4 mb-16">
@@ -55,8 +60,9 @@
   </header>
 
   <section class="max-w-6xl mx-auto px-6 my-8">
-    <div class="rounded-2xl overflow-hidden shadow-lg relative flex flex-col md:flex-row items-center p-8 text-white gap-6" style="background: linear-gradient(135deg, rgb(217, 119, 6), rgb(245, 158, 11));">
-      <div class="flex-1 space-y-3 text-center md:text-left">
+    <div class="banner-destacado banner-destacado-bg rounded-2xl overflow-hidden shadow-lg relative flex flex-col md:flex-row items-center p-8 text-white gap-6 min-h-[160px]"
+         style="background-image: linear-gradient(135deg, rgba(217, 119, 6, 0.88), rgba(245, 158, 11, 0.82)), url('{{ banner_url }}');">
+      <div class="flex-1 space-y-3 text-center md:text-left relative z-10">
         <span class="bg-white/20 text-white text-[11px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">Destacado</span>
         <h4 class="font-display text-2xl md:text-3xl font-bold">Apoya lo local, vive mejor</h4>
         <p class="text-amber-100 text-sm max-w-xl">Descubre ofertas exclusivas en tus comercios de cercanía. Ref Tasa: <strong>{{ tasa }} Bs/USD</strong></p>
@@ -73,9 +79,9 @@
       </h3>
 
       {% if productos %}
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-5">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-5 grid-productos-mobile">
           {% for producto in productos %}
-            <div class="card-hover rounded-xl overflow-hidden bg-white shadow flex flex-col justify-between h-full"
+            <div class="card-hover card-producto-mobile rounded-xl overflow-hidden bg-white shadow flex flex-col justify-between h-full"
                  role="button" tabindex="0"
                  data-producto-id="{{ producto.id }}"
                  onclick="abrirModalProducto({{ producto.id }})">
@@ -108,8 +114,8 @@
   </section>
 
   <!-- Modal Producto -->
-  <div id="modal-producto" class="fixed inset-0 z-[100] items-center justify-center bg-black/60 p-4" onclick="if(event.target===this)cerrarModal()">
-    <div class="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl relative">
+  <div id="modal-producto" class="modal-push fixed inset-0 z-[100] items-center justify-center bg-black/60 p-4" onclick="if(event.target===this)cerrarModal()">
+    <div class="panel bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl relative">
       <button onclick="cerrarModal()" class="absolute top-3 right-3 z-10 bg-black/40 text-white rounded-full p-1.5 hover:bg-black/60">
         <i data-lucide="x" style="width:20px;height:20px;"></i>
       </button>
@@ -124,7 +130,7 @@
             <span id="modal-precio-bs" class="text-xs text-gray-400 ml-2"></span>
           </div>
         </div>
-        <a id="modal-btn-tienda" href="#" class="block w-full text-center py-3 rounded-full font-bold text-sm transition" style="background: rgb(245, 158, 11); color: rgb(26, 26, 26);">
+        <a id="modal-btn-tienda" href="#" class="btn-touch block w-full text-center py-3 rounded-full font-bold text-sm transition" style="background: rgb(245, 158, 11); color: rgb(26, 26, 26);">
           Ir a la Tienda
         </a>
       </div>

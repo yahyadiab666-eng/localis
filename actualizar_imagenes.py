@@ -1,20 +1,19 @@
 """Actualización masiva de imágenes con procesamiento paralelo."""
 
-import os
 import sqlite3
 
 from backend.db import get_db_connection
 from backend.image_batch import procesar_imagenes_productos_en_lote
-from config import DATABASE_FILE, UPLOAD_FOLDER
+from config import UPLOAD_FOLDER
+from database import DATABASE_URL
 
 
 def actualizar_imagenes_global(forzar_todos=True):
-    db_path = DATABASE_FILE if os.path.exists(DATABASE_FILE) else None
-    if not db_path:
-        print('❌ No se encontró la base de datos.')
+    if not DATABASE_URL:
+        print('❌ DATABASE_URL no configurada.')
         return
 
-    print(f'📁 Base de datos: {db_path}')
+    print('📁 Base de datos: PostgreSQL (Supabase)')
 
     with get_db_connection(row_factory=sqlite3.Row) as conn:
         cursor = conn.cursor()
