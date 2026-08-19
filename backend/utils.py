@@ -149,6 +149,56 @@ def normalizar_nombre_producto(valor):
     return ' '.join(texto.split()) or None
 
 
+def parsear_precio_form(valor):
+    """
+    Convierte precio de formulario/POST a float para PostgreSQL DOUBLE PRECISION.
+    Retorna (precio, None) o (None, mensaje_error).
+    """
+    if valor is None:
+        return None, 'El precio es obligatorio.'
+    texto = str(valor).strip()
+    if not texto:
+        return None, 'El precio es obligatorio.'
+    limpio = texto.replace(',', '.')
+    try:
+        precio = float(limpio)
+    except (TypeError, ValueError):
+        return None, 'El precio debe ser un número válido (usa punto decimal).'
+    if precio < 0:
+        return None, 'El precio no puede ser negativo.'
+    return round(precio, 2), None
+
+
+def parsear_entero_form(valor, default=None, minimo=None):
+    """Entero seguro desde formulario. Retorna (entero, error)."""
+    if valor is None or str(valor).strip() == '':
+        if default is not None:
+            return default, None
+        return None, 'Valor entero requerido.'
+    try:
+        numero = int(str(valor).strip())
+    except (TypeError, ValueError):
+        return None, 'Valor entero inválido.'
+    if minimo is not None and numero < minimo:
+        return None, f'El valor debe ser al menos {minimo}.'
+    return numero, None
+
+
+def parsear_visible_form(valor, default=1):
+    """Normaliza checkbox/select de visibilidad a 0 o 1."""
+    if valor is None or str(valor).strip() == '':
+        return default
+    texto = str(valor).strip().lower()
+    if texto in ('1', 'true', 'on', 'si', 'sí', 'activo'):
+        return 1
+    if texto in ('0', 'false', 'off', 'no', 'inactivo'):
+        return 0
+    try:
+        return 1 if int(texto) else 0
+    except (TypeError, ValueError):
+        return default
+
+
 def normalizar_telefono_whatsapp(telefono):
     """Convierte teléfono local VE a formato wa.me (58412...)."""
     if not telefono:

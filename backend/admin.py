@@ -3,6 +3,7 @@ import sqlite3
 
 from backend.db import get_db_connection
 from backend.plans import PLANES, limite_para_plan, obtener_plan_por_codigo
+from backend.utils import parsear_visible_form
 
 TIPOS_REPORTES_PERMITIDOS = {'soporte', 'reportar_tienda', 'reportar_articulo'}
 
@@ -189,7 +190,7 @@ def cambiar_visibilidad_comercio(admin_id, comercio_id, visible, estado_pago):
                 SET visible = ?, estado_pago = ?
                 WHERE id = ?
                 """,
-                (int(visible), estado_pago, int(comercio_id)),
+                (int(parsear_visible_form(visible)), estado_pago, int(comercio_id)),
             )
 
             detalles_log = (

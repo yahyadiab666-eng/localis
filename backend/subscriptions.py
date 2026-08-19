@@ -163,14 +163,14 @@ def puede_agregar_producto(comercio_id, cantidad_nueva=1):
 def _fecha_vencida(fecha_vencimiento):
     if not fecha_vencimiento:
         return False
-        try:
-            texto = formatear_fecha(fecha_vencimiento)
-            if not texto:
-                return False
-            venc = datetime.strptime(texto, '%Y-%m-%d').date()
-            return venc < datetime.now().date()
-        except (TypeError, ValueError):
+    try:
+        texto = formatear_fecha(fecha_vencimiento)
+        if not texto:
             return False
+        venc = datetime.strptime(texto, '%Y-%m-%d').date()
+        return venc < datetime.now().date()
+    except (TypeError, ValueError):
+        return False
 
 
 def _calcular_fecha_fin_prueba(comercio):

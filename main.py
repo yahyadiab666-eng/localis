@@ -27,6 +27,7 @@ else:
 
 import sqlite3
 
+import psycopg2
 from authlib.integrations.flask_client import OAuth
 from config import MAX_UPLOAD_BYTES, WHATSAPP_SOPORTE, WHATSAPP_SOPORTE_URL
 from flask import (
@@ -86,12 +87,16 @@ from backend.utils import (
     formatear_fecha,
     normalizar_codigo_barras,
     normalizar_telefono_whatsapp,
+    parsear_precio_form,
+    parsear_entero_form,
+    parsear_visible_form,
     url_imagen_usable,
     url_maps_comercio,
     url_whatsapp_comercio,
 )
 from backend.stores import (
     actualizar_datos_comercio,
+    actualizar_producto,
     buscar_y_filtrar_productos,
     eliminar_producto,
     obtener_comercio_por_id,
@@ -307,12 +312,35 @@ def procesar_imagen_para_producto(
     return None
 
 
+def _sesion_usuario_activa():
+    """Verifica que el usuario de la sesión siga existiendo en PostgreSQL."""
+    usuario_id = session.get('usuario_id')
+    if not usuario_id:
+        return False
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute('SELECT id FROM usuarios WHERE id = ?', (usuario_id,))
+            return cursor.fetchone() is not None
+    except psycopg2.Error:
+        raise
+    except Exception:
+        return False
+
+
 def login_requerido(f):
 
     @wraps(f)
     def decorada(*args, **kwargs):
         if 'usuario_id' not in session:
             flash('Debes iniciar sesión para acceder a esta sección.', 'error')
+            return redirect(url_for('login'))
+        if not _sesion_usuario_activa():
+            session.clear()
+            flash(
+                'Tu sesión expiró o ya no es válida. Inicia sesión nuevamente.',
+                'error',
+            )
             return redirect(url_for('login'))
         return f(*args, **kwargs)
 
@@ -325,6 +353,9 @@ def login_requerido_api(f):
     def decorada(*args, **kwargs):
         if 'usuario_id' not in session:
             return jsonify({'error': 'Debes iniciar sesión.'}), 401
+        if not _sesion_usuario_activa():
+            session.clear()
+            return jsonify({'error': 'Sesión inválida o expirada.'}), 401
         return f(*args, **kwargs)
 
     return decorada
@@ -340,6 +371,10 @@ def admin_requerido(f):
                 'error',
             )
             return redirect(url_for('login'))
+        if not _sesion_usuario_activa():
+            session.clear()
+            flash('Tu sesión expiró. Inicia sesión nuevamente.', 'error')
+            return redirect(url_for('login'))
         return f(*args, **kwargs)
 
     return decorada
@@ -351,6 +386,9 @@ def admin_requerido_api(f):
     def decorada(*args, **kwargs):
         if 'usuario_id' not in session or not session.get('es_admin'):
             return jsonify({'ok': False, 'mensaje': 'Acceso denegado.'}), 403
+        if not _sesion_usuario_activa():
+            session.clear()
+            return jsonify({'ok': False, 'mensaje': 'Sesión inválida o expirada.'}), 401
         return f(*args, **kwargs)
 
     return decorada
@@ -657,13 +695,15 @@ def panel_comercio():
             planes_beneficios=planes_beneficios,
             abrir_pago=request.args.get('abrir_pago'),
         )
+    except psycopg2.Error:
+        raise
     except Exception as error:
         print(f'Error al cargar panel de comercio: {error}')
         flash(
-            'No se pudo cargar el panel del comercio. Intenta iniciar sesión de nuevo.',
+            'No se pudo cargar el panel del comercio. Intenta de nuevo en unos segundos.',
             'error',
         )
-        return redirect(url_for('index'))
+        return redirect(url_for('panel_comercio'))
 
 
 @app.route('/comercio/editar', methods=['GET', 'POST'])
@@ -756,9 +796,10 @@ def crear_comercio():
         maps_url = request.form.get('maps_url', '').strip()
         documento_identidad = request.form.get('documento_identidad', '').strip()
         categoria_raw = request.form.get('categoria_id')
-        categoria_id = (
-            int(categoria_raw) if categoria_raw and categoria_raw.isdigit() else 1
-        )
+        if not categoria_raw or not str(categoria_raw).strip().isdigit():
+            flash('Debes seleccionar una categoría válida.', 'error')
+            return redirect(url_for('crear_comercio'))
+        categoria_id = int(categoria_raw)
         logo_archivo = request.files.get('logo')
 
         logo_url = None
@@ -809,15 +850,23 @@ def nuevo_producto():
         flash('Debes registrar un comercio primero.', 'error')
         return redirect(url_for('panel_comercio'))
 
+    bloqueo = _bloquear_gestion_inventario(comercio)
+    if bloqueo:
+        return bloqueo
+
     if request.method == 'POST':
         nombre = request.form.get('nombre')
         descripcion = request.form.get('descripcion')
-        precio_usd = request.form.get('precio_usd')
+        precio_raw = request.form.get('precio_usd')
         codigo_barras = normalizar_codigo_barras(request.form.get('codigo_barras'))
         imagen_archivo = request.files.get('imagen')
 
-        if not nombre or not precio_usd:
-            flash('El nombre y el precio son obligatorios.', 'error')
+        precio_usd, error_precio = parsear_precio_form(precio_raw)
+        if not nombre or not nombre.strip():
+            flash('El nombre es obligatorio.', 'error')
+            return redirect(url_for('nuevo_producto'))
+        if error_precio:
+            flash(error_precio, 'error')
             return redirect(url_for('nuevo_producto'))
 
         ok, msg_limite = puede_agregar_producto(comercio['id'])
@@ -873,7 +922,7 @@ def editar_producto(producto_id):
 
     if not comercio:
         flash('No se encontró un comercio asociado a esta cuenta.', 'error')
-        return redirect(url_for('login'))
+        return redirect(url_for('panel_comercio'))
 
     comercio_id = comercio['id']
 
@@ -883,10 +932,18 @@ def editar_producto(producto_id):
 
     if request.method == 'POST':
         nombre = request.form.get('nombre')
-        precio_usd = request.form.get('precio_usd')
+        precio_raw = request.form.get('precio_usd')
         descripcion = request.form.get('descripcion')
         codigo_barras = normalizar_codigo_barras(request.form.get('codigo_barras'))
         imagen_archivo = request.files.get('imagen')
+
+        precio_usd, error_precio = parsear_precio_form(precio_raw)
+        if not nombre or not nombre.strip():
+            flash('El nombre es obligatorio.', 'error')
+            return redirect(url_for('editar_producto', producto_id=producto_id))
+        if error_precio:
+            flash(error_precio, 'error')
+            return redirect(url_for('editar_producto', producto_id=producto_id))
 
         try:
             with get_db_connection(row_factory=sqlite3.Row) as conn:
@@ -913,23 +970,16 @@ def editar_producto(producto_id):
                             url_for('editar_producto', producto_id=producto_id)
                         )
 
-                cursor.execute(
-                    '''
-                    UPDATE productos
-                    SET nombre = ?, precio_usd = ?, descripcion = ?, codigo_barras = ?, imagen_url = ?
-                    WHERE id = ? AND comercio_id = ?
-                    ''',
-                    (
-                        nombre,
-                        precio_usd,
-                        descripcion,
-                        codigo_barras,
-                        imagen_url,
-                        producto_id,
-                        comercio_id,
-                    ),
-                )
-            flash('Producto actualizado con éxito.', 'exito')
+            exito, mensaje = actualizar_producto(
+                producto_id,
+                comercio_id,
+                nombre.strip(),
+                descripcion,
+                precio_usd,
+                codigo_barras=codigo_barras,
+                imagen_url=imagen_url,
+            )
+            flash(mensaje, 'exito' if exito else 'error')
             return redirect(url_for('panel_comercio'))
         except Exception as error:
             flash(f'Error al actualizar producto: {error}', 'error')
@@ -1078,13 +1128,12 @@ def api_crear_producto():
     codigo_barras = normalizar_codigo_barras(request.form.get('codigo_barras'))
     imagen_archivo = request.files.get('imagen')
 
-    if not nombre or not precio_raw:
-        return jsonify({'error': 'El nombre y el precio son obligatorios.'}), 400
+    if not nombre or not nombre.strip():
+        return jsonify({'error': 'El nombre es obligatorio.'}), 400
 
-    try:
-        precio_usd = float(precio_raw)
-    except (TypeError, ValueError):
-        return jsonify({'error': 'El precio debe ser un número válido.'}), 400
+    precio_usd, error_precio = parsear_precio_form(precio_raw)
+    if error_precio:
+        return jsonify({'error': error_precio}), 400
 
     try:
         imagen_url = procesar_imagen_para_producto(
@@ -1287,9 +1336,12 @@ def admin_banner():
 @app.route('/admin/comercio/estado/<int:comercio_id>', methods=['POST'])
 @admin_requerido
 def cambiar_estado_comercio(comercio_id):
-    visible = request.form.get('nuevo_estado') or request.form.get('visible')
+    visible = parsear_visible_form(
+        request.form.get('nuevo_estado') or request.form.get('visible'),
+        default=1,
+    )
     estado_pago = request.form.get(
-        'estado_pago', 'activo' if visible == '1' else 'suspendido'
+        'estado_pago', 'activo' if visible == 1 else 'suspendido'
     )
     exito, mensaje = cambiar_visibilidad_comercio(
         session.get('usuario_id'), comercio_id, visible, estado_pago
@@ -1353,7 +1405,9 @@ def api_confirmar_pago():
     data = request.get_json(silent=True) or {}
     comercio_id = data.get('comercio_id')
     plan_tipo = data.get('plan_tipo', 'basica')
-    meses = data.get('meses', 1)
+    meses, error_meses = parsear_entero_form(data.get('meses', 1), default=1, minimo=1)
+    if error_meses:
+        return jsonify({'ok': False, 'mensaje': error_meses}), 400
 
     if not comercio_id:
         return jsonify({'ok': False, 'mensaje': 'comercio_id requerido'}), 400

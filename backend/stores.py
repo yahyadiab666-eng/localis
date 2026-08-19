@@ -111,6 +111,12 @@ def registrar_comercio_completo(
     plan_id = plan_gratis.get('id')
     limite = plan_gratis.get('limite_productos') or 50
 
+    if not plan_id:
+        return False, (
+            'El plan gratuito no está configurado en el sistema. '
+            'Contacta soporte o reinicia la aplicación para aplicar migraciones.'
+        )
+
     try:
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
@@ -120,6 +126,13 @@ def registrar_comercio_completo(
             )
             if cursor.fetchone():
                 return False, 'Error: El usuario ya tiene un comercio registrado.'
+
+            cursor.execute(
+                'SELECT id FROM categorias WHERE id = ?',
+                (int(categoria_id),),
+            )
+            if not cursor.fetchone():
+                return False, 'La categoría seleccionada no es válida.'
 
             cursor.execute(
                 """
@@ -250,8 +263,11 @@ def obtener_comercio_por_usuario(usuario_id):
             )
             fila = cursor.fetchone()
             return dict(fila) if fila else None
-    except Exception:
-        return None
+    except psycopg2.Error:
+        raise
+    except Exception as error:
+        print(f'Error al obtener comercio por usuario {usuario_id}: {error}')
+        raise
 
 
 def buscar_y_filtrar_comercios(
