@@ -278,7 +278,13 @@
                 {% for producto in productos %}
                   <tr class="hover:bg-amber-50/30 transition">
                     <td class="py-4 px-6 font-semibold text-gray-900">
-                      {{ producto.nombre }}
+                      <div class="flex items-center gap-3">
+                        {% set img_prod = producto.imagen_url or url_for('static', filename='images/default-product.webp') %}
+                        <img src="{{ img_prod }}" alt=""
+                             class="w-10 h-10 rounded-lg object-cover border border-stone-200 bg-stone-50 flex-shrink-0"
+                             onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default-product.webp') }}';">
+                        <span>{{ producto.nombre }}</span>
+                      </div>
                     </td>
                     <td class="py-4 px-6 text-stone-500 text-xs font-mono">
                       {% if producto.codigo_barras %}

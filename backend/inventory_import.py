@@ -9,6 +9,7 @@ import unicodedata
 import openpyxl
 
 from config import MAX_UPLOAD_BYTES
+from backend.utils import texto_campo_imagen
 
 SINONIMOS_COLUMNA = {
     'nombre': [
@@ -71,8 +72,14 @@ SINONIMOS_COLUMNA = {
         'url imagen',
         'imagen',
         'foto',
+        'fotos',
         'image',
+        'photo',
+        'picture',
+        'img',
         'link imagen',
+        'url foto',
+        'foto url',
     ],
 }
 
@@ -311,15 +318,18 @@ def iter_filas_inventario(data, extension, encabezados):
         )
         try:
             hoja = wb.active
-            for row in hoja.iter_rows(min_row=2, values_only=True):
-                if not any(v is not None and str(v).strip() for v in row):
+            for row in hoja.iter_rows(min_row=2):
+                if not any(
+                    _valor_celda_excel(celda) not in (None, '')
+                    for celda in row
+                ):
                     continue
                 fila = {}
                 for idx, encabezado in enumerate(encabezados):
                     if not encabezado:
                         continue
-                    valor = row[idx] if idx < len(row) else None
-                    fila[encabezado] = valor
+                    celda = row[idx] if idx < len(row) else None
+                    fila[encabezado] = _valor_celda_excel(celda)
                 if _fila_tiene_datos(fila):
                     yield fila
         finally:
@@ -340,6 +350,18 @@ def iter_filas_inventario(data, extension, encabezados):
         }
         if _fila_tiene_datos(fila_limpia):
             yield fila_limpia
+
+
+def _valor_celda_excel(celda):
+    """Lee valor o hipervínculo de una celda Excel (las fotos suelen ir como HYPERLINK)."""
+    if celda is None:
+        return None
+    hyper = getattr(celda, 'hyperlink', None)
+    if hyper is not None:
+        destino = getattr(hyper, 'target', None) or getattr(hyper, 'display', None)
+        if destino:
+            return str(destino)
+    return celda.value
 
 
 def _obtener_valor_celda(fila, columna):
@@ -425,9 +447,10 @@ def parsear_fila_inventario(fila, mapeo, meta, tasa_dolar=1.0, imagen_default=No
 
     imagen_url = imagen_default
     if mapeo.get('imagen_url'):
-        imagen = str(_obtener_valor_celda(fila, mapeo['imagen_url']) or '').strip()
-        if imagen and imagen.lower() != 'none':
-            imagen_url = imagen
+        imagen_url = texto_campo_imagen(
+            _obtener_valor_celda(fila, mapeo['imagen_url']),
+            default=imagen_default,
+        )
 
     stock = 0
     if mapeo.get('stock'):
@@ -490,7 +513,7 @@ def _tuplas_insercion(comercio_id, lote):
             prod['descripcion'],
             prod['precio_usd'],
             prod['codigo_barras'],
-            prod['imagen_url'],
+            texto_campo_imagen(prod.get('imagen_url'), default=None),
             prod['stock'],
         )
         for prod in lote

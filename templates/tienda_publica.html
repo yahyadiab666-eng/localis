@@ -111,7 +111,7 @@
             <div class="h-36 bg-gray-100">
               <img src="{{ producto.imagen_url or default_img }}" alt="{{ producto.nombre }}"
                    class="w-full h-full object-cover" loading="lazy"
-                   onerror="this.src='{{ default_img }}';">
+                   onerror="this.onerror=null;this.src='{{ default_img }}';">
             </div>
             <div class="p-3">
               <h4 class="font-medium text-sm text-gray-900 line-clamp-1">{{ producto.nombre }}</h4>

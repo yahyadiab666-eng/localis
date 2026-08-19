@@ -83,6 +83,7 @@ from backend.subscriptions import (
 from backend.utils import (
     formatear_fecha,
     normalizar_telefono_whatsapp,
+    normalizar_url_imagen,
     url_maps_comercio,
     url_whatsapp_comercio,
 )
@@ -614,7 +615,7 @@ def panel_comercio():
                 'precio_usd': precio_usd,
                 'precio_bs': round(precio_usd * tasa_actual, 2),
                 'codigo_barras': p['codigo_barras'] or 'Sin código',
-                'imagen_url': p['imagen_url'] or '/static/images/default-product.webp',
+                'imagen_url': normalizar_url_imagen(p.get('imagen_url')),
             })
 
         comercio = _normalizar_imagenes_comercio(dict(comercio_db))

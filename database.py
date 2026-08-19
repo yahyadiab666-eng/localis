@@ -301,8 +301,12 @@ def _valor_python(valor):
         return float(valor)
     if isinstance(valor, UUID):
         return str(valor)
-    if isinstance(valor, memoryview):
-        return bytes(valor)
+    if isinstance(valor, (bytes, bytearray, memoryview)):
+        data = bytes(valor)
+        try:
+            return data.decode('utf-8')
+        except UnicodeDecodeError:
+            return data
     return valor
 
 

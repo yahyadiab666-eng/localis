@@ -127,7 +127,9 @@
 
             {% if producto and producto.imagen_url %}
               <div class="flex items-center gap-3 mb-2 p-2 bg-stone-50 border border-stone-200 rounded-xl">
-                <img src="{{ producto.imagen_url }}" alt="Imagen actual" class="w-12 h-12 object-cover rounded-lg border border-stone-200">
+                <img src="{{ producto.imagen_url or url_for('static', filename='images/default-product.webp') }}" alt="Imagen actual"
+                     class="w-12 h-12 object-cover rounded-lg border border-stone-200"
+                     onerror="this.onerror=null;this.style.display='none';">
                 <div class="text-xs text-stone-600">
                   <p class="font-medium">Imagen actual vinculada</p>
                   <p class="text-[10px] text-stone-400">Sube un archivo nuevo para reemplazarla.</p>

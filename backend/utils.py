@@ -17,7 +17,54 @@ def formatear_fecha(valor):
     return texto[:10] if texto else None
 
 
-def normalizar_telefono_whatsapp(telefono):
+DEFAULT_IMAGEN_PRODUCTO = '/static/images/default-product.webp'
+_VALORES_IMAGEN_VACIOS = frozenset({
+    '',
+    'none',
+    'null',
+    'nan',
+    'n/a',
+    '-',
+    '__pending__',
+})
+_HYPERLINK_RE = re.compile(r'HYPERLINK\(\s*["\']([^"\']+)["\']', re.IGNORECASE)
+
+
+def _bytes_a_texto(valor):
+    if isinstance(valor, memoryview):
+        valor = bytes(valor)
+    if isinstance(valor, (bytes, bytearray)):
+        try:
+            return valor.decode('utf-8').strip()
+        except UnicodeDecodeError:
+            return None
+    return None
+
+
+def texto_campo_imagen(valor, default=None):
+    """Convierte cualquier valor de celda/BD a texto de URL o ruta para PostgreSQL."""
+    if valor is None:
+        return default
+    texto_bytes = _bytes_a_texto(valor)
+    if texto_bytes is not None:
+        valor = texto_bytes
+    texto = str(valor).strip().strip('"').strip("'")
+    if not texto or texto.lower() in _VALORES_IMAGEN_VACIOS:
+        return default
+    enlace = _HYPERLINK_RE.search(texto)
+    if enlace:
+        texto = enlace.group(1).strip()
+    return texto[:2048] if texto else default
+
+
+def normalizar_url_imagen(valor, default=DEFAULT_IMAGEN_PRODUCTO):
+    """URL usable en <img src>. Conserva http(s) y rutas /static; el resto usa default."""
+    texto = texto_campo_imagen(valor, default=None)
+    if not texto:
+        return default
+    if texto.startswith(('http://', 'https://', '/')):
+        return texto
+    return default
     """Convierte teléfono local VE a formato wa.me (58412...)."""
     if not telefono:
         return None

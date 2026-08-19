@@ -4,7 +4,7 @@ import sqlite3
 import psycopg2
 
 from backend.db import get_db_connection
-from backend.image_batch import DEFAULT_IMAGEN
+from backend.utils import DEFAULT_IMAGEN_PRODUCTO as DEFAULT_IMAGEN, normalizar_url_imagen
 from backend.inventory_import import (
     cargar_archivo_inventario,
     detectar_mapeo_columnas,
@@ -57,11 +57,7 @@ def obtener_config(clave, default=None):
 
 
 def _normalizar_imagen_url(img):
-    if not img or img == '__PENDING__':
-        return '/static/images/default-product.webp'
-    if img.startswith(('http://', 'https://', '/')):
-        return img
-    return '/static/images/default-product.webp'
+    return normalizar_url_imagen(img, default=DEFAULT_IMAGEN)
 
 
 def _construir_filtro_palabras(palabra_clave):
@@ -348,6 +344,7 @@ def buscar_y_filtrar_productos(
                     precio = 0.0
                 d['precio_usd'] = precio
                 d['precio_bs'] = round(precio * tasa, 2)
+                d['imagen_url'] = _normalizar_imagen_url(d.get('imagen_url'))
                 productos.append(d)
 
             return productos
@@ -383,6 +380,7 @@ def obtener_producto_publico(producto_id):
                 precio = 0.0
             d['precio_usd'] = precio
             d['precio_bs'] = round(precio * tasa, 2)
+            d['imagen_url'] = _normalizar_imagen_url(d.get('imagen_url'))
             return d
     except Exception as e:
         print(f'Error al obtener producto público: {e}')
@@ -405,7 +403,11 @@ def obtener_producto_por_id(producto_id, comercio_id=None):
                 )
 
             fila = cursor.fetchone()
-            return dict(fila) if fila else None
+            if not fila:
+                return None
+            producto = dict(fila)
+            producto['imagen_url'] = _normalizar_imagen_url(producto.get('imagen_url'))
+            return producto
     except Exception as e:
         print(f'Error al obtener producto: {e}')
         return None
