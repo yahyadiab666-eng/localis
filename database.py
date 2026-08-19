@@ -14,6 +14,17 @@ from psycopg2.extensions import TRANSACTION_STATUS_INERROR
 from psycopg2.extras import RealDictCursor
 from psycopg2.pool import PoolError
 
+# Compatibilidad: sustituye sqlite3.Row en get_db_connection(row_factory=...).
+ROW_AS_DICT = object()
+
+# Fragmentos SQL PostgreSQL reutilizables (intervalos y fechas seguras).
+SQL_NOW = 'CURRENT_TIMESTAMP'
+SQL_TODAY = 'CURRENT_DATE'
+SQL_INTERVAL_DAYS = "INTERVAL '1 day' * %s"
+SQL_INTERVAL_MONTHS = "INTERVAL '1 month' * %s"
+SQL_VENCIMIENTO_30_DIAS = "CURRENT_TIMESTAMP + INTERVAL '30 days'"
+SQL_FECHA_VENCIDA = 'CAST(%s AS DATE) < CURRENT_DATE'
+
 DB_CONNECT_TIMEOUT = int(os.getenv('DB_CONNECT_TIMEOUT', '10'))
 DB_POOL_MIN = int(os.getenv('DB_POOL_MIN', '2'))
 DB_POOL_MAX = int(os.getenv('DB_POOL_MAX', '20'))
@@ -273,17 +284,37 @@ def _require_database_url():
 
 
 def _adapt_sql(query):
-    """Compatibilidad con consultas legacy de SQLite (?, ON CONFLICT, EXCLUDED)."""
+    """Adapta consultas legacy de SQLite a PostgreSQL de forma segura."""
     sql = query.replace('?', '%s')
     sql = sql.replace('ON CONFLICT(', 'ON CONFLICT (')
     sql = sql.replace('excluded.', 'EXCLUDED.')
+    sql = re.sub(
+        r"datetime\s*\(\s*['\"]now['\"]\s*(?:,\s*['\"][^'\"]*['\"])?\s*\)",
+        'CURRENT_TIMESTAMP',
+        sql,
+        flags=re.IGNORECASE,
+    )
+    sql = re.sub(
+        r"date\s*\(\s*['\"]now['\"]\s*\)",
+        'CURRENT_DATE',
+        sql,
+        flags=re.IGNORECASE,
+    )
+    sql = re.sub(
+        r"strftime\s*\(\s*['\"]%Y-%m-%d['\"]\s*,",
+        "TO_CHAR(",
+        sql,
+        flags=re.IGNORECASE,
+    )
     return sql
 
 
 def _valor_python(valor):
-    """Convierte tipos nativos de PostgreSQL a valores serializables y subscriptables."""
+    """Convierte tipos nativos de PostgreSQL a valores planos para la app."""
     if valor is None:
         return None
+    if isinstance(valor, bool):
+        return 1 if valor else 0
     if isinstance(valor, datetime):
         if (
             valor.hour == 0
@@ -301,13 +332,36 @@ def _valor_python(valor):
         return float(valor)
     if isinstance(valor, UUID):
         return str(valor)
+    if isinstance(valor, float):
+        if valor != valor:  # NaN
+            return None
+        return valor
     if isinstance(valor, (bytes, bytearray, memoryview)):
         data = bytes(valor)
         try:
             return data.decode('utf-8')
         except UnicodeDecodeError:
             return data
+    if isinstance(valor, (list, dict)):
+        return valor
     return valor
+
+
+def normalizar_valor_columna(valor):
+    """API pública: un solo valor PostgreSQL → Python plano."""
+    return _valor_python(valor)
+
+
+def normalizar_fila(fila):
+    """API pública: fila de cursor → dict o tupla con tipos planos."""
+    return _normalizar_fila(fila)
+
+
+def normalizar_filas(filas):
+    """API pública: lista de filas normalizadas."""
+    if not filas:
+        return []
+    return [_normalizar_fila(fila) for fila in filas]
 
 
 def _normalizar_fila(fila):
@@ -451,7 +505,10 @@ def es_error_bd_transitorio(exc):
 
 
 def get_db_connection(row_factory=None):
-    """Obtiene conexión del pool PostgreSQL (concurrencia segura vía Supabase/Postgres)."""
+    """
+    Conexión del pool PostgreSQL. row_factory truthy (p. ej. sqlite3.Row o ROW_AS_DICT)
+    devuelve filas como diccionarios planos con tipos ya normalizados.
+    """
     _require_database_url()
     try:
         pg_conn = _obtener_pool().getconn()
@@ -461,7 +518,101 @@ def get_db_connection(row_factory=None):
             'Intenta de nuevo en unos segundos.'
         ) from exc
     _preparar_conexion_pg(pg_conn)
-    return _PgConnection(pg_conn, dict_rows=row_factory is not None, from_pool=True)
+    usar_dict = row_factory is not None
+    return _PgConnection(pg_conn, dict_rows=usar_dict, from_pool=True)
+
+
+def consultar_uno(query, params=(), row_factory=ROW_AS_DICT):
+    """Ejecuta SELECT y retorna un dict plano o None."""
+    with get_db_connection(row_factory=row_factory) as conexion:
+        cursor = conexion.cursor()
+        cursor.execute(query, params)
+        fila = cursor.fetchone()
+        if fila is None:
+            return None
+        if isinstance(fila, dict):
+            return fila
+        return fila_a_dict(fila) if row_factory is not None else fila
+
+
+def consultar_todos(query, params=(), row_factory=ROW_AS_DICT):
+    """Ejecuta SELECT y retorna lista de dicts planos."""
+    with get_db_connection(row_factory=row_factory) as conexion:
+        cursor = conexion.cursor()
+        cursor.execute(query, params)
+        filas = cursor.fetchall()
+        if not filas:
+            return []
+        if isinstance(filas[0], dict):
+            return filas
+        return [fila_a_dict(f) for f in filas] if row_factory is not None else filas
+
+
+def ejecutar_escritura(query, params=()):
+    """INSERT/UPDATE/DELETE con commit explícito. Retorna filas afectadas."""
+    with get_db_connection() as conexion:
+        cursor = conexion.cursor()
+        cursor.execute(query, params)
+        afectadas = cursor.rowcount
+        conexion.commit()
+        return afectadas
+
+
+def diagnosticar_postgresql():
+    """Diagnóstico automático de conexión, latencia y tablas críticas."""
+    resultado = {
+        'ok': False,
+        'database_url_configurada': bool(DATABASE_URL),
+        'latencia_ms': None,
+        'version': None,
+        'tablas_criticas': {},
+        'pool_min': DB_POOL_MIN,
+        'pool_max': DB_POOL_MAX,
+        'error': None,
+    }
+    if not DATABASE_URL:
+        resultado['error'] = 'DATABASE_URL no configurada.'
+        return resultado
+
+    tablas_criticas = ('usuarios', 'comercios', 'productos', 'planes', 'categorias')
+    inicio = time.time()
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute('SELECT version()')
+            fila_version = cursor.fetchone()
+            if fila_version:
+                resultado['version'] = (
+                    fila_version[0] if isinstance(fila_version, tuple) else fila_version.get('version')
+                )
+            for tabla in tablas_criticas:
+                cursor.execute(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM information_schema.tables
+                        WHERE table_schema = 'public' AND table_name = %s
+                    )
+                    """,
+                    (tabla,),
+                )
+                existe = cursor.fetchone()
+                if isinstance(existe, dict):
+                    resultado['tablas_criticas'][tabla] = bool(
+                        next(iter(existe.values()), False)
+                    )
+                elif isinstance(existe, tuple):
+                    resultado['tablas_criticas'][tabla] = bool(existe[0])
+                else:
+                    resultado['tablas_criticas'][tabla] = False
+            conexion.rollback()
+        resultado['latencia_ms'] = round((time.time() - inicio) * 1000, 1)
+        resultado['ok'] = all(resultado['tablas_criticas'].values())
+    except Exception as error:
+        resultado['error'] = str(error)
+        resultado['latencia_ms'] = round((time.time() - inicio) * 1000, 1)
+
+    return resultado
 
 
 def ejecutar_con_reintentos_bd(operacion, reintentos=None):

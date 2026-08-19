@@ -61,6 +61,8 @@ from backend.admin import (
     suspender_comercio_temporal,
 )
 from backend.auth import obtener_o_crear_usuario_google
+from backend.diagnostics import ejecutar_diagnostico_inicio, obtener_estado_sistema
+from backend.error_handlers import registrar_manejadores_errores
 from backend.image_lookup import aplicar_respaldo_imagenes, resolver_imagen_producto
 from backend.db import get_db_connection
 from database import init_db, normalize_database_url
@@ -119,6 +121,7 @@ app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_BYTES
 os.makedirs(os.path.join(BASE_DIR, 'static', 'images', 'productos'), exist_ok=True)
 
 csrf = CSRFProtect(app)
+registrar_manejadores_errores(app)
 
 
 @app.template_filter('fecha_corta')
@@ -132,16 +135,20 @@ DEFAULT_BANNER = (
 
 
 def _inicializar_aplicacion():
-    """Migraciones y verificación de vencimientos al cargar la app."""
+    """Migraciones, diagnóstico PostgreSQL y verificación de vencimientos."""
     try:
         if db_url:
             print('Base de datos: PostgreSQL (DATABASE_URL / Supabase SQL).')
         else:
             print('Aviso: DATABASE_URL no configurada.')
         init_db()
+        ejecutar_diagnostico_inicio()
         verificar_vencimientos_comercios()
     except Exception as error:
         print(f'Error al inicializar la aplicación: {error}')
+        from backend.diagnostics import reportar_error_critico
+
+        reportar_error_critico(error, request=None)
 
 
 _inicializar_aplicacion()
@@ -368,22 +375,14 @@ def _bloquear_gestion_inventario(comercio, redirect_url='panel_comercio'):
     return redirect(url_for(redirect_url, abrir_pago='pro'))
 
 
-@app.errorhandler(404)
-def pagina_no_encontrada(e):
-    return redirect(url_for('index'))
-
-
-@app.errorhandler(500)
-def error_interno_servidor(e):
-    return redirect(url_for('index'))
-
-
 @app.errorhandler(CSRFError)
 def error_csrf(e):
     flash(
         'Tu sesión de formulario expiró o la petición no es segura. Inténtalo de nuevo.',
         'error',
     )
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Token CSRF inválido o expirado.'}), 400
     return redirect(request.referrer or url_for('index'))
 
 
@@ -397,6 +396,14 @@ def error_archivo_demasiado_grande(e):
 
     flash(mensaje, 'error')
     return redirect(request.referrer or url_for('index'))
+
+
+@app.route('/health')
+def health_check():
+    """Diagnóstico automático para monitoreo (Render, uptime, etc.)."""
+    estado = obtener_estado_sistema()
+    codigo = 200 if estado.get('ok') else 503
+    return jsonify(estado), codigo
 
 
 def inicializar_base_de_datos():
