@@ -102,6 +102,12 @@ from backend.utils import (
     url_maps_comercio,
     url_whatsapp_comercio,
 )
+from backend.session_comercio import (
+    asegurar_contexto_comercio,
+    destino_panel_usuario,
+    limpiar_contexto_comercio,
+    vincular_comercio_en_sesion,
+)
 from backend.stores import (
     actualizar_datos_comercio,
     actualizar_producto,
@@ -198,6 +204,7 @@ def sincronizar_vencimientos_suscripcion():
         comercio = obtener_comercio_por_usuario(session.get('usuario_id'))
         if comercio:
             verificar_vencimiento_comercio(comercio['id'])
+            vincular_comercio_en_sesion(comercio['id'])
     except Exception as error:
         print(f'Aviso sincronización de vencimientos: {error}')
 
@@ -353,6 +360,7 @@ def login_requerido(f):
                 'error',
             )
             return redirect(url_for('login'))
+        asegurar_contexto_comercio(session.get('usuario_id'))
         return f(*args, **kwargs)
 
     return decorada
@@ -421,7 +429,7 @@ def error_csrf(e):
     )
     if request.path.startswith('/api/'):
         return jsonify({'error': 'Token CSRF inválido o expirado.'}), 400
-    return redirect(request.referrer or url_for('index'))
+    return redirect(request.referrer or url_for(destino_panel_usuario()))
 
 
 @app.errorhandler(RequestEntityTooLarge)
@@ -433,7 +441,7 @@ def error_archivo_demasiado_grande(e):
         return jsonify({'error': mensaje}), 413
 
     flash(mensaje, 'error')
-    return redirect(request.referrer or url_for('index'))
+    return redirect(request.referrer or url_for(destino_panel_usuario()))
 
 
 @app.route('/health')
@@ -604,6 +612,9 @@ def google_callback():
         if usuario_o_error.get('rol') == 'admin':
             return redirect(url_for('panel_admin'))
         if usuario_o_error.get('rol') == 'comerciante':
+            comercio = obtener_comercio_por_usuario(usuario_o_error['id'])
+            if comercio:
+                vincular_comercio_en_sesion(comercio['id'])
             return redirect(url_for('panel_comercio'))
 
         return redirect(url_for('index'))
@@ -614,6 +625,7 @@ def google_callback():
 
 @app.route('/logout')
 def logout():
+    limpiar_contexto_comercio()
     session.clear()
     flash('Sesión cerrada correctamente.', 'info')
     return redirect(url_for('index'))
@@ -661,6 +673,8 @@ def panel_comercio():
                 return render_template(
                     'registro_comercio.html', categorias=categorias
                 )
+
+            vincular_comercio_en_sesion(comercio_db['id'])
 
             cursor.execute(
                 '''
@@ -970,7 +984,10 @@ def editar_producto(producto_id):
 
         try:
             imagen_url = None
-            if imagen_archivo and getattr(imagen_archivo, 'filename', ''):
+            incluir_imagen = bool(
+                imagen_archivo and getattr(imagen_archivo, 'filename', '')
+            )
+            if incluir_imagen:
                 try:
                     imagen_url = procesar_imagen_para_producto(
                         imagen_archivo,
@@ -993,6 +1010,7 @@ def editar_producto(producto_id):
                 precio_usd,
                 codigo_barras=codigo_barras,
                 imagen_url=imagen_url,
+                incluir_imagen=incluir_imagen,
             )
             flash(mensaje, 'exito' if exito else 'error')
             return redirect(url_for('panel_comercio'))

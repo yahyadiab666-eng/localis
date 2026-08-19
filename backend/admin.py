@@ -369,9 +369,12 @@ def obtener_todos_comercios_admin(busqueda=None):
 
 def confirmar_pago_suscripcion(comercio_id, plan_tipo, meses=1):
     """
-    Endpoint preparado para confirmar pago y activar suscripción.
+    Confirma pago admin y activa suscripción en una transacción atómica.
     Retorna (exito, mensaje).
     """
+    from backend.payments import activar_suscripcion_con_pago
+    from backend.subscriptions import _calcular_fecha_vencimiento_meses
+
     plan_tipo = (plan_tipo or 'basica').lower()
     if plan_tipo not in PLANES:
         return False, 'Plan no válido.'
@@ -379,38 +382,40 @@ def confirmar_pago_suscripcion(comercio_id, plan_tipo, meses=1):
     limite = limite_para_plan(plan_tipo)
     plan_db = obtener_plan_por_codigo(plan_tipo)
     plan_id = plan_db.get('id') if plan_db else None
+    if not plan_id:
+        return False, 'Plan no configurado en el sistema.'
 
     try:
-        with get_db_connection() as conexion:
+        with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
             cursor.execute(
-                """
-                UPDATE comercios
-                SET plan_id = ?, plan_tipo = ?, limite_productos = ?, estado_pago = 'activo',
-                    visible = 1,
-                    fecha_inicio_suscripcion = CURRENT_TIMESTAMP,
-                    fecha_vencimiento = CURRENT_TIMESTAMP + (? * INTERVAL '1 month')
-                WHERE id = ?
-                """,
-                (plan_id, plan_tipo, limite, int(meses), int(comercio_id)),
+                'SELECT fecha_vencimiento FROM comercios WHERE id = ?',
+                (int(comercio_id),),
             )
-            if cursor.rowcount == 0:
-                conexion.commit()
+            fila = cursor.fetchone()
+            if not fila:
                 return False, 'Comercio no encontrado.'
 
-            if plan_id:
-                cursor.execute(
-                    """
-                    INSERT INTO pagos (tienda_id, plan_id, monto, metodo, estado)
-                    VALUES (?, ?, ?, 'admin', 'aprobado')
-                    """,
-                    (
-                        int(comercio_id),
-                        plan_id,
-                        plan_db.get('precio', 0) if plan_db else 0,
-                    ),
-                )
-            conexion.commit()
-        return True, f'Suscripción {plan_tipo} activada por {meses} mes(es).'
+        nueva_fecha = _calcular_fecha_vencimiento_meses(fila['fecha_vencimiento'], meses)
+        exito, mensaje, _ = activar_suscripcion_con_pago(
+            comercio_id,
+            plan_id,
+            plan_tipo,
+            limite,
+            nueva_fecha,
+            pago_registro={
+                'columnas': ('tienda_id', 'plan_id', 'monto', 'metodo', 'estado'),
+                'valores': (
+                    int(comercio_id),
+                    plan_id,
+                    plan_db.get('precio', 0) if plan_db else 0,
+                    'admin',
+                    'aprobado',
+                ),
+            },
+        )
+        if exito:
+            return True, f'Suscripción {plan_tipo} activada por {meses} mes(es).'
+        return False, mensaje
     except Exception as e:
         return False, f'Error al confirmar pago: {str(e)}'

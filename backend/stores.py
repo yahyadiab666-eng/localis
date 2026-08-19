@@ -5,15 +5,15 @@ import psycopg2
 
 from backend.db import get_db_connection
 from backend.image_lookup import EXPR_CODIGO_BARRAS, aplicar_respaldo_imagenes, asociar_imagenes_inventario
-from backend.utils import imagen_url_para_actualizacion, normalizar_codigo_barras
+from backend.utils import imagen_url_para_persistir, normalizar_codigo_barras
 from backend.inventory_import import (
     cargar_archivo_inventario,
     detectar_mapeo_columnas,
     iter_lotes_productos,
-    contar_productos_validos,
     leer_encabezados_inventario,
     mensaje_error_importacion,
     persistir_importacion_por_lotes,
+    validar_inventario_previo,
 )
 from backend.plans import (
     MENSAJE_LIMITE_PRODUCTOS,
@@ -441,44 +441,38 @@ def actualizar_producto(
     precio_usd,
     codigo_barras=None,
     imagen_url=None,
+    *,
+    incluir_imagen=False,
 ):
+    """
+    Actualización parcial segura: imagen_url solo se incluye en el UPDATE
+    cuando incluir_imagen=True y hay una URL explícita nueva.
+    """
     try:
         codigo_normalizado = normalizar_codigo_barras(codigo_barras)
-        with get_db_connection(row_factory=sqlite3.Row) as conexion:
+        campos = {
+            'nombre': nombre,
+            'descripcion': descripcion,
+            'precio_usd': float(precio_usd),
+            'codigo_barras': codigo_normalizado,
+        }
+        if incluir_imagen:
+            imagen_nueva = imagen_url_para_persistir(imagen_url)
+            if imagen_nueva:
+                campos['imagen_url'] = imagen_nueva
+
+        set_sql = ', '.join(f'{columna} = ?' for columna in campos)
+        valores = list(campos.values()) + [producto_id, comercio_id]
+
+        with get_db_connection() as conexion:
             cursor = conexion.cursor()
             cursor.execute(
-                """
-                SELECT imagen_url FROM productos
-                WHERE id = ? AND comercio_id = ?
-                """,
-                (producto_id, comercio_id),
-            )
-            fila = cursor.fetchone()
-            if not fila:
-                return (
-                    False,
-                    'No se encontró el producto o no tienes permiso para modificarlo.',
-                )
-
-            imagen_final = imagen_url_para_actualizacion(
-                imagen_url, fila['imagen_url']
-            )
-            cursor.execute(
-                """
+                f"""
                 UPDATE productos
-                SET nombre = ?, descripcion = ?, precio_usd = ?, codigo_barras = ?,
-                    imagen_url = ?
+                SET {set_sql}
                 WHERE id = ? AND comercio_id = ?
                 """,
-                (
-                    nombre,
-                    descripcion,
-                    float(precio_usd),
-                    codigo_normalizado,
-                    imagen_final,
-                    producto_id,
-                    comercio_id,
-                ),
+                tuple(valores),
             )
             filas_afectadas = cursor.rowcount
             conexion.commit()
@@ -535,21 +529,18 @@ def procesar_csv_productos(comercio_id, archivo_csv):
             return False, msg, None
 
         tasa = float(obtener_tasa_dolar() or 1.0)
-        total_validos = contar_productos_validos(
+        valido, error_validacion, meta_validacion = validar_inventario_previo(
             data,
             extension,
             encabezados,
             mapeo,
             meta,
             tasa_dolar=tasa,
-            imagen_default=None,
         )
-        if total_validos == 0:
-            return False, (
-                'No se encontraron filas válidas con nombre y precio. '
-                'Revisa que los datos no estén vacíos y que el precio use formato numérico.'
-            ), None
+        if not valido:
+            return False, error_validacion, None
 
+        total_validos = (meta_validacion or {}).get('filas_validas', 0)
         limite = obtener_limite_productos_comercio(comercio_id)
         if not es_limite_ilimitado(limite) and total_validos > limite:
             with get_db_connection(row_factory=sqlite3.Row) as conexion:

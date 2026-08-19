@@ -95,6 +95,7 @@ ETIQUETAS_COLUMNA = {
 }
 
 CAMPOS_OBLIGATORIOS = ('nombre', 'precio')
+_MAX_ERRORES_VALIDACION = 20
 _UMBRAL_COINCIDENCIA = 50
 
 MAX_IMPORT_FILE_BYTES = min(
@@ -324,15 +325,24 @@ def _fila_tiene_datos(fila_dict):
     return any(str(v or '').strip() for v in fila_dict.values())
 
 
-def iter_filas_inventario(data, extension, encabezados):
-    """Generador de filas {encabezado: valor} sin cargar todo el inventario en RAM."""
+def _celda_vacia(valor):
+    if valor is None:
+        return True
+    texto = str(valor).strip()
+    return not texto or texto.lower() in ('none', 'null', 'nan', 'n/a', '-')
+
+
+def iter_filas_inventario_enumeradas(data, extension, encabezados):
+    """Generador (numero_fila, fila_dict). Datos desde fila 2 (Excel) o equivalente CSV."""
     if extension == 'xlsx':
         wb = openpyxl.load_workbook(
             io.BytesIO(data), read_only=True, data_only=True
         )
         try:
             hoja = wb.active
+            numero_fila = 1
             for row in hoja.iter_rows(min_row=2):
+                numero_fila += 1
                 if not any(
                     _valor_celda_excel(celda) not in (None, '')
                     for celda in row
@@ -345,7 +355,7 @@ def iter_filas_inventario(data, extension, encabezados):
                     celda = row[idx] if idx < len(row) else None
                     fila[encabezado] = _valor_celda_excel(celda)
                 if _fila_tiene_datos(fila):
-                    yield fila
+                    yield numero_fila, fila
         finally:
             wb.close()
         return
@@ -356,14 +366,20 @@ def iter_filas_inventario(data, extension, encabezados):
 
     delimitador = _detectar_delimitador_csv(contenido[:4096])
     reader = csv.DictReader(io.StringIO(contenido), delimiter=delimitador)
-    for fila in reader:
+    for indice, fila in enumerate(reader, start=2):
         fila_limpia = {
             str(clave).strip(): valor
             for clave, valor in fila.items()
             if clave is not None and str(clave).strip()
         }
         if _fila_tiene_datos(fila_limpia):
-            yield fila_limpia
+            yield indice, fila_limpia
+
+
+def iter_filas_inventario(data, extension, encabezados):
+    """Generador de filas {encabezado: valor} sin cargar todo el inventario en RAM."""
+    for _, fila in iter_filas_inventario_enumeradas(data, extension, encabezados):
+        yield fila
 
 
 def _valor_celda_excel(celda):
@@ -424,6 +440,84 @@ def _parsear_entero(valor):
     if numero is None:
         return 0
     return max(0, int(round(numero)))
+
+
+def diagnosticar_fila_obligatoria(fila, mapeo, meta, numero_fila, tasa_dolar=1.0):
+    """Detecta celdas vacías o inválidas en campos obligatorios. Retorna lista de mensajes."""
+    errores = []
+    nombre_raw = _obtener_valor_celda(fila, mapeo.get('nombre'))
+    if _celda_vacia(nombre_raw):
+        errores.append(
+            f'Fila {numero_fila}: el nombre del producto está vacío (campo obligatorio).'
+        )
+
+    precio_val = _obtener_valor_celda(fila, mapeo.get('precio'))
+    if _celda_vacia(precio_val):
+        errores.append(
+            f'Fila {numero_fila}: el precio está vacío (campo obligatorio).'
+        )
+    else:
+        precio_raw = _parsear_numero(precio_val)
+        if precio_raw is None:
+            errores.append(
+                f'Fila {numero_fila}: el precio «{precio_val}» no es un número válido.'
+            )
+        elif precio_raw < 0:
+            errores.append(
+                f'Fila {numero_fila}: el precio no puede ser negativo.'
+            )
+
+    return errores
+
+
+def validar_inventario_previo(
+    data, extension, encabezados, mapeo, meta, tasa_dolar=1.0
+):
+    """
+    Validación previa sin escribir en PostgreSQL.
+    Retorna (valido, mensaje_error, meta_validacion).
+    """
+    errores = []
+    filas_con_datos = 0
+    filas_validas = 0
+
+    for numero_fila, fila in iter_filas_inventario_enumeradas(
+        data, extension, encabezados
+    ):
+        filas_con_datos += 1
+        errores_fila = diagnosticar_fila_obligatoria(
+            fila, mapeo, meta, numero_fila, tasa_dolar=tasa_dolar
+        )
+        if errores_fila:
+            errores.extend(errores_fila)
+            continue
+        if parsear_fila_inventario(
+            fila, mapeo, meta, tasa_dolar=tasa_dolar, imagen_default=None
+        ):
+            filas_validas += 1
+
+    if filas_con_datos == 0:
+        return False, 'El archivo no contiene filas de datos debajo de los encabezados.', None
+
+    if errores:
+        visibles = errores[:_MAX_ERRORES_VALIDACION]
+        mensaje = (
+            'El archivo tiene errores en campos obligatorios. '
+            'Ningún cambio fue aplicado a tu inventario.\n'
+            + '\n'.join(visibles)
+        )
+        restantes = len(errores) - len(visibles)
+        if restantes > 0:
+            mensaje += f'\n… y {restantes} error(es) adicional(es).'
+        return False, mensaje, {'errores': errores, 'filas_validas': filas_validas}
+
+    if filas_validas == 0:
+        return False, (
+            'No se encontraron filas válidas con nombre y precio. '
+            'Revisa que los datos no estén vacíos y que el precio use formato numérico.'
+        ), None
+
+    return True, None, {'filas_validas': filas_validas, 'filas_con_datos': filas_con_datos}
 
 
 def parsear_fila_inventario(fila, mapeo, meta, tasa_dolar=1.0, imagen_default=None):

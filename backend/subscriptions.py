@@ -298,6 +298,21 @@ def _calcular_fecha_vencimiento_prorrateo(fecha_vencimiento_actual, dias=30):
     return _calcular_nueva_fecha_vencimiento(fecha_vencimiento_actual, dias)
 
 
+def _calcular_fecha_vencimiento_meses(fecha_vencimiento_actual, meses=1):
+    """Extiende suscripción N meses desde max(hoy, vencimiento actual)."""
+    hoy = datetime.now().date()
+    base = hoy
+    if fecha_vencimiento_actual:
+        try:
+            vencimiento = datetime.strptime(
+                formatear_fecha(fecha_vencimiento_actual), '%Y-%m-%d'
+            ).date()
+            base = max(hoy, vencimiento)
+        except (TypeError, ValueError):
+            pass
+    return (base + timedelta(days=30 * max(1, int(meses)))).strftime('%Y-%m-%d')
+
+
 def _precio_usd_plan(plan):
     return float(plan.get('precio') or plan.get('precio_usd') or 0)
 
@@ -395,7 +410,7 @@ def registrar_pago_movil_plan(
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
             cursor.execute(
-                'SELECT plan_tipo, fecha_vencimiento FROM comercios WHERE id = ?',
+                'SELECT fecha_vencimiento FROM comercios WHERE id = ?',
                 (int(comercio_id),),
             )
             comercio = cursor.fetchone()
@@ -406,46 +421,55 @@ def registrar_pago_movil_plan(
                 comercio['fecha_vencimiento'], dias
             )
 
-            cursor.execute(
-                """
-                UPDATE comercios
-                SET plan_id = ?, plan_tipo = ?, limite_productos = ?,
-                    estado_pago = 'activo', visible = 1,
-                    fecha_inicio_suscripcion = CURRENT_TIMESTAMP,
-                    fecha_vencimiento = ?
-                WHERE id = ?
-                """,
-                (plan_id, plan_tipo, limite, nueva_fecha, int(comercio_id)),
-            )
+        from backend.payments import activar_suscripcion_con_pago
 
-            cursor.execute(
-                """
-                INSERT INTO solicitudes_pago (
-                    comercio_id, plan_tipo, referencia, fecha_transferencia, estado
-                )
-                VALUES (?, ?, ?, ?, 'aprobado')
-                """,
-                (int(comercio_id), plan_tipo, referencia, fecha_transferencia),
-            )
-
-            cursor.execute(
-                """
-                INSERT INTO pagos (
-                    tienda_id, plan_id, monto, metodo, referencia,
-                    banco_origen, telefono_pagador, estado
-                )
-                VALUES (?, ?, ?, 'pago_movil', ?, ?, ?, 'aprobado')
-                """,
-                (
+        exito, mensaje, datos_tx = activar_suscripcion_con_pago(
+            comercio_id,
+            plan_id,
+            plan_tipo,
+            limite,
+            nueva_fecha,
+            pago_registro={
+                'columnas': (
+                    'tienda_id',
+                    'plan_id',
+                    'monto',
+                    'metodo',
+                    'referencia',
+                    'banco_origen',
+                    'telefono_pagador',
+                    'estado',
+                ),
+                'valores': (
                     int(comercio_id),
                     plan_id,
                     monto_bs,
+                    'pago_movil',
                     referencia,
                     banco_emisor,
                     telefono_pagador,
+                    'aprobado',
                 ),
-            )
-            conexion.commit()
+            },
+            solicitud_registro={
+                'columnas': (
+                    'comercio_id',
+                    'plan_tipo',
+                    'referencia',
+                    'fecha_transferencia',
+                    'estado',
+                ),
+                'valores': (
+                    int(comercio_id),
+                    plan_tipo,
+                    referencia,
+                    fecha_transferencia,
+                    'aprobado',
+                ),
+            },
+        )
+        if not exito:
+            return False, mensaje, None
 
         return (
             True,
@@ -461,6 +485,7 @@ def registrar_pago_movil_plan(
                 'monto_usd': monto_usd,
                 'monto_bs': monto_bs,
                 'tasa': montos['tasa'],
+                'pago_id': (datos_tx or {}).get('pago_id'),
             },
         )
     except Exception as e:
@@ -518,45 +543,53 @@ def activar_suscripcion_por_comprobante(
                 comercio['fecha_vencimiento'], dias
             )
 
-            cursor.execute(
-                """
-                UPDATE comercios
-                SET plan_id = ?, plan_tipo = ?, limite_productos = ?,
-                    estado_pago = 'activo', visible = 1,
-                    fecha_inicio_suscripcion = CURRENT_TIMESTAMP,
-                    fecha_vencimiento = ?
-                WHERE id = ?
-                """,
-                (plan_id, plan_tipo, limite, nueva_fecha, int(comercio_id)),
-            )
+        from backend.payments import activar_suscripcion_con_pago
 
-            cursor.execute(
-                """
-                INSERT INTO pagos (
-                    tienda_id, plan_id, monto, metodo, referencia,
-                    banco_origen, estado
-                )
-                VALUES (?, ?, ?, 'pago_movil_ocr', ?, ?, 'aprobado')
-                """,
-                (
+        exito, mensaje, datos_tx = activar_suscripcion_con_pago(
+            comercio_id,
+            plan_id,
+            plan_tipo,
+            limite,
+            nueva_fecha,
+            pago_registro={
+                'columnas': (
+                    'tienda_id',
+                    'plan_id',
+                    'monto',
+                    'metodo',
+                    'referencia',
+                    'banco_origen',
+                    'estado',
+                ),
+                'valores': (
                     int(comercio_id),
                     plan_id,
                     monto_bs,
+                    'pago_movil_ocr',
                     referencia,
                     'Banco Caribe',
+                    'aprobado',
                 ),
-            )
-
-            cursor.execute(
-                """
-                INSERT INTO solicitudes_pago (
-                    comercio_id, plan_tipo, referencia, fecha_transferencia, estado
-                )
-                VALUES (?, ?, ?, CURRENT_DATE, 'aprobado')
-                """,
-                (int(comercio_id), plan_tipo, referencia),
-            )
-            conexion.commit()
+            },
+            solicitud_registro={
+                'columnas': (
+                    'comercio_id',
+                    'plan_tipo',
+                    'referencia',
+                    'fecha_transferencia',
+                    'estado',
+                ),
+                'valores': (
+                    int(comercio_id),
+                    plan_tipo,
+                    referencia,
+                    datetime.now().date(),
+                    'aprobado',
+                ),
+            },
+        )
+        if not exito:
+            return False, mensaje, None
 
         return (
             True,
@@ -570,6 +603,7 @@ def activar_suscripcion_por_comprobante(
                 'monto_bs': monto_bs,
                 'tasa': montos['tasa'],
                 'comprobante_url': comprobante_url,
+                'pago_id': (datos_tx or {}).get('pago_id'),
             },
         )
     except Exception as error:
