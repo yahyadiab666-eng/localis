@@ -259,8 +259,17 @@ def _detectar_delimitador_csv(muestra):
         return ','
 
 
+_ENCODINGS_CSV = ('utf-8-sig', 'utf-8', 'cp1252', 'latin-1', 'iso-8859-1')
+_MENSAJE_CODIFICACION_CSV = (
+    'No se pudo leer la codificación del archivo CSV. '
+    'Guárdalo como UTF-8 o Latin-1 (Excel: «CSV UTF-8») e intenta de nuevo.'
+)
+
+
 def _decodificar_csv(data):
-    for encoding in ('utf-8-sig', 'latin-1', 'cp1252'):
+    if not data:
+        return None
+    for encoding in _ENCODINGS_CSV:
         try:
             return data.decode(encoding)
         except UnicodeDecodeError:
@@ -291,7 +300,7 @@ def leer_encabezados_inventario(data, extension):
 
         contenido = _decodificar_csv(data)
         if contenido is None:
-            return None, 'No se pudo leer la codificación del archivo CSV.'
+            return None, _MENSAJE_CODIFICACION_CSV
 
         delimitador = _detectar_delimitador_csv(contenido[:4096])
         reader = csv.reader(io.StringIO(contenido), delimiter=delimitador)
@@ -338,7 +347,7 @@ def iter_filas_inventario(data, extension, encabezados):
 
     contenido = _decodificar_csv(data)
     if contenido is None:
-        return
+        raise ErrorImportacionInventario(_MENSAJE_CODIFICACION_CSV)
 
     delimitador = _detectar_delimitador_csv(contenido[:4096])
     reader = csv.DictReader(io.StringIO(contenido), delimiter=delimitador)

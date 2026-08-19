@@ -29,7 +29,14 @@ import sqlite3
 
 import psycopg2
 from authlib.integrations.flask_client import OAuth
-from config import MAX_UPLOAD_BYTES, WHATSAPP_SOPORTE, WHATSAPP_SOPORTE_URL
+from config import (
+    MAX_UPLOAD_BYTES,
+    WHATSAPP_SOPORTE,
+    WHATSAPP_SOPORTE_URL,
+    aplicar_config_sesion_flask,
+    obtener_secret_key,
+    validar_config_arranque,
+)
 from flask import (
     Flask,
     flash,
@@ -116,9 +123,8 @@ app.config['SQLALCHEMY_DATABASE_URI'] = db_url or 'postgresql://localhost/locali
 
 db = SQLAlchemy(app)
 
-app.secret_key = os.environ.get(
-    'LOCALIS_SECRET_KEY', 'clave_secreta_localis_desarrollo'
-)
+app.secret_key = obtener_secret_key()
+aplicar_config_sesion_flask(app)
 
 app.config['SUPABASE_CLIENT'] = supabase
 app.config['SUPABASE_BUCKET_IMAGENES'] = SUPABASE_BUCKET_IMAGENES
@@ -140,15 +146,19 @@ DEFAULT_BANNER = (
 
 
 def _inicializar_aplicacion():
-    """Migraciones, diagnóstico PostgreSQL y verificación de vencimientos."""
+    """Migraciones, validación de entorno, diagnóstico PostgreSQL y vencimientos."""
     try:
+        advertencias = validar_config_arranque()
+        for aviso in advertencias:
+            print(f'[Localis Config] {aviso}')
         if db_url:
             print('Base de datos: PostgreSQL (DATABASE_URL / Supabase SQL).')
-        else:
-            print('Aviso: DATABASE_URL no configurada.')
         init_db()
         ejecutar_diagnostico_inicio()
         verificar_vencimientos_comercios()
+    except RuntimeError as error:
+        print(f'Error crítico de configuración: {error}')
+        raise
     except Exception as error:
         print(f'Error al inicializar la aplicación: {error}')
         from backend.diagnostics import reportar_error_critico
@@ -530,7 +540,17 @@ def tienda_publica(comercio_id):
 
 @app.route('/login')
 def login():
+    if session.get('usuario_id'):
+        if session.get('es_admin'):
+            return redirect(url_for('panel_admin'))
+        return redirect(url_for('panel_comercio'))
     return render_template('login.html')
+
+
+@app.route('/registro')
+def registro_legacy():
+    """Ruta legacy: el registro de comercio pasa por login Google + /comercio/crear."""
+    return redirect(url_for('login'))
 
 
 @app.route('/login/google')
@@ -1046,6 +1066,14 @@ def cargar_csv():
         )
 
     flash(mensaje, 'exito' if exito else 'error')
+    return redirect(url_for('panel_comercio'))
+
+
+@app.route('/comercio/productos/cargar-csv', methods=['GET'])
+@login_requerido
+def cargar_csv_get():
+    """Evita 405 si el usuario recarga la URL del POST de importación."""
+    flash('Selecciona un archivo CSV o Excel desde el panel de comercio.', 'info')
     return redirect(url_for('panel_comercio'))
 
 
