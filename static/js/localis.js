@@ -7,12 +7,9 @@
 
   const ALERTA_DURACION_MS = 4000;
 
-  window.urlImagenRespaldoProducto = function urlImagenRespaldoProducto(codigo, nombre, excluir) {
-    var params = new URLSearchParams();
-    if (codigo) params.set('codigo', codigo);
-    if (nombre) params.set('nombre', nombre);
-    if (excluir) params.set('excluir', excluir);
-    return '/imagen-producto?' + params.toString();
+  window.urlImagenRespaldoProducto = function urlImagenRespaldoProducto(productoId) {
+    if (!productoId) return '';
+    return '/imagen-producto?producto_id=' + encodeURIComponent(productoId);
   };
 
   window.rescatarImagenProducto = function rescatarImagenProducto(img) {
@@ -24,15 +21,14 @@
       img.style.visibility = 'hidden';
       return;
     }
-    var codigo = (img.getAttribute('data-codigo') || '').trim();
-    var nombre = (img.getAttribute('data-nombre') || '').trim();
-    if (!codigo && !nombre) {
+    var productoId = (img.getAttribute('data-producto-id') || '').trim();
+    if (!productoId) {
       img.onerror = null;
       img.removeAttribute('src');
       return;
     }
     img.dataset.rescate = '1';
-    img.src = window.urlImagenRespaldoProducto(codigo, nombre, actual);
+    img.src = window.urlImagenRespaldoProducto(productoId);
   };
 
   function obtenerCsrfToken() {

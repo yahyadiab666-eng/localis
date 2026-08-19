@@ -128,8 +128,7 @@
             {% if producto and producto.imagen_url %}
               <div class="flex items-center gap-3 mb-2 p-2 bg-stone-50 border border-stone-200 rounded-xl">
                 <img src="{{ producto.imagen_url }}" alt="Imagen actual"
-                     data-codigo="{{ producto.codigo_barras or '' }}"
-                     data-nombre="{{ producto.nombre or '' }}"
+                     data-producto-id="{{ producto.id }}"
                      class="w-12 h-12 object-cover rounded-lg border border-stone-200"
                      onerror="if(window.rescatarImagenProducto){rescatarImagenProducto(this)}else{this.onerror=null;this.style.display='none';}">
                 <div class="text-xs text-stone-600">
@@ -142,7 +141,7 @@
             <div class="relative flex items-center">
               <input type="file" id="imagen" name="imagen" accept="image/*" class="w-full text-xs text-stone-500 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 cursor-pointer bg-stone-50 border border-stone-200 rounded-xl py-1.5 px-2 focus:outline-none focus:border-amber-500 transition">
             </div>
-            <p class="text-[11px] text-stone-400 mt-1">Si no adjuntas foto, el sistema buscará una automáticamente en la web según el código o nombre.</p>
+            <p class="text-[11px] text-stone-400 mt-1">Si no adjuntas foto, el producto quedará sin imagen hasta que subas una manualmente o importes una URL exacta en el CSV.</p>
           </div>
 
           <!-- Botón de Envío -->

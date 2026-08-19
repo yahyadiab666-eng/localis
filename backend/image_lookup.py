@@ -1,4 +1,4 @@
-"""Respaldo inteligente de imágenes por código de barras, SKU o nombre."""
+"""Resolución estricta de imágenes: solo URL exacta del producto, sin adivinar."""
 
 import os
 import sqlite3
@@ -6,7 +6,6 @@ import sqlite3
 from backend.db import get_db_connection
 from backend.utils import (
     normalizar_codigo_barras,
-    normalizar_nombre_producto,
     texto_campo_imagen,
     url_imagen_usable,
 )
@@ -20,18 +19,6 @@ EXPR_CODIGO_BARRAS = (
 EXPR_NOMBRE = (
     "regexp_replace(LOWER(TRIM(BOTH FROM CAST(nombre AS TEXT))), '\\s+', ' ', 'g')"
 )
-
-_FILTRO_IMAGEN_REAL = """
-    imagen_url IS NOT NULL
-    AND TRIM(BOTH FROM CAST(imagen_url AS TEXT)) <> ''
-    AND imagen_url NOT ILIKE '%%default-product%%'
-    AND imagen_url NOT ILIKE '%%placeholder%%'
-    AND TRIM(BOTH FROM CAST(imagen_url AS TEXT)) <> '__PENDING__'
-    AND (
-        CAST(imagen_url AS TEXT) ILIKE 'http%%'
-        OR CAST(imagen_url AS TEXT) LIKE '/%%'
-    )
-"""
 
 _EXTENSIONES_LOCALES = ('.webp', '.jpg', '.jpeg', '.png')
 _CARPETAS_LOCALES = (
@@ -53,7 +40,7 @@ def _url_si_archivo_existe(relativo_static):
 
 
 def buscar_imagen_en_directorio(codigo_o_archivo):
-    """Busca foto local nombrada por código de barras/SKU o por archivo del CSV."""
+    """Busca archivo local por nombre exacto (CSV) o código de barras como nombre de archivo."""
     if not codigo_o_archivo:
         return None
 
@@ -101,139 +88,43 @@ def _url_usable_o_none(valor):
     return None
 
 
-def _mapa_desde_filas(filas, clave_norm):
-    resultado = {}
-    for fila in filas or []:
-        fila = dict(fila)
-        clave = fila.get(clave_norm)
-        url = _url_usable_o_none(fila.get('imagen_url'))
-        if clave and url and clave not in resultado:
-            resultado[clave] = url
-    return resultado
-
-
-def mapa_imagenes_por_codigos(codigos):
-    """Primera imagen real por código de barras normalizado (ignora espacios y .0)."""
-    normalizados = []
-    vistos = set()
-    for codigo in codigos or []:
-        limpio = normalizar_codigo_barras(codigo)
-        if limpio and limpio not in vistos:
-            vistos.add(limpio)
-            normalizados.append(limpio)
-    if not normalizados:
-        return {}
-
-    placeholders = ','.join(['?'] * len(normalizados))
-    sql = f"""
-        SELECT {EXPR_CODIGO_BARRAS} AS codigo_norm, imagen_url
-        FROM productos
-        WHERE codigo_barras IS NOT NULL
-          AND TRIM(BOTH FROM CAST(codigo_barras AS TEXT)) <> ''
-          AND {EXPR_CODIGO_BARRAS} IN ({placeholders})
-          AND {_FILTRO_IMAGEN_REAL}
-        ORDER BY id DESC
+def normalizar_imagen_registro(imagen_url=None, codigo_barras=None):
     """
-    try:
-        with get_db_connection(row_factory=sqlite3.Row) as conexion:
-            cursor = conexion.cursor()
-            cursor.execute(sql, tuple(normalizados))
-            return _mapa_desde_filas(cursor.fetchall(), 'codigo_norm')
-    except Exception as error:
-        print(f'Error al buscar imágenes por código de barras: {error}')
-        return {}
-
-
-def mapa_imagenes_por_nombres(nombres):
-    """Respaldo por nombre/SKU textual cuando no hay código de barras."""
-    normalizados = []
-    vistos = set()
-    for nombre in nombres or []:
-        limpio = normalizar_nombre_producto(nombre)
-        if limpio and limpio not in vistos:
-            vistos.add(limpio)
-            normalizados.append(limpio)
-    if not normalizados:
-        return {}
-
-    placeholders = ','.join(['?'] * len(normalizados))
-    sql = f"""
-        SELECT {EXPR_NOMBRE} AS nombre_norm, imagen_url
-        FROM productos
-        WHERE nombre IS NOT NULL
-          AND TRIM(BOTH FROM CAST(nombre AS TEXT)) <> ''
-          AND {EXPR_NOMBRE} IN ({placeholders})
-          AND {_FILTRO_IMAGEN_REAL}
-        ORDER BY id DESC
+    Normaliza la imagen de UN solo registro sin consultar otros productos.
+    1) URL http(s) o /static ya guardada (Supabase, CSV, manual)
+    2) Archivo local explícito referenciado en la celda o por código exacto
     """
-    try:
-        with get_db_connection(row_factory=sqlite3.Row) as conexion:
-            cursor = conexion.cursor()
-            cursor.execute(sql, tuple(normalizados))
-            return _mapa_desde_filas(cursor.fetchall(), 'nombre_norm')
-    except Exception as error:
-        print(f'Error al buscar imágenes por nombre: {error}')
-        return {}
+    directa = _url_usable_o_none(imagen_url)
+    if directa:
+        return directa
 
-
-def buscar_imagen_catalogo(codigo_barras=None, nombre=None, excluir_url=None):
-    """Consulta secundaria: catálogo PostgreSQL y luego directorio local."""
-    codigo = normalizar_codigo_barras(codigo_barras)
-    if codigo:
-        url = mapa_imagenes_por_codigos([codigo]).get(codigo)
-        if url and url != excluir_url:
-            return url
-        url_dir = buscar_imagen_en_directorio(codigo)
-        if url_dir and url_dir != excluir_url:
-            return url_dir
-
-    nombre_norm = normalizar_nombre_producto(nombre)
-    if nombre_norm:
-        url = mapa_imagenes_por_nombres([nombre_norm]).get(nombre_norm)
-        if url and url != excluir_url:
-            return url
+    referencia = texto_campo_imagen(imagen_url, default=None)
+    if not referencia:
+        referencia = normalizar_codigo_barras(codigo_barras)
+    if referencia:
+        return buscar_imagen_en_directorio(referencia)
     return None
 
 
-def persistir_imagen_rescatada(url, codigo_barras=None, nombre=None):
-    """Guarda la URL rescatada en productos que aún no tienen foto real."""
-    if not url_imagen_usable(url):
-        return 0
-    codigo = normalizar_codigo_barras(codigo_barras)
-    nombre_norm = normalizar_nombre_producto(nombre)
-    if not codigo and not nombre_norm:
-        return 0
-
-    actualizados = 0
+def obtener_imagen_url_producto(producto_id):
+    """Devuelve la URL exacta persistida en BD para este producto (sin cruzar catálogo)."""
+    if not producto_id:
+        return None
     try:
-        with get_db_connection() as conexion:
+        with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
-            if codigo:
-                cursor.execute(
-                    f"""
-                    UPDATE productos
-                    SET imagen_url = ?
-                    WHERE {EXPR_CODIGO_BARRAS} = ?
-                      AND NOT ({_FILTRO_IMAGEN_REAL})
-                    """,
-                    (url, codigo),
-                )
-                actualizados += cursor.rowcount or 0
-            elif nombre_norm:
-                cursor.execute(
-                    f"""
-                    UPDATE productos
-                    SET imagen_url = ?
-                    WHERE {EXPR_NOMBRE} = ?
-                      AND NOT ({_FILTRO_IMAGEN_REAL})
-                    """,
-                    (url, nombre_norm),
-                )
-                actualizados += cursor.rowcount or 0
-            conexion.commit()
+            cursor.execute(
+                'SELECT imagen_url FROM productos WHERE id = ?',
+                (int(producto_id),),
+            )
+            fila = cursor.fetchone()
+            if not fila:
+                return None
+            registro = dict(fila)
+            return normalizar_imagen_registro(registro.get('imagen_url'))
     except Exception as error:
-        print(f'Error al persistir imagen rescatada: {error}')
-    return actualizados
+        print(f'Error al leer imagen del producto {producto_id}: {error}')
+        return None
 
 
 def resolver_imagen_producto(
@@ -241,99 +132,45 @@ def resolver_imagen_producto(
     codigo_barras=None,
     nombre=None,
     descripcion=None,
+    producto_id=None,
     buscar_web=False,
     excluir_url=None,
     persistir=False,
 ):
     """
-    1) URL directa usable
-    2) Catálogo PostgreSQL / directorio por código o nombre
-    3) Búsqueda web (OpenFoodFacts/Bing) si buscar_web=True
-    Nunca devuelve la imagen genérica default-product.
+    Resolución estricta: nunca adivina ni reutiliza fotos de otros productos.
+    Prioridad: URL del registro → archivo local explícito → URL exacta en BD por id.
     """
-    directa = _url_usable_o_none(imagen_url)
-    if directa and directa != excluir_url:
-        return directa
+    del nombre, descripcion, buscar_web, persistir  # sin fuzzy ni búsqueda web
 
-    if imagen_url and not url_imagen_usable(imagen_url):
-        por_archivo = buscar_imagen_en_directorio(imagen_url)
-        if por_archivo and por_archivo != excluir_url:
-            if persistir:
-                persistir_imagen_rescatada(por_archivo, codigo_barras, nombre)
-            return por_archivo
-
-    url = buscar_imagen_catalogo(codigo_barras, nombre, excluir_url=excluir_url)
-    if url:
-        if persistir:
-            persistir_imagen_rescatada(url, codigo_barras, nombre)
+    url = normalizar_imagen_registro(imagen_url, codigo_barras)
+    if url and url != excluir_url:
         return url
 
-    if buscar_web:
-        try:
-            from backend.image_search import obtener_url_imagen_automatica
-
-            url_web = obtener_url_imagen_automatica(
-                nombre=nombre or '',
-                codigo_barras=codigo_barras,
-                descripcion=descripcion,
-                modo_rapido=True,
-            )
-            if url_imagen_usable(url_web) and url_web != excluir_url:
-                if persistir:
-                    persistir_imagen_rescatada(url_web, codigo_barras, nombre)
-                return url_web
-        except Exception as error:
-            print(f'Error en búsqueda web de imagen: {error}')
+    if producto_id:
+        url_bd = obtener_imagen_url_producto(producto_id)
+        if url_bd and url_bd != excluir_url:
+            return url_bd
 
     return None
 
 
 def aplicar_respaldo_imagenes(productos, persistir=False):
-    """Completa imagen_url faltante en un listado, en lote (sin N+1)."""
+    """Normaliza imagen_url de cada producto usando solo su propio valor guardado."""
+    del persistir  # no escribir URLs inferidas en BD
     if not productos:
         return productos
 
-    pendientes = []
     for prod in productos:
-        if url_imagen_usable(prod.get('imagen_url')):
-            prod['imagen_url'] = texto_campo_imagen(prod.get('imagen_url'))
-            continue
-        por_archivo = buscar_imagen_en_directorio(
-            prod.get('imagen_url') or prod.get('codigo_barras')
+        prod['imagen_url'] = normalizar_imagen_registro(
+            prod.get('imagen_url'),
+            prod.get('codigo_barras'),
         )
-        if por_archivo:
-            prod['imagen_url'] = por_archivo
-            continue
-        pendientes.append(prod)
-
-    if not pendientes:
-        return productos
-
-    mapa_codigos = mapa_imagenes_por_codigos(
-        [p.get('codigo_barras') for p in pendientes]
-    )
-    sin_codigo = [
-        p for p in pendientes
-        if not mapa_codigos.get(normalizar_codigo_barras(p.get('codigo_barras')))
-    ]
-    mapa_nombres = mapa_imagenes_por_nombres(
-        [p.get('nombre') for p in sin_codigo]
-    )
-
-    for prod in pendientes:
-        codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
-        url = mapa_codigos.get(codigo) if codigo else None
-        if not url:
-            url = mapa_nombres.get(normalizar_nombre_producto(prod.get('nombre')))
-        prod['imagen_url'] = url
-        if persistir and url:
-            persistir_imagen_rescatada(url, prod.get('codigo_barras'), prod.get('nombre'))
-
     return productos
 
 
 def asociar_imagenes_inventario(comercio_id):
-    """Tras un CSV: reutiliza fotos del catálogo y encola búsqueda web del resto."""
+    """Tras CSV: normaliza URLs ya importadas. No encola búsquedas ni adivina imágenes."""
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
@@ -350,14 +187,5 @@ def asociar_imagenes_inventario(comercio_id):
         print(f'Error al leer productos para asociar imágenes: {error}')
         return 0
 
-    aplicar_respaldo_imagenes(productos, persistir=True)
-
-    pendientes = [
-        prod for prod in productos
-        if not url_imagen_usable(prod.get('imagen_url'))
-    ]
-    if pendientes:
-        from backend.image_batch import encolar_procesamiento_imagenes
-
-        encolar_procesamiento_imagenes(comercio_id, pendientes)
+    aplicar_respaldo_imagenes(productos)
     return len(productos)

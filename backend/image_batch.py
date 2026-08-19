@@ -32,8 +32,6 @@ def procesar_imagenes_productos_en_lote(comercio_id, productos_info):
         prod_id = prod['id']
         imagen_url = texto_campo_imagen(prod.get('imagen_url'), default='')
 
-        if url_imagen_usable(imagen_url) and imagen_url.startswith('/static/'):
-            continue
         if url_imagen_usable(imagen_url) and imagen_url.startswith(('http://', 'https://')):
             tareas.append({
                 'tipo': 'url',
@@ -41,15 +39,7 @@ def procesar_imagenes_productos_en_lote(comercio_id, productos_info):
                 'producto_id': prod_id,
                 'prefijo': f'prod_{comercio_id}',
             })
-        else:
-            tareas.append({
-                'tipo': 'buscar',
-                'producto_id': prod_id,
-                'nombre': prod.get('nombre', ''),
-                'codigo_barras': prod.get('codigo_barras'),
-                'descripcion': prod.get('descripcion'),
-                'prefijo': f'prod_{comercio_id}',
-            })
+        # Sin URL explícita: no adivinar ni buscar por nombre/código.
 
     if not tareas:
         return 0

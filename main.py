@@ -63,7 +63,7 @@ from backend.admin import (
 from backend.auth import obtener_o_crear_usuario_google
 from backend.diagnostics import ejecutar_diagnostico_inicio, obtener_estado_sistema
 from backend.error_handlers import registrar_manejadores_errores
-from backend.image_lookup import aplicar_respaldo_imagenes, resolver_imagen_producto
+from backend.image_lookup import aplicar_respaldo_imagenes, obtener_imagen_url_producto
 from backend.db import get_db_connection
 from database import init_db, normalize_database_url
 from backend.plans import PLANES, MENSAJE_LIMITE_PRODUCTOS, es_limite_ilimitado, obtener_beneficios_plan
@@ -295,7 +295,7 @@ def procesar_logo_comercio(file_storage, prefijo):
 def procesar_imagen_para_producto(
     file_storage, codigo_barras, nombre, descripcion, comercio_id
 ):
-    """Prioridad: archivo subido > catálogo por código de barras > búsqueda web."""
+    """Prioridad: Supabase Storage (subida manual). Sin adivinar por nombre."""
     if file_storage and getattr(file_storage, 'filename', ''):
         url = procesar_imagen_subida(
             file_storage,
@@ -304,18 +304,7 @@ def procesar_imagen_para_producto(
         )
         if url:
             return url
-
-    try:
-        return resolver_imagen_producto(
-            imagen_url=None,
-            codigo_barras=codigo_barras,
-            nombre=nombre,
-            descripcion=descripcion,
-            buscar_web=True,
-        )
-    except Exception as e:
-        print(f'Error al buscar imagen automática: {e}')
-        return None
+    return None
 
 
 def login_requerido(f):
@@ -459,20 +448,11 @@ def api_producto(producto_id):
 
 @app.route('/imagen-producto')
 def imagen_producto_respaldo():
-    """Respaldo por código de barras/SKU/nombre cuando la foto principal falla."""
-    codigo = normalizar_codigo_barras(request.args.get('codigo'))
-    nombre = (request.args.get('nombre') or '').strip() or None
-    excluir = (request.args.get('excluir') or '').strip() or None
-    buscar_web = request.args.get('web') == '1'
-
-    url = resolver_imagen_producto(
-        imagen_url=None,
-        codigo_barras=codigo,
-        nombre=nombre,
-        buscar_web=buscar_web,
-        excluir_url=excluir,
-        persistir=True,
-    )
+    """Devuelve la URL exacta guardada en BD para un producto (sin cruzar catálogo)."""
+    producto_id = request.args.get('producto_id', type=int)
+    if not producto_id:
+        return ('', 404)
+    url = obtener_imagen_url_producto(producto_id)
     if url:
         return redirect(url)
     return ('', 404)
@@ -932,14 +912,6 @@ def editar_producto(producto_id):
                         return redirect(
                             url_for('editar_producto', producto_id=producto_id)
                         )
-                elif not url_imagen_usable(imagen_url):
-                    imagen_url = procesar_imagen_para_producto(
-                        None,
-                        codigo_barras,
-                        nombre,
-                        descripcion,
-                        comercio_id=comercio_id,
-                    )
 
                 cursor.execute(
                     '''

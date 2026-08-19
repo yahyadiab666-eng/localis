@@ -108,12 +108,8 @@
           <div class="card-producto-mobile rounded-xl overflow-hidden bg-white shadow border border-stone-100">
             <div class="h-36 bg-gray-100">
               {% set img_prod = producto.imagen_url %}
-              {% if not img_prod and (producto.codigo_barras or producto.nombre) %}
-                {% set img_prod = url_for('imagen_producto_respaldo', codigo=producto.codigo_barras or '', nombre=producto.nombre or '') %}
-              {% endif %}
               <img src="{{ img_prod or '' }}" alt="{{ producto.nombre }}"
-                   data-codigo="{{ producto.codigo_barras or '' }}"
-                   data-nombre="{{ producto.nombre or '' }}"
+                   data-producto-id="{{ producto.id }}"
                    class="w-full h-full object-cover" loading="lazy"
                    onerror="if(window.rescatarImagenProducto){rescatarImagenProducto(this)}else{this.onerror=null;this.removeAttribute('src')}">
             </div>

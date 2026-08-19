@@ -206,16 +206,8 @@ def procesar_tarea_imagen(tarea):
             url = url_externa
 
     elif tipo == 'buscar':
-        from backend.image_lookup import resolver_imagen_producto
-
-        url = resolver_imagen_producto(
-            imagen_url=tarea.get('url'),
-            codigo_barras=tarea.get('codigo_barras'),
-            nombre=tarea.get('nombre', ''),
-            descripcion=tarea.get('descripcion'),
-            buscar_web=True,
-            persistir=False,
-        )
+        # Deshabilitado: no asignar imágenes por búsqueda genérica.
+        url = None
 
     return {'producto_id': producto_id, 'url': url}
 

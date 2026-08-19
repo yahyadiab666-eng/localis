@@ -106,40 +106,13 @@ def buscar_openfoodfacts_barcode(codigo: str) -> str:
 
 
 def obtener_url_imagen_automatica(nombre: str = None, codigo_barras: str = None, descripcion: str = None, modo_rapido: bool = False, **kwargs) -> str:
-    """Búsqueda en cascada: código de barras → nombre. No usa imagen genérica."""
+    """
+    Solo consulta OpenFoodFacts por EAN exacto.
+    No usa Bing ni búsqueda por nombre para evitar imágenes incorrectas.
+    """
     from backend.utils import normalizar_codigo_barras
 
     codigo = normalizar_codigo_barras(codigo_barras)
     if codigo:
-        url_ean = buscar_openfoodfacts_barcode(codigo)
-        if url_ean:
-            return url_ean
-        url_bing_ean = buscar_bing_imagenes(f"{codigo} producto")
-        if url_bing_ean:
-            return url_bing_ean
-
-    nombre_limpio = limpiar_nombre_producto(nombre)
-    opciones_busqueda = [nombre_limpio]
-    if nombre and nombre.strip() and nombre.strip() not in opciones_busqueda:
-        opciones_busqueda.append(nombre.strip())
-    if descripcion:
-        desc = limpiar_nombre_producto(descripcion)
-        if desc and desc not in opciones_busqueda:
-            opciones_busqueda.append(desc)
-
-    for q in opciones_busqueda:
-        if not q:
-            continue
-
-        url_bing = buscar_bing_imagenes(f"{q} producto")
-        if url_bing:
-            return url_bing
-
-        url_off = buscar_openfoodfacts_texto(q)
-        if url_off:
-            return url_off
-
-        if not modo_rapido:
-            time.sleep(0.3)
-
+        return buscar_openfoodfacts_barcode(codigo)
     return None
