@@ -227,6 +227,15 @@ def _normalizar_imagenes_comercio(comercio):
     ):
         if comercio.get(campo) is not None:
             comercio[campo] = formatear_fecha(comercio[campo])
+
+    visible = comercio.get('visible', 1)
+    if isinstance(visible, bool):
+        comercio['visible'] = 1 if visible else 0
+    else:
+        try:
+            comercio['visible'] = int(visible)
+        except (TypeError, ValueError):
+            comercio['visible'] = 1
     return comercio
 
 
@@ -594,12 +603,16 @@ def panel_comercio():
 
         productos = []
         for p in productos_db:
+            try:
+                precio_usd = float(p['precio_usd'] or 0)
+            except (TypeError, ValueError):
+                precio_usd = 0.0
             productos.append({
                 'id': p['id'],
                 'nombre': p['nombre'],
                 'descripcion': p['descripcion'] or 'Sin descripción',
-                'precio_usd': p['precio_usd'],
-                'precio_bs': round(p['precio_usd'] * tasa_actual, 2),
+                'precio_usd': precio_usd,
+                'precio_bs': round(precio_usd * tasa_actual, 2),
                 'codigo_barras': p['codigo_barras'] or 'Sin código',
                 'imagen_url': p['imagen_url'] or '/static/images/default-product.webp',
             })
@@ -816,24 +829,22 @@ def nuevo_producto():
             return redirect(url_for('nuevo_producto'))
 
         try:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                '''
-                INSERT INTO productos (comercio_id, nombre, descripcion, precio_usd, codigo_barras, imagen_url)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ''',
-                (
-                    comercio['id'],
-                    nombre,
-                    descripcion,
-                    float(precio_usd),
-                    codigo_barras,
-                    imagen_url,
-                ),
-            )
-            conn.commit()
-            conn.close()
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    '''
+                    INSERT INTO productos (comercio_id, nombre, descripcion, precio_usd, codigo_barras, imagen_url)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ''',
+                    (
+                        comercio['id'],
+                        nombre,
+                        descripcion,
+                        float(precio_usd),
+                        codigo_barras,
+                        imagen_url,
+                    ),
+                )
             flash('Producto agregado con éxito.', 'exito')
             return redirect(url_for('panel_comercio'))
         except Exception as e:
@@ -865,62 +876,72 @@ def editar_producto(producto_id):
         codigo_barras = request.form.get('codigo_barras')
         imagen_archivo = request.files.get('imagen')
 
-        conn = get_db_connection(row_factory=sqlite3.Row)
-        cursor = conn.cursor()
-        cursor.execute(
-            'SELECT imagen_url FROM productos WHERE id = ? AND comercio_id = ?',
-            (producto_id, comercio_id),
-        )
-        prod_previo = cursor.fetchone()
-        imagen_url = prod_previo['imagen_url'] if prod_previo else None
-
-        if imagen_archivo and getattr(imagen_archivo, 'filename', ''):
-            try:
-                imagen_url = procesar_imagen_para_producto(
-                    imagen_archivo,
-                    codigo_barras,
-                    nombre,
-                    descripcion,
-                    comercio_id=comercio_id,
+        try:
+            with get_db_connection(row_factory=sqlite3.Row) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'SELECT imagen_url FROM productos WHERE id = ? AND comercio_id = ?',
+                    (producto_id, comercio_id),
                 )
-            except SupabaseUploadError as error:
-                flash(str(error), 'error')
-                return redirect(url_for('editar_producto', producto_id=producto_id))
-        elif not imagen_url or imagen_url == '/static/images/default-product.webp':
-            imagen_url = procesar_imagen_para_producto(
-                None, codigo_barras, nombre, descripcion, comercio_id=comercio_id
+                prod_previo = cursor.fetchone()
+                imagen_url = prod_previo['imagen_url'] if prod_previo else None
+
+                if imagen_archivo and getattr(imagen_archivo, 'filename', ''):
+                    try:
+                        imagen_url = procesar_imagen_para_producto(
+                            imagen_archivo,
+                            codigo_barras,
+                            nombre,
+                            descripcion,
+                            comercio_id=comercio_id,
+                        )
+                    except SupabaseUploadError as error:
+                        flash(str(error), 'error')
+                        return redirect(
+                            url_for('editar_producto', producto_id=producto_id)
+                        )
+                elif not imagen_url or imagen_url == '/static/images/default-product.webp':
+                    imagen_url = procesar_imagen_para_producto(
+                        None,
+                        codigo_barras,
+                        nombre,
+                        descripcion,
+                        comercio_id=comercio_id,
+                    )
+
+                cursor.execute(
+                    '''
+                    UPDATE productos
+                    SET nombre = ?, precio_usd = ?, descripcion = ?, codigo_barras = ?, imagen_url = ?
+                    WHERE id = ? AND comercio_id = ?
+                    ''',
+                    (
+                        nombre,
+                        precio_usd,
+                        descripcion,
+                        codigo_barras,
+                        imagen_url,
+                        producto_id,
+                        comercio_id,
+                    ),
+                )
+            flash('Producto actualizado con éxito.', 'exito')
+            return redirect(url_for('panel_comercio'))
+        except Exception as error:
+            flash(f'Error al actualizar producto: {error}', 'error')
+            return redirect(url_for('editar_producto', producto_id=producto_id))
+
+    try:
+        with get_db_connection(row_factory=sqlite3.Row) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT * FROM productos WHERE id = ? AND comercio_id = ?',
+                (producto_id, comercio_id),
             )
-
-        cursor.execute(
-            '''
-            UPDATE productos
-            SET nombre = ?, precio_usd = ?, descripcion = ?, codigo_barras = ?, imagen_url = ?
-            WHERE id = ? AND comercio_id = ?
-            ''',
-            (
-                nombre,
-                precio_usd,
-                descripcion,
-                codigo_barras,
-                imagen_url,
-                producto_id,
-                comercio_id,
-            ),
-        )
-        conn.commit()
-        conn.close()
-
-        flash('Producto actualizado con éxito.', 'exito')
+            producto_row = cursor.fetchone()
+    except Exception as error:
+        flash(f'Error al cargar el producto: {error}', 'error')
         return redirect(url_for('panel_comercio'))
-
-    conn = get_db_connection(row_factory=sqlite3.Row)
-    cursor = conn.cursor()
-    cursor.execute(
-        'SELECT * FROM productos WHERE id = ? AND comercio_id = ?',
-        (producto_id, comercio_id),
-    )
-    producto_row = cursor.fetchone()
-    conn.close()
 
     if not producto_row:
         flash('El producto no existe o no tienes permiso para modificarlo.', 'error')

@@ -3,7 +3,10 @@
 import os
 import re
 import time
+from datetime import date, datetime, time as time_of_day
+from decimal import Decimal
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from uuid import UUID
 
 import psycopg2
 from psycopg2 import OperationalError, pool
@@ -277,6 +280,51 @@ def _adapt_sql(query):
     return sql
 
 
+def _valor_python(valor):
+    """Convierte tipos nativos de PostgreSQL a valores serializables y subscriptables."""
+    if valor is None:
+        return None
+    if isinstance(valor, datetime):
+        if (
+            valor.hour == 0
+            and valor.minute == 0
+            and valor.second == 0
+            and valor.microsecond == 0
+        ):
+            return valor.strftime('%Y-%m-%d')
+        return valor.strftime('%Y-%m-%d %H:%M:%S')
+    if isinstance(valor, date):
+        return valor.strftime('%Y-%m-%d')
+    if isinstance(valor, time_of_day):
+        return valor.strftime('%H:%M:%S')
+    if isinstance(valor, Decimal):
+        return float(valor)
+    if isinstance(valor, UUID):
+        return str(valor)
+    if isinstance(valor, memoryview):
+        return bytes(valor)
+    return valor
+
+
+def _normalizar_fila(fila):
+    """Dict o tupla con tipos ya adaptados para plantillas, JSON y [.get]/[:]."""
+    if fila is None:
+        return None
+    if isinstance(fila, dict):
+        return {clave: _valor_python(valor) for clave, valor in fila.items()}
+    return tuple(_valor_python(valor) for valor in fila)
+
+
+def fila_a_dict(fila):
+    """Normaliza una fila de cursor a dict plano (o None)."""
+    normalizada = _normalizar_fila(fila)
+    if normalizada is None:
+        return None
+    if isinstance(normalizada, dict):
+        return normalizada
+    return None
+
+
 class _PgCursor:
     def __init__(self, cursor):
         self._cursor = cursor
@@ -292,10 +340,10 @@ class _PgCursor:
         return self
 
     def fetchone(self):
-        return self._cursor.fetchone()
+        return _normalizar_fila(self._cursor.fetchone())
 
     def fetchall(self):
-        return self._cursor.fetchall()
+        return [_normalizar_fila(fila) for fila in self._cursor.fetchall()]
 
     @property
     def rowcount(self):

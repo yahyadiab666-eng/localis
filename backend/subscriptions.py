@@ -13,6 +13,7 @@ from backend.plans import (
     limite_desde_plan_id,
     limite_para_plan,
 )
+from backend.utils import formatear_fecha
 
 def verificar_vencimientos_comercios():
     """
@@ -162,23 +163,26 @@ def puede_agregar_producto(comercio_id, cantidad_nueva=1):
 def _fecha_vencida(fecha_vencimiento):
     if not fecha_vencimiento:
         return False
-    try:
-        venc = datetime.strptime(str(fecha_vencimiento)[:10], '%Y-%m-%d').date()
-        return venc < datetime.now().date()
-    except ValueError:
-        return False
+        try:
+            texto = formatear_fecha(fecha_vencimiento)
+            if not texto:
+                return False
+            venc = datetime.strptime(texto, '%Y-%m-%d').date()
+            return venc < datetime.now().date()
+        except (TypeError, ValueError):
+            return False
 
 
 def _calcular_fecha_fin_prueba(comercio):
     """Fecha de vencimiento del periodo de prueba (30 días)."""
-    fecha_venc = comercio.get('fecha_vencimiento')
+    fecha_venc = formatear_fecha(comercio.get('fecha_vencimiento'))
     if fecha_venc:
-        return str(fecha_venc)[:10]
+        return fecha_venc
 
-    fecha_reg = comercio.get('fecha_registro')
+    fecha_reg = formatear_fecha(comercio.get('fecha_registro'))
     if fecha_reg:
         try:
-            reg = datetime.strptime(str(fecha_reg)[:10], '%Y-%m-%d').date()
+            reg = datetime.strptime(fecha_reg, '%Y-%m-%d').date()
             return (reg + timedelta(days=30)).strftime('%Y-%m-%d')
         except ValueError:
             pass
@@ -281,10 +285,10 @@ def _calcular_nueva_fecha_vencimiento(fecha_vencimiento_actual, dias=30):
     if fecha_vencimiento_actual:
         try:
             vencimiento = datetime.strptime(
-                str(fecha_vencimiento_actual)[:10], '%Y-%m-%d'
+                formatear_fecha(fecha_vencimiento_actual), '%Y-%m-%d'
             ).date()
             base = max(hoy, vencimiento)
-        except ValueError:
+        except (TypeError, ValueError):
             pass
     return (base + timedelta(days=dias)).strftime('%Y-%m-%d')
 

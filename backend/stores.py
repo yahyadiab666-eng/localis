@@ -81,7 +81,7 @@ def _construir_filtro_palabras(palabra_clave):
 
     for palabra in palabras:
         like = f'%{palabra}%'
-        sub = ' OR '.join(f'{campo} LIKE ?' for campo in campos)
+        sub = ' OR '.join(f'{campo} ILIKE ?' for campo in campos)
         condiciones.append(f'({sub})')
         parametros.extend([like] * len(campos))
 
@@ -269,7 +269,7 @@ def buscar_y_filtrar_comercios(
             parametros = []
 
             if palabra_clave:
-                query += ' AND (c.nombre LIKE ? OR c.descripcion LIKE ? OR c.ciudad LIKE ? OR c.zona LIKE ?)'
+                query += ' AND (c.nombre ILIKE ? OR c.descripcion ILIKE ? OR c.ciudad ILIKE ? OR c.zona ILIKE ?)'
                 like = f'%{palabra_clave}%'
                 parametros.extend([like, like, like, like])
 
@@ -342,9 +342,12 @@ def buscar_y_filtrar_productos(
             productos = []
             for fila in filas:
                 d = dict(fila)
-                d['precio_bs'] = (
-                    round(d['precio_usd'] * tasa, 2) if d.get('precio_usd') else 0.0
-                )
+                try:
+                    precio = float(d.get('precio_usd') or 0)
+                except (TypeError, ValueError):
+                    precio = 0.0
+                d['precio_usd'] = precio
+                d['precio_bs'] = round(precio * tasa, 2)
                 productos.append(d)
 
             return productos
@@ -374,7 +377,12 @@ def obtener_producto_publico(producto_id):
             if not fila:
                 return None
             d = dict(fila)
-            d['precio_bs'] = round(d['precio_usd'] * tasa, 2)
+            try:
+                precio = float(d.get('precio_usd') or 0)
+            except (TypeError, ValueError):
+                precio = 0.0
+            d['precio_usd'] = precio
+            d['precio_bs'] = round(precio * tasa, 2)
             return d
     except Exception as e:
         print(f'Error al obtener producto público: {e}')

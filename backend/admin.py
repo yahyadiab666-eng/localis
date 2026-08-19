@@ -351,10 +351,10 @@ def obtener_todos_comercios_admin(busqueda=None):
             if busqueda:
                 termino = f'%{busqueda.strip()}%'
                 query += """
-                    WHERE c.nombre LIKE ?
-                       OR u.correo LIKE ?
-                       OR c.documento_identidad LIKE ?
-                       OR c.telefono LIKE ?
+                    WHERE c.nombre ILIKE ?
+                       OR u.correo ILIKE ?
+                       OR c.documento_identidad ILIKE ?
+                       OR c.telefono ILIKE ?
                 """
                 parametros.extend([termino, termino, termino, termino])
 
