@@ -4,14 +4,15 @@ import threading
 
 from backend.db import get_db_connection
 from backend.images import procesar_imagenes_paralelo
-from backend.utils import DEFAULT_IMAGEN_PRODUCTO, texto_campo_imagen
+from backend.utils import texto_campo_imagen, url_imagen_usable
 
 IMAGEN_PENDIENTE = '__PENDING__'
-DEFAULT_IMAGEN = DEFAULT_IMAGEN_PRODUCTO
 
 
 def _actualizar_imagen_producto(producto_id, url):
-    url = texto_campo_imagen(url, default=DEFAULT_IMAGEN)
+    url = texto_campo_imagen(url, default=None)
+    if not url_imagen_usable(url):
+        return
     with get_db_connection() as conexion:
         cursor = conexion.cursor()
         cursor.execute(
@@ -31,9 +32,9 @@ def procesar_imagenes_productos_en_lote(comercio_id, productos_info):
         prod_id = prod['id']
         imagen_url = texto_campo_imagen(prod.get('imagen_url'), default='')
 
-        if imagen_url and imagen_url not in (IMAGEN_PENDIENTE, '', 'None'):
-            if imagen_url.startswith('/static/') and 'default-product' not in imagen_url:
-                continue
+        if url_imagen_usable(imagen_url) and imagen_url.startswith('/static/'):
+            continue
+        if url_imagen_usable(imagen_url) and imagen_url.startswith(('http://', 'https://')):
             tareas.append({
                 'tipo': 'url',
                 'url': imagen_url,

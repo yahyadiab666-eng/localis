@@ -7,6 +7,34 @@
 
   const ALERTA_DURACION_MS = 4000;
 
+  window.urlImagenRespaldoProducto = function urlImagenRespaldoProducto(codigo, nombre, excluir) {
+    var params = new URLSearchParams();
+    if (codigo) params.set('codigo', codigo);
+    if (nombre) params.set('nombre', nombre);
+    if (excluir) params.set('excluir', excluir);
+    return '/imagen-producto?' + params.toString();
+  };
+
+  window.rescatarImagenProducto = function rescatarImagenProducto(img) {
+    if (!img) return;
+    var actual = img.currentSrc || img.getAttribute('src') || '';
+    if (img.dataset.rescate === '1' || actual.indexOf('/imagen-producto') !== -1) {
+      img.onerror = null;
+      img.removeAttribute('src');
+      img.style.visibility = 'hidden';
+      return;
+    }
+    var codigo = (img.getAttribute('data-codigo') || '').trim();
+    var nombre = (img.getAttribute('data-nombre') || '').trim();
+    if (!codigo && !nombre) {
+      img.onerror = null;
+      img.removeAttribute('src');
+      return;
+    }
+    img.dataset.rescate = '1';
+    img.src = window.urlImagenRespaldoProducto(codigo, nombre, actual);
+  };
+
   function obtenerCsrfToken() {
     const meta = document.querySelector('meta[name="csrf-token"]');
     if (meta) return meta.getAttribute('content');

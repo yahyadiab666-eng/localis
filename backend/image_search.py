@@ -80,24 +80,61 @@ def buscar_openfoodfacts_texto(query: str) -> str:
     return None
 
 
-def obtener_url_imagen_automatica(nombre: str, codigo_barras: str = None, descripcion: str = None, modo_rapido: bool = False, **kwargs) -> str:
-    """Función principal de búsqueda rápida en cascada."""
-    if not nombre:
-        return "/static/images/default-product.webp"
+def buscar_openfoodfacts_barcode(codigo: str) -> str:
+    """Consulta OpenFoodFacts por EAN/UPC (más precisa que el nombre)."""
+    if not codigo:
+        return None
+    try:
+        url = f"https://world.openfoodfacts.org/api/v0/product/{quote(codigo)}.json"
+        res = requests.get(url, headers={"User-Agent": "LocalisApp/1.0"}, timeout=4)
+        if res.status_code != 200:
+            return None
+        data = res.json()
+        if str(data.get('status')) != '1':
+            return None
+        producto = data.get('product') or {}
+        img = (
+            producto.get('image_front_url')
+            or producto.get('image_url')
+            or producto.get('image_front_small_url')
+        )
+        if img:
+            return optimizar_url_imagen(img)
+    except Exception:
+        pass
+    return None
+
+
+def obtener_url_imagen_automatica(nombre: str = None, codigo_barras: str = None, descripcion: str = None, modo_rapido: bool = False, **kwargs) -> str:
+    """Búsqueda en cascada: código de barras → nombre. No usa imagen genérica."""
+    from backend.utils import normalizar_codigo_barras
+
+    codigo = normalizar_codigo_barras(codigo_barras)
+    if codigo:
+        url_ean = buscar_openfoodfacts_barcode(codigo)
+        if url_ean:
+            return url_ean
+        url_bing_ean = buscar_bing_imagenes(f"{codigo} producto")
+        if url_bing_ean:
+            return url_bing_ean
 
     nombre_limpio = limpiar_nombre_producto(nombre)
-    opciones_busqueda = [nombre_limpio, nombre.strip()]
+    opciones_busqueda = [nombre_limpio]
+    if nombre and nombre.strip() and nombre.strip() not in opciones_busqueda:
+        opciones_busqueda.append(nombre.strip())
+    if descripcion:
+        desc = limpiar_nombre_producto(descripcion)
+        if desc and desc not in opciones_busqueda:
+            opciones_busqueda.append(desc)
 
     for q in opciones_busqueda:
         if not q:
             continue
-        
-        # 1. Bing Images (Respuesta inmediata para marcas comerciales)
+
         url_bing = buscar_bing_imagenes(f"{q} producto")
         if url_bing:
             return url_bing
 
-        # 2. OpenFoodFacts
         url_off = buscar_openfoodfacts_texto(q)
         if url_off:
             return url_off
@@ -105,4 +142,4 @@ def obtener_url_imagen_automatica(nombre: str, codigo_barras: str = None, descri
         if not modo_rapido:
             time.sleep(0.3)
 
-    return "/static/images/default-product.webp"
+    return None

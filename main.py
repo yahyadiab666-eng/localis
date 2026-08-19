@@ -61,7 +61,7 @@ from backend.admin import (
     suspender_comercio_temporal,
 )
 from backend.auth import obtener_o_crear_usuario_google
-from backend.image_search import obtener_url_imagen_automatica
+from backend.image_lookup import aplicar_respaldo_imagenes, resolver_imagen_producto
 from backend.db import get_db_connection
 from database import init_db, normalize_database_url
 from backend.plans import PLANES, MENSAJE_LIMITE_PRODUCTOS, es_limite_ilimitado, obtener_beneficios_plan
@@ -82,8 +82,9 @@ from backend.subscriptions import (
 )
 from backend.utils import (
     formatear_fecha,
+    normalizar_codigo_barras,
     normalizar_telefono_whatsapp,
-    normalizar_url_imagen,
+    url_imagen_usable,
     url_maps_comercio,
     url_whatsapp_comercio,
 )
@@ -115,7 +116,7 @@ app.secret_key = os.environ.get(
 app.config['SUPABASE_CLIENT'] = supabase
 app.config['SUPABASE_BUCKET_IMAGENES'] = SUPABASE_BUCKET_IMAGENES
 app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_BYTES
-os.makedirs(os.path.join(BASE_DIR, 'static', 'images'), exist_ok=True)
+os.makedirs(os.path.join(BASE_DIR, 'static', 'images', 'productos'), exist_ok=True)
 
 csrf = CSRFProtect(app)
 
@@ -287,7 +288,7 @@ def procesar_logo_comercio(file_storage, prefijo):
 def procesar_imagen_para_producto(
     file_storage, codigo_barras, nombre, descripcion, comercio_id
 ):
-    """Prioridad: Supabase Storage > búsqueda automática > imagen default."""
+    """Prioridad: archivo subido > catálogo por código de barras > búsqueda web."""
     if file_storage and getattr(file_storage, 'filename', ''):
         url = procesar_imagen_subida(
             file_storage,
@@ -298,15 +299,16 @@ def procesar_imagen_para_producto(
             return url
 
     try:
-        url_externa = obtener_url_imagen_automatica(
-            codigo_barras, nombre, descripcion
+        return resolver_imagen_producto(
+            imagen_url=None,
+            codigo_barras=codigo_barras,
+            nombre=nombre,
+            descripcion=descripcion,
+            buscar_web=True,
         )
-        if url_externa:
-            return url_externa
     except Exception as e:
         print(f'Error al buscar imagen automática: {e}')
-
-    return '/static/images/default-product.webp'
+        return None
 
 
 def login_requerido(f):
@@ -446,6 +448,27 @@ def api_producto(producto_id):
     if not producto:
         return jsonify({'error': 'Producto no encontrado'}), 404
     return jsonify(producto)
+
+
+@app.route('/imagen-producto')
+def imagen_producto_respaldo():
+    """Respaldo por código de barras/SKU/nombre cuando la foto principal falla."""
+    codigo = normalizar_codigo_barras(request.args.get('codigo'))
+    nombre = (request.args.get('nombre') or '').strip() or None
+    excluir = (request.args.get('excluir') or '').strip() or None
+    buscar_web = request.args.get('web') == '1'
+
+    url = resolver_imagen_producto(
+        imagen_url=None,
+        codigo_barras=codigo,
+        nombre=nombre,
+        buscar_web=buscar_web,
+        excluir_url=excluir,
+        persistir=True,
+    )
+    if url:
+        return redirect(url)
+    return ('', 404)
 
 
 @app.route('/tienda/<int:comercio_id>')
@@ -614,9 +637,10 @@ def panel_comercio():
                 'descripcion': p['descripcion'] or 'Sin descripción',
                 'precio_usd': precio_usd,
                 'precio_bs': round(precio_usd * tasa_actual, 2),
-                'codigo_barras': p['codigo_barras'] or 'Sin código',
-                'imagen_url': normalizar_url_imagen(p.get('imagen_url')),
+                'codigo_barras': p['codigo_barras'] or '',
+                'imagen_url': p.get('imagen_url'),
             })
+        aplicar_respaldo_imagenes(productos)
 
         comercio = _normalizar_imagenes_comercio(dict(comercio_db))
 
@@ -802,7 +826,7 @@ def nuevo_producto():
         nombre = request.form.get('nombre')
         descripcion = request.form.get('descripcion')
         precio_usd = request.form.get('precio_usd')
-        codigo_barras = request.form.get('codigo_barras')
+        codigo_barras = normalizar_codigo_barras(request.form.get('codigo_barras'))
         imagen_archivo = request.files.get('imagen')
 
         if not nombre or not precio_usd:
@@ -874,7 +898,7 @@ def editar_producto(producto_id):
         nombre = request.form.get('nombre')
         precio_usd = request.form.get('precio_usd')
         descripcion = request.form.get('descripcion')
-        codigo_barras = request.form.get('codigo_barras')
+        codigo_barras = normalizar_codigo_barras(request.form.get('codigo_barras'))
         imagen_archivo = request.files.get('imagen')
 
         try:
@@ -901,7 +925,7 @@ def editar_producto(producto_id):
                         return redirect(
                             url_for('editar_producto', producto_id=producto_id)
                         )
-                elif not imagen_url or imagen_url == '/static/images/default-product.webp':
+                elif not url_imagen_usable(imagen_url):
                     imagen_url = procesar_imagen_para_producto(
                         None,
                         codigo_barras,
@@ -1072,7 +1096,7 @@ def api_crear_producto():
     nombre = (request.form.get('nombre') or '').strip()
     descripcion = (request.form.get('descripcion') or '').strip()
     precio_raw = request.form.get('precio_usd')
-    codigo_barras = (request.form.get('codigo_barras') or '').strip() or None
+    codigo_barras = normalizar_codigo_barras(request.form.get('codigo_barras'))
     imagen_archivo = request.files.get('imagen')
 
     if not nombre or not precio_raw:

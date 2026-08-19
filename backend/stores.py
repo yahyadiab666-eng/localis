@@ -4,7 +4,8 @@ import sqlite3
 import psycopg2
 
 from backend.db import get_db_connection
-from backend.utils import DEFAULT_IMAGEN_PRODUCTO as DEFAULT_IMAGEN, normalizar_url_imagen
+from backend.image_lookup import EXPR_CODIGO_BARRAS, aplicar_respaldo_imagenes, asociar_imagenes_inventario
+from backend.utils import normalizar_codigo_barras
 from backend.inventory_import import (
     cargar_archivo_inventario,
     detectar_mapeo_columnas,
@@ -56,10 +57,6 @@ def obtener_config(clave, default=None):
         return default
 
 
-def _normalizar_imagen_url(img):
-    return normalizar_url_imagen(img, default=DEFAULT_IMAGEN)
-
-
 def _construir_filtro_palabras(palabra_clave):
     """Genera condiciones LIKE por cada palabra del término de búsqueda."""
     if not palabra_clave:
@@ -78,10 +75,18 @@ def _construir_filtro_palabras(palabra_clave):
     for palabra in palabras:
         like = f'%{palabra}%'
         sub = ' OR '.join(f'{campo} ILIKE ?' for campo in campos)
+        codigo_palabra = normalizar_codigo_barras(palabra) or palabra
+        sub += f' OR {EXPR_CODIGO_BARRAS} ILIKE ?'
         condiciones.append(f'({sub})')
         parametros.extend([like] * len(campos))
+        parametros.append(f'%{codigo_palabra}%')
 
-    return ' AND '.join(condiciones), parametros
+    filtro = ' AND '.join(condiciones)
+    codigo_completo = normalizar_codigo_barras(palabra_clave)
+    if codigo_completo:
+        filtro = f'(({filtro}) OR {EXPR_CODIGO_BARRAS} = ?)'
+        parametros.append(codigo_completo)
+    return filtro, parametros
 
 
 # ==========================================
@@ -344,10 +349,9 @@ def buscar_y_filtrar_productos(
                     precio = 0.0
                 d['precio_usd'] = precio
                 d['precio_bs'] = round(precio * tasa, 2)
-                d['imagen_url'] = _normalizar_imagen_url(d.get('imagen_url'))
                 productos.append(d)
 
-            return productos
+            return aplicar_respaldo_imagenes(productos)
     except Exception as e:
         print(f'Error en la búsqueda de productos: {str(e)}')
         return []
@@ -380,7 +384,7 @@ def obtener_producto_publico(producto_id):
                 precio = 0.0
             d['precio_usd'] = precio
             d['precio_bs'] = round(precio * tasa, 2)
-            d['imagen_url'] = _normalizar_imagen_url(d.get('imagen_url'))
+            aplicar_respaldo_imagenes([d])
             return d
     except Exception as e:
         print(f'Error al obtener producto público: {e}')
@@ -406,7 +410,7 @@ def obtener_producto_por_id(producto_id, comercio_id=None):
             if not fila:
                 return None
             producto = dict(fila)
-            producto['imagen_url'] = _normalizar_imagen_url(producto.get('imagen_url'))
+            aplicar_respaldo_imagenes([producto])
             return producto
     except Exception as e:
         print(f'Error al obtener producto: {e}')
@@ -504,7 +508,7 @@ def procesar_csv_productos(comercio_id, archivo_csv):
             mapeo,
             meta,
             tasa_dolar=tasa,
-            imagen_default=DEFAULT_IMAGEN,
+            imagen_default=None,
         )
         if total_validos == 0:
             return False, (
@@ -535,10 +539,11 @@ def procesar_csv_productos(comercio_id, archivo_csv):
                 mapeo,
                 meta,
                 tasa_dolar=tasa,
-                imagen_default=DEFAULT_IMAGEN,
+                imagen_default=None,
             )
 
         insertados = persistir_importacion_por_lotes(comercio_id, _generador_lotes)
+        asociar_imagenes_inventario(comercio_id)
 
         return (
             True,

@@ -206,15 +206,16 @@ def procesar_tarea_imagen(tarea):
             url = url_externa
 
     elif tipo == 'buscar':
-        from backend.image_search import obtener_url_imagen_automatica
+        from backend.image_lookup import resolver_imagen_producto
 
-        url_encontrada = obtener_url_imagen_automatica(
-            nombre=tarea.get('nombre', ''),
+        url = resolver_imagen_producto(
+            imagen_url=tarea.get('url'),
             codigo_barras=tarea.get('codigo_barras'),
+            nombre=tarea.get('nombre', ''),
             descripcion=tarea.get('descripcion'),
-            modo_rapido=True,
+            buscar_web=True,
+            persistir=False,
         )
-        url = url_encontrada or '/static/images/default-product.webp'
 
     return {'producto_id': producto_id, 'url': url}
 

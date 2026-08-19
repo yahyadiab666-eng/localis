@@ -9,7 +9,7 @@ import unicodedata
 import openpyxl
 
 from config import MAX_UPLOAD_BYTES
-from backend.utils import texto_campo_imagen
+from backend.utils import normalizar_codigo_barras, texto_campo_imagen, url_imagen_usable
 
 SINONIMOS_COLUMNA = {
     'nombre': [
@@ -441,16 +441,23 @@ def parsear_fila_inventario(fila, mapeo, meta, tasa_dolar=1.0, imagen_default=No
 
     codigo_barras = None
     if mapeo.get('codigo_barras'):
-        codigo = str(_obtener_valor_celda(fila, mapeo['codigo_barras']) or '').strip()
-        if codigo and codigo.lower() != 'none':
-            codigo_barras = codigo
+        codigo_barras = normalizar_codigo_barras(
+            _obtener_valor_celda(fila, mapeo['codigo_barras'])
+        )
 
-    imagen_url = imagen_default
+    imagen_url = None
     if mapeo.get('imagen_url'):
         imagen_url = texto_campo_imagen(
             _obtener_valor_celda(fila, mapeo['imagen_url']),
-            default=imagen_default,
+            default=None,
         )
+        if imagen_url and not url_imagen_usable(imagen_url):
+            # Archivo local o código usado como nombre de foto; se resuelve después.
+            pass
+        elif not imagen_url:
+            imagen_url = None
+    if not imagen_url:
+        imagen_url = imagen_default if url_imagen_usable(imagen_default) else None
 
     stock = 0
     if mapeo.get('stock'):

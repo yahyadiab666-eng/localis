@@ -71,8 +71,6 @@
     </div>
   </section>
 
-  {% set default_img = url_for('static', filename='images/default-product.webp') %}
-
   <section class="w-full py-14 px-6" style="background: rgb(245, 240, 232);">
     <div class="max-w-6xl mx-auto">
       <h3 class="font-display mb-8 text-[26px] font-bold text-gray-900">
@@ -87,10 +85,16 @@
                  data-producto-id="{{ producto.id }}"
                  onclick="abrirModalProducto({{ producto.id }})">
               <div class="h-40 bg-gray-100 relative overflow-hidden flex items-center justify-center">
-                <img src="{{ producto.imagen_url or default_img }}"
+                {% set img_prod = producto.imagen_url %}
+                {% if not img_prod and (producto.codigo_barras or producto.nombre) %}
+                  {% set img_prod = url_for('imagen_producto_respaldo', codigo=producto.codigo_barras or '', nombre=producto.nombre or '') %}
+                {% endif %}
+                <img src="{{ img_prod or '' }}"
                      alt="{{ producto.nombre }}" loading="lazy" referrerpolicy="no-referrer"
+                     data-codigo="{{ producto.codigo_barras or '' }}"
+                     data-nombre="{{ producto.nombre or '' }}"
                      class="w-full h-full object-cover"
-                     onerror="this.onerror=null;this.src='{{ default_img }}';">
+                     onerror="if(window.rescatarImagenProducto){rescatarImagenProducto(this)}else{this.onerror=null;this.removeAttribute('src')}">
               </div>
               <div class="p-3 flex-grow flex flex-col justify-between">
                 <div>
@@ -149,15 +153,16 @@
   <script>
     lucide.createIcons();
 
-    const defaultImg = "{{ default_img }}";
-
     async function abrirModalProducto(id) {
       try {
         const res = await fetch(`/api/producto/${id}`);
         if (!res.ok) return;
         const p = await res.json();
+        const imgUrl = p.imagen_url || (window.urlImagenRespaldoProducto
+          ? window.urlImagenRespaldoProducto(p.codigo_barras, p.nombre)
+          : '');
 
-        document.getElementById('modal-imagen').style.backgroundImage = `url('${p.imagen_url || defaultImg}')`;
+        document.getElementById('modal-imagen').style.backgroundImage = imgUrl ? `url('${imgUrl}')` : 'none';
         document.getElementById('modal-comercio').textContent = p.comercio_nombre || '';
         document.getElementById('modal-nombre').textContent = p.nombre || '';
         document.getElementById('modal-descripcion').textContent = p.descripcion || 'Sin descripción.';
@@ -181,5 +186,6 @@
     });
   </script>
   <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/localis.js') }}"></script>
 </body>
 </html>

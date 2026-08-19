@@ -27,7 +27,24 @@ _VALORES_IMAGEN_VACIOS = frozenset({
     '-',
     '__pending__',
 })
+_VALORES_CODIGO_VACIOS = frozenset({
+    '',
+    'none',
+    'null',
+    'nan',
+    'n/a',
+    '-',
+    'sin codigo',
+    'sin código',
+    's/c',
+})
 _HYPERLINK_RE = re.compile(r'HYPERLINK\(\s*["\']([^"\']+)["\']', re.IGNORECASE)
+_MARCADORES_IMAGEN_GENERICA = (
+    'default-product',
+    'placeholder',
+    'no-image',
+    'sin-imagen',
+)
 
 
 def _bytes_a_texto(valor):
@@ -57,14 +74,79 @@ def texto_campo_imagen(valor, default=None):
     return texto[:2048] if texto else default
 
 
-def normalizar_url_imagen(valor, default=DEFAULT_IMAGEN_PRODUCTO):
-    """URL usable en <img src>. Conserva http(s) y rutas /static; el resto usa default."""
+def es_imagen_generica(valor):
+    """True si el valor es vacío o un placeholder genérico (no usar como foto real)."""
     texto = texto_campo_imagen(valor, default=None)
     if not texto:
+        return True
+    lower = texto.lower()
+    return any(marca in lower for marca in _MARCADORES_IMAGEN_GENERICA)
+
+
+def url_imagen_usable(valor):
+    """True si hay una URL/ruta real (http o absoluta), no un default genérico."""
+    texto = texto_campo_imagen(valor, default=None)
+    if not texto or es_imagen_generica(texto):
+        return False
+    return texto.startswith(('http://', 'https://', '/'))
+
+
+def normalizar_url_imagen(valor, default=None):
+    """URL usable en <img src>. Conserva http(s) y rutas /; no inyecta default genérico."""
+    texto = texto_campo_imagen(valor, default=None)
+    if not texto or es_imagen_generica(texto):
         return default
     if texto.startswith(('http://', 'https://', '/')):
         return texto
     return default
+
+
+def normalizar_codigo_barras(valor):
+    """Normaliza EAN/SKU desde CSV/Excel/PostgreSQL (espacios, .0, notación científica)."""
+    if valor is None or isinstance(valor, bool):
+        return None
+    if isinstance(valor, int):
+        return str(valor) if valor else None
+    if isinstance(valor, float):
+        if valor != valor:  # NaN
+            return None
+        try:
+            if valor == int(valor):
+                return str(int(valor))
+        except (OverflowError, ValueError):
+            pass
+        texto = str(valor).strip()
+    else:
+        texto_bytes = _bytes_a_texto(valor)
+        texto = (texto_bytes if texto_bytes is not None else str(valor)).strip()
+
+    if not texto:
+        return None
+    if texto.lower() in _VALORES_CODIGO_VACIOS:
+        return None
+
+    if re.fullmatch(r'[+-]?\d+(\.\d+)?[eE][+-]?\d+', texto):
+        try:
+            numero = float(texto)
+            if numero == int(numero):
+                return str(int(numero))
+        except (OverflowError, ValueError):
+            pass
+
+    limpio = re.sub(r'\s+', '', texto)
+    if re.fullmatch(r'\d+\.0+', limpio):
+        limpio = limpio.split('.', 1)[0]
+    return limpio or None
+
+
+def normalizar_nombre_producto(valor):
+    """Nombre comparable (minúsculas, espacios colapsados) para respaldo por título."""
+    if valor is None:
+        return None
+    texto = str(valor).strip().lower()
+    if not texto or texto in _VALORES_CODIGO_VACIOS:
+        return None
+    return ' '.join(texto.split()) or None
 
 
 def normalizar_telefono_whatsapp(telefono):

@@ -279,10 +279,15 @@
                   <tr class="hover:bg-amber-50/30 transition">
                     <td class="py-4 px-6 font-semibold text-gray-900">
                       <div class="flex items-center gap-3">
-                        {% set img_prod = producto.imagen_url or url_for('static', filename='images/default-product.webp') %}
-                        <img src="{{ img_prod }}" alt=""
+                        {% set img_prod = producto.imagen_url %}
+                        {% if not img_prod and (producto.codigo_barras or producto.nombre) %}
+                          {% set img_prod = url_for('imagen_producto_respaldo', codigo=producto.codigo_barras or '', nombre=producto.nombre or '') %}
+                        {% endif %}
+                        <img src="{{ img_prod or '' }}" alt=""
+                             data-codigo="{{ producto.codigo_barras or '' }}"
+                             data-nombre="{{ producto.nombre or '' }}"
                              class="w-10 h-10 rounded-lg object-cover border border-stone-200 bg-stone-50 flex-shrink-0"
-                             onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/default-product.webp') }}';">
+                             onerror="if(window.rescatarImagenProducto){rescatarImagenProducto(this)}else{this.onerror=null;this.removeAttribute('src')}">
                         <span>{{ producto.nombre }}</span>
                       </div>
                     </td>
