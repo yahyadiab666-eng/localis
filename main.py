@@ -92,6 +92,7 @@ from backend.subscriptions import (
 )
 from backend.utils import (
     formatear_fecha,
+    imagen_url_para_persistir,
     normalizar_codigo_barras,
     normalizar_telefono_whatsapp,
     parsear_precio_form,
@@ -898,12 +899,14 @@ def nuevo_producto():
             return redirect(destino)
 
         try:
-            imagen_url = procesar_imagen_para_producto(
-                imagen_archivo,
-                codigo_barras,
-                nombre,
-                descripcion,
-                comercio_id=comercio['id'],
+            imagen_url = imagen_url_para_persistir(
+                procesar_imagen_para_producto(
+                    imagen_archivo,
+                    codigo_barras,
+                    nombre,
+                    descripcion,
+                    comercio_id=comercio['id'],
+                )
             )
         except SupabaseUploadError as error:
             flash(str(error), 'error')
@@ -966,29 +969,21 @@ def editar_producto(producto_id):
             return redirect(url_for('editar_producto', producto_id=producto_id))
 
         try:
-            with get_db_connection(row_factory=sqlite3.Row) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    'SELECT imagen_url FROM productos WHERE id = ? AND comercio_id = ?',
-                    (producto_id, comercio_id),
-                )
-                prod_previo = cursor.fetchone()
-                imagen_url = prod_previo['imagen_url'] if prod_previo else None
-
-                if imagen_archivo and getattr(imagen_archivo, 'filename', ''):
-                    try:
-                        imagen_url = procesar_imagen_para_producto(
-                            imagen_archivo,
-                            codigo_barras,
-                            nombre,
-                            descripcion,
-                            comercio_id=comercio_id,
-                        )
-                    except SupabaseUploadError as error:
-                        flash(str(error), 'error')
-                        return redirect(
-                            url_for('editar_producto', producto_id=producto_id)
-                        )
+            imagen_url = None
+            if imagen_archivo and getattr(imagen_archivo, 'filename', ''):
+                try:
+                    imagen_url = procesar_imagen_para_producto(
+                        imagen_archivo,
+                        codigo_barras,
+                        nombre,
+                        descripcion,
+                        comercio_id=comercio_id,
+                    )
+                except SupabaseUploadError as error:
+                    flash(str(error), 'error')
+                    return redirect(
+                        url_for('editar_producto', producto_id=producto_id)
+                    )
 
             exito, mensaje = actualizar_producto(
                 producto_id,
@@ -1164,12 +1159,14 @@ def api_crear_producto():
         return jsonify({'error': error_precio}), 400
 
     try:
-        imagen_url = procesar_imagen_para_producto(
-            imagen_archivo,
-            codigo_barras,
-            nombre,
-            descripcion,
-            comercio_id=tienda_id,
+        imagen_url = imagen_url_para_persistir(
+            procesar_imagen_para_producto(
+                imagen_archivo,
+                codigo_barras,
+                nombre,
+                descripcion,
+                comercio_id=tienda_id,
+            )
         )
     except SupabaseUploadError as error:
         return jsonify({'error': str(error)}), 503

@@ -91,6 +91,30 @@ def url_imagen_usable(valor):
     return texto.startswith(('http://', 'https://', '/'))
 
 
+def imagen_url_almacenada(valor):
+    """URL persistible en BD, o None si está vacía o es placeholder genérico."""
+    texto = texto_campo_imagen(valor, default=None)
+    if not texto or es_imagen_generica(texto):
+        return None
+    return texto
+
+
+def imagen_url_para_persistir(valor):
+    """Normaliza un valor nuevo antes de INSERT; None si no hay imagen real."""
+    return imagen_url_almacenada(valor)
+
+
+def imagen_url_para_actualizacion(nueva, existente):
+    """
+    Conserva la imagen existente si la nueva entrada está vacía o es inválida.
+    Nunca devuelve cadenas vacías: solo URL persistible o None.
+    """
+    persistida = imagen_url_para_persistir(nueva)
+    if persistida:
+        return persistida
+    return imagen_url_almacenada(existente)
+
+
 def normalizar_url_imagen(valor, default=None):
     """URL usable en <img src>. Conserva http(s) y rutas /; no inyecta default genérico."""
     texto = texto_campo_imagen(valor, default=None)

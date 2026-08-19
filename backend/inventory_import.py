@@ -9,7 +9,12 @@ import unicodedata
 import openpyxl
 
 from config import MAX_UPLOAD_BYTES
-from backend.utils import normalizar_codigo_barras, texto_campo_imagen, url_imagen_usable
+from backend.image_lookup import EXPR_CODIGO_BARRAS
+from backend.utils import (
+    imagen_url_almacenada,
+    imagen_url_para_persistir,
+    normalizar_codigo_barras,
+)
 
 SINONIMOS_COLUMNA = {
     'nombre': [
@@ -456,17 +461,9 @@ def parsear_fila_inventario(fila, mapeo, meta, tasa_dolar=1.0, imagen_default=No
 
     imagen_url = None
     if mapeo.get('imagen_url'):
-        imagen_url = texto_campo_imagen(
-            _obtener_valor_celda(fila, mapeo['imagen_url']),
-            default=None,
+        imagen_url = imagen_url_para_persistir(
+            _obtener_valor_celda(fila, mapeo['imagen_url'])
         )
-        if imagen_url and not url_imagen_usable(imagen_url):
-            # Archivo local o código usado como nombre de foto; se resuelve después.
-            pass
-        elif not imagen_url:
-            imagen_url = None
-    if not imagen_url:
-        imagen_url = imagen_default if url_imagen_usable(imagen_default) else None
 
     stock = 0
     if mapeo.get('stock'):
@@ -521,7 +518,50 @@ def iter_lotes_productos(
         yield lote
 
 
-def _tuplas_insercion(comercio_id, lote):
+def _snapshot_imagenes_por_codigo(cursor, comercio_id):
+    """
+    Mapa codigo_barras normalizado → imagen_url existente antes de reemplazo masivo.
+    Coincidencia estricta vía EXPR_CODIGO_BARRAS (PostgreSQL / Excel / CSV).
+    """
+    cursor.execute(
+        f"""
+        SELECT {EXPR_CODIGO_BARRAS} AS codigo_key, imagen_url
+        FROM productos
+        WHERE comercio_id = ?
+          AND codigo_barras IS NOT NULL
+          AND TRIM(BOTH FROM CAST(codigo_barras AS TEXT)) <> ''
+        """,
+        (int(comercio_id),),
+    )
+    snapshot = {}
+    for fila in cursor.fetchall():
+        if isinstance(fila, dict):
+            clave_raw = fila.get('codigo_key')
+            imagen_raw = fila.get('imagen_url')
+        else:
+            clave_raw, imagen_raw = fila[0], fila[1]
+        clave = normalizar_codigo_barras(clave_raw)
+        if not clave:
+            continue
+        imagen = imagen_url_almacenada(imagen_raw)
+        if imagen:
+            snapshot[clave] = imagen
+    return snapshot
+
+
+def _imagen_final_importacion(imagen_csv, codigo_barras, snapshot_imagenes):
+    """Nueva URL del archivo, o la ya guardada por código/SKU; None si no hay imagen."""
+    nueva = imagen_url_para_persistir(imagen_csv)
+    if nueva:
+        return nueva
+    codigo = normalizar_codigo_barras(codigo_barras)
+    if codigo and codigo in snapshot_imagenes:
+        return snapshot_imagenes[codigo]
+    return None
+
+
+def _tuplas_insercion(comercio_id, lote, snapshot_imagenes=None):
+    snapshot_imagenes = snapshot_imagenes or {}
     return [
         (
             comercio_id,
@@ -529,7 +569,11 @@ def _tuplas_insercion(comercio_id, lote):
             prod['descripcion'],
             prod['precio_usd'],
             prod['codigo_barras'],
-            texto_campo_imagen(prod.get('imagen_url'), default=None),
+            _imagen_final_importacion(
+                prod.get('imagen_url'),
+                prod.get('codigo_barras'),
+                snapshot_imagenes,
+            ),
             prod['stock'],
         )
         for prod in lote
@@ -547,13 +591,27 @@ def persistir_importacion_por_lotes(comercio_id, factory_generador_lotes):
     def _operacion(conexion):
         cursor = conexion.cursor()
         cursor.execute('SELECT pg_advisory_xact_lock(?)', (int(comercio_id),))
+        snapshot_imagenes = _snapshot_imagenes_por_codigo(cursor, comercio_id)
         cursor.execute('DELETE FROM productos WHERE comercio_id = ?', (int(comercio_id),))
 
-        insertados = 0
+        productos_por_codigo = {}
+        productos_sin_codigo = []
         for lote in factory_generador_lotes():
-            if not lote:
-                continue
-            cursor.executemany(INSERT_PRODUCTO_SQL, _tuplas_insercion(comercio_id, lote))
+            for prod in lote:
+                codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
+                if codigo:
+                    productos_por_codigo[codigo] = prod
+                else:
+                    productos_sin_codigo.append(prod)
+
+        productos_finales = list(productos_por_codigo.values()) + productos_sin_codigo
+        insertados = 0
+        for inicio in range(0, len(productos_finales), IMPORT_BATCH_SIZE):
+            lote = productos_finales[inicio : inicio + IMPORT_BATCH_SIZE]
+            cursor.executemany(
+                INSERT_PRODUCTO_SQL,
+                _tuplas_insercion(comercio_id, lote, snapshot_imagenes),
+            )
             insertados += len(lote)
 
         if insertados == 0:

@@ -5,7 +5,7 @@ import psycopg2
 
 from backend.db import get_db_connection
 from backend.image_lookup import EXPR_CODIGO_BARRAS, aplicar_respaldo_imagenes, asociar_imagenes_inventario
-from backend.utils import normalizar_codigo_barras
+from backend.utils import imagen_url_para_actualizacion, normalizar_codigo_barras
 from backend.inventory_import import (
     cargar_archivo_inventario,
     detectar_mapeo_columnas,
@@ -443,21 +443,39 @@ def actualizar_producto(
     imagen_url=None,
 ):
     try:
-        with get_db_connection() as conexion:
+        codigo_normalizado = normalizar_codigo_barras(codigo_barras)
+        with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT imagen_url FROM productos
+                WHERE id = ? AND comercio_id = ?
+                """,
+                (producto_id, comercio_id),
+            )
+            fila = cursor.fetchone()
+            if not fila:
+                return (
+                    False,
+                    'No se encontró el producto o no tienes permiso para modificarlo.',
+                )
+
+            imagen_final = imagen_url_para_actualizacion(
+                imagen_url, fila['imagen_url']
+            )
             cursor.execute(
                 """
                 UPDATE productos
                 SET nombre = ?, descripcion = ?, precio_usd = ?, codigo_barras = ?,
-                    imagen_url = COALESCE(?, imagen_url)
+                    imagen_url = ?
                 WHERE id = ? AND comercio_id = ?
                 """,
                 (
                     nombre,
                     descripcion,
                     float(precio_usd),
-                    codigo_barras,
-                    imagen_url,
+                    codigo_normalizado,
+                    imagen_final,
                     producto_id,
                     comercio_id,
                 ),
