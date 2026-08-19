@@ -65,10 +65,13 @@ def normalizar_url_imagen(valor, default=DEFAULT_IMAGEN_PRODUCTO):
     if texto.startswith(('http://', 'https://', '/')):
         return texto
     return default
+
+
+def normalizar_telefono_whatsapp(telefono):
     """Convierte teléfono local VE a formato wa.me (58412...)."""
     if not telefono:
         return None
-    digits = re.sub(r'\D', '', telefono)
+    digits = re.sub(r'\D', '', str(telefono))
     if not digits:
         return None
     if digits.startswith('0'):
