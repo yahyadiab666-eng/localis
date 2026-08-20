@@ -8,7 +8,7 @@ from supabase import Client, create_client
 
 SUPABASE_URL = (os.getenv('SUPABASE_URL') or '').strip().rstrip('/')
 SUPABASE_KEY = (os.getenv('SUPABASE_KEY') or '').strip()
-SUPABASE_BUCKET_IMAGENES = (os.getenv('SUPABASE_BUCKET_IMAGENES') or 'imágenes').strip()
+SUPABASE_BUCKET_IMAGENES = (os.getenv('SUPABASE_BUCKET_IMAGENES') or 'imagenes').strip()
 
 supabase: Optional[Client] = None
 
@@ -21,8 +21,7 @@ def url_publica_bucket(carpeta: str, nombre_archivo: str) -> str:
     carpeta_limpia = carpeta.strip('/').replace('\\', '/')
     archivo = quote(nombre_archivo.lstrip('/'), safe='./-_')
     ruta = f'{carpeta_limpia}/{archivo}' if carpeta_limpia else archivo
-    bucket = quote(SUPABASE_BUCKET_IMAGENES, safe='')
-    return f'{SUPABASE_URL}/storage/v1/object/public/{bucket}/{ruta}'
+    return f'{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET_IMAGENES}/{ruta}'
 
 
 def es_host_supabase(url: str) -> bool:
