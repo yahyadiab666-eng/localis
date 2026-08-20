@@ -1,4 +1,4 @@
-"""Resolución de imágenes exclusivamente vía URLs del bucket Supabase."""
+"""Imágenes: lectura instantánea desde BD; resolución HEAD solo al escribir."""
 
 import sqlite3
 
@@ -21,25 +21,21 @@ EXPR_CODIGO_BARRAS = (
 )
 
 _EXTENSIONES_BUCKET = ('webp', 'jpg', 'jpeg', 'png')
-_CACHE_EXISTENCIA = {}
 
 
 def _existe_en_bucket(url: str) -> bool:
+    """Verificación remota: solo en rutas de escritura (import/create/update)."""
     if not url:
         return False
-    if url in _CACHE_EXISTENCIA:
-        return _CACHE_EXISTENCIA[url]
     try:
         respuesta = requests.head(url, timeout=4, allow_redirects=True)
-        ok = respuesta.status_code == 200
+        return respuesta.status_code == 200
     except requests.RequestException:
-        ok = False
-    _CACHE_EXISTENCIA[url] = ok
-    return ok
+        return False
 
 
 def buscar_imagen_supabase_por_codigo(codigo_barras):
-    """Busca productos/{codigo}.{ext} en el bucket público de Supabase."""
+    """Busca productos/{codigo}.{ext} en el bucket (solo al persistir en BD)."""
     if not SUPABASE_URL:
         return None
     codigo = normalizar_codigo_barras(codigo_barras)
@@ -52,12 +48,21 @@ def buscar_imagen_supabase_por_codigo(codigo_barras):
     return None
 
 
-def normalizar_imagen_registro(imagen_url=None, codigo_barras=None):
+def imagen_url_para_catalogo(imagen_url=None):
     """
-    Resuelve la imagen de un producto:
-    1) URL válida del bucket Supabase en imagen_url
-    2) Búsqueda por código de barras en productos/ del bucket
-    3) Imagen por defecto (default-product.webp)
+    Lectura para catálogos: usa la URL ya guardada en PostgreSQL.
+    Sin HEAD ni búsquedas en bucket (O(1) por producto).
+    """
+    directa = url_imagen_supabase_valida(imagen_url)
+    if directa:
+        return directa
+    return url_imagen_producto_default()
+
+
+def resolver_imagen_url_definitiva(imagen_url=None, codigo_barras=None):
+    """
+    Escritura: resuelve la URL final para INSERT/UPDATE en BD.
+    Puede usar HEAD por código de barras; si no hay imagen, guarda el default.
     """
     directa = url_imagen_supabase_valida(imagen_url)
     if directa:
@@ -73,24 +78,28 @@ def normalizar_imagen_registro(imagen_url=None, codigo_barras=None):
     return url_imagen_producto_default()
 
 
+def normalizar_imagen_registro(imagen_url=None, codigo_barras=None):
+    """Alias de lectura rápida (ignora codigo_barras en runtime de catálogo)."""
+    del codigo_barras
+    return imagen_url_para_catalogo(imagen_url)
+
+
 def obtener_imagen_url_producto(producto_id):
+    """Endpoint /imagen-producto: solo lee imagen_url de BD, sin HEAD."""
     if not producto_id:
         return url_imagen_producto_default()
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
             cursor.execute(
-                'SELECT imagen_url, codigo_barras FROM productos WHERE id = ?',
+                'SELECT imagen_url FROM productos WHERE id = ?',
                 (int(producto_id),),
             )
             fila = cursor.fetchone()
             if not fila:
                 return url_imagen_producto_default()
             registro = dict(fila)
-            return normalizar_imagen_registro(
-                registro.get('imagen_url'),
-                registro.get('codigo_barras'),
-            )
+            return imagen_url_para_catalogo(registro.get('imagen_url'))
     except Exception as error:
         print(f'Error al leer imagen del producto {producto_id}: {error}')
         return url_imagen_producto_default()
@@ -106,9 +115,14 @@ def resolver_imagen_producto(
     excluir_url=None,
     persistir=False,
 ):
-    del nombre, descripcion, buscar_web, persistir
+    del nombre, descripcion, buscar_web
+    escribir_bd = persistir
 
-    url = normalizar_imagen_registro(imagen_url, codigo_barras)
+    if escribir_bd:
+        url = resolver_imagen_url_definitiva(imagen_url, codigo_barras)
+    else:
+        url = imagen_url_para_catalogo(imagen_url)
+
     if url and url != excluir_url:
         return url
 
@@ -121,25 +135,42 @@ def resolver_imagen_producto(
 
 
 def aplicar_respaldo_imagenes(productos, persistir=False):
-    del persistir
+    """Normaliza imagen_url para mostrar (lectura BD). persistir=True resuelve y escribe."""
     if not productos:
         return productos
+
+    if persistir:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            for prod in productos:
+                producto_id = prod.get('id')
+                if not producto_id:
+                    continue
+                url_final = resolver_imagen_url_definitiva(
+                    prod.get('imagen_url'),
+                    prod.get('codigo_barras'),
+                )
+                cursor.execute(
+                    'UPDATE productos SET imagen_url = ? WHERE id = ?',
+                    (url_final, int(producto_id)),
+                )
+                prod['imagen_url'] = url_final
+            conexion.commit()
+        return productos
+
     for prod in productos:
-        prod['imagen_url'] = normalizar_imagen_registro(
-            prod.get('imagen_url'),
-            prod.get('codigo_barras'),
-        )
+        prod['imagen_url'] = imagen_url_para_catalogo(prod.get('imagen_url'))
     return productos
 
 
 def asociar_imagenes_inventario(comercio_id):
-    """Tras CSV: normaliza URLs en memoria (sin búsqueda web ni disco local)."""
+    """Tras CSV: persiste URL definitiva en PostgreSQL (HEAD solo aquí, no en catálogo)."""
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
             cursor.execute(
                 """
-                SELECT id, nombre, codigo_barras, descripcion, imagen_url
+                SELECT id, codigo_barras, imagen_url
                 FROM productos
                 WHERE comercio_id = ?
                 """,
@@ -150,5 +181,32 @@ def asociar_imagenes_inventario(comercio_id):
         print(f'Error al leer productos para asociar imágenes: {error}')
         return 0
 
-    aplicar_respaldo_imagenes(productos)
-    return len(productos)
+    if not productos:
+        return 0
+
+    actualizados = 0
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            for prod in productos:
+                if url_imagen_supabase_valida(prod.get('imagen_url')):
+                    continue
+                url_final = resolver_imagen_url_definitiva(
+                    prod.get('imagen_url'),
+                    prod.get('codigo_barras'),
+                )
+                cursor.execute(
+                    """
+                    UPDATE productos
+                    SET imagen_url = ?
+                    WHERE id = ? AND comercio_id = ?
+                    """,
+                    (url_final, int(prod['id']), int(comercio_id)),
+                )
+                actualizados += cursor.rowcount
+            conexion.commit()
+    except Exception as error:
+        print(f'Error al persistir imágenes del inventario: {error}')
+        return 0
+
+    return actualizados

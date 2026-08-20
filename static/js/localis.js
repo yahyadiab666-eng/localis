@@ -14,21 +14,17 @@
 
   window.rescatarImagenProducto = function rescatarImagenProducto(img) {
     if (!img) return;
+    var fallback = img.getAttribute('data-imagen-default')
+      || window.LOCALIS_IMAGEN_PRODUCTO_DEFAULT
+      || '';
     var actual = img.currentSrc || img.getAttribute('src') || '';
-    if (img.dataset.rescate === '1' || actual.indexOf('/imagen-producto') !== -1) {
+    if (img.dataset.rescate === '1' || !fallback || actual === fallback) {
       img.onerror = null;
-      img.removeAttribute('src');
-      img.style.visibility = 'hidden';
-      return;
-    }
-    var productoId = (img.getAttribute('data-producto-id') || '').trim();
-    if (!productoId) {
-      img.onerror = null;
-      img.removeAttribute('src');
+      if (fallback) img.src = fallback;
       return;
     }
     img.dataset.rescate = '1';
-    img.src = window.urlImagenRespaldoProducto(productoId);
+    img.src = fallback;
   };
 
   function obtenerCsrfToken() {

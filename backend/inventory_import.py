@@ -644,14 +644,16 @@ def _snapshot_imagenes_por_codigo(cursor, comercio_id):
 
 
 def _imagen_final_importacion(imagen_csv, codigo_barras, snapshot_imagenes):
-    """Nueva URL del archivo, o la ya guardada por código/SKU; None si no hay imagen."""
+    """URL definitiva para guardar en BD (incluye default si no hay imagen)."""
+    from backend.image_lookup import resolver_imagen_url_definitiva
+
     nueva = imagen_url_para_persistir(imagen_csv)
     if nueva:
         return nueva
     codigo = normalizar_codigo_barras(codigo_barras)
     if codigo and codigo in snapshot_imagenes:
         return snapshot_imagenes[codigo]
-    return None
+    return resolver_imagen_url_definitiva(None, codigo_barras)
 
 
 def _tuplas_insercion(comercio_id, lote, snapshot_imagenes=None):

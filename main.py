@@ -71,7 +71,11 @@ from backend.admin import (
 from backend.auth import obtener_o_crear_usuario_google
 from backend.diagnostics import ejecutar_diagnostico_inicio, obtener_estado_sistema
 from backend.error_handlers import registrar_manejadores_errores
-from backend.image_lookup import aplicar_respaldo_imagenes, obtener_imagen_url_producto
+from backend.image_lookup import (
+    aplicar_respaldo_imagenes,
+    obtener_imagen_url_producto,
+    resolver_imagen_url_definitiva,
+)
 from backend.db import get_db_connection
 from database import init_db, normalize_database_url
 from backend.plans import PLANES, MENSAJE_LIMITE_PRODUCTOS, es_limite_ilimitado, obtener_beneficios_plan
@@ -98,7 +102,7 @@ from backend.utils import (
     parsear_precio_form,
     parsear_entero_form,
     parsear_visible_form,
-    url_imagen_usable,
+    url_imagen_producto_default,
     url_maps_comercio,
     url_whatsapp_comercio,
 )
@@ -141,6 +145,11 @@ app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_BYTES
 
 csrf = CSRFProtect(app)
 registrar_manejadores_errores(app)
+
+
+@app.context_processor
+def _inyectar_imagen_producto_default():
+    return {'imagen_producto_default': url_imagen_producto_default()}
 
 
 @app.template_filter('fecha_corta')
@@ -958,6 +967,8 @@ def nuevo_producto():
                     comercio_id=comercio['id'],
                 )
             )
+            if not imagen_url:
+                imagen_url = resolver_imagen_url_definitiva(None, codigo_barras)
         except SupabaseUploadError as error:
             flash(str(error), 'error')
             return redirect(url_for('nuevo_producto'))
@@ -1215,6 +1226,8 @@ def api_crear_producto():
                 comercio_id=tienda_id,
             )
         )
+        if not imagen_url:
+            imagen_url = resolver_imagen_url_definitiva(None, codigo_barras)
     except SupabaseUploadError as error:
         return jsonify({'error': str(error)}), 503
 

@@ -4,7 +4,11 @@ import sqlite3
 import psycopg2
 
 from backend.db import get_db_connection
-from backend.image_lookup import EXPR_CODIGO_BARRAS, aplicar_respaldo_imagenes, asociar_imagenes_inventario
+from backend.image_lookup import (
+    EXPR_CODIGO_BARRAS,
+    aplicar_respaldo_imagenes,
+    asociar_imagenes_inventario,
+)
 from backend.utils import imagen_url_para_persistir, normalizar_codigo_barras
 from backend.inventory_import import (
     cargar_archivo_inventario,

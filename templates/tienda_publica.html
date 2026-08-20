@@ -106,12 +106,13 @@
       <div class="grid grid-cols-2 md:grid-cols-4 gap-5 grid-productos-mobile">
         {% for producto in productos %}
           <div class="card-producto-mobile rounded-xl overflow-hidden bg-white shadow border border-stone-100">
-            <div class="h-36 bg-gray-100">
-              {% set img_prod = producto.imagen_url %}
-              <img src="{{ img_prod or '' }}" alt="{{ producto.nombre }}"
+            <div class="localis-img-producto-wrap">
+              <img src="{{ producto.imagen_url or imagen_producto_default }}"
+                   alt="{{ producto.nombre }}"
                    data-producto-id="{{ producto.id }}"
-                   class="w-full h-full object-cover" loading="lazy"
-                   onerror="if(window.rescatarImagenProducto){rescatarImagenProducto(this)}else{this.onerror=null;this.removeAttribute('src')}">
+                   class="localis-img-producto" loading="lazy"
+                   data-imagen-default="{{ imagen_producto_default }}"
+                   onerror="this.onerror=null;this.src=this.dataset.imagenDefault||'';">
             </div>
             <div class="p-3">
               <h4 class="font-medium text-sm text-gray-900 line-clamp-1">{{ producto.nombre }}</h4>
@@ -147,6 +148,7 @@
     }
   </script>
   <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
+  <script>window.LOCALIS_IMAGEN_PRODUCTO_DEFAULT = {{ imagen_producto_default|tojson }};</script>
   <script src="{{ url_for('static', filename='js/localis.js') }}"></script>
 </body>
 </html>

@@ -279,11 +279,11 @@
                   <tr class="hover:bg-amber-50/30 transition">
                     <td class="py-4 px-6 font-semibold text-gray-900">
                       <div class="flex items-center gap-3">
-                        {% set img_prod = producto.imagen_url %}
-                        <img src="{{ img_prod or '' }}" alt=""
+                        <img src="{{ producto.imagen_url or imagen_producto_default }}" alt=""
                              data-producto-id="{{ producto.id }}"
-                             class="w-10 h-10 rounded-lg object-cover border border-stone-200 bg-stone-50 flex-shrink-0"
-                             onerror="if(window.rescatarImagenProducto){rescatarImagenProducto(this)}else{this.onerror=null;this.removeAttribute('src')}">
+                             data-imagen-default="{{ imagen_producto_default }}"
+                             class="localis-img-producto-thumb rounded-lg border border-stone-200"
+                             onerror="this.onerror=null;this.src=this.dataset.imagenDefault||'';">
                         <span>{{ producto.nombre }}</span>
                       </div>
                     </td>
@@ -513,6 +513,7 @@
     lucide.createIcons();
   </script>
   <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
+  <script>window.LOCALIS_IMAGEN_PRODUCTO_DEFAULT = {{ imagen_producto_default|tojson }};</script>
   <script src="{{ url_for('static', filename='js/localis.js') }}"></script>
 </body>
 </html>
