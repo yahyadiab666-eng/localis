@@ -8,6 +8,13 @@ from urllib.parse import quote
 
 from backend.utils import normalizar_codigo_barras
 
+# Tarjetas de catálogo (~180px CSS): proxy compacto vía wsrv.nl
+_WSRV_ANCHO = 300
+_WSRV_ALTO = 300
+_WSRV_FIT = 'cover'
+_WSRV_FORMATO = 'webp'
+_WSRV_CALIDAD = 80
+
 
 def limpiar_nombre_producto(nombre: str) -> str:
     """Elimina medidas y ajusta sinónimos de productos locales."""
@@ -35,7 +42,7 @@ def limpiar_nombre_producto(nombre: str) -> str:
 
 
 def optimizar_url_imagen(url_original: str) -> str:
-    """Proxy WebP vía wsrv.nl para evitar bloqueos CORS en el navegador."""
+    """Proxy WebP vía wsrv.nl: tamaño fijo, cover y compresión para tarjetas."""
     if not url_original or not url_original.startswith('http'):
         return None
     if any(
@@ -43,8 +50,14 @@ def optimizar_url_imagen(url_original: str) -> str:
         for bad in ('.svg', 'placeholder', 'default-product')
     ):
         return None
+    if 'wsrv.nl' in url_original.lower():
+        return url_original
     url_encriptada = quote(url_original, safe='')
-    return f'https://wsrv.nl/?url={url_encriptada}&w=600&output=webp'
+    return (
+        f'https://wsrv.nl/?url={url_encriptada}'
+        f'&w={_WSRV_ANCHO}&h={_WSRV_ALTO}&fit={_WSRV_FIT}'
+        f'&output={_WSRV_FORMATO}&q={_WSRV_CALIDAD}'
+    )
 
 
 def buscar_openfoodfacts_texto(query: str) -> str:
