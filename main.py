@@ -14,16 +14,7 @@ else:
 
 from functools import wraps
 
-from backend.supabase_client import SUPABASE_BUCKET_IMAGENES, supabase
-from backend.supabase_storage import (
-    SupabaseUploadError,
-    subir_bytes_a_supabase,
-    subir_imagen_a_supabase,
-)
-if supabase:
-    print('Supabase Storage + API configurados correctamente.')
-else:
-    print('Aviso: SUPABASE_URL o SUPABASE_KEY no configurados. Las subidas de imágenes fallarán.')
+from backend.image_storage import ImageUploadError, subir_bytes_local, subir_imagen_local
 
 import sqlite3
 
@@ -133,8 +124,6 @@ db = SQLAlchemy(app)
 app.secret_key = obtener_secret_key()
 aplicar_config_sesion_flask(app)
 
-app.config['SUPABASE_CLIENT'] = supabase
-app.config['SUPABASE_BUCKET_IMAGENES'] = SUPABASE_BUCKET_IMAGENES
 app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_BYTES
 os.makedirs(os.path.join(BASE_DIR, 'static', 'images', 'productos'), exist_ok=True)
 
@@ -159,7 +148,7 @@ def _inicializar_aplicacion():
         for aviso in advertencias:
             print(f'[Localis Config] {aviso}')
         if db_url:
-            print('Base de datos: PostgreSQL (DATABASE_URL / Supabase SQL).')
+            print('Base de datos: PostgreSQL (DATABASE_URL).')
         init_db()
         ejecutar_diagnostico_inicio()
         verificar_vencimientos_comercios()
@@ -281,25 +270,12 @@ def procesar_imagen_subida(
     carpeta='comercios',
     max_dimension=800,
 ):
-    """Sube imagen exclusivamente a Supabase Storage. Lanza SupabaseUploadError si falla."""
+    """Guarda imagen en static/images. Lanza ImageUploadError si falla."""
     if not file_storage or not getattr(file_storage, 'filename', ''):
         return None
 
-    from backend.images import validar_archivo_subida
-
-    error_validacion = validar_archivo_subida(file_storage)
-    if error_validacion:
-        raise SupabaseUploadError(error_validacion)
-
-    if not supabase:
-        raise SupabaseUploadError(
-            'Supabase Storage no está configurado. '
-            'Define SUPABASE_URL y SUPABASE_KEY en el entorno.'
-        )
-
-    return subir_imagen_a_supabase(
+    return subir_imagen_local(
         file_storage,
-        supabase,
         prefijo=prefijo,
         carpeta=carpeta,
         max_dimension=max_dimension,
@@ -307,7 +283,7 @@ def procesar_imagen_subida(
 
 
 def procesar_logo_comercio(file_storage, prefijo):
-    """Logo de comercio → bucket imágenes en Supabase."""
+    """Logo de comercio → static/images/comercios."""
     return procesar_imagen_subida(
         file_storage,
         prefijo=prefijo,
@@ -318,7 +294,7 @@ def procesar_logo_comercio(file_storage, prefijo):
 def procesar_imagen_para_producto(
     file_storage, codigo_barras, nombre, descripcion, comercio_id
 ):
-    """Prioridad: Supabase Storage (subida manual). Sin adivinar por nombre."""
+    """Subida manual de archivo a static/images."""
     if file_storage and getattr(file_storage, 'filename', ''):
         url = procesar_imagen_subida(
             file_storage,
@@ -768,7 +744,7 @@ def editar_comercio():
                 logo_url = procesar_logo_comercio(
                     logo_archivo, prefijo=f'logo_{comercio["id"]}'
                 )
-            except SupabaseUploadError as error:
+            except ImageUploadError as error:
                 flash(str(error), 'error')
                 return redirect(url_for('editar_comercio'))
 
@@ -781,7 +757,7 @@ def editar_comercio():
                     carpeta='banners',
                     max_dimension=1920,
                 )
-            except SupabaseUploadError as error:
+            except ImageUploadError as error:
                 flash(str(error), 'error')
                 return redirect(url_for('editar_comercio'))
 
@@ -843,7 +819,7 @@ def crear_comercio():
                 logo_url = procesar_logo_comercio(
                     logo_archivo, prefijo=f'logo_nuevo_{usuario_id}'
                 )
-            except SupabaseUploadError as error:
+            except ImageUploadError as error:
                 flash(str(error), 'error')
                 return redirect(url_for('crear_comercio'))
 
@@ -922,7 +898,7 @@ def nuevo_producto():
                     comercio_id=comercio['id'],
                 )
             )
-        except SupabaseUploadError as error:
+        except ImageUploadError as error:
             flash(str(error), 'error')
             return redirect(url_for('nuevo_producto'))
 
@@ -996,7 +972,7 @@ def editar_producto(producto_id):
                         descripcion,
                         comercio_id=comercio_id,
                     )
-                except SupabaseUploadError as error:
+                except ImageUploadError as error:
                     flash(str(error), 'error')
                     return redirect(
                         url_for('editar_producto', producto_id=producto_id)
@@ -1186,7 +1162,7 @@ def api_crear_producto():
                 comercio_id=tienda_id,
             )
         )
-    except SupabaseUploadError as error:
+    except ImageUploadError as error:
         return jsonify({'error': str(error)}), 503
 
     try:
@@ -1263,28 +1239,21 @@ def api_verificar_pago():
     comprobante_url = None
 
     try:
-        if not supabase:
-            raise SupabaseUploadError(
-                'Supabase Storage no está configurado para almacenar comprobantes.'
-            )
-
         comprimido = comprimir_bytes_a_bytes(
             data_bytes,
             prefijo=f'pago_{comercio["id"]}',
             max_dimension=1920,
         )
         if not comprimido:
-            raise SupabaseUploadError('No se pudo procesar la imagen del comprobante.')
+            raise ImageUploadError('No se pudo procesar la imagen del comprobante.')
 
         payload, content_type, filename = comprimido
-        comprobante_url = subir_bytes_a_supabase(
+        comprobante_url = subir_bytes_local(
             payload,
-            supabase,
             filename,
-            content_type=content_type,
             carpeta='pagos',
         )
-    except SupabaseUploadError as error:
+    except ImageUploadError as error:
         return jsonify({'error': str(error)}), 503
 
     exito, mensaje, datos = activar_suscripcion_por_comprobante(
@@ -1367,7 +1336,7 @@ def admin_banner():
                 max_dimension=1920,
             )
             exito, mensaje = actualizar_banner_principal(admin_id, banner_url)
-        except SupabaseUploadError as error:
+        except ImageUploadError as error:
             exito, mensaje = False, str(error)
     else:
         exito, mensaje = False, 'Debes seleccionar una imagen.'

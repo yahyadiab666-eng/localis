@@ -1,5 +1,3 @@
-"""Esquema PostgreSQL (Supabase), conexión vía psycopg2 e init_db()."""
-
 import os
 import re
 import time
@@ -34,7 +32,7 @@ DB_RETRY_BASE_DELAY = float(os.getenv('DB_RETRY_BASE_DELAY', '0.08'))
 
 _connection_pool = None
 
-# Parámetros válidos en URIs libpq/psycopg2. El resto (p. ej. pgbouncer=true de Supabase) se descarta.
+# Parámetros válidos en URIs libpq/psycopg2. El resto (p. ej. pgbouncer=true) se descarta.
 _PARAMS_URI_PERMITIDOS = frozenset({
     'application_name',
     'channel_binding',
@@ -82,6 +80,7 @@ def normalize_database_url(url):
 
 
 DATABASE_URL = normalize_database_url(os.getenv('DATABASE_URL'))
+DATABASE_KEY = (os.getenv('DATABASE_KEY') or '').strip()
 
 _IDENTIFICADOR_SQL = re.compile(r'^[a-z_][a-z0-9_]*$')
 
@@ -99,6 +98,7 @@ TABLAS_PERMITIDAS = frozenset({
     'logs_auditoria',
     'intentos_login',
     'solicitudes_pago',
+    'mapeo_imagenes',
 })
 
 # Columnas que deben existir en tablas ya creadas (ADD COLUMN IF NOT EXISTS).
@@ -279,7 +279,12 @@ def _require_database_url():
     if not DATABASE_URL:
         raise RuntimeError(
             'DATABASE_URL no está configurada. '
-            'Define la cadena de conexión PostgreSQL de Supabase en tu entorno.'
+            'Define la cadena de conexión PostgreSQL en tu entorno.'
+        )
+    if not DATABASE_KEY:
+        raise RuntimeError(
+            'DATABASE_KEY no está configurada. '
+            'Define la clave de acceso a la base de datos en tu entorno.'
         )
 
 
@@ -923,6 +928,20 @@ def _crear_tabla_solicitudes_pago(cursor):
     )
 
 
+def _crear_tabla_mapeo_imagenes(cursor):
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS mapeo_imagenes (
+            id SERIAL PRIMARY KEY,
+            nombre_producto TEXT NOT NULL,
+            imagen_url TEXT NOT NULL,
+            activo INTEGER DEFAULT 1,
+            fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
 def _crear_tablas(cursor):
     """Crea todas las tablas de la aplicación. El orden respeta las FKs."""
     _crear_tabla_usuarios(cursor)
@@ -937,6 +956,7 @@ def _crear_tablas(cursor):
     _crear_tabla_intentos_login(cursor)
     _crear_tabla_pagos(cursor)
     _crear_tabla_solicitudes_pago(cursor)
+    _crear_tabla_mapeo_imagenes(cursor)
 
 
 def _asegurar_indices_unicos(cursor):
@@ -1076,6 +1096,10 @@ def _crear_indices(cursor):
         'CREATE INDEX IF NOT EXISTS idx_soporte_estado ON soporte_y_reportes(estado)',
         'CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_comercio ON solicitudes_pago(comercio_id)',
         'CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_referencia ON solicitudes_pago(referencia)',
+        (
+            'CREATE INDEX IF NOT EXISTS idx_mapeo_imagenes_nombre_norm ON mapeo_imagenes '
+            "(regexp_replace(LOWER(TRIM(BOTH FROM CAST(nombre_producto AS TEXT))), '\\s+', ' ', 'g'))"
+        ),
     ]
     for ddl in indices:
         _ejecutar_ddl_seguro(cursor, ddl)
@@ -1103,7 +1127,7 @@ def _sembrar_configuracion(cursor):
 
 def init_db():
     """
-    Inicializa o actualiza la base PostgreSQL en Supabase sin destruir datos.
+    Inicializa o actualiza la base PostgreSQL sin destruir datos.
     Crea tablas faltantes, añade columnas ausentes y asegura FKs e índices.
     """
     _require_database_url()
@@ -1133,6 +1157,6 @@ def init_db():
 
 if __name__ == '__main__':
     if init_db():
-        print('Base de datos PostgreSQL (Supabase) inicializada/actualizada correctamente.')
+        print('Base de datos PostgreSQL inicializada/actualizada correctamente.')
     else:
         print('No se pudo completar init_db().')

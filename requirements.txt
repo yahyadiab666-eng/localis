@@ -5,7 +5,6 @@ authlib
 gunicorn
 python-dotenv
 psycopg2-binary
-supabase
 rapidocr-onnxruntime
 opencv-python-headless
 Pillow

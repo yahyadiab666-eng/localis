@@ -101,10 +101,21 @@ CREATE TABLE IF NOT EXISTS productos (
     nombre TEXT NOT NULL,
     precio_usd REAL NOT NULL, 
     descripcion TEXT,
-    imagen_url TEXT, -- URL pública (Supabase Storage), externa o asset estático
+    imagen_url TEXT, -- URL pública externa, ruta /static/ o asset estático
     stock INTEGER DEFAULT 0,
     codigo_barras TEXT,
     FOREIGN KEY (comercio_id) REFERENCES comercios(id) ON DELETE CASCADE
+);
+
+-- ==========================================
+-- 5b. TABLA DE MAPEO DE IMÁGENES (catálogo en nube)
+-- ==========================================
+CREATE TABLE IF NOT EXISTS mapeo_imagenes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre_producto TEXT NOT NULL,
+    imagen_url TEXT NOT NULL,
+    activo INTEGER DEFAULT 1,
+    fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ==========================================

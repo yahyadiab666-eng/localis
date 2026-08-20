@@ -12,7 +12,7 @@ def actualizar_imagenes_global(forzar_todos=True):
         print('❌ DATABASE_URL no configurada.')
         return
 
-    print('📁 Base de datos: PostgreSQL (Supabase)')
+    print('📁 Base de datos: PostgreSQL (DATABASE_URL)')
 
     with get_db_connection(row_factory=sqlite3.Row) as conn:
         cursor = conn.cursor()
