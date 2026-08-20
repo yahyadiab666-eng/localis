@@ -197,6 +197,23 @@ def normalizar_nombre_producto(valor):
     return ' '.join(texto.split()) or None
 
 
+def normalizar_clave_imagen_catalogo(nombre, descripcion=None):
+    """
+    Clave de archivo en bucket productos/ a partir de nombre + descripción.
+    Ej.: 'Harina PAN' + '1kg blanca' → 'harina-pan-1kg-blanca'
+    """
+    partes = []
+    for valor in (nombre, descripcion):
+        norm = normalizar_nombre_producto(valor)
+        if norm and norm not in partes:
+            partes.append(norm)
+    if not partes:
+        return None
+    slug = re.sub(r'[^a-z0-9]+', '-', ' '.join(partes))
+    slug = re.sub(r'-+', '-', slug).strip('-')
+    return slug[:180] if slug else None
+
+
 def parsear_precio_form(valor):
     """
     Convierte precio de formulario/POST a float para PostgreSQL DOUBLE PRECISION.

@@ -962,7 +962,12 @@ def nuevo_producto():
                 )
             )
             if not imagen_url:
-                imagen_url = resolver_imagen_url_definitiva(None, codigo_barras)
+                imagen_url = resolver_imagen_url_definitiva(
+                    None,
+                    codigo_barras,
+                    nombre=nombre,
+                    descripcion=descripcion,
+                )
         except SupabaseUploadError as error:
             flash(str(error), 'error')
             return redirect(url_for('nuevo_producto'))
@@ -1221,7 +1226,12 @@ def api_crear_producto():
             )
         )
         if not imagen_url:
-            imagen_url = resolver_imagen_url_definitiva(None, codigo_barras)
+            imagen_url = resolver_imagen_url_definitiva(
+                None,
+                codigo_barras,
+                nombre=nombre,
+                descripcion=descripcion,
+            )
     except SupabaseUploadError as error:
         return jsonify({'error': str(error)}), 503
 

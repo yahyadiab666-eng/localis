@@ -643,7 +643,7 @@ def _snapshot_imagenes_por_codigo(cursor, comercio_id):
     return snapshot
 
 
-def _imagen_final_importacion(imagen_csv, codigo_barras, snapshot_imagenes):
+def _imagen_final_importacion(imagen_csv, codigo_barras, snapshot_imagenes, nombre=None, descripcion=None):
     """URL definitiva para guardar en BD (incluye default si no hay imagen)."""
     from backend.image_lookup import resolver_imagen_url_definitiva
 
@@ -653,7 +653,12 @@ def _imagen_final_importacion(imagen_csv, codigo_barras, snapshot_imagenes):
     codigo = normalizar_codigo_barras(codigo_barras)
     if codigo and codigo in snapshot_imagenes:
         return snapshot_imagenes[codigo]
-    return resolver_imagen_url_definitiva(None, codigo_barras)
+    return resolver_imagen_url_definitiva(
+        None,
+        codigo_barras,
+        nombre=nombre,
+        descripcion=descripcion,
+    )
 
 
 def _tuplas_insercion(comercio_id, lote, snapshot_imagenes=None):
@@ -669,6 +674,8 @@ def _tuplas_insercion(comercio_id, lote, snapshot_imagenes=None):
                 prod.get('imagen_url'),
                 prod.get('codigo_barras'),
                 snapshot_imagenes,
+                nombre=prod.get('nombre'),
+                descripcion=prod.get('descripcion'),
             ),
             prod['stock'],
         )
