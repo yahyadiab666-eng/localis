@@ -66,7 +66,7 @@
           <p class="text-stone-500 text-sm">Completa los datos de tu negocio para empezar a publicar tus productos en Localis.</p>
         </div>
 
-        <form action="{{ url_for('crear_comercio') }}" method="POST" enctype="multipart/form-data" class="space-y-5">
+        <form action="{{ url_for('registrar_comercio') }}" method="POST" enctype="multipart/form-data" class="space-y-5">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
           <!-- Logo / Imagen de portada -->

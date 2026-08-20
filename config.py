@@ -91,6 +91,12 @@ def validar_config_arranque():
             advertencias.append(
                 'GOOGLE_CLIENT_ID no configurado: el inicio de sesión con Google no funcionará.'
             )
+        if not (os.environ.get('SUPABASE_URL') or '').strip() or not (
+            os.environ.get('SUPABASE_KEY') or ''
+        ).strip():
+            advertencias.append(
+                'SUPABASE_URL/SUPABASE_KEY no configurados: las subidas de imágenes fallarán.'
+            )
     else:
         if not (os.environ.get('LOCALIS_SECRET_KEY') or '').strip():
             advertencias.append(

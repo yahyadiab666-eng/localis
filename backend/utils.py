@@ -84,19 +84,42 @@ def es_imagen_generica(valor):
 
 
 def url_imagen_usable(valor):
-    """True si hay una URL/ruta real (http o absoluta), no un default genérico."""
-    texto = texto_campo_imagen(valor, default=None)
-    if not texto or es_imagen_generica(texto):
-        return False
-    return texto.startswith(('http://', 'https://', '/'))
+    """True si hay URL Supabase usable o fallback estático."""
+    return bool(url_imagen_supabase_valida(valor))
 
 
 def imagen_url_almacenada(valor):
-    """URL persistible en BD, o None si está vacía o es placeholder genérico."""
+    """URL persistible en BD (Supabase http(s) exclusivamente), o None."""
+    return url_imagen_supabase_valida(valor)
+
+
+def url_imagen_supabase_valida(valor):
+    """True si es una URL https del bucket público de Supabase."""
     texto = texto_campo_imagen(valor, default=None)
     if not texto or es_imagen_generica(texto):
         return None
+    if not texto.startswith('https://'):
+        return None
+    if '/storage/v1/object/public/' not in texto:
+        return None
     return texto
+
+
+def url_imagen_producto_default():
+    """URL por defecto para productos sin imagen (Supabase o override de entorno)."""
+    import os
+
+    override = (os.getenv('DEFAULT_PRODUCT_IMAGE_URL') or '').strip()
+    if override and url_imagen_supabase_valida(override):
+        return override
+    try:
+        from backend.supabase_client import SUPABASE_URL, url_publica_bucket
+
+        if SUPABASE_URL:
+            return url_publica_bucket('productos', 'default-product.webp')
+    except Exception:
+        pass
+    return DEFAULT_IMAGEN_PRODUCTO
 
 
 def imagen_url_para_persistir(valor):

@@ -122,12 +122,6 @@ def registrar_comercio_completo(
             cursor = conexion.cursor()
 
             cursor.execute(
-                'SELECT id FROM comercios WHERE usuario_id = ?', (usuario_id,)
-            )
-            if cursor.fetchone():
-                return False, 'Error: El usuario ya tiene un comercio registrado.'
-
-            cursor.execute(
                 'SELECT id FROM categorias WHERE id = ?',
                 (int(categoria_id),),
             )
@@ -254,13 +248,60 @@ def obtener_comercio_por_id(comercio_id, solo_visible=True):
         return None
 
 
-def obtener_comercio_por_usuario(usuario_id):
+def listar_comercios_por_usuario(usuario_id):
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
             cursor.execute(
-                'SELECT * FROM comercios WHERE usuario_id = ?', (usuario_id,)
+                """
+                SELECT c.*, cat.nombre AS categoria
+                FROM comercios c
+                LEFT JOIN categorias cat ON c.categoria_id = cat.id
+                WHERE c.usuario_id = ?
+                ORDER BY c.nombre ASC
+                """,
+                (usuario_id,),
             )
+            return [dict(fila) for fila in cursor.fetchall()]
+    except psycopg2.Error:
+        raise
+    except Exception as error:
+        print(f'Error al listar comercios del usuario {usuario_id}: {error}')
+        raise
+
+
+def usuario_posee_comercio(usuario_id, comercio_id):
+    if not usuario_id or not comercio_id:
+        return False
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                'SELECT 1 FROM comercios WHERE id = ? AND usuario_id = ? LIMIT 1',
+                (int(comercio_id), int(usuario_id)),
+            )
+            return cursor.fetchone() is not None
+    except psycopg2.Error:
+        raise
+    except Exception:
+        return False
+
+
+def obtener_comercio_por_usuario(usuario_id, comercio_id=None):
+    """Obtiene un comercio del usuario; si comercio_id se omite, retorna el primero."""
+    try:
+        with get_db_connection(row_factory=sqlite3.Row) as conexion:
+            cursor = conexion.cursor()
+            if comercio_id is not None:
+                cursor.execute(
+                    'SELECT * FROM comercios WHERE id = ? AND usuario_id = ?',
+                    (int(comercio_id), int(usuario_id)),
+                )
+            else:
+                cursor.execute(
+                    'SELECT * FROM comercios WHERE usuario_id = ? ORDER BY id ASC LIMIT 1',
+                    (usuario_id,),
+                )
             fila = cursor.fetchone()
             return dict(fila) if fila else None
     except psycopg2.Error:

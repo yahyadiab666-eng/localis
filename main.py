@@ -14,7 +14,16 @@ else:
 
 from functools import wraps
 
-from backend.image_storage import ImageUploadError, subir_bytes_local, subir_imagen_local
+from backend.supabase_client import SUPABASE_BUCKET_IMAGENES, supabase
+from backend.supabase_storage import (
+    SupabaseUploadError,
+    subir_bytes_a_supabase,
+    subir_imagen_a_supabase,
+)
+if supabase:
+    print('Supabase Storage configurado correctamente.')
+else:
+    print('Aviso: SUPABASE_URL o SUPABASE_KEY no configurados. Las subidas de imágenes fallarán.')
 
 import sqlite3
 
@@ -104,6 +113,7 @@ from backend.stores import (
     actualizar_producto,
     buscar_y_filtrar_productos,
     eliminar_producto,
+    listar_comercios_por_usuario,
     obtener_comercio_por_id,
     obtener_comercio_por_usuario,
     obtener_config,
@@ -111,6 +121,7 @@ from backend.stores import (
     obtener_tasa_dolar,
     procesar_csv_productos,
     registrar_comercio_completo,
+    usuario_posee_comercio,
 )
 
 app = Flask(__name__)
@@ -124,8 +135,9 @@ db = SQLAlchemy(app)
 app.secret_key = obtener_secret_key()
 aplicar_config_sesion_flask(app)
 
+app.config['SUPABASE_CLIENT'] = supabase
+app.config['SUPABASE_BUCKET_IMAGENES'] = SUPABASE_BUCKET_IMAGENES
 app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_BYTES
-os.makedirs(os.path.join(BASE_DIR, 'static', 'images', 'productos'), exist_ok=True)
 
 csrf = CSRFProtect(app)
 registrar_manejadores_errores(app)
@@ -190,10 +202,9 @@ def sincronizar_vencimientos_suscripcion():
         if not any(request.path.startswith(ruta) for ruta in rutas_comercio):
             return
 
-        comercio = obtener_comercio_por_usuario(session.get('usuario_id'))
-        if comercio:
-            verificar_vencimiento_comercio(comercio['id'])
-            vincular_comercio_en_sesion(comercio['id'])
+        comercio_id = asegurar_contexto_comercio(session.get('usuario_id'))
+        if comercio_id:
+            verificar_vencimiento_comercio(comercio_id)
     except Exception as error:
         print(f'Aviso sincronización de vencimientos: {error}')
 
@@ -270,12 +281,19 @@ def procesar_imagen_subida(
     carpeta='comercios',
     max_dimension=800,
 ):
-    """Guarda imagen en static/images. Lanza ImageUploadError si falla."""
+    """Sube imagen al bucket Supabase. Lanza SupabaseUploadError si falla."""
     if not file_storage or not getattr(file_storage, 'filename', ''):
         return None
 
-    return subir_imagen_local(
+    if not supabase:
+        raise SupabaseUploadError(
+            'Supabase Storage no está configurado. '
+            'Define SUPABASE_URL y SUPABASE_KEY en el entorno.'
+        )
+
+    return subir_imagen_a_supabase(
         file_storage,
+        supabase,
         prefijo=prefijo,
         carpeta=carpeta,
         max_dimension=max_dimension,
@@ -283,7 +301,7 @@ def procesar_imagen_subida(
 
 
 def procesar_logo_comercio(file_storage, prefijo):
-    """Logo de comercio → static/images/comercios."""
+    """Logo de comercio → bucket Supabase comercios/."""
     return procesar_imagen_subida(
         file_storage,
         prefijo=prefijo,
@@ -294,7 +312,7 @@ def procesar_logo_comercio(file_storage, prefijo):
 def procesar_imagen_para_producto(
     file_storage, codigo_barras, nombre, descripcion, comercio_id
 ):
-    """Subida manual de archivo a static/images."""
+    """Subida manual de archivo al bucket Supabase productos/."""
     if file_storage and getattr(file_storage, 'filename', ''):
         url = procesar_imagen_subida(
             file_storage,
@@ -304,6 +322,31 @@ def procesar_imagen_para_producto(
         if url:
             return url
     return None
+
+
+def _comercio_sesion_validado():
+    """Comercio activo validado contra PostgreSQL (HTML y API)."""
+    usuario_id = session.get('usuario_id')
+    comercio_id = asegurar_contexto_comercio(usuario_id)
+    if not comercio_id:
+        return None
+    return obtener_comercio_por_usuario(usuario_id, comercio_id=comercio_id)
+
+
+def _requiere_comercio():
+    """Resuelve el comercio activo validando permisos reales del usuario en sesión."""
+    usuario_id = session.get('usuario_id')
+    comercio_id = asegurar_contexto_comercio(usuario_id)
+    if not comercio_id:
+        flash('Selecciona un comercio para continuar.', 'info')
+        return None, redirect(url_for('comercio_inicio'))
+
+    comercio = obtener_comercio_por_usuario(usuario_id, comercio_id=comercio_id)
+    if not comercio:
+        limpiar_contexto_comercio()
+        flash('No tienes permiso sobre ese comercio.', 'error')
+        return None, redirect(url_for('comercio_inicio'))
+    return comercio, None
 
 
 def _sesion_usuario_activa():
@@ -351,6 +394,7 @@ def login_requerido_api(f):
         if not _sesion_usuario_activa():
             session.clear()
             return jsonify({'error': 'Sesión inválida o expirada.'}), 401
+        asegurar_contexto_comercio(session.get('usuario_id'))
         return f(*args, **kwargs)
 
     return decorada
@@ -528,7 +572,7 @@ def login():
     if session.get('usuario_id'):
         if session.get('es_admin'):
             return redirect(url_for('panel_admin'))
-        return redirect(url_for('panel_comercio'))
+        return redirect(url_for('comercio_inicio'))
     return render_template('login.html')
 
 
@@ -588,10 +632,8 @@ def google_callback():
         if usuario_o_error.get('rol') == 'admin':
             return redirect(url_for('panel_admin'))
         if usuario_o_error.get('rol') == 'comerciante':
-            comercio = obtener_comercio_por_usuario(usuario_o_error['id'])
-            if comercio:
-                vincular_comercio_en_sesion(comercio['id'])
-            return redirect(url_for('panel_comercio'))
+            limpiar_contexto_comercio()
+            return redirect(url_for('comercio_inicio'))
 
         return redirect(url_for('index'))
     except Exception as error:
@@ -614,7 +656,109 @@ def logout():
 
 @app.route('/comercio')
 @login_requerido
+def comercio_inicio():
+    """Punto de entrada del comerciante: selección explícita o registro controlado."""
+    usuario_id = session.get('usuario_id')
+    comercios = listar_comercios_por_usuario(usuario_id)
+    comercio_activo_id = asegurar_contexto_comercio(usuario_id)
+    return render_template(
+        'comercio_inicio.html',
+        comercios=comercios,
+        comercio_activo_id=comercio_activo_id,
+        username=session.get('username'),
+    )
+
+
+@app.route('/comercio/seleccionar', methods=['POST'])
+@login_requerido
+def comercio_seleccionar():
+    usuario_id = session.get('usuario_id')
+    comercio_id = request.form.get('comercio_id', type=int)
+    if not comercio_id or not usuario_posee_comercio(usuario_id, comercio_id):
+        flash('Debes seleccionar un comercio válido.', 'error')
+        return redirect(url_for('comercio_inicio'))
+    vincular_comercio_en_sesion(comercio_id)
+    flash('Comercio seleccionado correctamente.', 'exito')
+    return redirect(url_for('panel_comercio'))
+
+
+@app.route('/comercio/registrar', methods=['GET', 'POST'])
+@login_requerido
+def registrar_comercio():
+    try:
+        if request.method == 'GET':
+            with get_db_connection(row_factory=sqlite3.Row) as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT id, nombre FROM categorias')
+                categorias = [dict(c) for c in cursor.fetchall()]
+            return render_template('registro_comercio.html', categorias=categorias)
+
+        usuario_id = session.get('usuario_id')
+        nombre = request.form.get('nombre', '').strip()
+        descripcion = request.form.get('descripcion', '').strip()
+        telefono = request.form.get('telefono', '').strip()
+        direccion = request.form.get('direccion', '').strip()
+        ciudad = request.form.get('ciudad', '').strip()
+        zona = request.form.get('zona', '').strip()
+        maps_url = request.form.get('maps_url', '').strip()
+        documento_identidad = request.form.get('documento_identidad', '').strip()
+        categoria_raw = request.form.get('categoria_id')
+        if not categoria_raw or not str(categoria_raw).strip().isdigit():
+            flash('Debes seleccionar una categoría válida.', 'error')
+            return redirect(url_for('registrar_comercio'))
+        categoria_id = int(categoria_raw)
+        logo_archivo = request.files.get('logo')
+
+        logo_url = None
+        if logo_archivo and logo_archivo.filename:
+            try:
+                logo_url = procesar_logo_comercio(
+                    logo_archivo, prefijo=f'logo_nuevo_{usuario_id}'
+                )
+            except SupabaseUploadError as error:
+                flash(str(error), 'error')
+                return redirect(url_for('registrar_comercio'))
+
+        exito, resultado = registrar_comercio_completo(
+            usuario_id,
+            nombre,
+            descripcion,
+            telefono,
+            direccion,
+            categoria_id,
+            logo_url=logo_url,
+            ciudad=ciudad or None,
+            zona=zona or None,
+            maps_url=maps_url or None,
+            documento_identidad=documento_identidad or None,
+        )
+        if not exito:
+            flash(resultado, 'error')
+            return redirect(url_for('registrar_comercio'))
+
+        flash(resultado, 'exito')
+        return redirect(url_for('comercio_inicio'))
+    except psycopg2.Error:
+        raise
+    except Exception as error:
+        print(f'Error al registrar comercio: {error}')
+        flash('No se pudo registrar el comercio. Intenta de nuevo.', 'error')
+        return redirect(url_for('registrar_comercio'))
+
+
+@app.route('/comercio/crear', methods=['GET', 'POST'])
+@login_requerido
+def crear_comercio_legacy():
+    return redirect(url_for('registrar_comercio'))
+
+
+@app.route('/comercio/panel')
+@login_requerido
 def panel_comercio():
+    comercio, redireccion = _requiere_comercio()
+    if redireccion:
+        return redireccion
+
     usuario_id = session.get('usuario_id')
     try:
         tasa_actual = obtener_tasa_dolar() or 1.0
@@ -622,35 +766,20 @@ def panel_comercio():
 
         with get_db_connection(row_factory=sqlite3.Row) as conn:
             cursor = conn.cursor()
-
-            cursor.execute('SELECT id FROM usuarios WHERE id = ?', (usuario_id,))
-            if not cursor.fetchone():
-                session.clear()
-                flash(
-                    'La sesión ya no existe en la base de datos. Por favor inicia sesión nuevamente.',
-                    'error',
-                )
-                return redirect(url_for('login'))
-
             cursor.execute(
                 '''
                 SELECT c.*, cat.nombre as categoria
                 FROM comercios c
                 LEFT JOIN categorias cat ON c.categoria_id = cat.id
-                WHERE c.usuario_id = ?
+                WHERE c.id = ? AND c.usuario_id = ?
                 ''',
-                (usuario_id,),
+                (comercio['id'], usuario_id),
             )
             comercio_db = cursor.fetchone()
-
             if not comercio_db:
-                cursor.execute('SELECT id, nombre FROM categorias')
-                categorias = [dict(c) for c in cursor.fetchall()]
-                return render_template(
-                    'registro_comercio.html', categorias=categorias
-                )
-
-            vincular_comercio_en_sesion(comercio_db['id'])
+                limpiar_contexto_comercio()
+                flash('Comercio no encontrado.', 'error')
+                return redirect(url_for('comercio_inicio'))
 
             cursor.execute(
                 '''
@@ -714,18 +843,17 @@ def panel_comercio():
             'No se pudo cargar el panel del comercio. Intenta de nuevo en unos segundos.',
             'error',
         )
-        return redirect(url_for('panel_comercio'))
+        return redirect(url_for('comercio_inicio'))
 
 
 @app.route('/comercio/editar', methods=['GET', 'POST'])
 @login_requerido
 def editar_comercio():
-    usuario_id = session.get('usuario_id')
-    comercio = obtener_comercio_por_usuario(usuario_id)
+    comercio, redireccion = _requiere_comercio()
+    if redireccion:
+        return redireccion
 
-    if not comercio:
-        flash('Debes registrar un comercio primero.', 'error')
-        return redirect(url_for('panel_comercio'))
+    usuario_id = session.get('usuario_id')
 
     if request.method == 'POST':
         nombre = request.form.get('nombre', '').strip()
@@ -744,7 +872,7 @@ def editar_comercio():
                 logo_url = procesar_logo_comercio(
                     logo_archivo, prefijo=f'logo_{comercio["id"]}'
                 )
-            except ImageUploadError as error:
+            except SupabaseUploadError as error:
                 flash(str(error), 'error')
                 return redirect(url_for('editar_comercio'))
 
@@ -757,7 +885,7 @@ def editar_comercio():
                     carpeta='banners',
                     max_dimension=1920,
                 )
-            except ImageUploadError as error:
+            except SupabaseUploadError as error:
                 flash(str(error), 'error')
                 return redirect(url_for('editar_comercio'))
 
@@ -786,80 +914,12 @@ def editar_comercio():
     )
 
 
-@app.route('/comercio/crear', methods=['GET', 'POST'])
-@login_requerido
-def crear_comercio():
-    try:
-        if request.method == 'GET':
-            with get_db_connection(row_factory=sqlite3.Row) as conn:
-                cursor = conn.cursor()
-                cursor.execute('SELECT id, nombre FROM categorias')
-                categorias = [dict(c) for c in cursor.fetchall()]
-            return render_template('registro_comercio.html', categorias=categorias)
-
-        usuario_id = session.get('usuario_id')
-        nombre = request.form.get('nombre', '').strip()
-        descripcion = request.form.get('descripcion', '').strip()
-        telefono = request.form.get('telefono', '').strip()
-        direccion = request.form.get('direccion', '').strip()
-        ciudad = request.form.get('ciudad', '').strip()
-        zona = request.form.get('zona', '').strip()
-        maps_url = request.form.get('maps_url', '').strip()
-        documento_identidad = request.form.get('documento_identidad', '').strip()
-        categoria_raw = request.form.get('categoria_id')
-        if not categoria_raw or not str(categoria_raw).strip().isdigit():
-            flash('Debes seleccionar una categoría válida.', 'error')
-            return redirect(url_for('crear_comercio'))
-        categoria_id = int(categoria_raw)
-        logo_archivo = request.files.get('logo')
-
-        logo_url = None
-        if logo_archivo and logo_archivo.filename:
-            try:
-                logo_url = procesar_logo_comercio(
-                    logo_archivo, prefijo=f'logo_nuevo_{usuario_id}'
-                )
-            except ImageUploadError as error:
-                flash(str(error), 'error')
-                return redirect(url_for('crear_comercio'))
-
-        exito, resultado = registrar_comercio_completo(
-            usuario_id,
-            nombre,
-            descripcion,
-            telefono,
-            direccion,
-            categoria_id,
-            logo_url=logo_url,
-            ciudad=ciudad or None,
-            zona=zona or None,
-            maps_url=maps_url or None,
-            documento_identidad=documento_identidad or None,
-        )
-
-        if exito:
-            flash(
-                'Comercio registrado con éxito. Tienes 30 días de prueba gratuita.',
-                'exito',
-            )
-        else:
-            flash(resultado, 'error')
-        return redirect(url_for('panel_comercio'))
-    except Exception as error:
-        print(f'Error al registrar comercio: {error}')
-        flash(f'No se pudo registrar el comercio: {error}', 'error')
-        return redirect(url_for('panel_comercio'))
-
-
 @app.route('/comercio/producto/nuevo', methods=['GET', 'POST'])
 @login_requerido
 def nuevo_producto():
-    usuario_id = session.get('usuario_id')
-    comercio = obtener_comercio_por_usuario(usuario_id)
-
-    if not comercio:
-        flash('Debes registrar un comercio primero.', 'error')
-        return redirect(url_for('panel_comercio'))
+    comercio, redireccion = _requiere_comercio()
+    if redireccion:
+        return redireccion
 
     bloqueo = _bloquear_gestion_inventario(comercio)
     if bloqueo:
@@ -898,7 +958,7 @@ def nuevo_producto():
                     comercio_id=comercio['id'],
                 )
             )
-        except ImageUploadError as error:
+        except SupabaseUploadError as error:
             flash(str(error), 'error')
             return redirect(url_for('nuevo_producto'))
 
@@ -930,12 +990,9 @@ def nuevo_producto():
 @app.route('/comercio/producto/editar/<int:producto_id>', methods=['GET', 'POST'])
 @login_requerido
 def editar_producto(producto_id):
-    usuario_id = session.get('usuario_id')
-    comercio = obtener_comercio_por_usuario(usuario_id)
-
-    if not comercio:
-        flash('No se encontró un comercio asociado a esta cuenta.', 'error')
-        return redirect(url_for('panel_comercio'))
+    comercio, redireccion = _requiere_comercio()
+    if redireccion:
+        return redireccion
 
     comercio_id = comercio['id']
 
@@ -972,7 +1029,7 @@ def editar_producto(producto_id):
                         descripcion,
                         comercio_id=comercio_id,
                     )
-                except ImageUploadError as error:
+                except SupabaseUploadError as error:
                     flash(str(error), 'error')
                     return redirect(
                         url_for('editar_producto', producto_id=producto_id)
@@ -1016,10 +1073,9 @@ def editar_producto(producto_id):
 @app.route('/comercio/producto/eliminar/<int:producto_id>', methods=['POST'])
 @login_requerido
 def eliminar_producto_ruta(producto_id):
-    comercio = obtener_comercio_por_usuario(session.get('usuario_id'))
-    if not comercio:
-        flash('Comercio no encontrado.', 'error')
-        return redirect(url_for('panel_comercio'))
+    comercio, redireccion = _requiere_comercio()
+    if redireccion:
+        return redireccion
 
     bloqueo = _bloquear_gestion_inventario(comercio)
     if bloqueo:
@@ -1033,10 +1089,9 @@ def eliminar_producto_ruta(producto_id):
 @app.route('/comercio/productos/cargar-csv', methods=['POST'])
 @login_requerido
 def cargar_csv():
-    comercio = obtener_comercio_por_usuario(session.get('usuario_id'))
-    if not comercio:
-        flash('Comercio no encontrado.', 'error')
-        return redirect(url_for('panel_comercio'))
+    comercio, redireccion = _requiere_comercio()
+    if redireccion:
+        return redireccion
 
     bloqueo = _bloquear_gestion_inventario(comercio)
     if bloqueo:
@@ -1069,7 +1124,7 @@ def cargar_csv_get():
 @app.route('/comercio/suscripcion/marcar-bienvenida', methods=['POST'])
 @login_requerido
 def suscripcion_marcar_bienvenida():
-    comercio = obtener_comercio_por_usuario(session.get('usuario_id'))
+    comercio = _comercio_sesion_validado()
     if comercio:
         marcar_bienvenida_vista(comercio['id'])
     return redirect(url_for('panel_comercio'))
@@ -1078,10 +1133,9 @@ def suscripcion_marcar_bienvenida():
 @app.route('/comercio/suscripcion/rechazar-vencido', methods=['POST'])
 @login_requerido
 def suscripcion_rechazar_vencido():
-    comercio = obtener_comercio_por_usuario(session.get('usuario_id'))
-    if not comercio:
-        flash('Comercio no encontrado.', 'error')
-        return redirect(url_for('panel_comercio'))
+    comercio, redireccion = _requiere_comercio()
+    if redireccion:
+        return redireccion
 
     exito, mensaje = rechazar_renovacion_vencida(comercio['id'])
     flash(mensaje, 'exito' if exito else 'error')
@@ -1095,10 +1149,9 @@ def suscripcion_solicitar_pago():
     Ruta legacy conservada por compatibilidad.
     Redirige al panel de comercio y abre el modal de pago OCR automático.
     """
-    comercio = obtener_comercio_por_usuario(session.get('usuario_id'))
-    if not comercio:
-        flash('Comercio no encontrado.', 'error')
-        return redirect(url_for('panel_comercio'))
+    comercio, redireccion = _requiere_comercio()
+    if redireccion:
+        return redireccion
 
     plan_tipo = (
         request.form.get('plan_tipo')
@@ -1124,9 +1177,9 @@ def suscripcion_solicitar_pago():
 @app.route('/api/productos/crear', methods=['POST'])
 @login_requerido_api
 def api_crear_producto():
-    comercio = obtener_comercio_por_usuario(session.get('usuario_id'))
+    comercio = _comercio_sesion_validado()
     if not comercio:
-        return jsonify({'error': 'Comercio no encontrado.'}), 404
+        return jsonify({'error': 'Selecciona un comercio válido en tu cuenta.'}), 403
 
     tienda_id = comercio['id']
     limite = obtener_limite_productos_comercio(tienda_id)
@@ -1162,7 +1215,7 @@ def api_crear_producto():
                 comercio_id=tienda_id,
             )
         )
-    except ImageUploadError as error:
+    except SupabaseUploadError as error:
         return jsonify({'error': str(error)}), 503
 
     try:
@@ -1205,9 +1258,9 @@ def api_cotizacion_pago():
 @app.route('/api/pagos/verificar', methods=['POST'])
 @login_requerido_api
 def api_verificar_pago():
-    comercio = obtener_comercio_por_usuario(session.get('usuario_id'))
+    comercio = _comercio_sesion_validado()
     if not comercio:
-        return jsonify({'error': 'Comercio no encontrado.'}), 404
+        return jsonify({'error': 'Selecciona un comercio válido en tu cuenta.'}), 403
 
     plan_tipo = (request.form.get('plan_tipo') or 'basica').lower()
     archivo = request.files.get('comprobante')
@@ -1239,21 +1292,28 @@ def api_verificar_pago():
     comprobante_url = None
 
     try:
+        if not supabase:
+            raise SupabaseUploadError(
+                'Supabase Storage no está configurado para almacenar comprobantes.'
+            )
+
         comprimido = comprimir_bytes_a_bytes(
             data_bytes,
             prefijo=f'pago_{comercio["id"]}',
             max_dimension=1920,
         )
         if not comprimido:
-            raise ImageUploadError('No se pudo procesar la imagen del comprobante.')
+            raise SupabaseUploadError('No se pudo procesar la imagen del comprobante.')
 
         payload, content_type, filename = comprimido
-        comprobante_url = subir_bytes_local(
+        comprobante_url = subir_bytes_a_supabase(
             payload,
+            supabase,
             filename,
+            content_type=content_type,
             carpeta='pagos',
         )
-    except ImageUploadError as error:
+    except SupabaseUploadError as error:
         return jsonify({'error': str(error)}), 503
 
     exito, mensaje, datos = activar_suscripcion_por_comprobante(
@@ -1336,7 +1396,7 @@ def admin_banner():
                 max_dimension=1920,
             )
             exito, mensaje = actualizar_banner_principal(admin_id, banner_url)
-        except ImageUploadError as error:
+        except SupabaseUploadError as error:
             exito, mensaje = False, str(error)
     else:
         exito, mensaje = False, 'Debes seleccionar una imagen.'

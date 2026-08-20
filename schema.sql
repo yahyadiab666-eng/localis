@@ -108,17 +108,6 @@ CREATE TABLE IF NOT EXISTS productos (
 );
 
 -- ==========================================
--- 5b. TABLA DE MAPEO DE IMÁGENES (catálogo en nube)
--- ==========================================
-CREATE TABLE IF NOT EXISTS mapeo_imagenes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre_producto TEXT NOT NULL,
-    imagen_url TEXT NOT NULL,
-    activo INTEGER DEFAULT 1,
-    fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- ==========================================
 -- 6. TABLA DE SOPORTE Y REPORTES
 -- ==========================================
 CREATE TABLE IF NOT EXISTS soporte_y_reportes (

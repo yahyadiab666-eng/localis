@@ -1,130 +1,99 @@
-"""Resolución estricta de imágenes: solo URL exacta del producto, sin adivinar."""
+"""Resolución de imágenes exclusivamente vía URLs del bucket Supabase."""
 
-import os
 import sqlite3
 
+import requests
+
 from backend.db import get_db_connection
+from backend.supabase_client import SUPABASE_URL, url_publica_bucket
 from backend.utils import (
     normalizar_codigo_barras,
     texto_campo_imagen,
-    url_imagen_usable,
+    url_imagen_producto_default,
+    url_imagen_supabase_valida,
 )
 
-# PostgreSQL: CAST a texto + TRIM + quitar espacios (CSV/Excel suelen traer padding).
+# PostgreSQL: normalización de código de barras en consultas SQL.
 EXPR_CODIGO_BARRAS = (
     "regexp_replace("
     "regexp_replace(TRIM(BOTH FROM CAST(codigo_barras AS TEXT)), '\\s+', '', 'g'), "
     "'\\.0+$', '', 'g')"
 )
-EXPR_NOMBRE = (
-    "regexp_replace(LOWER(TRIM(BOTH FROM CAST(nombre AS TEXT))), '\\s+', ' ', 'g')"
-)
 
-_EXTENSIONES_LOCALES = ('.webp', '.jpg', '.jpeg', '.png')
-_CARPETAS_LOCALES = (
-    os.path.join('static', 'images', 'productos'),
-    os.path.join('static', 'images'),
-)
+_EXTENSIONES_BUCKET = ('webp', 'jpg', 'jpeg', 'png')
+_CACHE_EXISTENCIA = {}
 
 
-def _raiz_proyecto():
-    return os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+def _existe_en_bucket(url: str) -> bool:
+    if not url:
+        return False
+    if url in _CACHE_EXISTENCIA:
+        return _CACHE_EXISTENCIA[url]
+    try:
+        respuesta = requests.head(url, timeout=4, allow_redirects=True)
+        ok = respuesta.status_code == 200
+    except requests.RequestException:
+        ok = False
+    _CACHE_EXISTENCIA[url] = ok
+    return ok
 
 
-def _url_si_archivo_existe(relativo_static):
-    relativo_static = relativo_static.replace('\\', '/').lstrip('/')
-    ruta = os.path.join(_raiz_proyecto(), 'static', relativo_static)
-    if os.path.isfile(ruta):
-        return f'/static/{relativo_static}'
-    return None
-
-
-def buscar_imagen_en_directorio(codigo_o_archivo):
-    """Busca archivo local por nombre exacto (CSV) o código de barras como nombre de archivo."""
-    if not codigo_o_archivo:
+def buscar_imagen_supabase_por_codigo(codigo_barras):
+    """Busca productos/{codigo}.{ext} en el bucket público de Supabase."""
+    if not SUPABASE_URL:
         return None
-
-    bruto = str(codigo_o_archivo).strip().replace('\\', '/')
-    if not bruto:
+    codigo = normalizar_codigo_barras(codigo_barras)
+    if not codigo:
         return None
-
-    nombre_archivo = os.path.basename(bruto)
-    stem, ext = os.path.splitext(nombre_archivo)
-    candidatos = []
-    if nombre_archivo:
-        candidatos.append(nombre_archivo)
-    codigo = normalizar_codigo_barras(stem) or (stem.strip() if stem else None)
-    if codigo and codigo not in candidatos:
-        candidatos.append(codigo)
-
-    vistos = set()
-    for carpeta in _CARPETAS_LOCALES:
-        for cand in candidatos:
-            if not cand:
-                continue
-            clave = f'{carpeta}|{cand}'.lower()
-            if clave in vistos:
-                continue
-            vistos.add(clave)
-            rel_dir = os.path.relpath(carpeta, 'static')
-
-            if ext and ext.lower() in _EXTENSIONES_LOCALES:
-                url = _url_si_archivo_existe(os.path.join(rel_dir, cand))
-                if url:
-                    return url
-
-            for extra in _EXTENSIONES_LOCALES:
-                archivo = cand if cand.lower().endswith(extra) else f'{cand}{extra}'
-                url = _url_si_archivo_existe(os.path.join(rel_dir, archivo))
-                if url:
-                    return url
-    return None
-
-
-def _url_usable_o_none(valor):
-    texto = texto_campo_imagen(valor, default=None)
-    if url_imagen_usable(texto):
-        return texto
+    for extension in _EXTENSIONES_BUCKET:
+        candidata = url_publica_bucket('productos', f'{codigo}.{extension}')
+        if _existe_en_bucket(candidata):
+            return candidata
     return None
 
 
 def normalizar_imagen_registro(imagen_url=None, codigo_barras=None):
     """
-    Normaliza la imagen de UN solo registro sin consultar otros productos.
-    1) URL http(s) o /static ya guardada (Supabase, CSV, manual)
-    2) Archivo local explícito referenciado en la celda o por código exacto
+    Resuelve la imagen de un producto:
+    1) URL válida del bucket Supabase en imagen_url
+    2) Búsqueda por código de barras en productos/ del bucket
+    3) Imagen por defecto (default-product.webp)
     """
-    directa = _url_usable_o_none(imagen_url)
+    directa = url_imagen_supabase_valida(imagen_url)
     if directa:
         return directa
 
     referencia = texto_campo_imagen(imagen_url, default=None)
-    if not referencia:
-        referencia = normalizar_codigo_barras(codigo_barras)
-    if referencia:
-        return buscar_imagen_en_directorio(referencia)
-    return None
+    codigo = normalizar_codigo_barras(codigo_barras) or normalizar_codigo_barras(referencia)
+    if codigo:
+        encontrada = buscar_imagen_supabase_por_codigo(codigo)
+        if encontrada:
+            return encontrada
+
+    return url_imagen_producto_default()
 
 
 def obtener_imagen_url_producto(producto_id):
-    """Devuelve la URL exacta persistida en BD para este producto (sin cruzar catálogo)."""
     if not producto_id:
-        return None
+        return url_imagen_producto_default()
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
             cursor.execute(
-                'SELECT imagen_url FROM productos WHERE id = ?',
+                'SELECT imagen_url, codigo_barras FROM productos WHERE id = ?',
                 (int(producto_id),),
             )
             fila = cursor.fetchone()
             if not fila:
-                return None
+                return url_imagen_producto_default()
             registro = dict(fila)
-            return normalizar_imagen_registro(registro.get('imagen_url'))
+            return normalizar_imagen_registro(
+                registro.get('imagen_url'),
+                registro.get('codigo_barras'),
+            )
     except Exception as error:
         print(f'Error al leer imagen del producto {producto_id}: {error}')
-        return None
+        return url_imagen_producto_default()
 
 
 def resolver_imagen_producto(
@@ -137,11 +106,7 @@ def resolver_imagen_producto(
     excluir_url=None,
     persistir=False,
 ):
-    """
-    Resolución estricta: nunca adivina ni reutiliza fotos de otros productos.
-    Prioridad: URL del registro → archivo local explícito → URL exacta en BD por id.
-    """
-    del nombre, descripcion, buscar_web, persistir  # sin fuzzy ni búsqueda web
+    del nombre, descripcion, buscar_web, persistir
 
     url = normalizar_imagen_registro(imagen_url, codigo_barras)
     if url and url != excluir_url:
@@ -152,15 +117,13 @@ def resolver_imagen_producto(
         if url_bd and url_bd != excluir_url:
             return url_bd
 
-    return None
+    return url_imagen_producto_default()
 
 
 def aplicar_respaldo_imagenes(productos, persistir=False):
-    """Normaliza imagen_url de cada producto usando solo su propio valor guardado."""
-    del persistir  # no escribir URLs inferidas en BD
+    del persistir
     if not productos:
         return productos
-
     for prod in productos:
         prod['imagen_url'] = normalizar_imagen_registro(
             prod.get('imagen_url'),
@@ -170,7 +133,7 @@ def aplicar_respaldo_imagenes(productos, persistir=False):
 
 
 def asociar_imagenes_inventario(comercio_id):
-    """Tras CSV: normaliza URLs ya importadas. No encola búsquedas ni adivina imágenes."""
+    """Tras CSV: normaliza URLs en memoria (sin búsqueda web ni disco local)."""
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()

@@ -98,7 +98,6 @@ TABLAS_PERMITIDAS = frozenset({
     'logs_auditoria',
     'intentos_login',
     'solicitudes_pago',
-    'mapeo_imagenes',
 })
 
 # Columnas que deben existir en tablas ya creadas (ADD COLUMN IF NOT EXISTS).
@@ -928,20 +927,6 @@ def _crear_tabla_solicitudes_pago(cursor):
     )
 
 
-def _crear_tabla_mapeo_imagenes(cursor):
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS mapeo_imagenes (
-            id SERIAL PRIMARY KEY,
-            nombre_producto TEXT NOT NULL,
-            imagen_url TEXT NOT NULL,
-            activo INTEGER DEFAULT 1,
-            fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-
-
 def _crear_tablas(cursor):
     """Crea todas las tablas de la aplicación. El orden respeta las FKs."""
     _crear_tabla_usuarios(cursor)
@@ -956,7 +941,6 @@ def _crear_tablas(cursor):
     _crear_tabla_intentos_login(cursor)
     _crear_tabla_pagos(cursor)
     _crear_tabla_solicitudes_pago(cursor)
-    _crear_tabla_mapeo_imagenes(cursor)
 
 
 def _asegurar_indices_unicos(cursor):
@@ -1096,10 +1080,6 @@ def _crear_indices(cursor):
         'CREATE INDEX IF NOT EXISTS idx_soporte_estado ON soporte_y_reportes(estado)',
         'CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_comercio ON solicitudes_pago(comercio_id)',
         'CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_referencia ON solicitudes_pago(referencia)',
-        (
-            'CREATE INDEX IF NOT EXISTS idx_mapeo_imagenes_nombre_norm ON mapeo_imagenes '
-            "(regexp_replace(LOWER(TRIM(BOTH FROM CAST(nombre_producto AS TEXT))), '\\s+', ' ', 'g'))"
-        ),
     ]
     for ddl in indices:
         _ejecutar_ddl_seguro(cursor, ddl)
