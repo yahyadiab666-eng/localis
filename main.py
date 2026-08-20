@@ -117,7 +117,6 @@ from backend.stores import (
     actualizar_producto,
     buscar_y_filtrar_productos,
     eliminar_producto,
-    listar_comercios_por_usuario,
     obtener_comercio_por_id,
     obtener_comercio_por_usuario,
     obtener_config,
@@ -125,7 +124,6 @@ from backend.stores import (
     obtener_tasa_dolar,
     procesar_csv_productos,
     registrar_comercio_completo,
-    usuario_posee_comercio,
 )
 
 app = Flask(__name__)
@@ -336,25 +334,18 @@ def procesar_imagen_para_producto(
 def _comercio_sesion_validado():
     """Comercio activo validado contra PostgreSQL (HTML y API)."""
     usuario_id = session.get('usuario_id')
-    comercio_id = asegurar_contexto_comercio(usuario_id)
-    if not comercio_id:
-        return None
-    return obtener_comercio_por_usuario(usuario_id, comercio_id=comercio_id)
+    asegurar_contexto_comercio(usuario_id)
+    return obtener_comercio_por_usuario(usuario_id)
 
 
 def _requiere_comercio():
-    """Resuelve el comercio activo validando permisos reales del usuario en sesión."""
+    """Resuelve el comercio del usuario autenticado (primer comercio asociado)."""
     usuario_id = session.get('usuario_id')
-    comercio_id = asegurar_contexto_comercio(usuario_id)
-    if not comercio_id:
-        flash('Selecciona un comercio para continuar.', 'info')
-        return None, redirect(url_for('comercio_inicio'))
-
-    comercio = obtener_comercio_por_usuario(usuario_id, comercio_id=comercio_id)
+    comercio = obtener_comercio_por_usuario(usuario_id)
     if not comercio:
-        limpiar_contexto_comercio()
-        flash('No tienes permiso sobre ese comercio.', 'error')
-        return None, redirect(url_for('comercio_inicio'))
+        flash('Debes registrar un comercio primero.', 'error')
+        return None, redirect(url_for('panel_comercio'))
+    vincular_comercio_en_sesion(comercio['id'])
     return comercio, None
 
 
@@ -581,7 +572,7 @@ def login():
     if session.get('usuario_id'):
         if session.get('es_admin'):
             return redirect(url_for('panel_admin'))
-        return redirect(url_for('comercio_inicio'))
+        return redirect(url_for('panel_comercio'))
     return render_template('login.html')
 
 
@@ -641,8 +632,10 @@ def google_callback():
         if usuario_o_error.get('rol') == 'admin':
             return redirect(url_for('panel_admin'))
         if usuario_o_error.get('rol') == 'comerciante':
-            limpiar_contexto_comercio()
-            return redirect(url_for('comercio_inicio'))
+            comercio = obtener_comercio_por_usuario(usuario_o_error['id'])
+            if comercio:
+                vincular_comercio_en_sesion(comercio['id'])
+            return redirect(url_for('panel_comercio'))
 
         return redirect(url_for('index'))
     except Exception as error:
@@ -665,109 +658,7 @@ def logout():
 
 @app.route('/comercio')
 @login_requerido
-def comercio_inicio():
-    """Punto de entrada del comerciante: selección explícita o registro controlado."""
-    usuario_id = session.get('usuario_id')
-    comercios = listar_comercios_por_usuario(usuario_id)
-    comercio_activo_id = asegurar_contexto_comercio(usuario_id)
-    return render_template(
-        'comercio_inicio.html',
-        comercios=comercios,
-        comercio_activo_id=comercio_activo_id,
-        username=session.get('username'),
-    )
-
-
-@app.route('/comercio/seleccionar', methods=['POST'])
-@login_requerido
-def comercio_seleccionar():
-    usuario_id = session.get('usuario_id')
-    comercio_id = request.form.get('comercio_id', type=int)
-    if not comercio_id or not usuario_posee_comercio(usuario_id, comercio_id):
-        flash('Debes seleccionar un comercio válido.', 'error')
-        return redirect(url_for('comercio_inicio'))
-    vincular_comercio_en_sesion(comercio_id)
-    flash('Comercio seleccionado correctamente.', 'exito')
-    return redirect(url_for('panel_comercio'))
-
-
-@app.route('/comercio/registrar', methods=['GET', 'POST'])
-@login_requerido
-def registrar_comercio():
-    try:
-        if request.method == 'GET':
-            with get_db_connection(row_factory=sqlite3.Row) as conn:
-                cursor = conn.cursor()
-                cursor.execute('SELECT id, nombre FROM categorias')
-                categorias = [dict(c) for c in cursor.fetchall()]
-            return render_template('registro_comercio.html', categorias=categorias)
-
-        usuario_id = session.get('usuario_id')
-        nombre = request.form.get('nombre', '').strip()
-        descripcion = request.form.get('descripcion', '').strip()
-        telefono = request.form.get('telefono', '').strip()
-        direccion = request.form.get('direccion', '').strip()
-        ciudad = request.form.get('ciudad', '').strip()
-        zona = request.form.get('zona', '').strip()
-        maps_url = request.form.get('maps_url', '').strip()
-        documento_identidad = request.form.get('documento_identidad', '').strip()
-        categoria_raw = request.form.get('categoria_id')
-        if not categoria_raw or not str(categoria_raw).strip().isdigit():
-            flash('Debes seleccionar una categoría válida.', 'error')
-            return redirect(url_for('registrar_comercio'))
-        categoria_id = int(categoria_raw)
-        logo_archivo = request.files.get('logo')
-
-        logo_url = None
-        if logo_archivo and logo_archivo.filename:
-            try:
-                logo_url = procesar_logo_comercio(
-                    logo_archivo, prefijo=f'logo_nuevo_{usuario_id}'
-                )
-            except SupabaseUploadError as error:
-                flash(str(error), 'error')
-                return redirect(url_for('registrar_comercio'))
-
-        exito, resultado = registrar_comercio_completo(
-            usuario_id,
-            nombre,
-            descripcion,
-            telefono,
-            direccion,
-            categoria_id,
-            logo_url=logo_url,
-            ciudad=ciudad or None,
-            zona=zona or None,
-            maps_url=maps_url or None,
-            documento_identidad=documento_identidad or None,
-        )
-        if not exito:
-            flash(resultado, 'error')
-            return redirect(url_for('registrar_comercio'))
-
-        flash(resultado, 'exito')
-        return redirect(url_for('comercio_inicio'))
-    except psycopg2.Error:
-        raise
-    except Exception as error:
-        print(f'Error al registrar comercio: {error}')
-        flash('No se pudo registrar el comercio. Intenta de nuevo.', 'error')
-        return redirect(url_for('registrar_comercio'))
-
-
-@app.route('/comercio/crear', methods=['GET', 'POST'])
-@login_requerido
-def crear_comercio_legacy():
-    return redirect(url_for('registrar_comercio'))
-
-
-@app.route('/comercio/panel')
-@login_requerido
 def panel_comercio():
-    comercio, redireccion = _requiere_comercio()
-    if redireccion:
-        return redireccion
-
     usuario_id = session.get('usuario_id')
     try:
         tasa_actual = obtener_tasa_dolar() or 1.0
@@ -775,20 +666,35 @@ def panel_comercio():
 
         with get_db_connection(row_factory=sqlite3.Row) as conn:
             cursor = conn.cursor()
+
+            cursor.execute('SELECT id FROM usuarios WHERE id = ?', (usuario_id,))
+            if not cursor.fetchone():
+                session.clear()
+                flash(
+                    'La sesión ya no existe en la base de datos. Por favor inicia sesión nuevamente.',
+                    'error',
+                )
+                return redirect(url_for('login'))
+
             cursor.execute(
                 '''
                 SELECT c.*, cat.nombre as categoria
                 FROM comercios c
                 LEFT JOIN categorias cat ON c.categoria_id = cat.id
-                WHERE c.id = ? AND c.usuario_id = ?
+                WHERE c.usuario_id = ?
                 ''',
-                (comercio['id'], usuario_id),
+                (usuario_id,),
             )
             comercio_db = cursor.fetchone()
+
             if not comercio_db:
-                limpiar_contexto_comercio()
-                flash('Comercio no encontrado.', 'error')
-                return redirect(url_for('comercio_inicio'))
+                cursor.execute('SELECT id, nombre FROM categorias')
+                categorias = [dict(c) for c in cursor.fetchall()]
+                return render_template(
+                    'registro_comercio.html', categorias=categorias
+                )
+
+            vincular_comercio_en_sesion(comercio_db['id'])
 
             cursor.execute(
                 '''
@@ -852,7 +758,95 @@ def panel_comercio():
             'No se pudo cargar el panel del comercio. Intenta de nuevo en unos segundos.',
             'error',
         )
-        return redirect(url_for('comercio_inicio'))
+        return redirect(url_for('panel_comercio'))
+
+
+@app.route('/comercio/panel')
+@login_requerido
+def panel_comercio_legacy():
+    """Compatibilidad con enlaces antiguos a /comercio/panel."""
+    return redirect(url_for('panel_comercio'))
+
+
+@app.route('/comercio/seleccionar', methods=['GET', 'POST'])
+@login_requerido
+def comercio_seleccionar_legacy():
+    """Hub de selección eliminado: redirige al panel directo."""
+    return redirect(url_for('panel_comercio'))
+
+
+@app.route('/comercio/registrar', methods=['GET', 'POST'])
+@login_requerido
+def registrar_comercio_legacy():
+    """Compatibilidad con la ruta /comercio/registrar."""
+    return redirect(url_for('crear_comercio'))
+
+
+@app.route('/comercio/crear', methods=['GET', 'POST'])
+@login_requerido
+def crear_comercio():
+    try:
+        if request.method == 'GET':
+            with get_db_connection(row_factory=sqlite3.Row) as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT id, nombre FROM categorias')
+                categorias = [dict(c) for c in cursor.fetchall()]
+            return render_template('registro_comercio.html', categorias=categorias)
+
+        usuario_id = session.get('usuario_id')
+        nombre = request.form.get('nombre', '').strip()
+        descripcion = request.form.get('descripcion', '').strip()
+        telefono = request.form.get('telefono', '').strip()
+        direccion = request.form.get('direccion', '').strip()
+        ciudad = request.form.get('ciudad', '').strip()
+        zona = request.form.get('zona', '').strip()
+        maps_url = request.form.get('maps_url', '').strip()
+        documento_identidad = request.form.get('documento_identidad', '').strip()
+        categoria_raw = request.form.get('categoria_id')
+        if not categoria_raw or not str(categoria_raw).strip().isdigit():
+            flash('Debes seleccionar una categoría válida.', 'error')
+            return redirect(url_for('crear_comercio'))
+        categoria_id = int(categoria_raw)
+        logo_archivo = request.files.get('logo')
+
+        logo_url = None
+        if logo_archivo and logo_archivo.filename:
+            try:
+                logo_url = procesar_logo_comercio(
+                    logo_archivo, prefijo=f'logo_nuevo_{usuario_id}'
+                )
+            except SupabaseUploadError as error:
+                flash(str(error), 'error')
+                return redirect(url_for('crear_comercio'))
+
+        exito, resultado = registrar_comercio_completo(
+            usuario_id,
+            nombre,
+            descripcion,
+            telefono,
+            direccion,
+            categoria_id,
+            logo_url=logo_url,
+            ciudad=ciudad or None,
+            zona=zona or None,
+            maps_url=maps_url or None,
+            documento_identidad=documento_identidad or None,
+        )
+
+        if exito:
+            flash(
+                'Comercio registrado con éxito. Tienes 30 días de prueba gratuita.',
+                'exito',
+            )
+        else:
+            flash(resultado, 'error')
+        return redirect(url_for('panel_comercio'))
+    except psycopg2.Error:
+        raise
+    except Exception as error:
+        print(f'Error al registrar comercio: {error}')
+        flash('No se pudo registrar el comercio. Intenta de nuevo.', 'error')
+        return redirect(url_for('panel_comercio'))
 
 
 @app.route('/comercio/editar', methods=['GET', 'POST'])

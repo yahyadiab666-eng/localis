@@ -17,7 +17,6 @@ def formatear_fecha(valor):
     return texto[:10] if texto else None
 
 
-DEFAULT_IMAGEN_PRODUCTO = '/static/images/default-product.webp'
 _VALORES_IMAGEN_VACIOS = frozenset({
     '',
     'none',
@@ -84,7 +83,7 @@ def es_imagen_generica(valor):
 
 
 def url_imagen_usable(valor):
-    """True si hay URL Supabase usable o fallback estático."""
+    """True si hay URL Supabase usable."""
     return bool(url_imagen_supabase_valida(valor))
 
 
@@ -106,20 +105,22 @@ def url_imagen_supabase_valida(valor):
 
 
 def url_imagen_producto_default():
-    """URL por defecto para productos sin imagen (Supabase o override de entorno)."""
+    """URL por defecto para productos sin imagen (siempre bucket público Supabase)."""
     import os
 
     override = (os.getenv('DEFAULT_PRODUCT_IMAGE_URL') or '').strip()
+    if override.startswith('https://') and '/storage/v1/object/public/' in override:
+        return override
     if override and url_imagen_supabase_valida(override):
         return override
-    try:
-        from backend.supabase_client import SUPABASE_URL, url_publica_bucket
 
-        if SUPABASE_URL:
-            return url_publica_bucket('productos', 'default-product.webp')
-    except Exception:
-        pass
-    return DEFAULT_IMAGEN_PRODUCTO
+    from backend.supabase_client import SUPABASE_URL, url_publica_bucket
+
+    if not SUPABASE_URL:
+        raise RuntimeError(
+            'Configure SUPABASE_URL o DEFAULT_PRODUCT_IMAGE_URL para la imagen por defecto.'
+        )
+    return url_publica_bucket('productos', 'default-product.webp')
 
 
 def imagen_url_para_persistir(valor):
