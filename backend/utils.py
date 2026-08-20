@@ -82,14 +82,24 @@ def es_imagen_generica(valor):
     return any(marca in lower for marca in _MARCADORES_IMAGEN_GENERICA)
 
 
+def url_imagen_manual_valida(valor):
+    """URL https explícita (CSV, catálogo externo), excluyendo placeholders."""
+    texto = texto_campo_imagen(valor, default=None)
+    if not texto or es_imagen_generica(texto):
+        return None
+    if texto.startswith('https://'):
+        return texto
+    return None
+
+
 def url_imagen_usable(valor):
-    """True si hay URL Supabase usable."""
-    return bool(url_imagen_supabase_valida(valor))
+    """True si hay URL manual o Supabase usable."""
+    return bool(url_imagen_supabase_valida(valor) or url_imagen_manual_valida(valor))
 
 
 def imagen_url_almacenada(valor):
-    """URL persistible en BD (Supabase http(s) exclusivamente), o None."""
-    return url_imagen_supabase_valida(valor)
+    """URL persistible en BD (Supabase o enlace https explícito)."""
+    return url_imagen_supabase_valida(valor) or url_imagen_manual_valida(valor)
 
 
 def url_imagen_supabase_valida(valor):
