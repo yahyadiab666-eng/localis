@@ -643,29 +643,33 @@ def _snapshot_imagenes_por_codigo(cursor, comercio_id):
     return snapshot
 
 
-def _imagen_final_importacion(imagen_csv, codigo_barras, snapshot_imagenes, nombre=None, descripcion=None):
-    """URL definitiva para INSERT: resolución completa en importación (no en catálogo)."""
-    from backend.image_lookup import (
-        preparar_url_imagen_persistida,
-        resolver_imagen_url_definitiva,
-    )
+def _imagen_final_importacion(
+    imagen_csv,
+    codigo_barras,
+    snapshot_imagenes,
+    mapa_maestro=None,
+    nombre=None,
+    descripcion=None,
+):
+    """URL definitiva para INSERT: manual, snapshot local o image_manager."""
+    del nombre, descripcion
+    from backend.image_manager import resolver_imagen_escritura
 
     nueva = imagen_url_para_persistir(imagen_csv)
     if nueva:
-        return preparar_url_imagen_persistida(nueva)
+        return nueva
     codigo = normalizar_codigo_barras(codigo_barras)
     if codigo and codigo in snapshot_imagenes:
         return snapshot_imagenes[codigo]
-    return resolver_imagen_url_definitiva(
-        None,
-        codigo_barras,
-        nombre=nombre,
-        descripcion=descripcion,
+    return resolver_imagen_escritura(
+        codigo_barras=codigo_barras,
+        mapa_maestro=mapa_maestro,
     )
 
 
-def _tuplas_insercion(comercio_id, lote, snapshot_imagenes=None):
+def _tuplas_insercion(comercio_id, lote, snapshot_imagenes=None, mapa_maestro=None):
     snapshot_imagenes = snapshot_imagenes or {}
+    mapa_maestro = mapa_maestro or {}
     return [
         (
             comercio_id,
@@ -677,8 +681,7 @@ def _tuplas_insercion(comercio_id, lote, snapshot_imagenes=None):
                 prod.get('imagen_url'),
                 prod.get('codigo_barras'),
                 snapshot_imagenes,
-                nombre=prod.get('nombre'),
-                descripcion=prod.get('descripcion'),
+                mapa_maestro=mapa_maestro,
             ),
             prod['stock'],
         )
@@ -689,34 +692,43 @@ def _tuplas_insercion(comercio_id, lote, snapshot_imagenes=None):
 def persistir_importacion_por_lotes(comercio_id, factory_generador_lotes):
     """
     Transacción atómica con bloqueo por comercio e inserción por lotes.
-    factory_generador_lotes debe ser callable que retorne un generador nuevo
-    (necesario para reintentos tras deadlock).
+    Las imágenes se resuelven antes del lock (catálogo maestro + OpenFoodFacts).
     """
-    from backend.db import ejecutar_con_reintentos_bd
+    from backend.db import ejecutar_con_reintentos_bd, get_db_connection
+    from backend.image_manager import preparar_mapa_imagenes_importacion
+
+    productos_por_codigo = {}
+    productos_sin_codigo = []
+    for lote in factory_generador_lotes():
+        for prod in lote:
+            codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
+            if codigo:
+                productos_por_codigo[codigo] = prod
+            else:
+                productos_sin_codigo.append(prod)
+
+    productos_finales = list(productos_por_codigo.values()) + productos_sin_codigo
+
+    with get_db_connection() as conexion:
+        cursor = conexion.cursor()
+        snapshot_imagenes = _snapshot_imagenes_por_codigo(cursor, comercio_id)
+
+    mapa_imagenes = preparar_mapa_imagenes_importacion(
+        productos_finales,
+        snapshot_imagenes,
+    )
 
     def _operacion(conexion):
         cursor = conexion.cursor()
         cursor.execute('SELECT pg_advisory_xact_lock(?)', (int(comercio_id),))
-        snapshot_imagenes = _snapshot_imagenes_por_codigo(cursor, comercio_id)
         cursor.execute('DELETE FROM productos WHERE comercio_id = ?', (int(comercio_id),))
 
-        productos_por_codigo = {}
-        productos_sin_codigo = []
-        for lote in factory_generador_lotes():
-            for prod in lote:
-                codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
-                if codigo:
-                    productos_por_codigo[codigo] = prod
-                else:
-                    productos_sin_codigo.append(prod)
-
-        productos_finales = list(productos_por_codigo.values()) + productos_sin_codigo
         insertados = 0
         for inicio in range(0, len(productos_finales), IMPORT_BATCH_SIZE):
             lote = productos_finales[inicio : inicio + IMPORT_BATCH_SIZE]
             cursor.executemany(
                 INSERT_PRODUCTO_SQL,
-                _tuplas_insercion(comercio_id, lote, snapshot_imagenes),
+                _tuplas_insercion(comercio_id, lote, snapshot_imagenes, mapa_imagenes),
             )
             insertados += len(lote)
 

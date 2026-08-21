@@ -73,8 +73,8 @@ from backend.diagnostics import ejecutar_diagnostico_inicio, obtener_estado_sist
 from backend.error_handlers import registrar_manejadores_errores
 from backend.image_lookup import (
     imagen_url_para_catalogo,
+    imagen_urls_para_catalogo,
     obtener_imagen_url_producto,
-    preparar_url_imagen_persistida,
     resolver_imagen_url_definitiva,
 )
 from backend.db import get_db_connection
@@ -719,9 +719,10 @@ def panel_comercio():
                 'precio_usd': precio_usd,
                 'precio_bs': round(precio_usd * tasa_actual, 2),
                 'codigo_barras': p['codigo_barras'] or '',
-                'imagen_url': imagen_url_para_catalogo(p.get('imagen_url')),
+                'imagen_url': p.get('imagen_url'),
             })
-        # Catálogo: solo lectura de imagen_url persistida (sin APIs externas).
+        imagen_urls_para_catalogo(productos)
+        # Catálogo: PostgreSQL + catálogo maestro Supabase (sin APIs externas).
 
         comercio = _normalizar_imagenes_comercio(dict(comercio_db))
 
@@ -962,14 +963,10 @@ def nuevo_producto():
                     comercio_id=comercio['id'],
                 )
             )
-            if imagen_url:
-                imagen_url = preparar_url_imagen_persistida(imagen_url)
             if not imagen_url:
                 imagen_url = resolver_imagen_url_definitiva(
                     None,
                     codigo_barras,
-                    nombre=nombre,
-                    descripcion=descripcion,
                 )
         except SupabaseUploadError as error:
             flash(str(error), 'error')
@@ -1228,14 +1225,10 @@ def api_crear_producto():
                 comercio_id=tienda_id,
             )
         )
-        if imagen_url:
-            imagen_url = preparar_url_imagen_persistida(imagen_url)
         if not imagen_url:
             imagen_url = resolver_imagen_url_definitiva(
                 None,
                 codigo_barras,
-                nombre=nombre,
-                descripcion=descripcion,
             )
     except SupabaseUploadError as error:
         return jsonify({'error': str(error)}), 503
