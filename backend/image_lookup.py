@@ -1,4 +1,4 @@
-"""Resolución de imágenes: manual (Supabase/URL), catálogo externo y default."""
+"""Imágenes: resolución en escritura (import/alta); lectura instantánea desde PostgreSQL."""
 
 import sqlite3
 
@@ -31,8 +31,8 @@ _FILTRO_IMAGEN_REAL = """
 """
 
 
-def _url_manual_o_none(valor):
-    """URL explícita del usuario: Supabase subida o enlace https guardado en BD/CSV."""
+def _url_almacenada_o_none(valor):
+    """URL ya persistida en BD (Supabase, wsrv.nl u https explícita)."""
     supabase = url_imagen_supabase_valida(valor)
     if supabase:
         return supabase
@@ -45,9 +45,27 @@ def _url_manual_o_none(valor):
 
 
 def _es_url_default(url):
-    if not url:
-        return False
-    return 'default-product' in str(url).lower()
+    return bool(url and 'default-product' in str(url).lower())
+
+
+def preparar_url_imagen_persistida(url):
+    """
+    Formato final para guardar en PostgreSQL.
+    Supabase se conserva; URLs externas pasan por wsrv.nl (300×300, webp).
+    """
+    if not url or _es_url_default(url):
+        return None
+    if url_imagen_supabase_valida(url):
+        return url
+    if 'wsrv.nl' in url.lower():
+        return url
+    try:
+        from backend.image_search import optimizar_url_imagen
+
+        return optimizar_url_imagen(url) or url
+    except Exception as error:
+        print(f'Aviso al optimizar URL de imagen: {error}')
+        return url
 
 
 def _mapa_desde_filas(filas, clave_norm):
@@ -55,14 +73,14 @@ def _mapa_desde_filas(filas, clave_norm):
     for fila in filas or []:
         fila = dict(fila)
         clave = fila.get(clave_norm)
-        url = _url_manual_o_none(fila.get('imagen_url'))
+        url = _url_almacenada_o_none(fila.get('imagen_url'))
         if clave and url and clave not in resultado:
             resultado[clave] = url
     return resultado
 
 
 def mapa_imagenes_por_codigos(codigos):
-    """Reutiliza imagen ya conocida en PostgreSQL por código de barras."""
+    """Reutiliza imagen ya persistida en PostgreSQL por código de barras."""
     normalizados = []
     vistos = set()
     for codigo in codigos or []:
@@ -94,7 +112,7 @@ def mapa_imagenes_por_codigos(codigos):
 
 
 def mapa_imagenes_por_nombres(nombres):
-    """Reutiliza imagen ya conocida en PostgreSQL por nombre."""
+    """Reutiliza imagen ya persistida en PostgreSQL por nombre."""
     normalizados = []
     vistos = set()
     for nombre in nombres or []:
@@ -125,38 +143,8 @@ def mapa_imagenes_por_nombres(nombres):
         return {}
 
 
-def _cargar_mapas_catalogo_global():
-    """Mapas código/nombre → imagen_url reutilizable desde PostgreSQL."""
-    mapa_codigos = {}
-    mapa_nombres = {}
-    sql = f"""
-        SELECT codigo_barras, nombre, imagen_url
-        FROM productos
-        WHERE {_FILTRO_IMAGEN_REAL}
-        ORDER BY id DESC
-    """
-    try:
-        with get_db_connection(row_factory=sqlite3.Row) as conexion:
-            cursor = conexion.cursor()
-            cursor.execute(sql)
-            for fila in cursor.fetchall():
-                registro = dict(fila)
-                url = _url_manual_o_none(registro.get('imagen_url'))
-                if not url:
-                    continue
-                codigo = normalizar_codigo_barras(registro.get('codigo_barras'))
-                if codigo and codigo not in mapa_codigos:
-                    mapa_codigos[codigo] = url
-                nombre = normalizar_nombre_producto(registro.get('nombre'))
-                if nombre and nombre not in mapa_nombres:
-                    mapa_nombres[nombre] = url
-    except Exception as error:
-        print(f'Error al cargar mapas de imágenes del catálogo: {error}')
-    return mapa_codigos, mapa_nombres
-
-
 def _resolver_url_externa(codigo_barras=None, nombre=None, descripcion=None):
-    """Catálogo externo (OpenFoodFacts): solo devuelve URL, sin descargar."""
+    """OpenFoodFacts: solo en escritura/importación (devuelve URL ya optimizada vía wsrv)."""
     try:
         from backend.image_search import obtener_url_imagen_automatica
 
@@ -164,32 +152,31 @@ def _resolver_url_externa(codigo_barras=None, nombre=None, descripcion=None):
             nombre=nombre or '',
             codigo_barras=codigo_barras,
             descripcion=descripcion,
-            modo_rapido=True,
+            modo_rapido=False,
         )
     except Exception as error:
         print(f'Error en resolución externa de imagen: {error}')
         return None
 
 
-def _resolver_url_imagen(
+def _resolver_url_escritura(
     imagen_url=None,
     codigo_barras=None,
     nombre=None,
     descripcion=None,
     mapa_codigos=None,
     mapa_nombres=None,
-    incluir_default=False,
 ):
     """
-    1) URL manual (Supabase o https explícita)
-    2) Reutilización en PostgreSQL por código
-    3) Catálogo externo (código → nombre+descripción → nombre)
-    4) Reutilización en PostgreSQL por nombre
-    5) default-product.webp (solo si incluir_default=True)
+    Resolución completa solo al crear/importar productos.
+    1) URL manual explícita
+    2) Reutilización PostgreSQL por código
+    3) Catálogo externo (OpenFoodFacts)
+    4) Reutilización PostgreSQL por nombre
     """
-    manual = _url_manual_o_none(imagen_url)
+    manual = _url_almacenada_o_none(imagen_url)
     if manual:
-        return manual
+        return preparar_url_imagen_persistida(manual)
 
     codigo = normalizar_codigo_barras(codigo_barras)
     if codigo:
@@ -206,7 +193,7 @@ def _resolver_url_imagen(
         descripcion=descripcion,
     )
     if url_ext:
-        return url_ext
+        return preparar_url_imagen_persistida(url_ext)
 
     nombre_norm = normalizar_nombre_producto(nombre)
     if nombre_norm:
@@ -217,25 +204,16 @@ def _resolver_url_imagen(
         if url:
             return url
 
-    if incluir_default:
-        return url_imagen_producto_default()
     return None
 
 
-def imagen_url_para_catalogo(
-    imagen_url=None,
-    codigo_barras=None,
-    nombre=None,
-    descripcion=None,
-):
-    """Lectura para catálogos: resuelve URL dinámica; default solo al final."""
-    url = _resolver_url_imagen(
-        imagen_url=imagen_url,
-        codigo_barras=codigo_barras,
-        nombre=nombre,
-        descripcion=descripcion,
-        incluir_default=False,
-    )
+def imagen_url_para_catalogo(imagen_url=None, codigo_barras=None, nombre=None, descripcion=None):
+    """
+    Lectura de catálogo: solo la URL guardada en BD.
+    Sin APIs externas ni búsquedas en tiempo real.
+    """
+    del codigo_barras, nombre, descripcion
+    url = _url_almacenada_o_none(imagen_url)
     return url if url else url_imagen_producto_default()
 
 
@@ -244,58 +222,43 @@ def resolver_imagen_url_definitiva(
     codigo_barras=None,
     nombre=None,
     descripcion=None,
+    mapa_codigos=None,
+    mapa_nombres=None,
 ):
-    """Escritura: persiste URL manual o externa; no guarda default en BD."""
-    url = _resolver_url_imagen(
+    """
+    Obligatorio en alta manual e importación CSV.
+    Persiste URL optimizada; NULL si no hay imagen (default solo en vista).
+    """
+    return _resolver_url_escritura(
         imagen_url=imagen_url,
         codigo_barras=codigo_barras,
         nombre=nombre,
         descripcion=descripcion,
-        incluir_default=False,
+        mapa_codigos=mapa_codigos,
+        mapa_nombres=mapa_nombres,
     )
-    if url and not _es_url_default(url):
-        return url
-    return None
 
 
-def normalizar_imagen_registro(
-    imagen_url=None,
-    codigo_barras=None,
-    nombre=None,
-    descripcion=None,
-):
-    return imagen_url_para_catalogo(
-        imagen_url=imagen_url,
-        codigo_barras=codigo_barras,
-        nombre=nombre,
-        descripcion=descripcion,
-    )
+def normalizar_imagen_registro(imagen_url=None, codigo_barras=None, nombre=None, descripcion=None):
+    del codigo_barras, nombre, descripcion
+    return imagen_url_para_catalogo(imagen_url=imagen_url)
 
 
 def obtener_imagen_url_producto(producto_id):
-    """Resuelve imagen de un producto usando sus datos en PostgreSQL."""
+    """Endpoint de respaldo: lee imagen_url de BD sin resolver en runtime."""
     if not producto_id:
         return url_imagen_producto_default()
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
             cursor.execute(
-                '''
-                SELECT imagen_url, codigo_barras, nombre, descripcion
-                FROM productos WHERE id = ?
-                ''',
+                'SELECT imagen_url FROM productos WHERE id = ?',
                 (int(producto_id),),
             )
             fila = cursor.fetchone()
             if not fila:
                 return url_imagen_producto_default()
-            registro = dict(fila)
-            return imagen_url_para_catalogo(
-                registro.get('imagen_url'),
-                codigo_barras=registro.get('codigo_barras'),
-                nombre=registro.get('nombre'),
-                descripcion=registro.get('descripcion'),
-            )
+            return imagen_url_para_catalogo(dict(fila).get('imagen_url'))
     except Exception as error:
         print(f'Error al leer imagen del producto {producto_id}: {error}')
         return url_imagen_producto_default()
@@ -307,7 +270,7 @@ def resolver_imagen_producto(
     nombre=None,
     descripcion=None,
     producto_id=None,
-    buscar_web=True,
+    buscar_web=False,
     excluir_url=None,
     persistir=False,
 ):
@@ -320,16 +283,9 @@ def resolver_imagen_producto(
             nombre=nombre,
             descripcion=descripcion,
         )
-        if url and url != excluir_url:
-            return url
-        return None
+        return url if url and url != excluir_url else None
 
-    url = imagen_url_para_catalogo(
-        imagen_url,
-        codigo_barras,
-        nombre=nombre,
-        descripcion=descripcion,
-    )
+    url = imagen_url_para_catalogo(imagen_url)
     if url and url != excluir_url:
         return url
 
@@ -342,54 +298,77 @@ def resolver_imagen_producto(
 
 
 def aplicar_respaldo_imagenes(productos, persistir=False):
-    """Asigna imagen_url: manual, catálogo PG/externo o default en vista."""
+    """
+    persistir=False (catálogo): solo normaliza URL desde BD + default en vista.
+    persistir=True (post-import): resuelve y guarda URLs faltantes en BD.
+    """
     if not productos:
         return productos
 
-    mapa_codigos, mapa_nombres = _cargar_mapas_catalogo_global()
-    default_url = url_imagen_producto_default()
-
     if persistir:
+        mapa_codigos = {}
+        mapa_nombres = {}
+        sql = f"""
+            SELECT codigo_barras, nombre, imagen_url
+            FROM productos
+            WHERE {_FILTRO_IMAGEN_REAL}
+            ORDER BY id DESC
+        """
+        try:
+            with get_db_connection(row_factory=sqlite3.Row) as conexion:
+                cursor = conexion.cursor()
+                cursor.execute(sql)
+                for fila in cursor.fetchall():
+                    registro = dict(fila)
+                    url = _url_almacenada_o_none(registro.get('imagen_url'))
+                    if not url:
+                        continue
+                    codigo = normalizar_codigo_barras(registro.get('codigo_barras'))
+                    if codigo and codigo not in mapa_codigos:
+                        mapa_codigos[codigo] = url
+                    nombre = normalizar_nombre_producto(registro.get('nombre'))
+                    if nombre and nombre not in mapa_nombres:
+                        mapa_nombres[nombre] = url
+        except Exception as error:
+            print(f'Error al cargar mapas para persistir imágenes: {error}')
+
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
             for prod in productos:
                 producto_id = prod.get('id')
-                if not producto_id:
+                if not producto_id or _url_almacenada_o_none(prod.get('imagen_url')):
                     continue
-                url_final = _resolver_url_imagen(
+                url_final = resolver_imagen_url_definitiva(
                     prod.get('imagen_url'),
                     prod.get('codigo_barras'),
                     nombre=prod.get('nombre'),
                     descripcion=prod.get('descripcion'),
                     mapa_codigos=mapa_codigos,
                     mapa_nombres=mapa_nombres,
-                    incluir_default=False,
                 )
+                if not url_final:
+                    continue
                 cursor.execute(
                     'UPDATE productos SET imagen_url = ? WHERE id = ?',
                     (url_final, int(producto_id)),
                 )
-                prod['imagen_url'] = url_final or default_url
+                prod['imagen_url'] = url_final
+                codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
+                if codigo:
+                    mapa_codigos[codigo] = url_final
+                nombre = normalizar_nombre_producto(prod.get('nombre'))
+                if nombre:
+                    mapa_nombres[nombre] = url_final
             conexion.commit()
         return productos
 
     for prod in productos:
-        url = _resolver_url_imagen(
-            prod.get('imagen_url'),
-            prod.get('codigo_barras'),
-            nombre=prod.get('nombre'),
-            descripcion=prod.get('descripcion'),
-            mapa_codigos=mapa_codigos,
-            mapa_nombres=mapa_nombres,
-            incluir_default=False,
-        )
-        prod['imagen_url'] = url or default_url
-
+        prod['imagen_url'] = imagen_url_para_catalogo(prod.get('imagen_url'))
     return productos
 
 
 def asociar_imagenes_inventario(comercio_id):
-    """Tras CSV: persiste URLs manuales o externas (sin default en BD)."""
+    """Post-CSV: resuelve solo productos sin imagen_url persistida."""
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
@@ -406,8 +385,12 @@ def asociar_imagenes_inventario(comercio_id):
         print(f'Error al leer productos para asociar imágenes: {error}')
         return 0
 
-    if not productos:
+    pendientes = [
+        p for p in productos
+        if not _url_almacenada_o_none(p.get('imagen_url'))
+    ]
+    if not pendientes:
         return 0
 
-    aplicar_respaldo_imagenes(productos, persistir=True)
-    return len(productos)
+    aplicar_respaldo_imagenes(pendientes, persistir=True)
+    return len(pendientes)

@@ -72,8 +72,9 @@ from backend.auth import obtener_o_crear_usuario_google
 from backend.diagnostics import ejecutar_diagnostico_inicio, obtener_estado_sistema
 from backend.error_handlers import registrar_manejadores_errores
 from backend.image_lookup import (
-    aplicar_respaldo_imagenes,
+    imagen_url_para_catalogo,
     obtener_imagen_url_producto,
+    preparar_url_imagen_persistida,
     resolver_imagen_url_definitiva,
 )
 from backend.db import get_db_connection
@@ -718,9 +719,9 @@ def panel_comercio():
                 'precio_usd': precio_usd,
                 'precio_bs': round(precio_usd * tasa_actual, 2),
                 'codigo_barras': p['codigo_barras'] or '',
-                'imagen_url': p.get('imagen_url'),
+                'imagen_url': imagen_url_para_catalogo(p.get('imagen_url')),
             })
-        aplicar_respaldo_imagenes(productos)
+        # Catálogo: solo lectura de imagen_url persistida (sin APIs externas).
 
         comercio = _normalizar_imagenes_comercio(dict(comercio_db))
 
@@ -961,6 +962,8 @@ def nuevo_producto():
                     comercio_id=comercio['id'],
                 )
             )
+            if imagen_url:
+                imagen_url = preparar_url_imagen_persistida(imagen_url)
             if not imagen_url:
                 imagen_url = resolver_imagen_url_definitiva(
                     None,
@@ -1225,6 +1228,8 @@ def api_crear_producto():
                 comercio_id=tienda_id,
             )
         )
+        if imagen_url:
+            imagen_url = preparar_url_imagen_persistida(imagen_url)
         if not imagen_url:
             imagen_url = resolver_imagen_url_definitiva(
                 None,

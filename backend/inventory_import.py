@@ -644,12 +644,15 @@ def _snapshot_imagenes_por_codigo(cursor, comercio_id):
 
 
 def _imagen_final_importacion(imagen_csv, codigo_barras, snapshot_imagenes, nombre=None, descripcion=None):
-    """URL definitiva para guardar en BD (incluye default si no hay imagen)."""
-    from backend.image_lookup import resolver_imagen_url_definitiva
+    """URL definitiva para INSERT: resolución completa en importación (no en catálogo)."""
+    from backend.image_lookup import (
+        preparar_url_imagen_persistida,
+        resolver_imagen_url_definitiva,
+    )
 
     nueva = imagen_url_para_persistir(imagen_csv)
     if nueva:
-        return nueva
+        return preparar_url_imagen_persistida(nueva)
     codigo = normalizar_codigo_barras(codigo_barras)
     if codigo and codigo in snapshot_imagenes:
         return snapshot_imagenes[codigo]

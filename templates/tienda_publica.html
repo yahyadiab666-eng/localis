@@ -105,16 +105,16 @@
     {% if productos %}
       <div class="grid grid-cols-2 md:grid-cols-4 gap-5 grid-productos-mobile">
         {% for producto in productos %}
-          <div class="card-producto-mobile rounded-xl overflow-hidden bg-white shadow border border-stone-100">
+          <div class="card-hover card-producto-mobile rounded-xl overflow-hidden bg-white shadow border border-stone-100 flex flex-col h-full">
             <div class="localis-img-producto-wrap">
               <img src="{{ producto.imagen_url or imagen_producto_default }}"
                    alt="{{ producto.nombre }}"
                    data-producto-id="{{ producto.id }}"
-                   class="localis-img-producto" loading="lazy"
+                   class="localis-img-producto" loading="lazy" referrerpolicy="no-referrer"
                    data-imagen-default="{{ imagen_producto_default }}"
                    onerror="this.onerror=null;this.src=this.dataset.imagenDefault||'';">
             </div>
-            <div class="p-3">
+            <div class="p-3 flex-grow flex flex-col justify-between">
               <h4 class="font-medium text-sm text-gray-900 line-clamp-1">{{ producto.nombre }}</h4>
               <p class="text-xs text-gray-500 line-clamp-2 mt-1">{{ producto.descripcion or '' }}</p>
               <div class="mt-2 flex justify-between items-center">
