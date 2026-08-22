@@ -2,7 +2,7 @@
 
 import sqlite3
 
-from backend.catalogo_maestro import mapa_imagenes_maestro
+from backend.catalogo_maestro import imagen_maestro_por_codigo, mapa_imagenes_maestro
 from backend.db import get_db_connection
 from backend.image_manager import (
     completar_mapa_imagenes,
@@ -13,7 +13,6 @@ from backend.utils import (
     es_imagen_generica,
     normalizar_codigo_barras,
     texto_campo_imagen,
-    url_imagen_producto_default,
     url_imagen_supabase_valida,
 )
 
@@ -51,15 +50,16 @@ def _resolver_url_escritura(
 
 
 def imagen_url_para_catalogo(imagen_url=None, codigo_barras=None):
-    """URL para catálogo: PostgreSQL → catálogo maestro → default (sin APIs externas)."""
-    return resolver_imagen_catalogo(
+    """URL para catálogo: PostgreSQL → catálogo maestro; None si no hay imagen."""
+    url = resolver_imagen_catalogo(
         imagen_url=imagen_url,
         codigo_barras=codigo_barras,
     )
+    return url or None
 
 
 def imagen_urls_para_catalogo(productos):
-    """Resuelve imágenes en lote (PostgreSQL → catálogo maestro → default)."""
+    """Resuelve imágenes en lote (PostgreSQL → catálogo maestro; sin placeholder)."""
     if not productos:
         return productos
 
@@ -76,11 +76,37 @@ def imagen_urls_para_catalogo(productos):
     mapa = mapa_imagenes_maestro(codigos) if codigos else {}
 
     for prod in productos:
-        prod['imagen_url'] = resolver_imagen_catalogo(
-            prod.get('imagen_url'),
-            codigo_barras=prod.get('codigo_barras'),
-            mapa_maestro=mapa,
-        )
+        url = _url_almacenada_o_none(prod.get('imagen_url'))
+        if not url:
+            url = resolver_imagen_catalogo(
+                prod.get('imagen_url'),
+                codigo_barras=prod.get('codigo_barras'),
+                mapa_maestro=mapa,
+            )
+        prod['imagen_url'] = url or None
+
+    # Re-consulta puntual al catálogo maestro por códigos que quedaron sin URL.
+    codigos_faltantes = []
+    vistos_falt = set()
+    for prod in productos:
+        if prod.get('imagen_url'):
+            continue
+        codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
+        if codigo and codigo not in vistos_falt:
+            vistos_falt.add(codigo)
+            codigos_faltantes.append(codigo)
+
+    if codigos_faltantes:
+        mapa_extra = mapa_imagenes_maestro(codigos_faltantes)
+        for prod in productos:
+            if prod.get('imagen_url'):
+                continue
+            codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
+            url = mapa_extra.get(codigo) if codigo else None
+            if not url and codigo:
+                url = imagen_maestro_por_codigo(codigo)
+            prod['imagen_url'] = url or None
+
     return productos
 
 
@@ -95,7 +121,7 @@ def resolver_imagen_url_definitiva(
 ):
     """
     Alta manual e importación CSV.
-    Persiste URL del catálogo maestro; NULL si no hay imagen (default solo en vista).
+    Persiste URL del catálogo maestro; NULL si no hay imagen.
     """
     del nombre, descripcion, mapa_codigos, mapa_nombres
     return _resolver_url_escritura(
@@ -113,7 +139,7 @@ def normalizar_imagen_registro(imagen_url=None, codigo_barras=None, nombre=None,
 def obtener_imagen_url_producto(producto_id):
     """Endpoint de respaldo: lee producto en BD y resuelve imagen sin APIs externas."""
     if not producto_id:
-        return url_imagen_producto_default()
+        return None
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
@@ -123,7 +149,7 @@ def obtener_imagen_url_producto(producto_id):
             )
             fila = cursor.fetchone()
             if not fila:
-                return url_imagen_producto_default()
+                return None
             registro = dict(fila)
             return imagen_url_para_catalogo(
                 registro.get('imagen_url'),
@@ -131,7 +157,7 @@ def obtener_imagen_url_producto(producto_id):
             )
     except Exception as error:
         print(f'Error al leer imagen del producto {producto_id}: {error}')
-        return url_imagen_producto_default()
+        return None
 
 
 def resolver_imagen_producto(
@@ -162,12 +188,12 @@ def resolver_imagen_producto(
         if url_bd and url_bd != excluir_url:
             return url_bd
 
-    return url_imagen_producto_default()
+    return None
 
 
 def aplicar_respaldo_imagenes(productos, persistir=False):
     """
-    persistir=False (catálogo): PostgreSQL → catálogo maestro → default.
+    persistir=False (catálogo): PostgreSQL → catálogo maestro (sin placeholder).
     persistir=True (post-import): guarda URLs del catálogo maestro en PostgreSQL.
     """
     if not productos:

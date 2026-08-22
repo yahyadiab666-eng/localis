@@ -14,17 +14,21 @@
 
   window.rescatarImagenProducto = function rescatarImagenProducto(img) {
     if (!img) return;
-    var fallback = img.getAttribute('data-imagen-default')
-      || window.LOCALIS_IMAGEN_PRODUCTO_DEFAULT
-      || '';
-    var actual = img.currentSrc || img.getAttribute('src') || '';
-    if (img.dataset.rescate === '1' || !fallback || actual === fallback) {
-      img.onerror = null;
-      if (fallback) img.src = fallback;
+    img.onerror = null;
+    var wrap = img.closest('.localis-img-producto-wrap');
+    var esThumb = img.classList.contains('localis-img-producto-thumb');
+    var contenedor = img.parentElement;
+    img.remove();
+    if (wrap) {
+      wrap.classList.add('localis-img-producto-wrap--vacio');
       return;
     }
-    img.dataset.rescate = '1';
-    img.src = fallback;
+    if (contenedor && esThumb) {
+      var vacio = document.createElement('span');
+      vacio.className = 'localis-img-producto-thumb localis-img-producto-thumb--vacio rounded-lg border border-stone-200';
+      vacio.setAttribute('aria-hidden', 'true');
+      contenedor.insertBefore(vacio, contenedor.firstChild);
+    }
   };
 
   function obtenerCsrfToken() {

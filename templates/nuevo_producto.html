@@ -127,11 +127,10 @@
 
             {% if producto and producto.imagen_url %}
               <div class="flex items-center gap-3 mb-2 p-2 bg-stone-50 border border-stone-200 rounded-xl">
-                <img src="{{ producto.imagen_url or imagen_producto_default }}" alt="Imagen actual"
+                <img src="{{ producto.imagen_url }}" alt="Imagen actual"
                      data-producto-id="{{ producto.id }}"
-                     data-imagen-default="{{ imagen_producto_default }}"
                      class="localis-img-producto-thumb rounded-lg border border-stone-200"
-                     onerror="this.onerror=null;this.src=this.dataset.imagenDefault||'';">
+                     onerror="window.rescatarImagenProducto(this)">
                 <div class="text-xs text-stone-600">
                   <p class="font-medium">Imagen actual vinculada</p>
                   <p class="text-[10px] text-stone-400">Sube un archivo nuevo para reemplazarla.</p>
@@ -167,7 +166,6 @@
     lucide.createIcons();
   </script>
   <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
-  <script>window.LOCALIS_IMAGEN_PRODUCTO_DEFAULT = {{ imagen_producto_default|tojson }};</script>
   <script src="{{ url_for('static', filename='js/localis.js') }}"></script>
 </body>
 </html>

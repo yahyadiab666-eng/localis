@@ -117,25 +117,6 @@ def url_imagen_supabase_valida(valor):
     return texto
 
 
-def url_imagen_producto_default():
-    """URL por defecto para productos sin imagen (siempre bucket público Supabase)."""
-    import os
-
-    override = (os.getenv('DEFAULT_PRODUCT_IMAGE_URL') or '').strip()
-    if override.startswith('https://') and '/storage/v1/object/public/' in override:
-        return override
-    if override and url_imagen_supabase_valida(override):
-        return override
-
-    from backend.supabase_client import SUPABASE_URL, url_publica_bucket
-
-    if not SUPABASE_URL:
-        raise RuntimeError(
-            'Configure SUPABASE_URL o DEFAULT_PRODUCT_IMAGE_URL para la imagen por defecto.'
-        )
-    return url_publica_bucket('productos', 'default-product.webp')
-
-
 def imagen_url_para_persistir(valor):
     """Normaliza un valor nuevo antes de INSERT; None si no hay imagen real."""
     return imagen_url_almacenada(valor)

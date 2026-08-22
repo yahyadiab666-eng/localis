@@ -103,7 +103,6 @@ from backend.utils import (
     parsear_precio_form,
     parsear_entero_form,
     parsear_visible_form,
-    url_imagen_producto_default,
     url_maps_comercio,
     url_whatsapp_comercio,
 )
@@ -144,11 +143,6 @@ app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_BYTES
 
 csrf = CSRFProtect(app)
 registrar_manejadores_errores(app)
-
-
-@app.context_processor
-def _inyectar_imagen_producto_default():
-    return {'imagen_producto_default': url_imagen_producto_default()}
 
 
 @app.template_filter('fecha_corta')

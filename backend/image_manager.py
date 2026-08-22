@@ -5,7 +5,7 @@ Flujo:
 1. Catálogo maestro Supabase (cache permanente por código de barras)
 2. Catálogos oficiales (OpenFoodFacts por EAN) con filtro de calidad
 3. Optimización wsrv.nl + persistencia automática en catálogo maestro
-4. default-product.webp si no hay imagen apta
+4. None si no hay imagen apta (sin placeholder genérico)
 """
 
 import time
@@ -21,7 +21,6 @@ from backend.catalogo_maestro import (
 from backend.utils import (
     imagen_url_almacenada,
     normalizar_codigo_barras,
-    url_imagen_producto_default,
     url_imagen_supabase_valida,
 )
 
@@ -199,8 +198,8 @@ def resolver_imagen(
     """
     Resuelve la imagen de un producto.
 
-    para_escritura=True → None si solo aplica default (no persistir placeholder en productos).
-    para_escritura=False → incluye default-product.webp para la vista.
+    para_escritura=True → None si no hay imagen (no persistir en productos).
+    para_escritura=False → None si no hay imagen (vista sin comodín).
     """
     manual = _url_manual_valida(imagen_manual)
     if manual:
@@ -224,9 +223,7 @@ def resolver_imagen(
                 mapa_maestro[codigo] = url
             return url
 
-    if para_escritura:
-        return None
-    return url_imagen_producto_default()
+    return None
 
 
 def resolver_imagen_escritura(
@@ -248,22 +245,24 @@ def resolver_imagen_catalogo(
     codigo_barras=None,
     mapa_maestro=None,
 ):
-    """URL para mostrar en catálogo (incluye default). Solo lectura de caches."""
+    """URL para mostrar en catálogo. Solo lectura: PostgreSQL → catálogo maestro."""
     manual = imagen_url_almacenada(imagen_url)
     if manual:
         return manual
 
     codigo = normalizar_codigo_barras(codigo_barras)
-    if codigo:
-        if mapa_maestro is not None and codigo in mapa_maestro:
-            url = mapa_maestro.get(codigo)
-            if url:
-                return url
-        url = imagen_maestro_por_codigo(codigo)
+    if not codigo:
+        return None
+
+    if mapa_maestro is not None:
+        url = mapa_maestro.get(codigo)
         if url:
             return url
 
-    return url_imagen_producto_default()
+    url = imagen_maestro_por_codigo(codigo)
+    if url and mapa_maestro is not None:
+        mapa_maestro[codigo] = url
+    return url or None
 
 
 def completar_mapa_imagenes(codigos, mapa_maestro=None, buscar_oficial=True):

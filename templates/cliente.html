@@ -84,13 +84,14 @@
                  role="button" tabindex="0"
                  data-producto-id="{{ producto.id }}"
                  onclick="abrirModalProducto({{ producto.id }})">
-              <div class="localis-img-producto-wrap">
-                <img src="{{ producto.imagen_url or imagen_producto_default }}"
+              <div class="localis-img-producto-wrap{% if not producto.imagen_url %} localis-img-producto-wrap--vacio{% endif %}">
+                {% if producto.imagen_url %}
+                <img src="{{ producto.imagen_url }}"
                      alt="{{ producto.nombre }}" loading="lazy" referrerpolicy="no-referrer"
                      data-producto-id="{{ producto.id }}"
                      class="localis-img-producto"
-                     data-imagen-default="{{ imagen_producto_default }}"
-                     onerror="this.onerror=null;this.src=this.dataset.imagenDefault||'';">
+                     onerror="window.rescatarImagenProducto(this)">
+                {% endif %}
               </div>
               <div class="p-3 flex-grow flex flex-col justify-between">
                 <div>
@@ -147,9 +148,6 @@
   </footer>
 
   <script>
-    window.LOCALIS_IMAGEN_PRODUCTO_DEFAULT = {{ imagen_producto_default|tojson }};
-  </script>
-  <script>
     lucide.createIcons();
 
     async function abrirModalProducto(id) {
@@ -157,7 +155,7 @@
         const res = await fetch(`/api/producto/${id}`);
         if (!res.ok) return;
         const p = await res.json();
-        const imgUrl = p.imagen_url || window.LOCALIS_IMAGEN_PRODUCTO_DEFAULT || '';
+        const imgUrl = p.imagen_url || '';
 
         document.getElementById('modal-imagen').style.backgroundImage = imgUrl ? `url('${imgUrl}')` : 'none';
         document.getElementById('modal-comercio').textContent = p.comercio_nombre || '';
