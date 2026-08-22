@@ -104,9 +104,12 @@ def imagen_url_almacenada(valor):
 
 def url_imagen_supabase_valida(valor):
     """True si es una URL https del bucket público de Supabase."""
+    from backend.supabase_client import corregir_typo_ruta_storage
+
     texto = texto_campo_imagen(valor, default=None)
     if not texto or es_imagen_generica(texto):
         return None
+    texto = corregir_typo_ruta_storage(texto)
     if not texto.startswith('https://'):
         return None
     if '/storage/v1/object/public/' not in texto:

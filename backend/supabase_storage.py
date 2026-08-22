@@ -1,7 +1,10 @@
 """Subida de imágenes al bucket Supabase Storage."""
 
 from backend.images import comprimir_bytes_a_bytes, comprimir_file_storage_a_bytes, validar_archivo_subida
-from backend.supabase_client import SUPABASE_BUCKET_IMAGENES
+from backend.supabase_client import (
+    SUPABASE_BUCKET_IMAGENES,
+    normalizar_url_publica_storage,
+)
 from backend.utils import url_imagen_supabase_valida
 
 
@@ -60,6 +63,10 @@ def subir_imagen_a_supabase(
         url_publica = bucket.get_public_url(ruta_storage)
         if not url_publica:
             raise SupabaseUploadError('Supabase no devolvió URL pública para la imagen.')
+        url_publica = normalizar_url_publica_storage(
+            url_publica,
+            ruta=ruta_storage,
+        )
         return _validar_url_publica(url_publica)
     except SupabaseUploadError:
         raise
@@ -99,6 +106,10 @@ def subir_bytes_a_supabase(
         url_publica = bucket.get_public_url(ruta_storage)
         if not url_publica:
             raise SupabaseUploadError('Supabase no devolvió URL pública para el comprobante.')
+        url_publica = normalizar_url_publica_storage(
+            url_publica,
+            ruta=ruta_storage,
+        )
         return _validar_url_publica(url_publica)
     except SupabaseUploadError:
         raise
