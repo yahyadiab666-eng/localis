@@ -43,9 +43,17 @@
   background: #f3f4f6;
 }
 
+.localis-img-producto-wrap--vacio .localis-img-producto:not([src]) {
+  visibility: hidden;
+}
+
 .localis-img-producto-thumb--vacio {
   display: inline-block;
   background: #f3f4f6;
+}
+
+img.localis-img-producto-thumb--vacio:not([src]) {
+  visibility: hidden;
 }
 
 @media (max-width: 768px) {

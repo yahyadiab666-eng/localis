@@ -279,14 +279,11 @@
                   <tr class="hover:bg-amber-50/30 transition">
                     <td class="py-4 px-6 font-semibold text-gray-900">
                       <div class="flex items-center gap-3">
-                        {% if producto.imagen_url %}
-                        <img src="{{ producto.imagen_url }}" alt=""
+                        <img{% if producto.imagen_url %} src="{{ producto.imagen_url }}"{% endif %}
+                             alt=""
                              data-producto-id="{{ producto.id }}"
-                             class="localis-img-producto-thumb rounded-lg border border-stone-200"
+                             class="localis-img-producto-thumb rounded-lg border border-stone-200{% if not producto.imagen_url %} localis-img-producto-thumb--vacio{% endif %}"
                              onerror="window.rescatarImagenProducto(this)">
-                        {% else %}
-                        <span class="localis-img-producto-thumb localis-img-producto-thumb--vacio rounded-lg border border-stone-200" aria-hidden="true"></span>
-                        {% endif %}
                         <span>{{ producto.nombre }}</span>
                       </div>
                     </td>

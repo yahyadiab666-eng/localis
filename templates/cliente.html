@@ -85,13 +85,11 @@
                  data-producto-id="{{ producto.id }}"
                  onclick="abrirModalProducto({{ producto.id }})">
               <div class="localis-img-producto-wrap{% if not producto.imagen_url %} localis-img-producto-wrap--vacio{% endif %}">
-                {% if producto.imagen_url %}
-                <img src="{{ producto.imagen_url }}"
+                <img{% if producto.imagen_url %} src="{{ producto.imagen_url }}"{% endif %}
                      alt="{{ producto.nombre }}" loading="lazy" referrerpolicy="no-referrer"
                      data-producto-id="{{ producto.id }}"
                      class="localis-img-producto"
                      onerror="window.rescatarImagenProducto(this)">
-                {% endif %}
               </div>
               <div class="p-3 flex-grow flex flex-col justify-between">
                 <div>

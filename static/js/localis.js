@@ -15,19 +15,14 @@
   window.rescatarImagenProducto = function rescatarImagenProducto(img) {
     if (!img) return;
     img.onerror = null;
+    img.removeAttribute('src');
     var wrap = img.closest('.localis-img-producto-wrap');
-    var esThumb = img.classList.contains('localis-img-producto-thumb');
-    var contenedor = img.parentElement;
-    img.remove();
     if (wrap) {
       wrap.classList.add('localis-img-producto-wrap--vacio');
       return;
     }
-    if (contenedor && esThumb) {
-      var vacio = document.createElement('span');
-      vacio.className = 'localis-img-producto-thumb localis-img-producto-thumb--vacio rounded-lg border border-stone-200';
-      vacio.setAttribute('aria-hidden', 'true');
-      contenedor.insertBefore(vacio, contenedor.firstChild);
+    if (img.classList.contains('localis-img-producto-thumb')) {
+      img.classList.add('localis-img-producto-thumb--vacio');
     }
   };
 
