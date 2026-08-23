@@ -102,10 +102,7 @@ def imagen_urls_para_catalogo(productos):
             if prod.get('imagen_url'):
                 continue
             codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
-            url = mapa_extra.get(codigo) if codigo else None
-            if not url and codigo:
-                url = imagen_maestro_por_codigo(codigo)
-            prod['imagen_url'] = url or None
+            prod['imagen_url'] = (mapa_extra.get(codigo) if codigo else None) or None
 
     return productos
 

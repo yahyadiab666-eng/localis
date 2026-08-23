@@ -1,5 +1,5 @@
 -- Catálogo maestro de imágenes (cache global por código de barras).
--- Ejecutar en el SQL Editor de Supabase si la tabla no existe aún.
+-- Ejecutar en Supabase → SQL Editor.
 
 CREATE TABLE IF NOT EXISTS catalogo_maestro_imagenes (
     codigo_barras TEXT PRIMARY KEY,
@@ -7,5 +7,19 @@ CREATE TABLE IF NOT EXISTS catalogo_maestro_imagenes (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Opcional: permitir lectura pública y escritura solo con service_role (ajusta según tu política).
--- ALTER TABLE catalogo_maestro_imagenes ENABLE ROW LEVEL SECURITY;
+-- Si la tabla ya existía sin PRIMARY KEY, añadirla (ajusta si hay duplicados).
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'catalogo_maestro_imagenes_pkey'
+    ) THEN
+        ALTER TABLE catalogo_maestro_imagenes
+            ADD CONSTRAINT catalogo_maestro_imagenes_pkey PRIMARY KEY (codigo_barras);
+    END IF;
+EXCEPTION
+    WHEN duplicate_table THEN NULL;
+    WHEN invalid_table_definition THEN
+        RAISE NOTICE 'Revisa duplicados en codigo_barras antes de añadir PRIMARY KEY.';
+END $$;

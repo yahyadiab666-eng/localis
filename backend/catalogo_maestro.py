@@ -72,11 +72,26 @@ def imagen_maestro_por_codigo(codigo_barras):
 
 
 def _guardar_imagen_maestro_supabase(codigo, url):
-    supabase.table(TABLA_CATALOGO_MAESTRO).upsert(
-        {'codigo_barras': codigo, 'url_imagen': url},
-        on_conflict='codigo_barras',
-    ).execute()
-    return True
+    actualizado = (
+        supabase.table(TABLA_CATALOGO_MAESTRO)
+        .update({'url_imagen': url})
+        .eq('codigo_barras', codigo)
+        .execute()
+    )
+    if actualizado.data:
+        return True
+
+    try:
+        supabase.table(TABLA_CATALOGO_MAESTRO).upsert(
+            {'codigo_barras': codigo, 'url_imagen': url},
+            on_conflict='codigo_barras',
+        ).execute()
+        return True
+    except Exception:
+        supabase.table(TABLA_CATALOGO_MAESTRO).insert(
+            {'codigo_barras': codigo, 'url_imagen': url}
+        ).execute()
+        return True
 
 
 def _guardar_imagen_maestro_postgres(codigo, url):
