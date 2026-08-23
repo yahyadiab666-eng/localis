@@ -102,6 +102,12 @@ def validar_config_arranque():
             advertencias.append(
                 'LOCALIS_SECRET_KEY no definida: usando clave de desarrollo (no usar en producción).'
             )
+        if not (os.environ.get('SUPABASE_URL') or '').strip() or not (
+            os.environ.get('SUPABASE_KEY') or ''
+        ).strip():
+            advertencias.append(
+                'SUPABASE_URL/SUPABASE_KEY no configurados: subidas y catálogo maestro vía Supabase no funcionarán.'
+            )
 
     if errores:
         raise RuntimeError('Configuración inválida: ' + ' | '.join(errores))

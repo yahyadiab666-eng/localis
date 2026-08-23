@@ -835,6 +835,18 @@ def _crear_tabla_productos(cursor):
     )
 
 
+def _crear_tabla_catalogo_maestro_imagenes(cursor):
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS catalogo_maestro_imagenes (
+            codigo_barras TEXT PRIMARY KEY,
+            url_imagen TEXT NOT NULL,
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+        """
+    )
+
+
 def _crear_tabla_soporte_y_reportes(cursor):
     cursor.execute(
         """
@@ -935,6 +947,7 @@ def _crear_tablas(cursor):
     _crear_tabla_comercios(cursor)
     _crear_tabla_sucursales(cursor)
     _crear_tabla_productos(cursor)
+    _crear_tabla_catalogo_maestro_imagenes(cursor)
     _crear_tabla_soporte_y_reportes(cursor)
     _crear_tabla_configuracion_sistema(cursor)
     _crear_tabla_logs_auditoria(cursor)

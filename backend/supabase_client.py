@@ -18,6 +18,16 @@ supabase: Optional[Client] = None
 
 if SUPABASE_URL and SUPABASE_KEY:
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+elif SUPABASE_URL or SUPABASE_KEY:
+    print(
+        '⚠️  Localis: SUPABASE_URL y SUPABASE_KEY deben definirse juntas. '
+        'Storage y catálogo maestro vía Supabase quedarán desactivados.'
+    )
+else:
+    print(
+        '⚠️  Localis: SUPABASE_URL/SUPABASE_KEY no configuradas. '
+        'Subidas a Storage y catálogo maestro vía Supabase no estarán disponibles.'
+    )
 
 
 def _host_supabase():
