@@ -3,3 +3,14 @@ __pycache__/
 *.pyc
 instance/
 test_app_localis.py
+
+# Capacitor / Android
+node_modules/
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+android/keystore.properties
+*.jks
+*.keystore
+.capacitor/
