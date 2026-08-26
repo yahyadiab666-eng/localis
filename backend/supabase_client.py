@@ -3,13 +3,20 @@
 import os
 import re
 import socket
-from typing import Optional
+import time
+from typing import Callable, Optional, TypeVar
 from urllib.parse import quote, urlparse
 
+import httpx
 from supabase import Client, create_client
+from supabase.lib.client_options import SyncClientOptions
 
 _STORAGE_PUBLIC_PREFIX = '/storage/v1/object/public/'
 _SUBASE_TYPO_RE = re.compile(r'/subase/', re.IGNORECASE)
+SUPABASE_HTTP_TIMEOUT = 10.0
+SUPABASE_MAX_REINTENTOS = 3
+SUPABASE_ESPERA_REINTENTO_SEG = 0.5
+T = TypeVar('T')
 
 
 def _limpiar_valor_env(valor):
@@ -67,11 +74,26 @@ def _imprimir_estado_supabase():
         )
 
 
+def _opciones_cliente_supabase():
+    """Timeout HTTP uniforme para PostgREST, Storage y Functions."""
+    timeout = httpx.Timeout(SUPABASE_HTTP_TIMEOUT)
+    return SyncClientOptions(
+        postgrest_client_timeout=timeout,
+        storage_client_timeout=int(SUPABASE_HTTP_TIMEOUT),
+        function_client_timeout=int(SUPABASE_HTTP_TIMEOUT),
+        httpx_client=httpx.Client(timeout=timeout),
+    )
+
+
 def _crear_cliente_supabase(api_key, etiqueta='anon'):
     if not SUPABASE_URL or not api_key:
         return None
     try:
-        return create_client(SUPABASE_URL, api_key)
+        return create_client(
+            SUPABASE_URL,
+            api_key,
+            options=_opciones_cliente_supabase(),
+        )
     except Exception as error:
         host = _extraer_host_desde_url(SUPABASE_URL) or SUPABASE_URL
         print(
@@ -144,6 +166,33 @@ def es_error_red_supabase(error):
             'nodename nor servname provided',
         )
     )
+
+
+def ejecutar_supabase_con_reintentos(
+    operacion: Callable[[], T],
+    descripcion: str = 'peticion Supabase',
+) -> T:
+    """
+    Ejecuta una llamada al SDK con reintentos breves ante fallos DNS/red intermitentes.
+    """
+    ultimo_error = None
+    for intento in range(1, SUPABASE_MAX_REINTENTOS + 1):
+        try:
+            return operacion()
+        except Exception as error:
+            ultimo_error = error
+            if not es_error_red_supabase(error) or intento >= SUPABASE_MAX_REINTENTOS:
+                raise
+            espera = SUPABASE_ESPERA_REINTENTO_SEG * intento
+            print(
+                f'[Localis Supabase] {descripcion}: reintento {intento}/'
+                f'{SUPABASE_MAX_REINTENTOS} tras {type(error).__name__}; '
+                f'esperando {espera:.1f}s.'
+            )
+            time.sleep(espera)
+    if ultimo_error is not None:
+        raise ultimo_error
+    raise RuntimeError(f'{descripcion}: operacion sin resultado')
 
 
 def _host_supabase():

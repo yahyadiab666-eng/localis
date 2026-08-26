@@ -1,6 +1,11 @@
 """Catálogo maestro de imágenes: Supabase (PostgREST) con fallback a PostgreSQL."""
 
-from backend.supabase_client import es_error_red_supabase, supabase, supabase_api_habilitado
+from backend.supabase_client import (
+    ejecutar_supabase_con_reintentos,
+    es_error_red_supabase,
+    supabase,
+    supabase_api_habilitado,
+)
 from backend.utils import normalizar_codigo_barras, texto_campo_imagen
 
 TABLA_CATALOGO_MAESTRO = 'catalogo_maestro_imagenes'
@@ -21,16 +26,22 @@ def _catalogo_disponible():
 
 
 def _imagen_maestro_por_codigo_supabase(codigo):
-    response = (
-        supabase.table(TABLA_CATALOGO_MAESTRO)
-        .select('url_imagen')
-        .eq('codigo_barras', codigo)
-        .limit(1)
-        .execute()
+    def _consultar():
+        response = (
+            supabase.table(TABLA_CATALOGO_MAESTRO)
+            .select('url_imagen')
+            .eq('codigo_barras', codigo)
+            .limit(1)
+            .execute()
+        )
+        if not response.data:
+            return None
+        return _url_maestro_valida(response.data[0].get('url_imagen'))
+
+    return ejecutar_supabase_con_reintentos(
+        _consultar,
+        f'catalogo maestro consulta {codigo}',
     )
-    if not response.data:
-        return None
-    return _url_maestro_valida(response.data[0].get('url_imagen'))
 
 
 def _imagen_maestro_por_codigo_postgres(codigo):
@@ -96,26 +107,32 @@ def imagen_maestro_por_codigo(codigo_barras):
 
 
 def _guardar_imagen_maestro_supabase(codigo, url):
-    actualizado = (
-        supabase.table(TABLA_CATALOGO_MAESTRO)
-        .update({'url_imagen': url})
-        .eq('codigo_barras', codigo)
-        .execute()
-    )
-    if actualizado.data:
-        return True
+    def _persistir():
+        actualizado = (
+            supabase.table(TABLA_CATALOGO_MAESTRO)
+            .update({'url_imagen': url})
+            .eq('codigo_barras', codigo)
+            .execute()
+        )
+        if actualizado.data:
+            return True
 
-    try:
-        supabase.table(TABLA_CATALOGO_MAESTRO).upsert(
-            {'codigo_barras': codigo, 'url_imagen': url},
-            on_conflict='codigo_barras',
-        ).execute()
-        return True
-    except Exception:
-        supabase.table(TABLA_CATALOGO_MAESTRO).insert(
-            {'codigo_barras': codigo, 'url_imagen': url}
-        ).execute()
-        return True
+        try:
+            supabase.table(TABLA_CATALOGO_MAESTRO).upsert(
+                {'codigo_barras': codigo, 'url_imagen': url},
+                on_conflict='codigo_barras',
+            ).execute()
+            return True
+        except Exception:
+            supabase.table(TABLA_CATALOGO_MAESTRO).insert(
+                {'codigo_barras': codigo, 'url_imagen': url}
+            ).execute()
+            return True
+
+    return ejecutar_supabase_con_reintentos(
+        _persistir,
+        f'catalogo maestro guardado {codigo}',
+    )
 
 
 def _guardar_imagen_maestro_postgres(codigo, url):
@@ -159,19 +176,25 @@ def guardar_imagen_maestro(codigo_barras, url_imagen):
 
 
 def _mapa_imagenes_maestro_supabase(lote):
-    response = (
-        supabase.table(TABLA_CATALOGO_MAESTRO)
-        .select('codigo_barras, url_imagen')
-        .in_('codigo_barras', lote)
-        .execute()
+    def _consultar_lote():
+        response = (
+            supabase.table(TABLA_CATALOGO_MAESTRO)
+            .select('codigo_barras, url_imagen')
+            .in_('codigo_barras', lote)
+            .execute()
+        )
+        resultado = {}
+        for fila in response.data or []:
+            codigo_db = normalizar_codigo_barras(fila.get('codigo_barras'))
+            url = _url_maestro_valida(fila.get('url_imagen'))
+            if codigo_db and url and codigo_db not in resultado:
+                resultado[codigo_db] = url
+        return resultado
+
+    return ejecutar_supabase_con_reintentos(
+        _consultar_lote,
+        f'catalogo maestro lote ({len(lote)} codigos)',
     )
-    resultado = {}
-    for fila in response.data or []:
-        codigo_db = normalizar_codigo_barras(fila.get('codigo_barras'))
-        url = _url_maestro_valida(fila.get('url_imagen'))
-        if codigo_db and url and codigo_db not in resultado:
-            resultado[codigo_db] = url
-    return resultado
 
 
 def _mapa_imagenes_maestro_postgres(lote):
