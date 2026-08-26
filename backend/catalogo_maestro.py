@@ -1,15 +1,35 @@
 """Catálogo maestro de imágenes: Supabase (PostgREST) con fallback a PostgreSQL."""
 
-from backend.supabase_client import (
-    ejecutar_supabase_con_reintentos,
-    es_error_red_supabase,
-    supabase,
-    supabase_api_habilitado,
-)
+from backend.supabase_client import es_error_red_supabase, supabase, supabase_api_habilitado
 from backend.utils import normalizar_codigo_barras, texto_campo_imagen
 
 TABLA_CATALOGO_MAESTRO = 'catalogo_maestro_imagenes'
 _LOTE_CONSULTA = 100
+
+
+def _avisar_respaldo_postgres(error, contexto, estado_log=None):
+    """Un solo aviso por petición ante fallos de red repetidos."""
+    if estado_log is not None and es_error_red_supabase(error):
+        if estado_log.get('red'):
+            return
+        estado_log['red'] = True
+        print(
+            'Catálogo maestro: Supabase no alcanzable por red '
+            f'({type(error).__name__}). Usando PostgreSQL como respaldo.'
+        )
+        return
+
+    detalle = f'{type(error).__name__}: {error}'
+    if es_error_red_supabase(error):
+        print(
+            f'Catálogo maestro: fallo de red con Supabase ({detalle}). '
+            'Usando PostgreSQL como respaldo.'
+        )
+    else:
+        print(
+            f'Catálogo maestro ({contexto}): fallo Supabase API ({detalle}). '
+            'Usando PostgreSQL como respaldo.'
+        )
 
 
 def _url_maestro_valida(valor):
@@ -26,22 +46,16 @@ def _catalogo_disponible():
 
 
 def _imagen_maestro_por_codigo_supabase(codigo):
-    def _consultar():
-        response = (
-            supabase.table(TABLA_CATALOGO_MAESTRO)
-            .select('url_imagen')
-            .eq('codigo_barras', codigo)
-            .limit(1)
-            .execute()
-        )
-        if not response.data:
-            return None
-        return _url_maestro_valida(response.data[0].get('url_imagen'))
-
-    return ejecutar_supabase_con_reintentos(
-        _consultar,
-        f'catalogo maestro consulta {codigo}',
+    response = (
+        supabase.table(TABLA_CATALOGO_MAESTRO)
+        .select('url_imagen')
+        .eq('codigo_barras', codigo)
+        .limit(1)
+        .execute()
     )
+    if not response.data:
+        return None
+    return _url_maestro_valida(response.data[0].get('url_imagen'))
 
 
 def _imagen_maestro_por_codigo_postgres(codigo):
@@ -65,7 +79,7 @@ def _imagen_maestro_por_codigo_postgres(codigo):
         return _url_maestro_valida(url_raw)
 
 
-def _consultar_supabase_con_respaldo(codigo, operacion, fallback):
+def _consultar_supabase_con_respaldo(codigo, operacion, fallback, estado_log=None):
     """
     Intenta PostgREST; ante fallo de red o API usa PostgreSQL directo.
     """
@@ -75,17 +89,7 @@ def _consultar_supabase_con_respaldo(codigo, operacion, fallback):
     try:
         return operacion(codigo)
     except Exception as error:
-        detalle = f'{type(error).__name__}: {error}'
-        if es_error_red_supabase(error):
-            print(
-                f'Catálogo maestro: fallo de red con Supabase ({detalle}). '
-                'Usando PostgreSQL como respaldo.'
-            )
-        else:
-            print(
-                f'Catálogo maestro: fallo Supabase API ({detalle}). '
-                'Usando PostgreSQL como respaldo.'
-            )
+        _avisar_respaldo_postgres(error, codigo, estado_log)
         try:
             return fallback(codigo)
         except Exception as pg_error:
@@ -107,32 +111,26 @@ def imagen_maestro_por_codigo(codigo_barras):
 
 
 def _guardar_imagen_maestro_supabase(codigo, url):
-    def _persistir():
-        actualizado = (
-            supabase.table(TABLA_CATALOGO_MAESTRO)
-            .update({'url_imagen': url})
-            .eq('codigo_barras', codigo)
-            .execute()
-        )
-        if actualizado.data:
-            return True
-
-        try:
-            supabase.table(TABLA_CATALOGO_MAESTRO).upsert(
-                {'codigo_barras': codigo, 'url_imagen': url},
-                on_conflict='codigo_barras',
-            ).execute()
-            return True
-        except Exception:
-            supabase.table(TABLA_CATALOGO_MAESTRO).insert(
-                {'codigo_barras': codigo, 'url_imagen': url}
-            ).execute()
-            return True
-
-    return ejecutar_supabase_con_reintentos(
-        _persistir,
-        f'catalogo maestro guardado {codigo}',
+    actualizado = (
+        supabase.table(TABLA_CATALOGO_MAESTRO)
+        .update({'url_imagen': url})
+        .eq('codigo_barras', codigo)
+        .execute()
     )
+    if actualizado.data:
+        return True
+
+    try:
+        supabase.table(TABLA_CATALOGO_MAESTRO).upsert(
+            {'codigo_barras': codigo, 'url_imagen': url},
+            on_conflict='codigo_barras',
+        ).execute()
+        return True
+    except Exception:
+        supabase.table(TABLA_CATALOGO_MAESTRO).insert(
+            {'codigo_barras': codigo, 'url_imagen': url}
+        ).execute()
+        return True
 
 
 def _guardar_imagen_maestro_postgres(codigo, url):
@@ -176,25 +174,19 @@ def guardar_imagen_maestro(codigo_barras, url_imagen):
 
 
 def _mapa_imagenes_maestro_supabase(lote):
-    def _consultar_lote():
-        response = (
-            supabase.table(TABLA_CATALOGO_MAESTRO)
-            .select('codigo_barras, url_imagen')
-            .in_('codigo_barras', lote)
-            .execute()
-        )
-        resultado = {}
-        for fila in response.data or []:
-            codigo_db = normalizar_codigo_barras(fila.get('codigo_barras'))
-            url = _url_maestro_valida(fila.get('url_imagen'))
-            if codigo_db and url and codigo_db not in resultado:
-                resultado[codigo_db] = url
-        return resultado
-
-    return ejecutar_supabase_con_reintentos(
-        _consultar_lote,
-        f'catalogo maestro lote ({len(lote)} codigos)',
+    response = (
+        supabase.table(TABLA_CATALOGO_MAESTRO)
+        .select('codigo_barras, url_imagen')
+        .in_('codigo_barras', lote)
+        .execute()
     )
+    resultado = {}
+    for fila in response.data or []:
+        codigo_db = normalizar_codigo_barras(fila.get('codigo_barras'))
+        url = _url_maestro_valida(fila.get('url_imagen'))
+        if codigo_db and url and codigo_db not in resultado:
+            resultado[codigo_db] = url
+    return resultado
 
 
 def _mapa_imagenes_maestro_postgres(lote):
@@ -224,17 +216,14 @@ def _mapa_imagenes_maestro_postgres(lote):
     return resultado
 
 
-def _mapa_lote_con_respaldo(lote):
+def _mapa_lote_con_respaldo(lote, estado_log=None):
     if not supabase_api_habilitado():
         return _mapa_imagenes_maestro_postgres(lote)
 
     try:
         return _mapa_imagenes_maestro_supabase(lote)
     except Exception as error:
-        print(
-            f'Catálogo maestro (lote): fallo Supabase ({error}). '
-            'Usando PostgreSQL como respaldo.'
-        )
+        _avisar_respaldo_postgres(error, 'lote', estado_log)
         return _mapa_imagenes_maestro_postgres(lote)
 
 
@@ -251,10 +240,11 @@ def mapa_imagenes_maestro(codigos):
         return {}
 
     resultado = {}
+    estado_log = {'red': False}
     try:
         for inicio in range(0, len(normalizados), _LOTE_CONSULTA):
             lote = normalizados[inicio : inicio + _LOTE_CONSULTA]
-            resultado.update(_mapa_lote_con_respaldo(lote))
+            resultado.update(_mapa_lote_con_respaldo(lote, estado_log))
     except Exception as error:
         print(f'Error al consultar catálogo maestro en lote: {error}')
     return resultado
