@@ -12,6 +12,7 @@ _STORAGE_PUBLIC_PREFIX = '/storage/v1/object/public/'
 _SUBASE_TYPO_RE = re.compile(r'/subase/', re.IGNORECASE)
 _DOMINIO_SUPABASE_ESPERADO = '.supabase.co'
 _FORMATO_URL_EJEMPLO = 'https://TU_PROJECT_REF.supabase.co'
+_CARACTERES_INVISIBLES_HOST = ('\ufeff', '\u200b', '\u200c', '\u200d', '\u00ad', '\x00')
 
 
 def _limpiar_valor_env(valor):
@@ -22,10 +23,43 @@ def _limpiar_valor_env(valor):
     return texto.replace('\r', '').replace('\n', '').strip()
 
 
+def _normalizar_host_supabase(host):
+    """
+    Host DNS limpio: sin puerto, sin punto final ni caracteres invisibles de copiar/pegar.
+    """
+    if not host:
+        return ''
+
+    texto = str(host).strip().lower().rstrip('.')
+    for caracter in _CARACTERES_INVISIBLES_HOST:
+        texto = texto.replace(caracter, '')
+    return texto.strip()
+
+
+def _extraer_host_desde_url(url):
+    """Usa hostname (no netloc) para no confundir :443 con parte del dominio."""
+    url_limpia = _limpiar_valor_env(url).rstrip('/')
+    if not url_limpia:
+        return ''
+
+    if not url_limpia.startswith(('http://', 'https://')):
+        url_limpia = 'https://' + url_limpia.lstrip('/')
+
+    return _normalizar_host_supabase(urlparse(url_limpia).hostname)
+
+
+def _es_host_supabase_valido(host):
+    """Acepta cualquier subdominio *.supabase.co (p. ej. REF.supabase.co)."""
+    host_limpio = _normalizar_host_supabase(host)
+    if not host_limpio or '.' not in host_limpio:
+        return False
+    return host_limpio.endswith(_DOMINIO_SUPABASE_ESPERADO) and host_limpio != 'supabase.co'
+
+
 def sanitizar_supabase_url(url):
     """
     Normaliza SUPABASE_URL para evitar Errno -2 (hostname inválido).
-    Acepta valores con o sin https:// y rechaza hosts vacíos o sin punto.
+    Acepta valores con o sin https:// y reconstruye una URL canónica sin puerto ni basura.
     """
     url_limpia = _limpiar_valor_env(url).rstrip('/')
     if not url_limpia:
@@ -35,14 +69,15 @@ def sanitizar_supabase_url(url):
         url_limpia = 'https://' + url_limpia.lstrip('/')
 
     parsed = urlparse(url_limpia)
-    host = (parsed.netloc or '').lower()
-    if not host or '.' not in host:
-        return ''
-
     if parsed.scheme not in ('http', 'https'):
         return ''
 
-    return url_limpia
+    host = _extraer_host_desde_url(url_limpia)
+    if not _es_host_supabase_valido(host):
+        return ''
+
+    scheme = parsed.scheme if parsed.scheme in ('http', 'https') else 'https'
+    return f'{scheme}://{host}'
 
 
 def diagnosticar_supabase_url(url_raw=None):
@@ -69,28 +104,30 @@ def diagnosticar_supabase_url(url_raw=None):
 
     sanitizada = sanitizar_supabase_url(raw)
     if not sanitizada:
-        diagnostico['problema'] = 'malformada'
-        diagnostico['pista'] = (
-            'La URL no tiene un dominio válido. Usa una sola línea sin comillas, '
-            f'por ejemplo {_FORMATO_URL_EJEMPLO}'
-        )
-        if '@' in raw or ' ' in raw:
-            diagnostico['pista'] += (
-                ' (parece contener espacios o caracteres inválidos).'
+        host_candidato = _extraer_host_desde_url(raw)
+        if host_candidato and not _es_host_supabase_valido(host_candidato):
+            diagnostico['problema'] = 'dominio_inesperado'
+            diagnostico['host'] = host_candidato
+            diagnostico['pista'] = (
+                f'El host "{host_candidato}" no es un subdominio válido de Supabase. '
+                f'Usa el Project URL con formato {_FORMATO_URL_EJEMPLO}'
             )
+        else:
+            diagnostico['problema'] = 'malformada'
+            diagnostico['pista'] = (
+                'La URL no tiene un dominio válido. Usa una sola línea sin comillas, '
+                f'por ejemplo {_FORMATO_URL_EJEMPLO}'
+            )
+            if '@' in raw or ' ' in raw:
+                diagnostico['pista'] += (
+                    ' (parece contener espacios o caracteres inválidos).'
+                )
         return diagnostico
 
-    host = urlparse(sanitizada).netloc.lower()
+    host = _extraer_host_desde_url(sanitizada)
     diagnostico['url_sanitizada'] = sanitizada
     diagnostico['host'] = host
     diagnostico['ok'] = True
-
-    if not host.endswith(_DOMINIO_SUPABASE_ESPERADO):
-        diagnostico['problema'] = 'dominio_inesperado'
-        diagnostico['pista'] = (
-            f'El host "{host}" no termina en {_DOMINIO_SUPABASE_ESPERADO}. '
-            'Verifica el Project URL en Supabase → Settings → API.'
-        )
 
     return diagnostico
 
@@ -157,7 +194,7 @@ def _crear_cliente_supabase(api_key, etiqueta='anon'):
     try:
         return create_client(SUPABASE_URL, api_key)
     except Exception as error:
-        host = urlparse(SUPABASE_URL).netloc or SUPABASE_URL
+        host = _extraer_host_desde_url(SUPABASE_URL) or SUPABASE_URL
         print(
             f'WARNING Localis Supabase ({etiqueta}): no se pudo inicializar cliente '
             f'para host {host}: {type(error).__name__}: {error}'
@@ -230,7 +267,7 @@ def es_error_red_supabase(error):
 def _host_supabase():
     if not SUPABASE_URL:
         return ''
-    return urlparse(SUPABASE_URL).netloc.lower()
+    return _extraer_host_desde_url(SUPABASE_URL)
 
 
 def ruta_storage_objeto(carpeta: str, nombre_archivo: str) -> str:
@@ -284,7 +321,7 @@ def normalizar_url_publica_storage(
 
     host_esperado = _host_supabase()
     parsed = urlparse(url_limpia)
-    host_url = (parsed.netloc or '').lower()
+    host_url = _normalizar_host_supabase(parsed.hostname)
 
     if not host_esperado or host_url != host_esperado:
         return canonica
