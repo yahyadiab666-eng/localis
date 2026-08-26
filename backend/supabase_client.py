@@ -23,6 +23,23 @@ def _limpiar_valor_env(valor):
     return texto.replace('\r', '').replace('\n', '').strip()
 
 
+def _preparar_url_supabase(url):
+    """
+    Normaliza esquema http/https sin importar mayúsculas y evita doble prefijo
+    (p. ej. HTTPS://REF.supabase.co).
+    """
+    url_limpia = _limpiar_valor_env(url).rstrip('/')
+    if not url_limpia:
+        return ''
+
+    lower = url_limpia.lower()
+    if lower.startswith('https://'):
+        return 'https://' + url_limpia[8:].lstrip('/')
+    if lower.startswith('http://'):
+        return 'http://' + url_limpia[7:].lstrip('/')
+    return 'https://' + url_limpia.lstrip('/')
+
+
 def _normalizar_host_supabase(host):
     """
     Host DNS limpio: sin puerto, sin punto final ni caracteres invisibles de copiar/pegar.
@@ -38,45 +55,38 @@ def _normalizar_host_supabase(host):
 
 def _extraer_host_desde_url(url):
     """Usa hostname (no netloc) para no confundir :443 con parte del dominio."""
-    url_limpia = _limpiar_valor_env(url).rstrip('/')
+    url_limpia = _preparar_url_supabase(url)
     if not url_limpia:
         return ''
-
-    if not url_limpia.startswith(('http://', 'https://')):
-        url_limpia = 'https://' + url_limpia.lstrip('/')
-
     return _normalizar_host_supabase(urlparse(url_limpia).hostname)
 
 
 def _es_host_supabase_valido(host):
-    """Acepta cualquier subdominio *.supabase.co (p. ej. REF.supabase.co)."""
+    """True si el host termina en .supabase.co (p. ej. REF.supabase.co)."""
     host_limpio = _normalizar_host_supabase(host)
-    if not host_limpio or '.' not in host_limpio:
+    if not host_limpio or host_limpio == 'supabase.co':
         return False
-    return host_limpio.endswith(_DOMINIO_SUPABASE_ESPERADO) and host_limpio != 'supabase.co'
+    return host_limpio.endswith(_DOMINIO_SUPABASE_ESPERADO)
 
 
 def sanitizar_supabase_url(url):
     """
     Normaliza SUPABASE_URL para evitar Errno -2 (hostname inválido).
-    Acepta valores con o sin https:// y reconstruye una URL canónica sin puerto ni basura.
+    Reconstruye https://HOST sin puerto, paths ni caracteres invisibles.
     """
-    url_limpia = _limpiar_valor_env(url).rstrip('/')
+    url_limpia = _preparar_url_supabase(url)
     if not url_limpia:
         return ''
 
-    if not url_limpia.startswith(('http://', 'https://')):
-        url_limpia = 'https://' + url_limpia.lstrip('/')
-
     parsed = urlparse(url_limpia)
-    if parsed.scheme not in ('http', 'https'):
+    if (parsed.scheme or '').lower() not in ('http', 'https'):
         return ''
 
     host = _extraer_host_desde_url(url_limpia)
     if not _es_host_supabase_valido(host):
         return ''
 
-    scheme = parsed.scheme if parsed.scheme in ('http', 'https') else 'https'
+    scheme = 'https' if (parsed.scheme or '').lower() != 'http' else 'http'
     return f'{scheme}://{host}'
 
 
@@ -109,8 +119,8 @@ def diagnosticar_supabase_url(url_raw=None):
             diagnostico['problema'] = 'dominio_inesperado'
             diagnostico['host'] = host_candidato
             diagnostico['pista'] = (
-                f'El host "{host_candidato}" no es un subdominio válido de Supabase. '
-                f'Usa el Project URL con formato {_FORMATO_URL_EJEMPLO}'
+                f'El host "{host_candidato}" no termina en {_DOMINIO_SUPABASE_ESPERADO}. '
+                f'Usa el Project URL: {_FORMATO_URL_EJEMPLO}'
             )
         else:
             diagnostico['problema'] = 'malformada'
@@ -212,13 +222,25 @@ SUPABASE_BUCKET_IMAGENES = _limpiar_valor_env(os.getenv('SUPABASE_BUCKET_IMAGENE
 supabase: Optional[Client] = None
 supabase_storage_admin: Optional[Client] = None
 
-if SUPABASE_URL and SUPABASE_KEY:
-    supabase = _crear_cliente_supabase(SUPABASE_KEY, etiqueta='anon')
-if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
-    supabase_storage_admin = _crear_cliente_supabase(
-        SUPABASE_SERVICE_ROLE_KEY,
-        etiqueta='service_role',
-    )
+
+def _inicializar_clientes_supabase():
+    global supabase, supabase_storage_admin
+    supabase = None
+    supabase_storage_admin = None
+
+    if not SUPABASE_URL:
+        return
+
+    if SUPABASE_KEY:
+        supabase = _crear_cliente_supabase(SUPABASE_KEY, etiqueta='anon')
+    if SUPABASE_SERVICE_ROLE_KEY:
+        supabase_storage_admin = _crear_cliente_supabase(
+            SUPABASE_SERVICE_ROLE_KEY,
+            etiqueta='service_role',
+        )
+
+
+_inicializar_clientes_supabase()
 
 _imprimir_diagnostico_supabase(_DIAGNOSTICO_SUPABASE)
 
