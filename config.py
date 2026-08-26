@@ -104,9 +104,15 @@ def validar_config_arranque():
                 'SUPABASE_URL/SUPABASE_KEY no configurados: las subidas de imágenes fallarán.'
             )
         else:
-            from backend.supabase_client import SUPABASE_URL as _sb_url
+            from backend.supabase_client import obtener_diagnostico_supabase
 
-            if not _sb_url:
+            diag = obtener_diagnostico_supabase()
+            if not diag.get('ok'):
+                advertencias.append(
+                    'SUPABASE_URL inválida o malformada: '
+                    + (diag.get('pista') or 'usa https://TU_REF.supabase.co en una sola línea.')
+                )
+            elif not diag.get('url_sanitizada'):
                 advertencias.append(
                     'SUPABASE_URL parece malformada (revisa comillas, saltos de línea y '
                     'formato https://REF.supabase.co en Render).'

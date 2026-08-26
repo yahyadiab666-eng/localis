@@ -1,6 +1,6 @@
 """Catálogo maestro de imágenes: Supabase (PostgREST) con fallback a PostgreSQL."""
 
-from backend.supabase_client import es_error_red_supabase, supabase
+from backend.supabase_client import es_error_red_supabase, supabase, supabase_api_habilitado
 from backend.utils import normalizar_codigo_barras, texto_campo_imagen
 
 TABLA_CATALOGO_MAESTRO = 'catalogo_maestro_imagenes'
@@ -17,7 +17,7 @@ def _url_maestro_valida(valor):
 def _catalogo_disponible():
     from backend.db import DATABASE_URL
 
-    return supabase is not None or bool((DATABASE_URL or '').strip())
+    return supabase_api_habilitado() or bool((DATABASE_URL or '').strip())
 
 
 def _imagen_maestro_por_codigo_supabase(codigo):
@@ -58,7 +58,7 @@ def _consultar_supabase_con_respaldo(codigo, operacion, fallback):
     """
     Intenta PostgREST; ante fallo de red o API usa PostgreSQL directo.
     """
-    if supabase is None:
+    if not supabase_api_habilitado():
         return fallback(codigo)
 
     try:
@@ -143,7 +143,7 @@ def guardar_imagen_maestro(codigo_barras, url_imagen):
         return False
 
     try:
-        if supabase is not None:
+        if supabase_api_habilitado():
             try:
                 return _guardar_imagen_maestro_supabase(codigo, url)
             except Exception as error:
@@ -202,7 +202,7 @@ def _mapa_imagenes_maestro_postgres(lote):
 
 
 def _mapa_lote_con_respaldo(lote):
-    if supabase is None:
+    if not supabase_api_habilitado():
         return _mapa_imagenes_maestro_postgres(lote)
 
     try:

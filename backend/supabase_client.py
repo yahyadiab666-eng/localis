@@ -10,6 +10,8 @@ from supabase import Client, create_client
 
 _STORAGE_PUBLIC_PREFIX = '/storage/v1/object/public/'
 _SUBASE_TYPO_RE = re.compile(r'/subase/', re.IGNORECASE)
+_DOMINIO_SUPABASE_ESPERADO = '.supabase.co'
+_FORMATO_URL_EJEMPLO = 'https://TU_PROJECT_REF.supabase.co'
 
 
 def _limpiar_valor_env(valor):
@@ -37,23 +39,135 @@ def sanitizar_supabase_url(url):
     if not host or '.' not in host:
         return ''
 
+    if parsed.scheme not in ('http', 'https'):
+        return ''
+
     return url_limpia
 
 
-def _crear_cliente_supabase(api_key):
+def diagnosticar_supabase_url(url_raw=None):
+    """
+    Evalúa SUPABASE_URL antes de llamar a la API.
+    Retorna dict con ok, problema, host y url_sanitizada (sin secretos).
+    """
+    raw = _limpiar_valor_env(url_raw if url_raw is not None else os.getenv('SUPABASE_URL'))
+    diagnostico = {
+        'raw_presente': bool(raw),
+        'url_sanitizada': '',
+        'host': '',
+        'ok': False,
+        'problema': None,
+        'pista': None,
+    }
+
+    if not raw:
+        diagnostico['problema'] = 'vacia'
+        diagnostico['pista'] = (
+            f'Define SUPABASE_URL en el entorno con formato {_FORMATO_URL_EJEMPLO}'
+        )
+        return diagnostico
+
+    sanitizada = sanitizar_supabase_url(raw)
+    if not sanitizada:
+        diagnostico['problema'] = 'malformada'
+        diagnostico['pista'] = (
+            'La URL no tiene un dominio válido. Usa una sola línea sin comillas, '
+            f'por ejemplo {_FORMATO_URL_EJEMPLO}'
+        )
+        if '@' in raw or ' ' in raw:
+            diagnostico['pista'] += (
+                ' (parece contener espacios o caracteres inválidos).'
+            )
+        return diagnostico
+
+    host = urlparse(sanitizada).netloc.lower()
+    diagnostico['url_sanitizada'] = sanitizada
+    diagnostico['host'] = host
+    diagnostico['ok'] = True
+
+    if not host.endswith(_DOMINIO_SUPABASE_ESPERADO):
+        diagnostico['problema'] = 'dominio_inesperado'
+        diagnostico['pista'] = (
+            f'El host "{host}" no termina en {_DOMINIO_SUPABASE_ESPERADO}. '
+            'Verifica el Project URL en Supabase → Settings → API.'
+        )
+
+    return diagnostico
+
+
+def _mascara_secreto(valor, visible=4):
+    texto = _limpiar_valor_env(valor)
+    if not texto:
+        return 'ausente'
+    if len(texto) <= visible * 2:
+        return 'presente'
+    return f'{texto[:visible]}…{texto[-visible:]}'
+
+
+def _imprimir_diagnostico_supabase(diagnostico):
+    """Log legible al arrancar; no imprime claves completas."""
+    prefijo = '[Localis Supabase]'
+
+    if not diagnostico.get('raw_presente') and not SUPABASE_KEY:
+        print(
+            f'{prefijo} No configurado (SUPABASE_URL/SUPABASE_KEY ausentes). '
+            'Catálogo maestro usará PostgreSQL directo.'
+        )
+        return
+
+    if diagnostico.get('problema') == 'vacia':
+        print(
+            f'{prefijo} SUPABASE_URL vacía. '
+            f'Formato esperado: {_FORMATO_URL_EJEMPLO}'
+        )
+        return
+
+    if not diagnostico.get('ok'):
+        print(f'{prefijo} SUPABASE_URL inválida: {diagnostico.get("problema")}.')
+        if diagnostico.get('pista'):
+            print(f'{prefijo} {diagnostico["pista"]}')
+        print(
+            f'{prefijo} Se omitirá la API de Supabase; catálogo maestro usará PostgreSQL.'
+        )
+        return
+
+    host = diagnostico.get('host') or '(sin host)'
+    print(
+        f'{prefijo} URL host={host} | '
+        f'SUPABASE_KEY={_mascara_secreto(SUPABASE_KEY)} | '
+        f'SERVICE_ROLE={_mascara_secreto(SUPABASE_SERVICE_ROLE_KEY)}'
+    )
+
+    if diagnostico.get('problema') == 'dominio_inesperado' and diagnostico.get('pista'):
+        print(f'{prefijo} Aviso: {diagnostico["pista"]}')
+
+    if supabase:
+        print(f'{prefijo} Cliente API inicializado (PostgREST + Storage).')
+    else:
+        clave_msg = 'SUPABASE_KEY ausente' if not SUPABASE_KEY else 'fallo al crear cliente'
+        print(
+            f'{prefijo} Cliente API no disponible ({clave_msg}). '
+            'Catálogo maestro usará PostgreSQL.'
+        )
+
+
+def _crear_cliente_supabase(api_key, etiqueta='anon'):
     if not SUPABASE_URL or not api_key:
         return None
     try:
         return create_client(SUPABASE_URL, api_key)
     except Exception as error:
+        host = urlparse(SUPABASE_URL).netloc or SUPABASE_URL
         print(
-            'WARNING Localis: no se pudo inicializar cliente Supabase '
-            f'({SUPABASE_URL}): {error}'
+            f'WARNING Localis Supabase ({etiqueta}): no se pudo inicializar cliente '
+            f'para host {host}: {type(error).__name__}: {error}'
         )
         return None
 
 
-SUPABASE_URL = sanitizar_supabase_url(os.getenv('SUPABASE_URL'))
+SUPABASE_URL_RAW = _limpiar_valor_env(os.getenv('SUPABASE_URL'))
+_DIAGNOSTICO_SUPABASE = diagnosticar_supabase_url(SUPABASE_URL_RAW)
+SUPABASE_URL = _DIAGNOSTICO_SUPABASE['url_sanitizada'] if _DIAGNOSTICO_SUPABASE.get('ok') else ''
 SUPABASE_KEY = _limpiar_valor_env(os.getenv('SUPABASE_KEY'))
 SUPABASE_SERVICE_ROLE_KEY = _limpiar_valor_env(os.getenv('SUPABASE_SERVICE_ROLE_KEY'))
 SUPABASE_BUCKET_IMAGENES = _limpiar_valor_env(os.getenv('SUPABASE_BUCKET_IMAGENES')) or 'imagenes'
@@ -62,29 +176,44 @@ supabase: Optional[Client] = None
 supabase_storage_admin: Optional[Client] = None
 
 if SUPABASE_URL and SUPABASE_KEY:
-    supabase = _crear_cliente_supabase(SUPABASE_KEY)
+    supabase = _crear_cliente_supabase(SUPABASE_KEY, etiqueta='anon')
 if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
-    supabase_storage_admin = _crear_cliente_supabase(SUPABASE_SERVICE_ROLE_KEY)
-elif SUPABASE_URL or SUPABASE_KEY:
-    print(
-        'WARNING Localis: SUPABASE_URL y SUPABASE_KEY deben definirse juntas. '
-        'Storage y catalogo maestro via Supabase quedaran desactivados.'
+    supabase_storage_admin = _crear_cliente_supabase(
+        SUPABASE_SERVICE_ROLE_KEY,
+        etiqueta='service_role',
     )
-else:
-    print(
-        'WARNING Localis: SUPABASE_URL/SUPABASE_KEY no configuradas. '
-        'Subidas a Storage y catalogo maestro via Supabase no estaran disponibles.'
-    )
+
+_imprimir_diagnostico_supabase(_DIAGNOSTICO_SUPABASE)
+
+
+def supabase_api_habilitado():
+    """True solo si la URL pasó validación y el cliente anon se creó correctamente."""
+    return supabase is not None and bool(SUPABASE_URL)
+
+
+def obtener_diagnostico_supabase():
+    """Diagnóstico de configuración (para arranque y health checks)."""
+    return dict(_DIAGNOSTICO_SUPABASE)
 
 
 def es_error_red_supabase(error):
     """True si el fallo parece DNS/red (p. ej. Name or service not known / Errno -2)."""
+    nombre = type(error).__name__
+    if nombre in (
+        'ConnectError',
+        'ConnectTimeout',
+        'ReadTimeout',
+        'NetworkError',
+        'RemoteProtocolError',
+    ):
+        return True
     if isinstance(error, (ConnectionError, TimeoutError, socket.gaierror, OSError)):
         return True
     mensaje = str(error).lower()
     return any(
         fragmento in mensaje
         for fragmento in (
+            'connecterror',
             'name or service not known',
             'errno -2',
             'errno -3',
@@ -93,6 +222,7 @@ def es_error_red_supabase(error):
             'temporary failure in name resolution',
             'connection refused',
             'network is unreachable',
+            'nodename nor servname provided',
         )
     )
 

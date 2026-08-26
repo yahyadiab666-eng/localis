@@ -14,18 +14,18 @@ else:
 
 from functools import wraps
 
-from backend.supabase_client import SUPABASE_BUCKET_IMAGENES, obtener_cliente_storage, supabase
+from backend.supabase_client import SUPABASE_BUCKET_IMAGENES, obtener_cliente_storage, supabase, supabase_api_habilitado
 from backend.supabase_storage import (
     SupabaseUploadError,
     subir_bytes_a_supabase,
     subir_imagen_a_supabase,
 )
-if supabase:
+if supabase_api_habilitado():
     print('Supabase Storage configurado correctamente.')
     if not obtener_cliente_storage():
         print('Aviso: no hay cliente Storage disponible para subidas.')
 else:
-    print('Aviso: SUPABASE_URL o SUPABASE_KEY no configurados. Las subidas de imágenes fallarán.')
+    print('Aviso: Supabase API no disponible. Catálogo usará PostgreSQL; subidas pueden fallar.')
 
 import sqlite3
 
