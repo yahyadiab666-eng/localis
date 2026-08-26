@@ -158,7 +158,7 @@ CREATE TABLE IF NOT EXISTS intentos_login (
 -- INSERCIONES POR DEFECTO E ÍNDICES
 -- ==========================================
 INSERT OR IGNORE INTO configuracion_sistema (clave, valor) VALUES ('tasa_dolar', '36.50');
-INSERT OR IGNORE INTO configuracion_sistema (clave, valor) VALUES ('banner_principal', '/static/images/default-banner.jpg');
+INSERT OR IGNORE INTO configuracion_sistema (clave, valor) VALUES ('banner_principal', 'https://images.pexels.com/photos/18618233/pexels-photo-18618233.jpeg?auto=compress&cs=tinysrgb&w=1920');
 INSERT OR IGNORE INTO configuracion_sistema (clave, valor) VALUES ('whatsapp_soporte', '584125970507');
 
 CREATE INDEX IF NOT EXISTS idx_intentos_correo ON intentos_login(correo_intentado);

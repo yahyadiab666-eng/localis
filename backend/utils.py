@@ -143,6 +143,38 @@ def normalizar_url_imagen(valor, default=None):
     return default
 
 
+def url_banner_principal(valor, default=None):
+    """
+    URL segura para banner promocional.
+    Evita rutas /static/... inexistentes en el despliegue.
+    """
+    from config import DEFAULT_BANNER_URL
+
+    fallback = default or DEFAULT_BANNER_URL
+    texto = texto_campo_imagen(valor, default=None)
+    if not texto:
+        return fallback
+    if texto.startswith('/static/'):
+        return fallback
+    if texto.startswith(('http://', 'https://')):
+        return texto
+    return fallback
+
+
+def url_estatica_existe(ruta_relativa):
+    """True si el archivo existe bajo la carpeta static/ del proyecto."""
+    if not ruta_relativa or not str(ruta_relativa).startswith('/static/'):
+        return False
+    from config import RUTA_RAIZ
+    import os
+
+    relativa = str(ruta_relativa).replace('\\', '/').lstrip('/')
+    if relativa.startswith('static/'):
+        relativa = relativa[len('static/') :]
+    destino = os.path.join(RUTA_RAIZ, 'static', relativa)
+    return os.path.isfile(destino)
+
+
 def normalizar_codigo_barras(valor):
     """Normaliza EAN/SKU desde CSV/Excel/PostgreSQL (espacios, .0, notación científica)."""
     if valor is None or isinstance(valor, bool):

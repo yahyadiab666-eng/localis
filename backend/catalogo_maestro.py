@@ -1,6 +1,6 @@
 """Catálogo maestro de imágenes: Supabase (PostgREST) con fallback a PostgreSQL."""
 
-from backend.supabase_client import supabase
+from backend.supabase_client import es_error_red_supabase, supabase
 from backend.utils import normalizar_codigo_barras, texto_campo_imagen
 
 TABLA_CATALOGO_MAESTRO = 'catalogo_maestro_imagenes'
@@ -15,11 +15,9 @@ def _url_maestro_valida(valor):
 
 
 def _catalogo_disponible():
-    if supabase is not None:
-        return True
     from backend.db import DATABASE_URL
 
-    return bool((DATABASE_URL or '').strip())
+    return supabase is not None or bool((DATABASE_URL or '').strip())
 
 
 def _imagen_maestro_por_codigo_supabase(codigo):
@@ -56,19 +54,45 @@ def _imagen_maestro_por_codigo_postgres(codigo):
         return _url_maestro_valida(url_raw)
 
 
+def _consultar_supabase_con_respaldo(codigo, operacion, fallback):
+    """
+    Intenta PostgREST; ante fallo de red o API usa PostgreSQL directo.
+    """
+    if supabase is None:
+        return fallback(codigo)
+
+    try:
+        return operacion(codigo)
+    except Exception as error:
+        detalle = f'{type(error).__name__}: {error}'
+        if es_error_red_supabase(error):
+            print(
+                f'Catálogo maestro: fallo de red con Supabase ({detalle}). '
+                'Usando PostgreSQL como respaldo.'
+            )
+        else:
+            print(
+                f'Catálogo maestro: fallo Supabase API ({detalle}). '
+                'Usando PostgreSQL como respaldo.'
+            )
+        try:
+            return fallback(codigo)
+        except Exception as pg_error:
+            print(f'Catálogo maestro: fallback PostgreSQL también falló: {pg_error}')
+            return None
+
+
 def imagen_maestro_por_codigo(codigo_barras):
     """URL de imagen para un código de barras en el catálogo maestro."""
     codigo = normalizar_codigo_barras(codigo_barras)
     if not codigo or not _catalogo_disponible():
         return None
 
-    try:
-        if supabase is not None:
-            return _imagen_maestro_por_codigo_supabase(codigo)
-        return _imagen_maestro_por_codigo_postgres(codigo)
-    except Exception as error:
-        print(f'Error al consultar catálogo maestro ({codigo}): {error}')
-    return None
+    return _consultar_supabase_con_respaldo(
+        codigo,
+        _imagen_maestro_por_codigo_supabase,
+        _imagen_maestro_por_codigo_postgres,
+    )
 
 
 def _guardar_imagen_maestro_supabase(codigo, url):
@@ -120,7 +144,14 @@ def guardar_imagen_maestro(codigo_barras, url_imagen):
 
     try:
         if supabase is not None:
-            return _guardar_imagen_maestro_supabase(codigo, url)
+            try:
+                return _guardar_imagen_maestro_supabase(codigo, url)
+            except Exception as error:
+                print(
+                    f'Catálogo maestro: no se pudo guardar vía Supabase ({error}). '
+                    'Intentando PostgreSQL.'
+                )
+                return _guardar_imagen_maestro_postgres(codigo, url)
         return _guardar_imagen_maestro_postgres(codigo, url)
     except Exception as error:
         print(f'Error al guardar en catálogo maestro ({codigo}): {error}')
@@ -170,6 +201,20 @@ def _mapa_imagenes_maestro_postgres(lote):
     return resultado
 
 
+def _mapa_lote_con_respaldo(lote):
+    if supabase is None:
+        return _mapa_imagenes_maestro_postgres(lote)
+
+    try:
+        return _mapa_imagenes_maestro_supabase(lote)
+    except Exception as error:
+        print(
+            f'Catálogo maestro (lote): fallo Supabase ({error}). '
+            'Usando PostgreSQL como respaldo.'
+        )
+        return _mapa_imagenes_maestro_postgres(lote)
+
+
 def mapa_imagenes_maestro(codigos):
     """Mapa codigo_barras normalizado → url_imagen desde el catálogo maestro en lote."""
     normalizados = []
@@ -186,10 +231,7 @@ def mapa_imagenes_maestro(codigos):
     try:
         for inicio in range(0, len(normalizados), _LOTE_CONSULTA):
             lote = normalizados[inicio : inicio + _LOTE_CONSULTA]
-            if supabase is not None:
-                resultado.update(_mapa_imagenes_maestro_supabase(lote))
-            else:
-                resultado.update(_mapa_imagenes_maestro_postgres(lote))
+            resultado.update(_mapa_lote_con_respaldo(lote))
     except Exception as error:
         print(f'Error al consultar catálogo maestro en lote: {error}')
     return resultado

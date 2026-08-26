@@ -1099,9 +1099,11 @@ def _crear_indices(cursor):
 
 
 def _sembrar_configuracion(cursor):
+    from config import DEFAULT_BANNER_URL
+
     defaults = [
         ('tasa_dolar', '36.50'),
-        ('banner_principal', '/static/images/default-banner.jpg'),
+        ('banner_principal', DEFAULT_BANNER_URL),
         ('whatsapp_soporte', '584125970507'),
         ('pago_movil_banco', 'Banco Caribe'),
         ('pago_movil_cedula', '30209716'),
@@ -1116,6 +1118,25 @@ def _sembrar_configuracion(cursor):
             """,
             (clave, valor),
         )
+    _corregir_banner_principal_legacy(cursor)
+
+
+def _corregir_banner_principal_legacy(cursor):
+    """Reemplaza rutas /static/images/... inexistentes por el banner HTTPS por defecto."""
+    from config import DEFAULT_BANNER_URL
+
+    cursor.execute(
+        """
+        UPDATE configuracion_sistema
+        SET valor = %s
+        WHERE clave = 'banner_principal'
+          AND (
+            valor LIKE '/static/images/%%'
+            OR TRIM(COALESCE(valor, '')) = ''
+          )
+        """,
+        (DEFAULT_BANNER_URL,),
+    )
 
 
 def init_db():

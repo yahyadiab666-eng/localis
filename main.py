@@ -32,6 +32,7 @@ import sqlite3
 import psycopg2
 from authlib.integrations.flask_client import OAuth
 from config import (
+    DEFAULT_BANNER_URL,
     MAX_UPLOAD_BYTES,
     WHATSAPP_SOPORTE,
     WHATSAPP_SOPORTE_URL,
@@ -99,14 +100,18 @@ from backend.subscriptions import (
 )
 from backend.utils import (
     formatear_fecha,
+    imagen_url_almacenada,
     imagen_url_para_persistir,
     normalizar_codigo_barras,
     normalizar_telefono_whatsapp,
     parsear_precio_form,
     parsear_entero_form,
     parsear_visible_form,
+    url_estatica_existe,
     url_maps_comercio,
+    url_banner_principal,
     url_whatsapp_comercio,
+    normalizar_url_imagen,
 )
 from backend.session_comercio import (
     asegurar_contexto_comercio,
@@ -151,10 +156,7 @@ registrar_manejadores_errores(app)
 def _filtro_fecha_corta(valor):
     return formatear_fecha(valor) or '—'
 
-DEFAULT_BANNER = (
-    'https://images.pexels.com/photos/18618233/pexels-photo-18618233.jpeg'
-    '?auto=compress&cs=tinysrgb&w=1920'
-)
+DEFAULT_BANNER = DEFAULT_BANNER_URL
 
 
 def _inicializar_aplicacion():
@@ -237,23 +239,26 @@ if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
     )
 
 
+def _url_imagen_comercio_usable(valor):
+    """URL de logo/banner usable en plantillas; descarta /static/ inexistentes."""
+    url = imagen_url_almacenada(valor) or normalizar_url_imagen(valor)
+    if not url:
+        return None
+    if url.startswith('/static/') and not url_estatica_existe(url):
+        return None
+    return url
+
+
 def _normalizar_imagenes_comercio(comercio):
     """Normaliza logo, banner y fechas para plantillas (PostgreSQL datetime)."""
     if not comercio:
         return comercio
     comercio = dict(comercio)
 
-    logo = comercio.get('logo_url')
-    if logo and str(logo).startswith(('http://', 'https://', '/')):
-        comercio['logo_completo'] = logo
-    else:
-        comercio['logo_completo'] = None
+    comercio['logo_completo'] = _url_imagen_comercio_usable(comercio.get('logo_url'))
 
     banner = comercio.get('banner_url') or comercio.get('imagen_portada')
-    if banner and str(banner).startswith(('http://', 'https://', '/')):
-        comercio['banner_completo'] = banner
-    else:
-        comercio['banner_completo'] = None
+    comercio['banner_completo'] = _url_imagen_comercio_usable(banner)
 
     comercio['tiene_banner'] = bool(comercio.get('banner_completo'))
     for campo in (
@@ -495,7 +500,7 @@ def index():
     )
 
     tasa_actual = obtener_tasa_dolar() or 1.0
-    banner_url = obtener_banner_principal() or DEFAULT_BANNER
+    banner_url = url_banner_principal(obtener_banner_principal(), default=DEFAULT_BANNER)
     whatsapp = obtener_config('whatsapp_soporte', WHATSAPP_SOPORTE)
 
     return render_template(
@@ -1395,7 +1400,10 @@ def panel_admin():
     tickets = obtener_bandeja_tecnica(estado_filtro=estado_filtro)
     tasa_actual = obtener_tasa_dolar()
     comercios = obtener_todos_comercios_admin(busqueda=busqueda or None)
-    banner_url = obtener_banner_principal()
+    banner_url = url_banner_principal(
+        obtener_banner_principal(),
+        default=DEFAULT_BANNER,
+    )
     whatsapp = obtener_config('whatsapp_soporte', WHATSAPP_SOPORTE)
 
     return render_template(

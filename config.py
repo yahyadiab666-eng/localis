@@ -17,6 +17,12 @@ PAGO_MOVIL_DEFAULT = {
 # Tamaño máximo por petición multipart (imágenes, comprobantes, CSV/Excel).
 MAX_UPLOAD_BYTES = int(os.environ.get('MAX_UPLOAD_BYTES', str(8 * 1024 * 1024)))
 
+# Banner promocional por defecto (URL externa; no depende de /static/).
+DEFAULT_BANNER_URL = (
+    'https://images.pexels.com/photos/18618233/pexels-photo-18618233.jpeg'
+    '?auto=compress&cs=tinysrgb&w=1920'
+)
+
 # Diagnóstico y alertas de errores críticos
 ERROR_REPORT_EMAIL = os.environ.get('ERROR_REPORT_EMAIL', 'ydiab.t@gmail.com')
 ENABLE_ERROR_EMAILS = os.environ.get('ENABLE_ERROR_EMAILS', 'true').lower() in (
@@ -97,6 +103,14 @@ def validar_config_arranque():
             advertencias.append(
                 'SUPABASE_URL/SUPABASE_KEY no configurados: las subidas de imágenes fallarán.'
             )
+        else:
+            from backend.supabase_client import SUPABASE_URL as _sb_url
+
+            if not _sb_url:
+                advertencias.append(
+                    'SUPABASE_URL parece malformada (revisa comillas, saltos de línea y '
+                    'formato https://REF.supabase.co en Render).'
+                )
     else:
         if not (os.environ.get('LOCALIS_SECRET_KEY') or '').strip():
             advertencias.append(

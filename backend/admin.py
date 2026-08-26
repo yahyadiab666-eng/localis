@@ -3,7 +3,7 @@ import sqlite3
 
 from backend.db import get_db_connection
 from backend.plans import PLANES, limite_para_plan, obtener_plan_por_codigo
-from backend.utils import parsear_visible_form
+from backend.utils import parsear_visible_form, url_banner_principal
 
 TIPOS_REPORTES_PERMITIDOS = {'soporte', 'reportar_tienda', 'reportar_articulo'}
 
@@ -133,6 +133,8 @@ def actualizar_tasa_dolar(admin_id, nueva_tasa):
 
 
 def obtener_banner_principal():
+    from config import DEFAULT_BANNER_URL
+
     try:
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
@@ -140,13 +142,10 @@ def obtener_banner_principal():
                 "SELECT valor FROM configuracion_sistema WHERE clave = 'banner_principal'"
             )
             fila = cursor.fetchone()
-            return (
-                fila[0]
-                if fila
-                else 'https://images.pexels.com/photos/18618233/pexels-photo-18618233.jpeg?auto=compress&cs=tinysrgb&w=1920'
-            )
+            valor = fila[0] if fila else None
+            return url_banner_principal(valor, default=DEFAULT_BANNER_URL)
     except Exception:
-        return 'https://images.pexels.com/photos/18618233/pexels-photo-18618233.jpeg?auto=compress&cs=tinysrgb&w=1920'
+        return DEFAULT_BANNER_URL
 
 
 def actualizar_banner_principal(admin_id, banner_url):

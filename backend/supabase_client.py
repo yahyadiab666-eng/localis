@@ -2,26 +2,69 @@
 
 import os
 import re
+import socket
 from typing import Optional
 from urllib.parse import quote, urlparse
 
 from supabase import Client, create_client
 
-SUPABASE_URL = (os.getenv('SUPABASE_URL') or '').strip().rstrip('/')
-SUPABASE_KEY = (os.getenv('SUPABASE_KEY') or '').strip()
-SUPABASE_SERVICE_ROLE_KEY = (os.getenv('SUPABASE_SERVICE_ROLE_KEY') or '').strip()
-SUPABASE_BUCKET_IMAGENES = (os.getenv('SUPABASE_BUCKET_IMAGENES') or 'imagenes').strip()
-
 _STORAGE_PUBLIC_PREFIX = '/storage/v1/object/public/'
 _SUBASE_TYPO_RE = re.compile(r'/subase/', re.IGNORECASE)
+
+
+def _limpiar_valor_env(valor):
+    """Elimina espacios, comillas y saltos de línea típicos de copiar/pegar en Render."""
+    if valor is None:
+        return ''
+    texto = str(valor).strip().strip('"').strip("'")
+    return texto.replace('\r', '').replace('\n', '').strip()
+
+
+def sanitizar_supabase_url(url):
+    """
+    Normaliza SUPABASE_URL para evitar Errno -2 (hostname inválido).
+    Acepta valores con o sin https:// y rechaza hosts vacíos o sin punto.
+    """
+    url_limpia = _limpiar_valor_env(url).rstrip('/')
+    if not url_limpia:
+        return ''
+
+    if not url_limpia.startswith(('http://', 'https://')):
+        url_limpia = 'https://' + url_limpia.lstrip('/')
+
+    parsed = urlparse(url_limpia)
+    host = (parsed.netloc or '').lower()
+    if not host or '.' not in host:
+        return ''
+
+    return url_limpia
+
+
+def _crear_cliente_supabase(api_key):
+    if not SUPABASE_URL or not api_key:
+        return None
+    try:
+        return create_client(SUPABASE_URL, api_key)
+    except Exception as error:
+        print(
+            'WARNING Localis: no se pudo inicializar cliente Supabase '
+            f'({SUPABASE_URL}): {error}'
+        )
+        return None
+
+
+SUPABASE_URL = sanitizar_supabase_url(os.getenv('SUPABASE_URL'))
+SUPABASE_KEY = _limpiar_valor_env(os.getenv('SUPABASE_KEY'))
+SUPABASE_SERVICE_ROLE_KEY = _limpiar_valor_env(os.getenv('SUPABASE_SERVICE_ROLE_KEY'))
+SUPABASE_BUCKET_IMAGENES = _limpiar_valor_env(os.getenv('SUPABASE_BUCKET_IMAGENES')) or 'imagenes'
 
 supabase: Optional[Client] = None
 supabase_storage_admin: Optional[Client] = None
 
 if SUPABASE_URL and SUPABASE_KEY:
-    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    supabase = _crear_cliente_supabase(SUPABASE_KEY)
 if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
-    supabase_storage_admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    supabase_storage_admin = _crear_cliente_supabase(SUPABASE_SERVICE_ROLE_KEY)
 elif SUPABASE_URL or SUPABASE_KEY:
     print(
         'WARNING Localis: SUPABASE_URL y SUPABASE_KEY deben definirse juntas. '
@@ -34,6 +77,26 @@ else:
     )
 
 
+def es_error_red_supabase(error):
+    """True si el fallo parece DNS/red (p. ej. Name or service not known / Errno -2)."""
+    if isinstance(error, (ConnectionError, TimeoutError, socket.gaierror, OSError)):
+        return True
+    mensaje = str(error).lower()
+    return any(
+        fragmento in mensaje
+        for fragmento in (
+            'name or service not known',
+            'errno -2',
+            'errno -3',
+            'getaddrinfo failed',
+            'failed to resolve',
+            'temporary failure in name resolution',
+            'connection refused',
+            'network is unreachable',
+        )
+    )
+
+
 def _host_supabase():
     if not SUPABASE_URL:
         return ''
@@ -41,7 +104,7 @@ def _host_supabase():
 
 
 def ruta_storage_objeto(carpeta: str, nombre_archivo: str) -> str:
-    """Ruta relativa dentro del bucket (p. ej. productos/default-product.webp)."""
+    """Ruta relativa dentro del bucket (p. ej. productos/archivo.webp)."""
     carpeta_limpia = carpeta.strip('/').replace('\\', '/')
     archivo = nombre_archivo.lstrip('/')
     return f'{carpeta_limpia}/{archivo}' if carpeta_limpia else archivo
@@ -99,7 +162,6 @@ def normalizar_url_publica_storage(
     if _STORAGE_PUBLIC_PREFIX not in url_limpia.lower():
         return canonica
 
-    # Conserva query string del SDK (p. ej. download) si existe.
     if parsed.query:
         base, _, query = url_limpia.partition('?')
         if _STORAGE_PUBLIC_PREFIX in base.lower():
