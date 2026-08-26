@@ -10,110 +10,20 @@ from supabase import Client, create_client
 
 _STORAGE_PUBLIC_PREFIX = '/storage/v1/object/public/'
 _SUBASE_TYPO_RE = re.compile(r'/subase/', re.IGNORECASE)
-_FORMATO_URL_EJEMPLO = 'https://TU_PROJECT_REF.supabase.co'
-_CARACTERES_INVISIBLES_HOST = ('\ufeff', '\u200b', '\u200c', '\u200d', '\u00ad', '\x00')
 
 
 def _limpiar_valor_env(valor):
-    """Limpia espacios, comillas y saltos de línea sin rechazar la URL."""
+    """Limpia claves/env auxiliares (comillas y saltos de línea al copiar en Render)."""
     if valor is None:
         return ''
     return str(valor).strip().strip('"').strip("'").replace('\r', '').replace('\n', '').strip()
 
 
-def _contiene_dominio_supabase(url):
-    """True si la cadena incluye https:// y .supabase.co."""
-    lower = (url or '').lower()
-    return 'https://' in lower and '.supabase.co' in lower
-
-
-def _preparar_url_supabase(url):
-    """Limpia y asegura prefijo https:// cuando hay dominio Supabase."""
-    limpia = _limpiar_valor_env(url).rstrip('/')
-    if not limpia:
-        return ''
-
-    lower = limpia.lower()
-    if lower.startswith('https://'):
-        return 'https://' + limpia[8:].lstrip('/')
-    if lower.startswith('http://'):
-        return 'https://' + limpia[7:].lstrip('/')
-    if '.supabase.co' in lower:
-        return 'https://' + limpia.lstrip('/')
-    return limpia
-
-
-def _normalizar_host_supabase(host):
-    """
-    Host DNS limpio: sin puerto, sin punto final ni caracteres invisibles de copiar/pegar.
-    """
-    if not host:
-        return ''
-
-    texto = str(host).strip().lower().rstrip('.')
-    for caracter in _CARACTERES_INVISIBLES_HOST:
-        texto = texto.replace(caracter, '')
-    return texto.strip()
-
-
 def _extraer_host_desde_url(url):
-    """Host sin puerto (logs y URL canónica)."""
-    url_limpia = _preparar_url_supabase(url)
-    if not url_limpia:
+    """Host sin puerto (logs y comparación de URLs de Storage)."""
+    if not url:
         return ''
-    return _normalizar_host_supabase(urlparse(url_limpia).hostname)
-
-
-def sanitizar_supabase_url(url):
-    """Devuelve https://HOST si reconoce dominio Supabase; si no, cadena vacía."""
-    preparada = _preparar_url_supabase(url)
-    if not _contiene_dominio_supabase(preparada):
-        return ''
-
-    host = _extraer_host_desde_url(preparada)
-    if host:
-        return f'https://{host}'
-
-    return preparada.split('?')[0].split('#')[0].rstrip('/')
-
-
-def diagnosticar_supabase_url(url_raw=None, url_cruda_env=None):
-    """
-    Limpia SUPABASE_URL y la acepta si contiene https:// y .supabase.co.
-    No bloquea el cliente cuando el dominio es correcto.
-    """
-    cruda_env = url_cruda_env if url_cruda_env is not None else os.getenv('SUPABASE_URL')
-    cruda_repr = repr(cruda_env)
-    raw = _limpiar_valor_env(url_raw if url_raw is not None else cruda_env)
-    diagnostico = {
-        'raw_presente': bool(raw),
-        'url_cruda_repr': cruda_repr,
-        'url_sanitizada': '',
-        'host': '',
-        'ok': False,
-        'problema': None,
-        'pista': None,
-    }
-
-    if not raw:
-        diagnostico['problema'] = 'vacia'
-        diagnostico['pista'] = f'SUPABASE_URL vacía (valor leído: {cruda_repr}).'
-        return diagnostico
-
-    preparada = _preparar_url_supabase(raw)
-    if _contiene_dominio_supabase(preparada):
-        url_final = sanitizar_supabase_url(preparada) or preparada.rstrip('/')
-        diagnostico['url_sanitizada'] = url_final
-        diagnostico['host'] = _extraer_host_desde_url(url_final) or url_final.replace('https://', '').split('/')[0]
-        diagnostico['ok'] = True
-        return diagnostico
-
-    diagnostico['problema'] = 'sin_dominio_supabase'
-    diagnostico['pista'] = (
-        f'SUPABASE_URL debe contener https:// y .supabase.co. Valor leído: {cruda_repr}'
-    )
-    print(f'[Localis Supabase] URL no aceptada; valor crudo: {cruda_repr}')
-    return diagnostico
+    return (urlparse(url.strip()).hostname or '').lower()
 
 
 def _mascara_secreto(valor, visible=4):
@@ -125,38 +35,24 @@ def _mascara_secreto(valor, visible=4):
     return f'{texto[:visible]}…{texto[-visible:]}'
 
 
-def _imprimir_diagnostico_supabase(diagnostico):
+def _imprimir_estado_supabase():
     """Log legible al arrancar; no imprime claves completas."""
     prefijo = '[Localis Supabase]'
 
-    if not diagnostico.get('raw_presente') and not SUPABASE_KEY:
+    if not SUPABASE_URL and not SUPABASE_KEY:
         print(
             f'{prefijo} No configurado (SUPABASE_URL/SUPABASE_KEY ausentes). '
             'Catálogo maestro usará PostgreSQL directo.'
         )
         return
 
-    if diagnostico.get('problema') == 'vacia':
-        print(
-            f'{prefijo} SUPABASE_URL vacía. '
-            f'Formato esperado: {_FORMATO_URL_EJEMPLO}'
-        )
+    if not SUPABASE_URL:
+        print(f'{prefijo} SUPABASE_URL vacía.')
         return
 
-    if not diagnostico.get('ok'):
-        print(f'{prefijo} SUPABASE_URL no usable: {diagnostico.get("problema")}.')
-        if diagnostico.get('pista'):
-            print(f'{prefijo} {diagnostico["pista"]}')
-        elif diagnostico.get('url_cruda_repr'):
-            print(f'{prefijo} Valor crudo: {diagnostico["url_cruda_repr"]}')
-        print(
-            f'{prefijo} Se omitirá la API de Supabase; catálogo maestro usará PostgreSQL.'
-        )
-        return
-
-    host = diagnostico.get('host') or '(sin host)'
+    host = _extraer_host_desde_url(SUPABASE_URL) or SUPABASE_URL
     print(
-        f'{prefijo} URL host={host} | '
+        f'{prefijo} URL={SUPABASE_URL} host={host} | '
         f'SUPABASE_KEY={_mascara_secreto(SUPABASE_KEY)} | '
         f'SERVICE_ROLE={_mascara_secreto(SUPABASE_SERVICE_ROLE_KEY)}'
     )
@@ -185,13 +81,7 @@ def _crear_cliente_supabase(api_key, etiqueta='anon'):
         return None
 
 
-SUPABASE_URL_RAW_ENV = os.getenv('SUPABASE_URL')
-SUPABASE_URL_RAW = _limpiar_valor_env(SUPABASE_URL_RAW_ENV)
-_DIAGNOSTICO_SUPABASE = diagnosticar_supabase_url(
-    SUPABASE_URL_RAW,
-    url_cruda_env=SUPABASE_URL_RAW_ENV,
-)
-SUPABASE_URL = _DIAGNOSTICO_SUPABASE.get('url_sanitizada', '') if _DIAGNOSTICO_SUPABASE.get('ok') else ''
+SUPABASE_URL = (os.getenv('SUPABASE_URL') or '').strip()
 SUPABASE_KEY = _limpiar_valor_env(os.getenv('SUPABASE_KEY'))
 SUPABASE_SERVICE_ROLE_KEY = _limpiar_valor_env(os.getenv('SUPABASE_SERVICE_ROLE_KEY'))
 SUPABASE_BUCKET_IMAGENES = _limpiar_valor_env(os.getenv('SUPABASE_BUCKET_IMAGENES')) or 'imagenes'
@@ -199,37 +89,30 @@ SUPABASE_BUCKET_IMAGENES = _limpiar_valor_env(os.getenv('SUPABASE_BUCKET_IMAGENE
 supabase: Optional[Client] = None
 supabase_storage_admin: Optional[Client] = None
 
+if SUPABASE_URL and SUPABASE_KEY:
+    supabase = _crear_cliente_supabase(SUPABASE_KEY, etiqueta='anon')
+if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
+    supabase_storage_admin = _crear_cliente_supabase(
+        SUPABASE_SERVICE_ROLE_KEY,
+        etiqueta='service_role',
+    )
 
-def _inicializar_clientes_supabase():
-    global supabase, supabase_storage_admin
-    supabase = None
-    supabase_storage_admin = None
-
-    if not SUPABASE_URL:
-        return
-
-    if SUPABASE_KEY:
-        supabase = _crear_cliente_supabase(SUPABASE_KEY, etiqueta='anon')
-    if SUPABASE_SERVICE_ROLE_KEY:
-        supabase_storage_admin = _crear_cliente_supabase(
-            SUPABASE_SERVICE_ROLE_KEY,
-            etiqueta='service_role',
-        )
-
-
-_inicializar_clientes_supabase()
-
-_imprimir_diagnostico_supabase(_DIAGNOSTICO_SUPABASE)
+_imprimir_estado_supabase()
 
 
 def supabase_api_habilitado():
-    """True solo si la URL pasó validación y el cliente anon se creó correctamente."""
+    """True si hay URL, clave y el cliente anon se creó correctamente."""
     return supabase is not None and bool(SUPABASE_URL)
 
 
 def obtener_diagnostico_supabase():
-    """Diagnóstico de configuración (para arranque y health checks)."""
-    return dict(_DIAGNOSTICO_SUPABASE)
+    """Estado de configuración (compatibilidad con config.py)."""
+    return {
+        'ok': bool(SUPABASE_URL),
+        'url_sanitizada': SUPABASE_URL,
+        'host': _extraer_host_desde_url(SUPABASE_URL),
+        'raw_presente': bool(SUPABASE_URL),
+    }
 
 
 def es_error_red_supabase(error):
@@ -320,7 +203,7 @@ def normalizar_url_publica_storage(
 
     host_esperado = _host_supabase()
     parsed = urlparse(url_limpia)
-    host_url = _normalizar_host_supabase(parsed.hostname)
+    host_url = (urlparse(url_limpia).hostname or '').lower()
 
     if not host_esperado or host_url != host_esperado:
         return canonica
