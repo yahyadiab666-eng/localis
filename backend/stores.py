@@ -510,8 +510,17 @@ def actualizar_producto(
         }
         if incluir_imagen:
             imagen_nueva = imagen_url_para_persistir(imagen_url)
-            if imagen_nueva:
-                campos['imagen_url'] = imagen_nueva
+            if imagen_url and not imagen_nueva:
+                return (
+                    False,
+                    'La imagen se procesó pero la URL pública no es válida para guardar en la base de datos.',
+                )
+            if not imagen_nueva:
+                return (
+                    False,
+                    'No se pudo subir la imagen del producto a Supabase Storage.',
+                )
+            campos['imagen_url'] = imagen_nueva
 
         set_sql = ', '.join(f'{columna} = ?' for columna in campos)
         valores = list(campos.values()) + [producto_id, comercio_id]

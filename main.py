@@ -14,7 +14,7 @@ else:
 
 from functools import wraps
 
-from backend.supabase_client import SUPABASE_BUCKET_IMAGENES, supabase
+from backend.supabase_client import SUPABASE_BUCKET_IMAGENES, obtener_cliente_storage, supabase
 from backend.supabase_storage import (
     SupabaseUploadError,
     subir_bytes_a_supabase,
@@ -22,6 +22,8 @@ from backend.supabase_storage import (
 )
 if supabase:
     print('Supabase Storage configurado correctamente.')
+    if not obtener_cliente_storage():
+        print('Aviso: no hay cliente Storage disponible para subidas.')
 else:
     print('Aviso: SUPABASE_URL o SUPABASE_KEY no configurados. Las subidas de imágenes fallarán.')
 
@@ -287,15 +289,14 @@ def procesar_imagen_subida(
     if not file_storage or not getattr(file_storage, 'filename', ''):
         return None
 
-    if not supabase:
+    if not obtener_cliente_storage():
         raise SupabaseUploadError(
             'Supabase Storage no está configurado. '
-            'Define SUPABASE_URL y SUPABASE_KEY en el entorno.'
+            'Define SUPABASE_URL y SUPABASE_KEY (o SUPABASE_SERVICE_ROLE_KEY) en el entorno.'
         )
 
     return subir_imagen_a_supabase(
         file_storage,
-        supabase,
         prefijo=prefijo,
         carpeta=carpeta,
         max_dimension=max_dimension,
@@ -948,15 +949,25 @@ def nuevo_producto():
             return redirect(destino)
 
         try:
-            imagen_url = imagen_url_para_persistir(
-                procesar_imagen_para_producto(
+            imagen_subida = None
+            if imagen_archivo and getattr(imagen_archivo, 'filename', ''):
+                imagen_subida = procesar_imagen_para_producto(
                     imagen_archivo,
                     codigo_barras,
                     nombre,
                     descripcion,
                     comercio_id=comercio['id'],
                 )
-            )
+                imagen_url = imagen_url_para_persistir(imagen_subida)
+                if not imagen_url:
+                    flash(
+                        'La imagen no se pudo subir o Supabase no devolvió una URL pública válida.',
+                        'error',
+                    )
+                    return redirect(url_for('nuevo_producto'))
+            else:
+                imagen_url = None
+
             if not imagen_url:
                 imagen_url = resolver_imagen_url_definitiva(
                     None,
@@ -1038,6 +1049,16 @@ def editar_producto(producto_id):
                     return redirect(
                         url_for('editar_producto', producto_id=producto_id)
                     )
+                imagen_persistida = imagen_url_para_persistir(imagen_url)
+                if not imagen_persistida:
+                    flash(
+                        'La imagen no se pudo subir o Supabase no devolvió una URL pública válida.',
+                        'error',
+                    )
+                    return redirect(
+                        url_for('editar_producto', producto_id=producto_id)
+                    )
+                imagen_url = imagen_persistida
 
             exito, mensaje = actualizar_producto(
                 producto_id,
@@ -1210,16 +1231,26 @@ def api_crear_producto():
         return jsonify({'error': error_precio}), 400
 
     try:
-        imagen_url = imagen_url_para_persistir(
-            procesar_imagen_para_producto(
-                imagen_archivo,
-                codigo_barras,
-                nombre,
-                descripcion,
-                comercio_id=tienda_id,
+        if imagen_archivo and getattr(imagen_archivo, 'filename', ''):
+            imagen_url = imagen_url_para_persistir(
+                procesar_imagen_para_producto(
+                    imagen_archivo,
+                    codigo_barras,
+                    nombre,
+                    descripcion,
+                    comercio_id=tienda_id,
+                )
             )
-        )
-        if not imagen_url:
+            if not imagen_url:
+                return jsonify(
+                    {
+                        'error': (
+                            'La imagen no se pudo subir o Supabase no devolvió '
+                            'una URL pública válida.'
+                        )
+                    }
+                ), 400
+        else:
             imagen_url = resolver_imagen_url_definitiva(
                 None,
                 codigo_barras,
@@ -1301,7 +1332,7 @@ def api_verificar_pago():
     comprobante_url = None
 
     try:
-        if not supabase:
+        if not obtener_cliente_storage():
             raise SupabaseUploadError(
                 'Supabase Storage no está configurado para almacenar comprobantes.'
             )
@@ -1317,8 +1348,7 @@ def api_verificar_pago():
         payload, content_type, filename = comprimido
         comprobante_url = subir_bytes_a_supabase(
             payload,
-            supabase,
-            filename,
+            filename=filename,
             content_type=content_type,
             carpeta='pagos',
         )

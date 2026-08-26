@@ -9,15 +9,19 @@ from supabase import Client, create_client
 
 SUPABASE_URL = (os.getenv('SUPABASE_URL') or '').strip().rstrip('/')
 SUPABASE_KEY = (os.getenv('SUPABASE_KEY') or '').strip()
+SUPABASE_SERVICE_ROLE_KEY = (os.getenv('SUPABASE_SERVICE_ROLE_KEY') or '').strip()
 SUPABASE_BUCKET_IMAGENES = (os.getenv('SUPABASE_BUCKET_IMAGENES') or 'imagenes').strip()
 
 _STORAGE_PUBLIC_PREFIX = '/storage/v1/object/public/'
 _SUBASE_TYPO_RE = re.compile(r'/subase/', re.IGNORECASE)
 
 supabase: Optional[Client] = None
+supabase_storage_admin: Optional[Client] = None
 
 if SUPABASE_URL and SUPABASE_KEY:
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
+    supabase_storage_admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 elif SUPABASE_URL or SUPABASE_KEY:
     print(
         'WARNING Localis: SUPABASE_URL y SUPABASE_KEY deben definirse juntas. '
@@ -123,3 +127,17 @@ def es_host_supabase(url: str) -> bool:
         return False
     host_config = _host_supabase()
     return host_config in corregir_typo_ruta_storage(url or '').lower()
+
+
+def obtener_cliente_storage():
+    """
+    Cliente para subidas server-side en Storage.
+    Prefiere SUPABASE_SERVICE_ROLE_KEY (evita rechazos RLS con anon key).
+    """
+    if supabase_storage_admin:
+        return supabase_storage_admin
+    return supabase
+
+
+def storage_usa_service_role():
+    return supabase_storage_admin is not None
