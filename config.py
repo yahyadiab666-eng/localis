@@ -23,6 +23,10 @@ DEFAULT_BANNER_URL = (
     '?auto=compress&cs=tinysrgb&w=1920'
 )
 
+# Respaldo local cuando Supabase Storage falla por red/DNS.
+UPLOAD_FOLDER = os.path.join(RUTA_RAIZ, 'static', 'uploads')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
 # Diagnóstico y alertas de errores críticos
 ERROR_REPORT_EMAIL = os.environ.get('ERROR_REPORT_EMAIL', 'ydiab.t@gmail.com')
 ENABLE_ERROR_EMAILS = os.environ.get('ENABLE_ERROR_EMAILS', 'true').lower() in (

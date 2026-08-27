@@ -92,14 +92,32 @@ def url_imagen_manual_valida(valor):
     return None
 
 
+def url_imagen_local_valida(valor):
+    """Ruta /static/uploads/... persistible si el archivo existe en disco."""
+    texto = texto_campo_imagen(valor, default=None)
+    if not texto or es_imagen_generica(texto):
+        return None
+    if not texto.startswith('/static/uploads/'):
+        return None
+    return texto if url_estatica_existe(texto) else None
+
+
 def url_imagen_usable(valor):
-    """True si hay URL manual o Supabase usable."""
-    return bool(url_imagen_supabase_valida(valor) or url_imagen_manual_valida(valor))
+    """True si hay URL manual, Supabase o archivo local usable."""
+    return bool(
+        url_imagen_supabase_valida(valor)
+        or url_imagen_manual_valida(valor)
+        or url_imagen_local_valida(valor)
+    )
 
 
 def imagen_url_almacenada(valor):
-    """URL persistible en BD (Supabase o enlace https explícito)."""
-    return url_imagen_supabase_valida(valor) or url_imagen_manual_valida(valor)
+    """URL persistible en BD (Supabase, https explícito o /static/uploads/)."""
+    return (
+        url_imagen_supabase_valida(valor)
+        or url_imagen_manual_valida(valor)
+        or url_imagen_local_valida(valor)
+    )
 
 
 def url_imagen_supabase_valida(valor):
@@ -146,7 +164,7 @@ def normalizar_url_imagen(valor, default=None):
 def url_banner_principal(valor, default=None):
     """
     URL segura para banner promocional.
-    Evita rutas /static/... inexistentes en el despliegue.
+    Acepta https externo o /static/uploads/ existente.
     """
     from config import DEFAULT_BANNER_URL
 
@@ -154,6 +172,8 @@ def url_banner_principal(valor, default=None):
     texto = texto_campo_imagen(valor, default=None)
     if not texto:
         return fallback
+    if texto.startswith('/static/uploads/') and url_estatica_existe(texto):
+        return texto
     if texto.startswith('/static/'):
         return fallback
     if texto.startswith(('http://', 'https://')):

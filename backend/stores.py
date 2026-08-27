@@ -513,12 +513,12 @@ def actualizar_producto(
             if imagen_url and not imagen_nueva:
                 return (
                     False,
-                    'La imagen se procesó pero la URL pública no es válida para guardar en la base de datos.',
+                    'La imagen se procesó pero la URL no es válida para guardar en la base de datos.',
                 )
             if not imagen_nueva:
                 return (
                     False,
-                    'No se pudo subir la imagen del producto a Supabase Storage.',
+                    'No se pudo subir la imagen del producto.',
                 )
             campos['imagen_url'] = imagen_nueva
 

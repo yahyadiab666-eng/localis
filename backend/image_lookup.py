@@ -11,9 +11,9 @@ from backend.image_manager import (
 )
 from backend.utils import (
     es_imagen_generica,
+    imagen_url_almacenada,
     normalizar_codigo_barras,
     texto_campo_imagen,
-    url_imagen_supabase_valida,
 )
 
 EXPR_CODIGO_BARRAS = (
@@ -24,16 +24,8 @@ EXPR_CODIGO_BARRAS = (
 
 
 def _url_almacenada_o_none(valor):
-    """URL ya persistida en PostgreSQL (Supabase u https explícita)."""
-    supabase = url_imagen_supabase_valida(valor)
-    if supabase:
-        return supabase
-    texto = texto_campo_imagen(valor, default=None)
-    if not texto or es_imagen_generica(texto):
-        return None
-    if texto.startswith('https://'):
-        return texto
-    return None
+    """URL ya persistida en PostgreSQL (Supabase, local o https explícita)."""
+    return imagen_url_almacenada(valor)
 
 
 def _resolver_url_escritura(

@@ -6,6 +6,8 @@ test_app_localis.py
 
 # Capacitor / Android
 node_modules/
+static/uploads/*
+!static/uploads/.gitkeep
 android/.gradle/
 android/app/build/
 android/build/
