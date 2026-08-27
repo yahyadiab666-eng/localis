@@ -1,9 +1,11 @@
 import os
+import random
 import sqlite3
 
 import psycopg2
 
 from backend.db import get_db_connection
+from backend.runtime_cache import get_or_load, invalidate
 from backend.image_lookup import (
     EXPR_CODIGO_BARRAS,
     asociar_imagenes_inventario,
@@ -36,7 +38,12 @@ from backend.subscriptions import (
 _FILTRO_COMERCIO_PUBLICO = (
     " AND c.visible = 1 AND c.estado_pago IN ('activo', 'gratis')"
 )
-def obtener_tasa_dolar():
+
+_CONFIG_TTL_SEG = 120
+_POOL_MUESTRA_ALEATORIA = 400
+
+
+def _cargar_tasa_dolar_db():
     try:
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
@@ -49,17 +56,49 @@ def obtener_tasa_dolar():
         return 36.50
 
 
-def obtener_config(clave, default=None):
+def obtener_tasa_dolar():
+    return get_or_load('config:tasa_dolar', _cargar_tasa_dolar_db, _CONFIG_TTL_SEG)
+
+
+def _cargar_config_map_db(claves):
     try:
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
+            placeholders = ', '.join('?' for _ in claves)
             cursor.execute(
-                "SELECT valor FROM configuracion_sistema WHERE clave = ?", (clave,)
+                f'SELECT clave, valor FROM configuracion_sistema WHERE clave IN ({placeholders})',
+                tuple(claves),
             )
-            fila = cursor.fetchone()
-            return fila[0] if fila else default
+            return {fila[0]: fila[1] for fila in cursor.fetchall()}
     except Exception:
-        return default
+        return {}
+
+
+def obtener_configs(claves_defaults):
+    """
+    Lee varias claves en una sola consulta.
+    claves_defaults: dict clave → valor por defecto.
+    """
+    claves = list(claves_defaults.keys())
+    cache_key = 'config:batch:' + ','.join(sorted(claves))
+
+    def loader():
+        encontrados = _cargar_config_map_db(claves)
+        return {
+            clave: encontrados.get(clave, default)
+            for clave, default in claves_defaults.items()
+        }
+
+    return get_or_load(cache_key, loader, _CONFIG_TTL_SEG)
+
+
+def obtener_config(clave, default=None):
+    return obtener_configs({clave: default}).get(clave, default)
+
+
+def invalidar_cache_configuracion():
+    """Llamar tras actualizar configuracion_sistema desde admin."""
+    invalidate('config:')
 
 
 def _construir_filtro_palabras(palabra_clave):
@@ -380,6 +419,35 @@ def buscar_y_filtrar_comercios(
 # ==========================================
 
 
+def _base_query_productos_publicos():
+    return """
+        SELECT p.*, c.nombre AS comercio_nombre, c.telefono AS comercio_telefono,
+               c.id AS comercio_id,
+               cat.nombre AS categoria_nombre
+        FROM productos p
+        JOIN comercios c ON p.comercio_id = c.id
+        LEFT JOIN categorias cat ON c.categoria_id = cat.id
+        WHERE 1=1
+    """ + _FILTRO_COMERCIO_PUBLICO
+
+
+def _aplicar_filtros_productos(query, parametros, palabra_clave, categoria_nombre, comercio_id):
+    if comercio_id:
+        query += ' AND p.comercio_id = ?'
+        parametros.append(comercio_id)
+
+    filtro_palabras, params_palabras = _construir_filtro_palabras(palabra_clave)
+    if filtro_palabras:
+        query += f' AND {filtro_palabras}'
+        parametros.extend(params_palabras)
+
+    if categoria_nombre:
+        query += ' AND cat.nombre = ?'
+        parametros.append(categoria_nombre)
+
+    return query, parametros
+
+
 def buscar_y_filtrar_productos(
     palabra_clave=None,
     categoria_nombre=None,
@@ -392,43 +460,42 @@ def buscar_y_filtrar_productos(
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
 
-            query = """
-                SELECT p.*, c.nombre AS comercio_nombre, c.telefono AS comercio_telefono,
-                       c.id AS comercio_id,
-                       cat.nombre AS categoria_nombre
-                FROM productos p
-                JOIN comercios c ON p.comercio_id = c.id
-                LEFT JOIN categorias cat ON c.categoria_id = cat.id
-                WHERE 1=1
-            """ + _FILTRO_COMERCIO_PUBLICO
             parametros = []
-
-            if comercio_id:
-                query += ' AND p.comercio_id = ?'
-                parametros.append(comercio_id)
-
-            filtro_palabras, params_palabras = _construir_filtro_palabras(
-                palabra_clave
-            )
-            if filtro_palabras:
-                query += f' AND {filtro_palabras}'
-                parametros.extend(params_palabras)
-
-            if categoria_nombre:
-                query += ' AND cat.nombre = ?'
-                parametros.append(categoria_nombre)
-
-            if orden_aleatorio:
-                query += ' ORDER BY RANDOM()'
+            if orden_aleatorio and limit and not palabra_clave and not categoria_nombre:
+                query_ids = """
+                    SELECT p.id
+                    FROM productos p
+                    JOIN comercios c ON p.comercio_id = c.id
+                    LEFT JOIN categorias cat ON c.categoria_id = cat.id
+                    WHERE 1=1
+                """ + _FILTRO_COMERCIO_PUBLICO
+                query_ids, params_ids = _aplicar_filtros_productos(
+                    query_ids, [], palabra_clave, categoria_nombre, comercio_id
+                )
+                pool_size = max(int(limit) * 10, min(_POOL_MUESTRA_ALEATORIA, 400))
+                query_ids += ' ORDER BY p.id DESC LIMIT ?'
+                params_ids.append(pool_size)
+                cursor.execute(query_ids, params_ids)
+                ids = [fila[0] for fila in cursor.fetchall()]
+                if not ids:
+                    return []
+                ids = random.sample(ids, min(int(limit), len(ids)))
+                placeholders = ', '.join('?' for _ in ids)
+                query = _base_query_productos_publicos()
+                query += f' AND p.id IN ({placeholders})'
+                cursor.execute(query, ids)
+                filas = cursor.fetchall()
             else:
+                query = _base_query_productos_publicos()
+                query, parametros = _aplicar_filtros_productos(
+                    query, parametros, palabra_clave, categoria_nombre, comercio_id
+                )
                 query += ' ORDER BY p.id DESC'
-
-            if limit:
-                query += ' LIMIT ?'
-                parametros.append(int(limit))
-
-            cursor.execute(query, parametros)
-            filas = cursor.fetchall()
+                if limit:
+                    query += ' LIMIT ?'
+                    parametros.append(int(limit))
+                cursor.execute(query, parametros)
+                filas = cursor.fetchall()
 
             productos = []
             for fila in filas:

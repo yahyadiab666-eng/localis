@@ -125,6 +125,9 @@ def actualizar_tasa_dolar(admin_id, nueva_tasa):
             )
 
             conexion.commit()
+        from backend.stores import invalidar_cache_configuracion
+
+        invalidar_cache_configuracion()
         return True, f'Tasa del día actualizada a {tasa_limpia} Bs. Grabado en auditoría.'
     except ValueError:
         return False, 'Error: El valor de la tasa debe ser un número válido.'
@@ -134,18 +137,10 @@ def actualizar_tasa_dolar(admin_id, nueva_tasa):
 
 def obtener_banner_principal():
     from config import DEFAULT_BANNER_URL
+    from backend.stores import obtener_config
 
-    try:
-        with get_db_connection() as conexion:
-            cursor = conexion.cursor()
-            cursor.execute(
-                "SELECT valor FROM configuracion_sistema WHERE clave = 'banner_principal'"
-            )
-            fila = cursor.fetchone()
-            valor = fila[0] if fila else None
-            return url_banner_principal(valor, default=DEFAULT_BANNER_URL)
-    except Exception:
-        return DEFAULT_BANNER_URL
+    valor = obtener_config('banner_principal', DEFAULT_BANNER_URL)
+    return url_banner_principal(valor, default=DEFAULT_BANNER_URL)
 
 
 def actualizar_banner_principal(admin_id, banner_url):
@@ -168,6 +163,9 @@ def actualizar_banner_principal(admin_id, banner_url):
                 (admin_id, f'Nuevo banner: {banner_url}'),
             )
             conexion.commit()
+        from backend.stores import invalidar_cache_configuracion
+
+        invalidar_cache_configuracion()
         return True, 'Banner promocional actualizado correctamente.'
     except Exception as e:
         return False, f'Error al actualizar banner: {str(e)}'

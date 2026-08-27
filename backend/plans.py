@@ -3,6 +3,7 @@
 import sqlite3
 
 from backend.db import get_db_connection
+from backend.runtime_cache import get_or_load, invalidate
 
 PLANES = {
     'gratis': {
@@ -118,40 +119,48 @@ def obtener_beneficios_plan(codigo):
 
 
 def obtener_plan_por_codigo(codigo):
-    """Busca un plan activo en la tabla planes; fallback a constantes."""
+    """Busca un plan activo en la tabla planes; fallback a constantes (cache TTL)."""
     codigo = (codigo or 'basica').lower()
-    try:
-        with get_db_connection(row_factory=sqlite3.Row) as conexion:
-            cursor = conexion.cursor()
-            cursor.execute(
-                """
-                SELECT id, codigo, nombre, precio, limite_productos,
-                       soporte_prioritario, dias_duracion, destacado, activo
-                FROM planes
-                WHERE codigo = ? AND activo = 1
-                """,
-                (codigo,),
-            )
-            fila = cursor.fetchone()
-            if fila:
-                return dict(fila)
-    except Exception:
-        pass
 
-    plan = PLANES.get(codigo)
-    if not plan:
-        return None
-    return {
-        'id': None,
-        'codigo': codigo,
-        'nombre': plan['nombre'],
-        'precio': plan['precio_usd'],
-        'limite_productos': plan['limite_productos'],
-        'dias_duracion': plan.get('dias_duracion', 30),
-        'soporte_prioritario': 0,
-        'destacado': 0,
-        'activo': 1,
-    }
+    def loader():
+        try:
+            with get_db_connection(row_factory=sqlite3.Row) as conexion:
+                cursor = conexion.cursor()
+                cursor.execute(
+                    """
+                    SELECT id, codigo, nombre, precio, limite_productos,
+                           soporte_prioritario, dias_duracion, destacado, activo
+                    FROM planes
+                    WHERE codigo = ? AND activo = 1
+                    """,
+                    (codigo,),
+                )
+                fila = cursor.fetchone()
+                if fila:
+                    return dict(fila)
+        except Exception:
+            pass
+
+        plan = PLANES.get(codigo)
+        if not plan:
+            return None
+        return {
+            'id': None,
+            'codigo': codigo,
+            'nombre': plan['nombre'],
+            'precio': plan['precio_usd'],
+            'limite_productos': plan['limite_productos'],
+            'dias_duracion': plan.get('dias_duracion', 30),
+            'soporte_prioritario': 0,
+            'destacado': 0,
+            'activo': 1,
+        }
+
+    return get_or_load(f'plan:{codigo}', loader, ttl_seconds=300)
+
+
+def invalidar_cache_planes():
+    invalidate('plan:')
 
 
 def limite_desde_plan_id(plan_id):

@@ -1077,11 +1077,15 @@ def _asignar_plan_id_existentes(cursor):
 
 def _crear_indices(cursor):
     indices = [
-        'CREATE INDEX IF NOT EXISTS idx_productos_tienda ON productos(comercio_id)',
+        'CREATE INDEX IF NOT EXISTS idx_productos_comercio_id ON productos(comercio_id)',
+        'CREATE INDEX IF NOT EXISTS idx_productos_comercio_id_desc ON productos(comercio_id, id DESC)',
+        'CREATE INDEX IF NOT EXISTS idx_comercios_publicos ON comercios(visible, estado_pago)',
+        'CREATE INDEX IF NOT EXISTS idx_comercios_vencimiento ON comercios(fecha_vencimiento)',
+        'CREATE INDEX IF NOT EXISTS idx_comercios_plan_pendiente ON comercios(plan_pendiente) WHERE plan_pendiente IS NOT NULL',
         'CREATE INDEX IF NOT EXISTS idx_tiendas_estado ON comercios(estado_pago, plan_id)',
         'CREATE INDEX IF NOT EXISTS idx_pagos_tienda ON pagos(tienda_id)',
         'CREATE INDEX IF NOT EXISTS idx_pagos_referencia ON pagos(referencia)',
-        'CREATE INDEX IF NOT EXISTS idx_productos_comercio_id ON productos(comercio_id)',
+        'CREATE INDEX IF NOT EXISTS idx_pagos_estado ON pagos(estado)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_estado_plan ON comercios(estado_pago, plan_tipo)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_plan_id ON comercios(plan_id)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_ciudad ON comercios(ciudad)',
@@ -1095,6 +1099,7 @@ def _crear_indices(cursor):
         'CREATE INDEX IF NOT EXISTS idx_soporte_estado ON soporte_y_reportes(estado)',
         'CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_comercio ON solicitudes_pago(comercio_id)',
         'CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_referencia ON solicitudes_pago(referencia)',
+        'CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_estado ON solicitudes_pago(estado)',
     ]
     for ddl in indices:
         _ejecutar_ddl_seguro(cursor, ddl)

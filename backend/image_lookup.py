@@ -70,31 +70,9 @@ def imagen_urls_para_catalogo(productos):
     for prod in productos:
         url = _url_almacenada_o_none(prod.get('imagen_url'))
         if not url:
-            url = resolver_imagen_catalogo(
-                prod.get('imagen_url'),
-                codigo_barras=prod.get('codigo_barras'),
-                mapa_maestro=mapa,
-            )
-        prod['imagen_url'] = url or None
-
-    # Re-consulta puntual al catálogo maestro por códigos que quedaron sin URL.
-    codigos_faltantes = []
-    vistos_falt = set()
-    for prod in productos:
-        if prod.get('imagen_url'):
-            continue
-        codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
-        if codigo and codigo not in vistos_falt:
-            vistos_falt.add(codigo)
-            codigos_faltantes.append(codigo)
-
-    if codigos_faltantes:
-        mapa_extra = mapa_imagenes_maestro(codigos_faltantes)
-        for prod in productos:
-            if prod.get('imagen_url'):
-                continue
             codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
-            prod['imagen_url'] = (mapa_extra.get(codigo) if codigo else None) or None
+            url = mapa.get(codigo) if codigo else None
+        prod['imagen_url'] = url or None
 
     return productos
 
@@ -204,6 +182,7 @@ def aplicar_respaldo_imagenes(productos, persistir=False):
 
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
+            actualizaciones = []
             for prod in pendientes:
                 producto_id = prod.get('id')
                 if not producto_id:
@@ -215,11 +194,13 @@ def aplicar_respaldo_imagenes(productos, persistir=False):
                 )
                 if not url_final:
                     continue
-                cursor.execute(
-                    'UPDATE productos SET imagen_url = ? WHERE id = ?',
-                    (url_final, int(producto_id)),
-                )
+                actualizaciones.append((url_final, int(producto_id)))
                 prod['imagen_url'] = url_final
+            if actualizaciones:
+                cursor.executemany(
+                    'UPDATE productos SET imagen_url = ? WHERE id = ?',
+                    actualizaciones,
+                )
             conexion.commit()
         return productos
 

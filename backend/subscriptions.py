@@ -30,7 +30,7 @@ def verificar_vencimientos_comercios():
                 """
                 UPDATE comercios
                 SET estado_pago = 'vencido', visible = 0
-                WHERE CAST(fecha_vencimiento AS DATE) < CURRENT_DATE
+                WHERE fecha_vencimiento < CURRENT_DATE
                   AND estado_pago IN ('activo', 'gratis')
                 """
             )
@@ -67,7 +67,7 @@ def aplicar_planes_pendientes():
                     plan_pendiente = NULL,
                     plan_id_pendiente = NULL
                 WHERE c.plan_pendiente IS NOT NULL
-                  AND CAST(c.fecha_vencimiento AS DATE) <= CURRENT_DATE
+                  AND c.fecha_vencimiento <= CURRENT_DATE
                 """
             )
             conexion.commit()
@@ -87,7 +87,7 @@ def verificar_vencimiento_comercio(comercio_id):
                 UPDATE comercios
                 SET estado_pago = 'vencido', visible = 0
                 WHERE id = ?
-                  AND CAST(fecha_vencimiento AS DATE) < CURRENT_DATE
+                  AND fecha_vencimiento < CURRENT_DATE
                   AND estado_pago IN ('activo', 'gratis')
                 """,
                 (int(comercio_id),),
@@ -104,8 +104,6 @@ def comercio_puede_gestionar_inventario(comercio_id):
     Verifica si el comercio puede editar, eliminar o importar inventario.
     Retorna (True, None) o (False, mensaje).
     """
-    verificar_vencimiento_comercio(comercio_id)
-
     with get_db_connection(row_factory=sqlite3.Row) as conexion:
         cursor = conexion.cursor()
         cursor.execute(
@@ -166,14 +164,13 @@ def obtener_limite_productos_comercio(comercio_id):
 
 
 def puede_agregar_producto(comercio_id, cantidad_nueva=1):
-    verificar_vencimiento_comercio(comercio_id)
-
     with get_db_connection(row_factory=sqlite3.Row) as conexion:
         cursor = conexion.cursor()
         cursor.execute(
             """
-            SELECT c.estado_pago, c.plan_tipo, c.nombre, c.visible,
-                   COALESCE(p.nombre, c.plan_tipo) AS plan_nombre
+            SELECT c.estado_pago, c.plan_tipo, c.limite_productos,
+                   p.limite_productos AS plan_limite,
+                   (SELECT COUNT(*) FROM productos WHERE comercio_id = c.id) AS total_productos
             FROM comercios c
             LEFT JOIN planes p ON c.plan_id = p.id
             WHERE c.id = ?
@@ -189,11 +186,15 @@ def puede_agregar_producto(comercio_id, cantidad_nueva=1):
     if comercio['estado_pago'] == 'suspendido':
         return False, 'Tu comercio está suspendido. Contacta a soporte técnico.'
 
-    limite = obtener_limite_productos_comercio(comercio_id)
+    limite = comercio['limite_productos']
+    if comercio['plan_limite'] is not None:
+        limite = comercio['plan_limite']
+    if limite is None:
+        limite = limite_para_plan(comercio['plan_tipo'])
     if es_limite_ilimitado(limite):
         return True, None
 
-    actual = contar_productos_comercio(comercio_id)
+    actual = int(comercio['total_productos'] or 0)
     if actual + cantidad_nueva > limite:
         return False, MENSAJE_LIMITE_PRODUCTOS
     return True, None
@@ -400,7 +401,7 @@ def _calcular_monto_upgrade(comercio, plan_destino):
     return round(max(0.0, precio_nuevo - credito), 2)
 
 
-def calcular_cotizacion_cambio_plan(comercio, plan_tipo_destino):
+def calcular_cotizacion_cambio_plan(comercio, plan_tipo_destino, tasa=None):
     """
     Cotiza un cambio de plan según upgrade, downgrade o renovación.
     Retorna dict con tipo_cambio, montos, fechas estimadas y mensaje UI.
@@ -419,7 +420,10 @@ def calcular_cotizacion_cambio_plan(comercio, plan_tipo_destino):
     plan_actual = (comercio.get('plan_tipo') or 'gratis').lower()
     tipo_cambio = clasificar_cambio_plan(plan_actual, plan_tipo_destino)
     dias = int(plan.get('dias_duracion') or 30)
-    tasa = float(obtener_tasa_dolar() or 1.0)
+    if tasa is None:
+        tasa = float(obtener_tasa_dolar() or 1.0)
+    else:
+        tasa = float(tasa)
     precio_completo = _precio_usd_plan(plan)
 
     resultado = {
@@ -480,10 +484,10 @@ def calcular_cotizacion_cambio_plan(comercio, plan_tipo_destino):
     return resultado
 
 
-def calcular_monto_pago_plan(plan_tipo, comercio=None):
+def calcular_monto_pago_plan(plan_tipo, comercio=None, tasa=None):
     """Calcula montos USD y Bs según plan, tasa y contexto del comercio."""
     if comercio:
-        cotizacion = calcular_cotizacion_cambio_plan(comercio, plan_tipo)
+        cotizacion = calcular_cotizacion_cambio_plan(comercio, plan_tipo, tasa=tasa)
         if cotizacion:
             return {
                 'plan_tipo': cotizacion['plan_tipo'],
@@ -501,7 +505,10 @@ def calcular_monto_pago_plan(plan_tipo, comercio=None):
     if not plan:
         return None
 
-    tasa = float(obtener_tasa_dolar() or 1.0)
+    if tasa is None:
+        tasa = float(obtener_tasa_dolar() or 1.0)
+    else:
+        tasa = float(tasa)
     monto_usd = _precio_usd_plan(plan)
     return {
         'plan_tipo': (plan_tipo or '').lower(),
@@ -895,22 +902,23 @@ def activar_suscripcion_por_comprobante(
 
 def obtener_datos_pago_movil(plan_tipo=None):
     """Lee configuración de pago móvil y montos calculados para un plan."""
-    from backend.stores import obtener_config, obtener_tasa_dolar
+    from backend.stores import obtener_configs, obtener_tasa_dolar
     from config import PAGO_MOVIL_DEFAULT
 
     tasa = float(obtener_tasa_dolar() or 1.0)
+    configs = obtener_configs({
+        'pago_movil_banco': PAGO_MOVIL_DEFAULT['banco'],
+        'pago_movil_cedula': PAGO_MOVIL_DEFAULT['cedula_rif'],
+        'pago_movil_telefono': PAGO_MOVIL_DEFAULT['telefono'],
+    })
     datos = {
-        'banco': obtener_config('pago_movil_banco', PAGO_MOVIL_DEFAULT['banco']),
-        'cedula_rif': obtener_config(
-            'pago_movil_cedula', PAGO_MOVIL_DEFAULT['cedula_rif']
-        ),
-        'telefono': obtener_config(
-            'pago_movil_telefono', PAGO_MOVIL_DEFAULT['telefono']
-        ),
+        'banco': configs['pago_movil_banco'],
+        'cedula_rif': configs['pago_movil_cedula'],
+        'telefono': configs['pago_movil_telefono'],
         'tasa': tasa,
     }
     if plan_tipo:
-        montos = calcular_monto_pago_plan(plan_tipo)
+        montos = calcular_monto_pago_plan(plan_tipo, tasa=tasa)
         if montos:
             datos.update(montos)
     return datos

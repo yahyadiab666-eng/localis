@@ -255,14 +255,9 @@ def resolver_imagen_catalogo(
         return None
 
     if mapa_maestro is not None:
-        url = mapa_maestro.get(codigo)
-        if url:
-            return url
+        return mapa_maestro.get(codigo)
 
-    url = imagen_maestro_por_codigo(codigo)
-    if url and mapa_maestro is not None:
-        mapa_maestro[codigo] = url
-    return url or None
+    return imagen_maestro_por_codigo(codigo) or None
 
 
 def completar_mapa_imagenes(codigos, mapa_maestro=None, buscar_oficial=True):

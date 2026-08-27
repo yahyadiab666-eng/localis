@@ -186,11 +186,12 @@ _inicializar_aplicacion()
 
 _ultima_verificacion_vencimientos_global = 0.0
 _INTERVALO_VENCIMIENTOS_SEG = 300
+_INTERVALO_VENCIMIENTO_COMERCIO_SEG = 600
 
 
 @app.before_request
 def sincronizar_vencimientos_suscripcion():
-    """Revisa vencimientos globalmente y por comercio en rutas autenticadas."""
+    """Revisa vencimientos globalmente (cada 5 min) y por comercio en pagos (cada 10 min)."""
     global _ultima_verificacion_vencimientos_global
 
     try:
@@ -202,17 +203,17 @@ def sincronizar_vencimientos_suscripcion():
         if 'usuario_id' not in session:
             return
 
-        rutas_comercio = (
-            '/comercio',
-            '/api/productos',
-            '/api/pagos',
-        )
-        if not any(request.path.startswith(ruta) for ruta in rutas_comercio):
+        if not request.path.startswith('/api/pagos'):
+            return
+
+        ultimo_comercio = session.get('_venc_comercio_ts', 0)
+        if ahora - ultimo_comercio < _INTERVALO_VENCIMIENTO_COMERCIO_SEG:
             return
 
         comercio_id = asegurar_contexto_comercio(session.get('usuario_id'))
         if comercio_id:
             verificar_vencimiento_comercio(comercio_id)
+            session['_venc_comercio_ts'] = ahora
     except Exception as error:
         print(f'Aviso sincronización de vencimientos: {error}')
 
@@ -504,9 +505,19 @@ def index():
         orden_aleatorio=not hay_filtros,
     )
 
-    tasa_actual = obtener_tasa_dolar() or 1.0
-    banner_url = url_banner_principal(obtener_banner_principal(), default=DEFAULT_BANNER)
-    whatsapp = obtener_config('whatsapp_soporte', WHATSAPP_SOPORTE)
+    from backend.stores import obtener_configs
+
+    configs = obtener_configs({
+        'tasa_dolar': '36.50',
+        'whatsapp_soporte': WHATSAPP_SOPORTE,
+        'banner_principal': DEFAULT_BANNER,
+    })
+    try:
+        tasa_actual = float(configs['tasa_dolar'])
+    except (TypeError, ValueError):
+        tasa_actual = obtener_tasa_dolar() or 1.0
+    banner_url = url_banner_principal(configs['banner_principal'], default=DEFAULT_BANNER)
+    whatsapp = configs['whatsapp_soporte']
 
     return render_template(
         'cliente.html',
@@ -673,15 +684,6 @@ def panel_comercio():
         with get_db_connection(row_factory=sqlite3.Row) as conn:
             cursor = conn.cursor()
 
-            cursor.execute('SELECT id FROM usuarios WHERE id = ?', (usuario_id,))
-            if not cursor.fetchone():
-                session.clear()
-                flash(
-                    'La sesión ya no existe en la base de datos. Por favor inicia sesión nuevamente.',
-                    'error',
-                )
-                return redirect(url_for('login'))
-
             cursor.execute(
                 '''
                 SELECT c.*, cat.nombre as categoria
@@ -706,6 +708,7 @@ def panel_comercio():
                 '''
                 SELECT id, nombre, descripcion, precio_usd, codigo_barras, imagen_url
                 FROM productos WHERE comercio_id = ?
+                ORDER BY id DESC
                 ''',
                 (comercio_db['id'],),
             )
@@ -738,7 +741,7 @@ def panel_comercio():
         planes_beneficios = {}
         for codigo in ('basica', 'pro', 'business'):
             info = obtener_beneficios_plan(codigo)
-            cotizacion = calcular_cotizacion_cambio_plan(comercio, codigo)
+            cotizacion = calcular_cotizacion_cambio_plan(comercio, codigo, tasa=tasa_actual)
             if cotizacion:
                 info['monto_bs'] = cotizacion['monto_bs']
                 info['monto_usd'] = cotizacion['monto_usd']
