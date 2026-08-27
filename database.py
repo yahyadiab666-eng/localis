@@ -147,6 +147,8 @@ COLUMNAS_ESQUEMA = {
         ('aviso_bienvenida_visto', 'INTEGER DEFAULT 0'),
         ('imagen_portada', 'TEXT'),
         ('visible', 'INTEGER DEFAULT 1'),
+        ('plan_pendiente', 'TEXT'),
+        ('plan_id_pendiente', 'INTEGER'),
     ],
     'sucursales': [
         ('comercio_id', 'INTEGER'),

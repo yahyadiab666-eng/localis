@@ -171,20 +171,36 @@
     formulario.addEventListener('submit', function (evento) {
       evento.preventDefault();
 
+      const planTipoInput = document.getElementById('input-plan-tipo');
+      const planTipo = planTipoInput ? planTipoInput.value : '';
+      const cotizacion = window.cotizacionPlanActual;
+      const esDowngrade = cotizacion && cotizacion.tipo_cambio === 'downgrade';
+
       const archivo = inputComprobante && inputComprobante.files && inputComprobante.files[0];
-      if (!archivo) {
+      if (!esDowngrade && !archivo) {
         window.mostrarAlertaLocalis('Debes adjuntar la captura del comprobante de pago.', 'error');
         return;
       }
 
       if (botonOcr) botonOcr.disabled = true;
-      if (textoBoton) textoBoton.textContent = 'Verificando comprobante...';
+      if (textoBoton) {
+        textoBoton.textContent = esDowngrade
+          ? 'Programando cambio...'
+          : 'Verificando comprobante...';
+      }
       if (spinner) spinner.classList.remove('hidden');
 
       const formData = new FormData(formulario);
-      formData.set('comprobante', archivo);
+      if (archivo) {
+        formData.set('comprobante', archivo);
+      } else {
+        formData.delete('comprobante');
+      }
+      formData.set('plan_tipo', planTipo);
 
-      fetch('/api/pagos/verificar', {
+      const endpoint = esDowngrade ? '/api/pagos/programar-cambio' : '/api/pagos/verificar';
+
+      fetch(endpoint, {
         method: 'POST',
         headers: {
           'X-CSRFToken': obtenerCsrfToken(),
@@ -200,24 +216,34 @@
         .then(function (resultado) {
           if (resultado.ok) {
             window.mostrarAlertaLocalis(
-              resultado.datos.mensaje || 'Pago verificado correctamente.',
+              resultado.datos.mensaje || 'Cambio de plan procesado correctamente.',
               'exito'
             );
+            if (esDowngrade) {
+              window.setTimeout(function () {
+                window.location.reload();
+              }, 1200);
+              return;
+            }
             mostrarExitoPago(contenedorFormulario, contenedorExito, resultado.datos);
             return;
           }
 
           window.mostrarAlertaLocalis(
-            resultado.datos.error || resultado.datos.mensaje || 'No se pudo verificar el pago.',
+            resultado.datos.error || resultado.datos.mensaje || 'No se pudo procesar el cambio de plan.',
             'error'
           );
         })
         .catch(function () {
-          window.mostrarAlertaLocalis('Error de conexión al verificar el pago.', 'error');
+          window.mostrarAlertaLocalis('Error de conexión al procesar el cambio de plan.', 'error');
         })
         .finally(function () {
           if (botonOcr) botonOcr.disabled = false;
-          if (textoBoton) textoBoton.textContent = 'Verificar comprobante y activar plan';
+          if (textoBoton) {
+            textoBoton.textContent = esDowngrade
+              ? 'Programar cambio de plan'
+              : 'Verificar comprobante y activar plan';
+          }
           if (spinner) spinner.classList.add('hidden');
         });
     });

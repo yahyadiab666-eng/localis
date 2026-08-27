@@ -1,5 +1,38 @@
 /* Localis — utilidades responsive mobile-first */
 
+/* Tarjetas interactivas — touch + hover (desktop) */
+.card-hover {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .card-hover:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+  }
+}
+
+.card-hover:active {
+  transform: scale(0.98);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+.btn-touch,
+a.btn-touch,
+button.btn-touch {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  min-height: 44px;
+}
+
+.btn-touch:active {
+  transform: scale(0.98);
+}
+
 /* Tarjetas de producto — contenedor fijo 1:1, sin desbordes ni estiramientos */
 .localis-img-producto-wrap {
   width: 100%;
@@ -118,6 +151,7 @@ img.localis-img-producto-thumb--vacio:not([src]) {
     min-width: 640px;
   }
 
+  /* Mercado Libre style: 2 productos por fila en móvil */
   .grid-productos-mobile {
     grid-template-columns: 1fr 1fr !important;
     gap: 0.75rem !important;
@@ -126,6 +160,12 @@ img.localis-img-producto-thumb--vacio:not([src]) {
   .card-producto-mobile .h-40,
   .card-producto-mobile .h-36 {
     height: 7.5rem !important;
+  }
+
+  .localis-img-producto-wrap {
+    height: 140px;
+    min-height: 140px;
+    max-height: 140px;
   }
 
   .modal-push .panel {
@@ -164,15 +204,26 @@ img.localis-img-producto-thumb--vacio:not([src]) {
   .busqueda-admin {
     flex-direction: column;
   }
-
-  .btn-touch {
-    min-height: 44px;
-  }
 }
 
 @media (max-width: 480px) {
   .grid-productos-mobile {
-    grid-template-columns: 1fr !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 0.5rem !important;
+  }
+
+  .localis-img-producto-wrap {
+    height: 120px;
+    min-height: 120px;
+    max-height: 120px;
+  }
+
+  .card-producto-mobile .p-3 {
+    padding: 0.5rem !important;
+  }
+
+  .card-producto-mobile h4 {
+    font-size: 0.75rem !important;
   }
 
   .hero-header h2 {

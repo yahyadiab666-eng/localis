@@ -10,7 +10,7 @@ from backend.image_lookup import (
     imagen_url_para_catalogo,
     imagen_urls_para_catalogo,
 )
-from backend.utils import imagen_url_para_persistir, normalizar_codigo_barras
+from backend.utils import imagen_url_para_persistir, normalizar_codigo_barras, validar_ubicacion_comercio
 from backend.inventory_import import (
     cargar_archivo_inventario,
     detectar_mapeo_columnas,
@@ -122,6 +122,18 @@ def registrar_comercio_completo(
             'Contacta soporte o reinicia la aplicación para aplicar migraciones.'
         )
 
+    ok_ubicacion, datos_ubicacion = validar_ubicacion_comercio(
+        direccion, ciudad=ciudad, zona=zona, maps_url=maps_url
+    )
+    if not ok_ubicacion:
+        return False, datos_ubicacion
+
+    direccion = datos_ubicacion['direccion']
+    ciudad = datos_ubicacion['ciudad']
+    zona = datos_ubicacion['zona']
+    maps_url = datos_ubicacion['maps_url']
+    ubicacion_maps_url = datos_ubicacion['ubicacion_maps_url']
+
     try:
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
@@ -138,10 +150,11 @@ def registrar_comercio_completo(
                 INSERT INTO comercios (
                     usuario_id, nombre, descripcion, telefono, direccion,
                     logo_url, categoria_id, ciudad, zona, maps_url,
-                    documento_identidad, plan_id, plan_tipo, limite_productos,
-                    estado_pago, fecha_inicio_suscripcion, fecha_vencimiento
+                    ubicacion_maps_url, documento_identidad, plan_id, plan_tipo,
+                    limite_productos, estado_pago, fecha_inicio_suscripcion,
+                    fecha_vencimiento
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo',
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo',
                         CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '30 days')
                 """,
                 (
@@ -155,6 +168,7 @@ def registrar_comercio_completo(
                     ciudad,
                     zona,
                     maps_url,
+                    ubicacion_maps_url,
                     documento_identidad,
                     plan_id,
                     PLAN_GRATIS_CODIGO,
@@ -183,6 +197,18 @@ def actualizar_datos_comercio(
     logo_url=None,
     banner_url=None,
 ):
+    ok_ubicacion, datos_ubicacion = validar_ubicacion_comercio(
+        direccion, ciudad=ciudad, zona=zona, maps_url=maps_url
+    )
+    if not ok_ubicacion:
+        return False, datos_ubicacion
+
+    direccion = datos_ubicacion['direccion']
+    ciudad = datos_ubicacion['ciudad']
+    zona = datos_ubicacion['zona']
+    maps_url = datos_ubicacion['maps_url']
+    ubicacion_maps_url = datos_ubicacion['ubicacion_maps_url']
+
     try:
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
@@ -195,6 +221,7 @@ def actualizar_datos_comercio(
                 'ciudad = ?',
                 'zona = ?',
                 'maps_url = ?',
+                'ubicacion_maps_url = ?',
             ]
             valores = [
                 nombre,
@@ -204,6 +231,7 @@ def actualizar_datos_comercio(
                 ciudad,
                 zona,
                 maps_url,
+                ubicacion_maps_url,
             ]
 
             if logo_url:

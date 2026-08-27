@@ -8,6 +8,8 @@ from backend.db import get_db_connection
 from backend.plans import (
     PLANES,
     MENSAJE_LIMITE_PRODUCTOS,
+    clasificar_cambio_plan,
+    es_downgrade,
     es_limite_ilimitado,
     obtener_plan_por_codigo,
     limite_desde_plan_id,
@@ -17,9 +19,10 @@ from backend.utils import formatear_fecha
 
 def verificar_vencimientos_comercios():
     """
-    Marca como vencidos y oculta del catálogo los comercios cuya fecha expiró.
+    Aplica downgrades programados y marca como vencidos los comercios expirados.
     Se ejecuta al arranque y periódicamente en requests autenticados.
     """
+    aplicados = aplicar_planes_pendientes()
     try:
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
@@ -32,9 +35,45 @@ def verificar_vencimientos_comercios():
                 """
             )
             conexion.commit()
-            return cursor.rowcount
+            return cursor.rowcount + aplicados
     except Exception as e:
         print(f'Aviso verificación vencimientos: {e}')
+        return aplicados
+
+
+def aplicar_planes_pendientes():
+    """
+    Al iniciar un nuevo ciclo, aplica el plan inferior programado (downgrade).
+    """
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                UPDATE comercios c
+                SET plan_tipo = c.plan_pendiente,
+                    plan_id = COALESCE(
+                        c.plan_id_pendiente,
+                        (SELECT p.id FROM planes p
+                         WHERE p.codigo = c.plan_pendiente AND p.activo = 1
+                         LIMIT 1)
+                    ),
+                    limite_productos = COALESCE(
+                        (SELECT p.limite_productos FROM planes p
+                         WHERE p.codigo = c.plan_pendiente AND p.activo = 1
+                         LIMIT 1),
+                        c.limite_productos
+                    ),
+                    plan_pendiente = NULL,
+                    plan_id_pendiente = NULL
+                WHERE c.plan_pendiente IS NOT NULL
+                  AND CAST(c.fecha_vencimiento AS DATE) <= CURRENT_DATE
+                """
+            )
+            conexion.commit()
+            return cursor.rowcount
+    except Exception as e:
+        print(f'Aviso aplicar planes pendientes: {e}')
         return 0
 
 
@@ -278,8 +317,26 @@ def rechazar_renovacion_vencida(comercio_id):
         return False, f'Error al actualizar estado: {e}'
 
 
+def _dias_restantes_suscripcion(fecha_vencimiento):
+    """Días hasta la fecha de vencimiento (0 si ya venció o no hay fecha)."""
+    if not fecha_vencimiento:
+        return 0
+    try:
+        venc = datetime.strptime(
+            formatear_fecha(fecha_vencimiento), '%Y-%m-%d'
+        ).date()
+        return max(0, (venc - datetime.now().date()).days)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _calcular_fecha_vencimiento_desde_hoy(dias=30):
+    """Nuevo ciclo desde la fecha actual del cambio (upgrade)."""
+    return (datetime.now().date() + timedelta(days=dias)).strftime('%Y-%m-%d')
+
+
 def _calcular_nueva_fecha_vencimiento(fecha_vencimiento_actual, dias=30):
-    """max(fecha_actual, fecha_vencimiento_actual) + dias."""
+    """max(fecha_actual, fecha_vencimiento_actual) + dias (renovación)."""
     hoy = datetime.now().date()
     base = hoy
     if fecha_vencimiento_actual:
@@ -317,8 +374,127 @@ def _precio_usd_plan(plan):
     return float(plan.get('precio') or plan.get('precio_usd') or 0)
 
 
-def calcular_monto_pago_plan(plan_tipo):
-    """Calcula montos USD y Bs según plan y tasa oficial del sistema."""
+def _calcular_monto_upgrade(comercio, plan_destino):
+    """
+    Ajuste por upgrade: precio del plan nuevo menos crédito del periodo no usado.
+    """
+    plan_actual_codigo = (comercio.get('plan_tipo') or 'gratis').lower()
+    plan_nuevo = obtener_plan_por_codigo(plan_destino)
+    plan_actual = obtener_plan_por_codigo(plan_actual_codigo)
+    if not plan_nuevo:
+        return None
+
+    precio_nuevo = _precio_usd_plan(plan_nuevo)
+    precio_actual = _precio_usd_plan(plan_actual or {})
+    dias_ciclo = int(plan_nuevo.get('dias_duracion') or 30)
+
+    estado = (comercio.get('estado_pago') or 'activo').lower()
+    if plan_actual_codigo == 'gratis' or estado == 'vencido' or precio_actual <= 0:
+        return round(precio_nuevo, 2)
+
+    dias_restantes = _dias_restantes_suscripcion(comercio.get('fecha_vencimiento'))
+    if dias_restantes <= 0:
+        return round(precio_nuevo, 2)
+
+    credito = precio_actual * dias_restantes / max(1, dias_ciclo)
+    return round(max(0.0, precio_nuevo - credito), 2)
+
+
+def calcular_cotizacion_cambio_plan(comercio, plan_tipo_destino):
+    """
+    Cotiza un cambio de plan según upgrade, downgrade o renovación.
+    Retorna dict con tipo_cambio, montos, fechas estimadas y mensaje UI.
+    """
+    from backend.stores import obtener_tasa_dolar
+
+    plan_tipo_destino = (plan_tipo_destino or 'basica').lower()
+    if plan_tipo_destino not in PLANES or plan_tipo_destino == 'gratis':
+        return None
+
+    plan = obtener_plan_por_codigo(plan_tipo_destino)
+    if not plan:
+        return None
+
+    comercio = comercio or {}
+    plan_actual = (comercio.get('plan_tipo') or 'gratis').lower()
+    tipo_cambio = clasificar_cambio_plan(plan_actual, plan_tipo_destino)
+    dias = int(plan.get('dias_duracion') or 30)
+    tasa = float(obtener_tasa_dolar() or 1.0)
+    precio_completo = _precio_usd_plan(plan)
+
+    resultado = {
+        'plan_tipo': plan_tipo_destino,
+        'plan_nombre': plan.get('nombre', plan_tipo_destino),
+        'plan_actual': plan_actual,
+        'tipo_cambio': tipo_cambio,
+        'tasa': tasa,
+        'precio_usd_completo': precio_completo,
+        'requiere_pago': True,
+        'plan_pendiente_actual': comercio.get('plan_pendiente'),
+    }
+
+    if tipo_cambio == 'downgrade':
+        fecha_aplicacion = formatear_fecha(comercio.get('fecha_vencimiento'))
+        if not fecha_aplicacion:
+            fecha_aplicacion = _calcular_fecha_fin_prueba(comercio)
+        resultado.update({
+            'monto_usd': 0.0,
+            'monto_bs': 0.0,
+            'requiere_pago': False,
+            'fecha_vencimiento_estimada': fecha_aplicacion,
+            'fecha_aplicacion_downgrade': fecha_aplicacion,
+            'mensaje': (
+                f'Mantendrás tu plan actual hasta el {fecha_aplicacion}. '
+                f'El plan {plan.get("nombre")} se aplicará automáticamente '
+                f' al iniciar el próximo ciclo.'
+            ),
+        })
+        return resultado
+
+    if tipo_cambio == 'upgrade':
+        monto_usd = _calcular_monto_upgrade(comercio, plan_tipo_destino)
+        nueva_fecha = _calcular_fecha_vencimiento_desde_hoy(dias)
+        resultado.update({
+            'monto_usd': monto_usd,
+            'monto_bs': round(monto_usd * tasa, 2),
+            'fecha_vencimiento_estimada': nueva_fecha,
+            'mensaje': (
+                f'Upgrade inmediato: pagas el ajuste de ${monto_usd:.2f} USD '
+                f'({round(monto_usd * tasa, 2):.2f} Bs) y tu nuevo ciclo vence el '
+                f'{nueva_fecha}.'
+            ),
+        })
+        return resultado
+
+    # Renovación (mismo plan)
+    nueva_fecha = _calcular_nueva_fecha_vencimiento(comercio.get('fecha_vencimiento'), dias)
+    resultado.update({
+        'monto_usd': precio_completo,
+        'monto_bs': round(precio_completo * tasa, 2),
+        'fecha_vencimiento_estimada': nueva_fecha,
+        'mensaje': (
+            f'Renovación: ${precio_completo:.2f} USD ({round(precio_completo * tasa, 2):.2f} Bs). '
+            f'Se suman {dias} días a tu vencimiento actual (hasta {nueva_fecha}).'
+        ),
+    })
+    return resultado
+
+
+def calcular_monto_pago_plan(plan_tipo, comercio=None):
+    """Calcula montos USD y Bs según plan, tasa y contexto del comercio."""
+    if comercio:
+        cotizacion = calcular_cotizacion_cambio_plan(comercio, plan_tipo)
+        if cotizacion:
+            return {
+                'plan_tipo': cotizacion['plan_tipo'],
+                'plan_nombre': cotizacion['plan_nombre'],
+                'monto_usd': cotizacion['monto_usd'],
+                'tasa': cotizacion['tasa'],
+                'monto_bs': cotizacion['monto_bs'],
+                'tipo_cambio': cotizacion['tipo_cambio'],
+                'requiere_pago': cotizacion['requiere_pago'],
+            }
+
     from backend.stores import obtener_tasa_dolar
 
     plan = obtener_plan_por_codigo(plan_tipo)
@@ -333,6 +509,8 @@ def calcular_monto_pago_plan(plan_tipo):
         'monto_usd': monto_usd,
         'tasa': tasa,
         'monto_bs': round(monto_usd * tasa, 2),
+        'tipo_cambio': 'renovacion',
+        'requiere_pago': True,
     }
 
 
@@ -358,6 +536,87 @@ def _referencia_ya_usada(referencia, excluir_comercio_id=None):
             (referencia,),
         )
         return cursor.fetchone() is not None
+
+
+def _resolver_fecha_y_montos_activacion(comercio, plan_tipo):
+    """Calcula fecha de vencimiento y montos según tipo de cambio de plan."""
+    cotizacion = calcular_cotizacion_cambio_plan(comercio, plan_tipo)
+    if not cotizacion:
+        return None
+
+    if cotizacion['tipo_cambio'] == 'downgrade':
+        return cotizacion
+
+    plan = obtener_plan_por_codigo(plan_tipo)
+    dias = int(plan.get('dias_duracion') or 30) if plan else 30
+
+    if cotizacion['tipo_cambio'] == 'upgrade':
+        nueva_fecha = _calcular_fecha_vencimiento_desde_hoy(dias)
+    else:
+        nueva_fecha = _calcular_nueva_fecha_vencimiento(
+            comercio.get('fecha_vencimiento'), dias
+        )
+
+    cotizacion['fecha_vencimiento'] = nueva_fecha
+    return cotizacion
+
+
+def programar_downgrade_plan(comercio_id, plan_tipo):
+    """Programa un downgrade para el próximo ciclo de facturación."""
+    plan_tipo = (plan_tipo or '').lower()
+    if plan_tipo not in PLANES or plan_tipo == 'gratis':
+        return False, 'Plan no válido.', None
+
+    try:
+        with get_db_connection(row_factory=sqlite3.Row) as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT id, plan_tipo, plan_id, fecha_vencimiento, estado_pago
+                FROM comercios WHERE id = ?
+                """,
+                (int(comercio_id),),
+            )
+            comercio = cursor.fetchone()
+            if not comercio:
+                return False, 'Comercio no encontrado.', None
+
+            comercio_dict = dict(comercio)
+            if not es_downgrade(comercio_dict.get('plan_tipo'), plan_tipo):
+                return False, 'Este cambio no es un downgrade. Usa el flujo de pago.', None
+
+            plan = obtener_plan_por_codigo(plan_tipo)
+            if not plan:
+                return False, 'Plan no encontrado.', None
+
+            plan_id_pendiente = plan.get('id')
+            cursor.execute(
+                """
+                UPDATE comercios
+                SET plan_pendiente = ?, plan_id_pendiente = ?
+                WHERE id = ?
+                """,
+                (plan_tipo, plan_id_pendiente, int(comercio_id)),
+            )
+            conexion.commit()
+
+        cotizacion = calcular_cotizacion_cambio_plan(comercio_dict, plan_tipo)
+        fecha_aplicacion = (cotizacion or {}).get('fecha_aplicacion_downgrade')
+        return (
+            True,
+            (
+                f'Cambio programado al plan {plan.get("nombre")}. '
+                f'Seguirás con tu plan actual hasta el {fecha_aplicacion or "fin del periodo pagado"}.'
+            ),
+            {
+                'plan_tipo': plan_tipo,
+                'plan_pendiente': plan_tipo,
+                'fecha_aplicacion': fecha_aplicacion,
+                'tipo_cambio': 'downgrade',
+            },
+        )
+    except Exception as error:
+        return False, f'Error al programar downgrade: {error}', None
 
 
 def registrar_pago_movil_plan(
@@ -393,34 +652,45 @@ def registrar_pago_movil_plan(
     if _referencia_ya_usada(referencia):
         return False, 'Esta referencia ya fue registrada en el sistema.', None
 
-    montos = calcular_monto_pago_plan(plan_tipo)
-    if not montos:
-        return False, 'Plan no encontrado.', None
-
-    plan = obtener_plan_por_codigo(plan_tipo)
-    limite = limite_para_plan(plan_tipo)
-    if es_limite_ilimitado(limite):
-        limite = None
-    plan_id = plan.get('id')
-    dias = plan.get('dias_duracion') or 30
-    monto_usd = montos['monto_usd']
-    monto_bs = montos['monto_bs']
-
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
             cursor.execute(
-                'SELECT fecha_vencimiento FROM comercios WHERE id = ?',
+                """
+                SELECT id, plan_tipo, plan_id, fecha_vencimiento, estado_pago
+                FROM comercios WHERE id = ?
+                """,
                 (int(comercio_id),),
             )
             comercio = cursor.fetchone()
             if not comercio:
                 return False, 'Comercio no encontrado.', None
 
-            nueva_fecha = _calcular_fecha_vencimiento_prorrateo(
-                comercio['fecha_vencimiento'], dias
-            )
+            comercio_dict = dict(comercio)
+            if es_downgrade(comercio_dict.get('plan_tipo'), plan_tipo):
+                return programar_downgrade_plan(comercio_id, plan_tipo)
 
+            resolucion = _resolver_fecha_y_montos_activacion(comercio_dict, plan_tipo)
+            if not resolucion:
+                return False, 'Plan no encontrado.', None
+
+    except Exception as e:
+        return False, f'Error al validar comercio: {e}', None
+
+    montos = calcular_monto_pago_plan(plan_tipo, comercio_dict)
+    if not montos or montos.get('requiere_pago') is False:
+        return False, 'No se pudo calcular el monto del plan.', None
+
+    plan = obtener_plan_por_codigo(plan_tipo)
+    limite = limite_para_plan(plan_tipo)
+    if es_limite_ilimitado(limite):
+        limite = None
+    plan_id = plan.get('id')
+    monto_usd = montos['monto_usd']
+    monto_bs = montos['monto_bs']
+    nueva_fecha = resolucion['fecha_vencimiento']
+
+    try:
         from backend.payments import activar_suscripcion_con_pago
 
         exito, mensaje, datos_tx = activar_suscripcion_con_pago(
@@ -485,6 +755,7 @@ def registrar_pago_movil_plan(
                 'monto_usd': monto_usd,
                 'monto_bs': monto_bs,
                 'tasa': montos['tasa'],
+                'tipo_cambio': resolucion['tipo_cambio'],
                 'pago_id': (datos_tx or {}).get('pago_id'),
             },
         )
@@ -513,7 +784,32 @@ def activar_suscripcion_por_comprobante(
     if _referencia_ya_usada(referencia):
         return False, 'Esta referencia ya fue registrada en el sistema.', None
 
-    montos = calcular_monto_pago_plan(plan_tipo)
+    try:
+        with get_db_connection(row_factory=sqlite3.Row) as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT id, plan_tipo, plan_id, fecha_vencimiento, estado_pago
+                FROM comercios WHERE id = ?
+                """,
+                (int(comercio_id),),
+            )
+            comercio = cursor.fetchone()
+            if not comercio:
+                return False, 'Comercio no encontrado.', None
+
+            comercio_dict = dict(comercio)
+            if es_downgrade(comercio_dict.get('plan_tipo'), plan_tipo):
+                return programar_downgrade_plan(comercio_id, plan_tipo)
+
+            resolucion = _resolver_fecha_y_montos_activacion(comercio_dict, plan_tipo)
+            if not resolucion:
+                return False, 'Plan no encontrado.', None
+
+    except Exception as e:
+        return False, f'Error al validar comercio: {e}', None
+
+    montos = calcular_monto_pago_plan(plan_tipo, comercio_dict)
     if not montos:
         return False, 'Plan no encontrado.', None
 
@@ -525,24 +821,10 @@ def activar_suscripcion_por_comprobante(
     if es_limite_ilimitado(limite):
         limite = None
     plan_id = plan.get('id')
-    dias = plan.get('dias_duracion') or 30
     monto_bs = float(monto_ocr_bs or montos['monto_bs'])
+    nueva_fecha = resolucion['fecha_vencimiento']
 
     try:
-        with get_db_connection(row_factory=sqlite3.Row) as conexion:
-            cursor = conexion.cursor()
-            cursor.execute(
-                'SELECT fecha_vencimiento FROM comercios WHERE id = ?',
-                (int(comercio_id),),
-            )
-            comercio = cursor.fetchone()
-            if not comercio:
-                return False, 'Comercio no encontrado.', None
-
-            nueva_fecha = _calcular_nueva_fecha_vencimiento(
-                comercio['fecha_vencimiento'], dias
-            )
-
         from backend.payments import activar_suscripcion_con_pago
 
         exito, mensaje, datos_tx = activar_suscripcion_con_pago(
@@ -602,6 +884,7 @@ def activar_suscripcion_por_comprobante(
                 'monto_usd': montos['monto_usd'],
                 'monto_bs': monto_bs,
                 'tasa': montos['tasa'],
+                'tipo_cambio': resolucion['tipo_cambio'],
                 'comprobante_url': comprobante_url,
                 'pago_id': (datos_tx or {}).get('pago_id'),
             },

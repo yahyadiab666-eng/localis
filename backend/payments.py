@@ -16,7 +16,7 @@ def activar_suscripcion_con_pago(
 ):
     """
     Actualiza comercio + inserta pago (+ solicitud opcional) en una sola transacción.
-    Retorna (exito, mensaje, datos) con RETURNING para evitar registros huérfanos.
+    Limpia plan_pendiente y renueva fecha_inicio al confirmar el pago.
     """
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
@@ -27,6 +27,7 @@ def activar_suscripcion_con_pago(
                     UPDATE comercios
                     SET plan_id = ?, plan_tipo = ?, limite_productos = ?,
                         estado_pago = 'activo', visible = 1,
+                        plan_pendiente = NULL, plan_id_pendiente = NULL,
                         fecha_inicio_suscripcion = CURRENT_TIMESTAMP,
                         fecha_vencimiento = ?
                     WHERE id = ?

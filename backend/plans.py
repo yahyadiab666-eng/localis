@@ -41,6 +41,35 @@ PLAN_GRATIS_CODIGO = 'gratis'
 
 ORDEN_PLANES = ['gratis', 'basica', 'pro', 'business']
 
+
+def indice_plan(codigo):
+    codigo = (codigo or 'gratis').lower()
+    try:
+        return ORDEN_PLANES.index(codigo)
+    except ValueError:
+        return 0
+
+
+def clasificar_cambio_plan(plan_actual, plan_nuevo):
+    """Retorna 'renovacion', 'upgrade' o 'downgrade'."""
+    actual = (plan_actual or 'gratis').lower()
+    nuevo = (plan_nuevo or '').lower()
+    if actual == nuevo:
+        return 'renovacion'
+    if indice_plan(nuevo) > indice_plan(actual):
+        return 'upgrade'
+    if indice_plan(nuevo) < indice_plan(actual):
+        return 'downgrade'
+    return 'renovacion'
+
+
+def es_upgrade(plan_actual, plan_nuevo):
+    return clasificar_cambio_plan(plan_actual, plan_nuevo) == 'upgrade'
+
+
+def es_downgrade(plan_actual, plan_nuevo):
+    return clasificar_cambio_plan(plan_actual, plan_nuevo) == 'downgrade'
+
 PLAN_BENEFICIOS = {
     'gratis': {
         'productos': 'Hasta 50 productos',

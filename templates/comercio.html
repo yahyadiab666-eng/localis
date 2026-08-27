@@ -18,8 +18,6 @@
   <style>
     body { font-family: 'DM Sans', sans-serif; }
     .font-display { font-family: 'Fraunces', serif; }
-    .card-hover { transition: transform 0.3s, box-shadow 0.3s; }
-    .card-hover:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(0,0,0,0.08); }
     .modal-push { display: none; position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.55); align-items: center; justify-content: center; padding: 1rem; }
     .modal-push.activo { display: flex; }
     .modal-push .panel { background: #fff; border-radius: 1rem; max-width: 520px; width: 100%; max-height: 90vh; overflow-y: auto; box-shadow: 0 25px 50px rgba(0,0,0,.25); }
@@ -171,9 +169,21 @@
                 <i data-lucide="phone" class="text-amber-600" style="width:15px;height:15px;"></i>
                 <span>{{ comercio.telefono or 'No registrado' }}</span>
               </div>
-              <div class="flex items-center gap-1.5">
-                <i data-lucide="map-pin" class="text-amber-600" style="width:15px;height:15px;"></i>
-                <span>{{ comercio.direccion or 'Dirección no configurada' }}</span>
+              <div class="flex items-center gap-1.5 max-w-md">
+                <i data-lucide="map-pin" class="text-amber-600 shrink-0" style="width:15px;height:15px;"></i>
+                <span>
+                  {% if comercio.direccion %}
+                    {{ comercio.direccion }}{% if comercio.ciudad %}, {{ comercio.ciudad }}{% endif %}{% if comercio.zona %} ({{ comercio.zona }}){% endif %}
+                  {% else %}
+                    Dirección no configurada
+                  {% endif %}
+                </span>
+                {% if comercio.maps_link %}
+                  <a href="{{ comercio.maps_link }}" target="_blank" rel="noopener"
+                     class="btn-touch inline-flex items-center text-amber-700 hover:text-amber-900 underline ml-1">
+                    Maps
+                  </a>
+                {% endif %}
               </div>
               <div class="flex items-center gap-1.5">
                 <i data-lucide="credit-card" class="text-amber-600" style="width:15px;height:15px;"></i>
@@ -208,11 +218,23 @@
           <div>
             <h3 class="font-display text-xl font-bold text-gray-900">Tu Plan y Suscripción</h3>
             <p class="text-stone-500 text-xs mt-1">Plan actual: <strong>{{ plan_info.nombre }}</strong> · ${{ plan_info.precio_usd }}/mes</p>
+            {% if comercio.plan_pendiente %}
+              <p class="text-amber-800 text-xs mt-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                Cambio programado al plan <strong>{{ comercio.plan_pendiente | capitalize }}</strong>
+                al finalizar el periodo actual{% if comercio.fecha_vencimiento %} ({{ comercio.fecha_vencimiento|fecha_corta }}){% endif %}.
+              </p>
+            {% endif %}
           </div>
           <div class="flex flex-wrap gap-2 comercio-plan-buttons">
-            <button type="button" onclick="abrirModalPlan('pro')" class="px-4 py-2 rounded-full bg-violet-600 text-white text-sm font-bold hover:bg-violet-500">Cambiar a Pro</button>
-            <button type="button" onclick="abrirModalPlan('business')" class="px-4 py-2 rounded-full bg-stone-900 text-white text-sm font-bold hover:bg-stone-800">Cambiar a Business</button>
-            <button type="button" onclick="abrirModalPlan('basica')" class="px-4 py-2 rounded-full border border-amber-400 text-amber-800 text-sm font-bold hover:bg-amber-50">Cambiar a Básico</button>
+            {% if comercio.plan_tipo != 'pro' %}
+            <button type="button" onclick="abrirModalPlan('pro')" class="btn-touch px-4 py-2 rounded-full bg-violet-600 text-white text-sm font-bold hover:bg-violet-500">Cambiar a Pro</button>
+            {% endif %}
+            {% if comercio.plan_tipo != 'business' %}
+            <button type="button" onclick="abrirModalPlan('business')" class="btn-touch px-4 py-2 rounded-full bg-stone-900 text-white text-sm font-bold hover:bg-stone-800">Cambiar a Business</button>
+            {% endif %}
+            {% if comercio.plan_tipo != 'basica' and comercio.plan_tipo != 'gratis' %}
+            <button type="button" onclick="abrirModalPlan('basica')" class="btn-touch px-4 py-2 rounded-full border border-amber-400 text-amber-800 text-sm font-bold hover:bg-amber-50">Cambiar a Básico</button>
+            {% endif %}
           </div>
         </div>
       </section>
@@ -419,6 +441,7 @@
           <strong>{{ tasa }} Bs/USD</strong>
         </p>
         <p id="modal-plan-monto-bs" class="font-bold text-amber-900 text-base"></p>
+        <p id="modal-plan-mensaje" class="text-xs text-stone-600 mt-2"></p>
       </div>
 
       <div id="contenedor-form-pago">
@@ -426,9 +449,9 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="plan_tipo" id="input-plan-tipo" value="pro">
 
-        <div>
+        <div id="bloque-comprobante">
           <label for="comprobante" class="block text-xs font-bold uppercase text-stone-600 mb-1">Captura del comprobante</label>
-          <input type="file" id="comprobante" name="comprobante" accept="image/png, image/jpeg, image/webp" required
+          <input type="file" id="comprobante" name="comprobante" accept="image/png, image/jpeg, image/webp"
                  class="w-full text-xs text-stone-600 file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-amber-500 file:text-stone-900 hover:file:bg-amber-400 bg-white rounded-xl border border-stone-200 cursor-pointer">
           <p class="text-[11px] text-stone-500 mt-1">
             Sube la captura del pago móvil. Validamos con OCR la referencia, el monto en Bs
@@ -440,7 +463,7 @@
           Vista previa del comprobante
         </div>
 
-        <p class="text-xs text-stone-500">Si aún tienes días activos, se sumarán 30 días a tu fecha de vencimiento actual.</p>
+        <p id="modal-plan-ayuda" class="text-xs text-stone-500"></p>
 
         <button type="submit" id="btn-verificar-pago"
                 class="w-full py-3 rounded-full font-bold text-sm bg-stone-900 text-white flex items-center justify-center gap-2 disabled:opacity-60 btn-touch">
@@ -462,26 +485,73 @@
   <script>
     const planesBeneficios = {{ planes_beneficios | tojson }};
     const TASA_CAMBIO = {{ tasa }};
+    const PLAN_ACTUAL = {{ (comercio.plan_tipo or 'gratis') | tojson }};
+    let cotizacionPlanActual = null;
 
     function cerrarModal(id) {
       document.getElementById(id)?.classList.remove('activo');
     }
 
-    function actualizarMontoPlan(codigo) {
+    function actualizarUiModalPlan(cotizacion, codigo) {
       const plan = planesBeneficios[codigo];
       const montoBsEl = document.getElementById('modal-plan-monto-bs');
+      const mensajeEl = document.getElementById('modal-plan-mensaje');
+      const ayudaEl = document.getElementById('modal-plan-ayuda');
+      const bloqueComprobante = document.getElementById('bloque-comprobante');
+      const preview = document.getElementById('preview-comprobante');
+      const inputComprobante = document.getElementById('comprobante');
+      const btnTexto = document.getElementById('btn-verificar-pago-texto');
       if (!plan || !montoBsEl) return;
-      const montoBs = plan.monto_bs != null
-        ? plan.monto_bs
-        : (plan.precio_usd * TASA_CAMBIO);
-      montoBsEl.textContent =
-        'Monto a pagar: ' + Number(montoBs).toFixed(2) + ' Bs (' +
-        Number(plan.precio_usd).toFixed(2) + ' USD)';
+
+      cotizacionPlanActual = cotizacion || null;
+      window.cotizacionPlanActual = cotizacionPlanActual;
+      const tipo = (cotizacion && cotizacion.tipo_cambio) || plan.tipo_cambio || 'renovacion';
+      const requierePago = cotizacion ? cotizacion.requiere_pago !== false : plan.requiere_pago !== false;
+      const montoUsd = cotizacion ? cotizacion.monto_usd : (plan.monto_usd != null ? plan.monto_usd : plan.precio_usd);
+      const montoBs = cotizacion ? cotizacion.monto_bs : (plan.monto_bs != null ? plan.monto_bs : (plan.precio_usd * TASA_CAMBIO));
+
+      if (tipo === 'downgrade' || !requierePago) {
+        montoBsEl.textContent = 'Sin pago ahora — cambio programado';
+        if (mensajeEl) mensajeEl.textContent = cotizacion?.mensaje || plan.mensaje_cambio || '';
+        if (ayudaEl) ayudaEl.textContent = 'Conservarás las funciones de tu plan actual hasta que finalice el periodo pagado.';
+        if (bloqueComprobante) bloqueComprobante.classList.add('hidden');
+        if (preview) preview.classList.add('hidden');
+        if (inputComprobante) inputComprobante.removeAttribute('required');
+        if (btnTexto) btnTexto.textContent = 'Programar cambio de plan';
+      } else {
+        montoBsEl.textContent =
+          'Monto a pagar: ' + Number(montoBs).toFixed(2) + ' Bs (' +
+          Number(montoUsd).toFixed(2) + ' USD)';
+        if (mensajeEl) mensajeEl.textContent = cotizacion?.mensaje || plan.mensaje_cambio || '';
+        if (ayudaEl) {
+          ayudaEl.textContent = tipo === 'upgrade'
+            ? 'El upgrade es inmediato: tu nuevo ciclo comienza hoy.'
+            : 'Renovación: se suman 30 días a tu vencimiento actual.';
+        }
+        if (bloqueComprobante) bloqueComprobante.classList.remove('hidden');
+        if (preview) preview.classList.remove('hidden');
+        if (inputComprobante) inputComprobante.setAttribute('required', 'required');
+        if (btnTexto) btnTexto.textContent = 'Verificar comprobante y activar plan';
+      }
+    }
+
+    function actualizarMontoPlan(codigo) {
+      fetch('/api/pagos/cotizacion?plan=' + encodeURIComponent(codigo), { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data.ok) actualizarUiModalPlan(data, codigo);
+          else actualizarUiModalPlan(null, codigo);
+        })
+        .catch(function () { actualizarUiModalPlan(null, codigo); });
     }
 
     function abrirModalPlan(codigo) {
       const plan = planesBeneficios[codigo];
       if (!plan) return;
+      if (codigo === PLAN_ACTUAL) {
+        window.mostrarAlertaLocalis?.('Ya tienes este plan activo.', 'info');
+        return;
+      }
       document.getElementById('input-plan-tipo').value = codigo;
       document.getElementById('modal-plan-titulo').textContent = 'Cambiar a ' + plan.nombre;
       document.getElementById('modal-plan-precio').textContent =

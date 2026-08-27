@@ -86,6 +86,7 @@ from backend.plans import PLANES, MENSAJE_LIMITE_PRODUCTOS, es_limite_ilimitado,
 from backend.payment_ocr import validar_comprobante_pago_movil
 from backend.subscriptions import (
     activar_suscripcion_por_comprobante,
+    calcular_cotizacion_cambio_plan,
     calcular_monto_pago_plan,
     comercio_puede_gestionar_inventario,
     contar_productos_comercio,
@@ -93,6 +94,7 @@ from backend.subscriptions import (
     obtener_avisos_suscripcion,
     obtener_datos_pago_movil,
     obtener_limite_productos_comercio,
+    programar_downgrade_plan,
     puede_agregar_producto,
     rechazar_renovacion_vencida,
     verificar_vencimiento_comercio,
@@ -728,6 +730,7 @@ def panel_comercio():
         # Catálogo: PostgreSQL + catálogo maestro Supabase (sin APIs externas).
 
         comercio = _normalizar_imagenes_comercio(dict(comercio_db))
+        comercio['maps_link'] = url_maps_comercio(comercio)
 
         plan_info = PLANES.get(comercio.get('plan_tipo', 'gratis'), PLANES['gratis'])
         avisos = obtener_avisos_suscripcion(comercio)
@@ -735,10 +738,14 @@ def panel_comercio():
         planes_beneficios = {}
         for codigo in ('basica', 'pro', 'business'):
             info = obtener_beneficios_plan(codigo)
-            montos = calcular_monto_pago_plan(codigo)
-            if montos:
-                info['monto_bs'] = montos['monto_bs']
-                info['tasa'] = montos['tasa']
+            cotizacion = calcular_cotizacion_cambio_plan(comercio, codigo)
+            if cotizacion:
+                info['monto_bs'] = cotizacion['monto_bs']
+                info['monto_usd'] = cotizacion['monto_usd']
+                info['tasa'] = cotizacion['tasa']
+                info['tipo_cambio'] = cotizacion['tipo_cambio']
+                info['requiere_pago'] = cotizacion['requiere_pago']
+                info['mensaje_cambio'] = cotizacion.get('mensaje')
             planes_beneficios[codigo] = info
 
         return render_template(
@@ -1295,12 +1302,41 @@ def api_crear_producto():
 @app.route('/api/pagos/cotizacion')
 @login_requerido_api
 def api_cotizacion_pago():
+    comercio = _comercio_sesion_validado()
     plan_tipo = (request.args.get('plan') or 'basica').lower()
+    if comercio:
+        cotizacion = calcular_cotizacion_cambio_plan(comercio, plan_tipo)
+        if not cotizacion:
+            return jsonify({'error': 'Plan no válido.'}), 400
+        datos = obtener_datos_pago_movil(plan_tipo)
+        return jsonify({'ok': True, **datos, **cotizacion}), 200
+
     montos = calcular_monto_pago_plan(plan_tipo)
     if not montos:
         return jsonify({'error': 'Plan no válido.'}), 400
     datos = obtener_datos_pago_movil(plan_tipo)
     return jsonify({'ok': True, **datos, **montos}), 200
+
+
+@app.route('/api/pagos/programar-cambio', methods=['POST'])
+@login_requerido_api
+def api_programar_cambio_plan():
+    comercio = _comercio_sesion_validado()
+    if not comercio:
+        return jsonify({'error': 'Selecciona un comercio válido en tu cuenta.'}), 403
+
+    plan_tipo = (request.form.get('plan_tipo') or (request.get_json(silent=True) or {}).get('plan_tipo') or '').lower()
+    cotizacion = calcular_cotizacion_cambio_plan(comercio, plan_tipo)
+    if not cotizacion:
+        return jsonify({'error': 'Plan no válido.'}), 400
+    if cotizacion['tipo_cambio'] != 'downgrade':
+        return jsonify({'error': 'Este cambio requiere pago. Usa el flujo de comprobante.'}), 400
+
+    exito, mensaje, datos = programar_downgrade_plan(comercio['id'], plan_tipo)
+    if not exito:
+        return jsonify({'error': mensaje}), 400
+
+    return jsonify({'ok': True, 'mensaje': mensaje, **(datos or {})}), 200
 
 
 @app.route('/api/pagos/verificar', methods=['POST'])
@@ -1311,6 +1347,16 @@ def api_verificar_pago():
         return jsonify({'error': 'Selecciona un comercio válido en tu cuenta.'}), 403
 
     plan_tipo = (request.form.get('plan_tipo') or 'basica').lower()
+    cotizacion = calcular_cotizacion_cambio_plan(comercio, plan_tipo)
+    if not cotizacion:
+        return jsonify({'error': 'Plan no válido para pago.'}), 400
+
+    if cotizacion['tipo_cambio'] == 'downgrade':
+        exito, mensaje, datos = programar_downgrade_plan(comercio['id'], plan_tipo)
+        if not exito:
+            return jsonify({'error': mensaje}), 400
+        return jsonify({'ok': True, 'mensaje': mensaje, **(datos or {})}), 200
+
     archivo = request.files.get('comprobante')
 
     if not archivo or not archivo.filename:
@@ -1322,7 +1368,7 @@ def api_verificar_pago():
     if error_lectura:
         return jsonify({'error': error_lectura}), 400
 
-    montos = calcular_monto_pago_plan(plan_tipo)
+    montos = calcular_monto_pago_plan(plan_tipo, comercio)
     if not montos:
         return jsonify({'error': 'Plan no válido para pago.'}), 400
 

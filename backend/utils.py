@@ -343,7 +343,7 @@ def url_whatsapp_comercio(telefono, texto=None):
 
 def url_maps_comercio(comercio):
     """Resuelve URL de Google Maps desde enlace guardado o dirección textual."""
-    maps_url = (comercio.get('maps_url') or '').strip()
+    maps_url = (comercio.get('maps_url') or comercio.get('ubicacion_maps_url') or '').strip()
     if maps_url:
         return maps_url
 
@@ -356,3 +356,25 @@ def url_maps_comercio(comercio):
     if query:
         return f'https://maps.google.com/?q={quote(query)}'
     return None
+
+
+def validar_ubicacion_comercio(direccion, ciudad=None, zona=None, maps_url=None):
+    """
+    Valida y normaliza la ubicación física del comercio.
+    Retorna (True, dict_datos) o (False, mensaje_error).
+    """
+    direccion = (direccion or '').strip()
+    if len(direccion) < 5:
+        return False, 'La dirección física del local es obligatoria (mínimo 5 caracteres).'
+
+    ciudad_norm = (ciudad or '').strip() or None
+    zona_norm = (zona or '').strip() or None
+    maps_norm = (maps_url or '').strip() or None
+
+    return True, {
+        'direccion': direccion,
+        'ciudad': ciudad_norm,
+        'zona': zona_norm,
+        'maps_url': maps_norm,
+        'ubicacion_maps_url': maps_norm,
+    }
