@@ -89,6 +89,15 @@ img.localis-img-producto-thumb--vacio:not([src]) {
   visibility: hidden;
 }
 
+/* Panel comercio — tabla en escritorio, tarjetas en móvil */
+.panel-comercio-tabla {
+  display: block;
+}
+
+.panel-comercio-cards {
+  display: none;
+}
+
 @media (max-width: 768px) {
   .hero-header {
     min-height: 52vh !important;
@@ -203,6 +212,31 @@ img.localis-img-producto-thumb--vacio:not([src]) {
 
   .busqueda-admin {
     flex-direction: column;
+  }
+
+  .panel-comercio-tabla {
+    display: none !important;
+  }
+
+  .panel-comercio-cards {
+    display: grid !important;
+  }
+
+  .panel-comercio-meta {
+    text-align: center;
+  }
+
+  .panel-comercio-csv-form input[type="file"] {
+    min-width: 0;
+  }
+
+  .panel-comercio .panel-comercio-busqueda {
+    font-size: 16px;
+  }
+
+  .panel-comercio-form input,
+  .panel-comercio-form textarea {
+    font-size: 16px;
   }
 }
 

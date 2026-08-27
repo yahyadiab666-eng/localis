@@ -94,9 +94,7 @@
 
       document.getElementById('modal-limite-plan-cerrar').addEventListener('click', function () {
         modal.classList.remove('activo');
-        if (typeof window.abrirModalPlan === 'function') {
-          window.abrirModalPlan('pro');
-        }
+        window.location.href = '/comercio/planes?abrir_pago=pro';
       });
     }
 
@@ -306,9 +304,44 @@
     });
   }
 
+  function inicializarBusquedaProductosPanel() {
+    const input = document.getElementById('busqueda-productos-panel');
+    if (!input) return;
+
+    const elementos = document.querySelectorAll('[data-producto-busqueda]');
+    const contador = document.getElementById('busqueda-productos-contador');
+    const sinResultados = document.getElementById('busqueda-sin-resultados');
+    const total = elementos.length;
+
+    input.addEventListener('input', function () {
+      const termino = input.value.trim().toLowerCase();
+      let visibles = 0;
+
+      elementos.forEach(function (el) {
+        const texto = (el.getAttribute('data-producto-busqueda') || '').toLowerCase();
+        const coincide = !termino || texto.indexOf(termino) !== -1;
+        el.classList.toggle('hidden', !coincide);
+        if (coincide) visibles += 1;
+      });
+
+      if (contador) {
+        if (termino) {
+          contador.textContent = visibles + ' de ' + total + ' producto' + (total !== 1 ? 's' : '');
+        } else {
+          contador.textContent = total + ' producto' + (total !== 1 ? 's' : '');
+        }
+      }
+
+      if (sinResultados) {
+        sinResultados.classList.toggle('hidden', !termino || visibles > 0);
+      }
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
     inicializarAlertasFlash();
     inicializarFormularioPagoMovil();
     inicializarFormularioProductoApi();
+    inicializarBusquedaProductosPanel();
   });
 })();

@@ -445,7 +445,7 @@ def _bloquear_gestion_inventario(comercio, redirect_url='panel_comercio'):
     if ok:
         return None
     flash(mensaje, 'error')
-    return redirect(url_for(redirect_url, abrir_pago='pro'))
+    return redirect(url_for('comercio_planes', abrir_pago='pro'))
 
 
 @app.errorhandler(CSRFError)
@@ -673,97 +673,107 @@ def logout():
 # ==========================================
 
 
+def _productos_desde_filas(productos_db, tasa_actual):
+    productos = []
+    for p in productos_db:
+        try:
+            precio_usd = float(p['precio_usd'] or 0)
+        except (TypeError, ValueError):
+            precio_usd = 0.0
+        productos.append({
+            'id': p['id'],
+            'nombre': p['nombre'],
+            'descripcion': p['descripcion'] or 'Sin descripción',
+            'precio_usd': precio_usd,
+            'precio_bs': round(precio_usd * tasa_actual, 2),
+            'codigo_barras': p['codigo_barras'] or '',
+            'imagen_url': p.get('imagen_url'),
+        })
+    imagen_urls_para_catalogo(productos)
+    return productos
+
+
+def _planes_beneficios_para_comercio(comercio, tasa_actual):
+    planes_beneficios = {}
+    for codigo in ('basica', 'pro', 'business'):
+        info = obtener_beneficios_plan(codigo)
+        cotizacion = calcular_cotizacion_cambio_plan(comercio, codigo, tasa=tasa_actual)
+        if cotizacion:
+            info['monto_bs'] = cotizacion['monto_bs']
+            info['monto_usd'] = cotizacion['monto_usd']
+            info['tasa'] = cotizacion['tasa']
+            info['tipo_cambio'] = cotizacion['tipo_cambio']
+            info['requiere_pago'] = cotizacion['requiere_pago']
+            info['mensaje_cambio'] = cotizacion.get('mensaje')
+        planes_beneficios[codigo] = info
+    return planes_beneficios
+
+
+def _cargar_datos_comercio_usuario(usuario_id):
+    """Carga comercio y productos del usuario autenticado."""
+    tasa_actual = obtener_tasa_dolar() or 1.0
+    with get_db_connection(row_factory=sqlite3.Row) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            '''
+            SELECT c.*, cat.nombre as categoria
+            FROM comercios c
+            LEFT JOIN categorias cat ON c.categoria_id = cat.id
+            WHERE c.usuario_id = ?
+            ''',
+            (usuario_id,),
+        )
+        comercio_db = cursor.fetchone()
+        if not comercio_db:
+            cursor.execute('SELECT id, nombre FROM categorias')
+            categorias = [dict(c) for c in cursor.fetchall()]
+            return None, None, tasa_actual, categorias
+
+        vincular_comercio_en_sesion(comercio_db['id'])
+        cursor.execute(
+            '''
+            SELECT id, nombre, descripcion, precio_usd, codigo_barras, imagen_url
+            FROM productos WHERE comercio_id = ?
+            ORDER BY id DESC
+            ''',
+            (comercio_db['id'],),
+        )
+        productos_db = cursor.fetchall()
+
+    comercio = _normalizar_imagenes_comercio(dict(comercio_db))
+    comercio['maps_link'] = url_maps_comercio(comercio)
+    productos = _productos_desde_filas(productos_db, tasa_actual)
+    return comercio, productos, tasa_actual, None
+
+
 @app.route('/comercio')
 @login_requerido
 def panel_comercio():
     usuario_id = session.get('usuario_id')
+    abrir_pago = request.args.get('abrir_pago')
+    if abrir_pago:
+        return redirect(url_for('comercio_planes', abrir_pago=abrir_pago))
+
     try:
-        tasa_actual = obtener_tasa_dolar() or 1.0
-        whatsapp = obtener_config('whatsapp_soporte', WHATSAPP_SOPORTE)
-
-        with get_db_connection(row_factory=sqlite3.Row) as conn:
-            cursor = conn.cursor()
-
-            cursor.execute(
-                '''
-                SELECT c.*, cat.nombre as categoria
-                FROM comercios c
-                LEFT JOIN categorias cat ON c.categoria_id = cat.id
-                WHERE c.usuario_id = ?
-                ''',
-                (usuario_id,),
-            )
-            comercio_db = cursor.fetchone()
-
-            if not comercio_db:
-                cursor.execute('SELECT id, nombre FROM categorias')
-                categorias = [dict(c) for c in cursor.fetchall()]
-                return render_template(
-                    'registro_comercio.html', categorias=categorias
-                )
-
-            vincular_comercio_en_sesion(comercio_db['id'])
-
-            cursor.execute(
-                '''
-                SELECT id, nombre, descripcion, precio_usd, codigo_barras, imagen_url
-                FROM productos WHERE comercio_id = ?
-                ORDER BY id DESC
-                ''',
-                (comercio_db['id'],),
-            )
-            productos_db = cursor.fetchall()
-
-        productos = []
-        for p in productos_db:
-            try:
-                precio_usd = float(p['precio_usd'] or 0)
-            except (TypeError, ValueError):
-                precio_usd = 0.0
-            productos.append({
-                'id': p['id'],
-                'nombre': p['nombre'],
-                'descripcion': p['descripcion'] or 'Sin descripción',
-                'precio_usd': precio_usd,
-                'precio_bs': round(precio_usd * tasa_actual, 2),
-                'codigo_barras': p['codigo_barras'] or '',
-                'imagen_url': p.get('imagen_url'),
-            })
-        imagen_urls_para_catalogo(productos)
-        # Catálogo: PostgreSQL + catálogo maestro Supabase (sin APIs externas).
-
-        comercio = _normalizar_imagenes_comercio(dict(comercio_db))
-        comercio['maps_link'] = url_maps_comercio(comercio)
+        comercio, productos, tasa_actual, categorias = _cargar_datos_comercio_usuario(
+            usuario_id
+        )
+        if categorias is not None:
+            return render_template('registro_comercio.html', categorias=categorias)
 
         plan_info = PLANES.get(comercio.get('plan_tipo', 'gratis'), PLANES['gratis'])
         avisos = obtener_avisos_suscripcion(comercio)
-        pago_movil = obtener_datos_pago_movil()
-        planes_beneficios = {}
-        for codigo in ('basica', 'pro', 'business'):
-            info = obtener_beneficios_plan(codigo)
-            cotizacion = calcular_cotizacion_cambio_plan(comercio, codigo, tasa=tasa_actual)
-            if cotizacion:
-                info['monto_bs'] = cotizacion['monto_bs']
-                info['monto_usd'] = cotizacion['monto_usd']
-                info['tasa'] = cotizacion['tasa']
-                info['tipo_cambio'] = cotizacion['tipo_cambio']
-                info['requiere_pago'] = cotizacion['requiere_pago']
-                info['mensaje_cambio'] = cotizacion.get('mensaje')
-            planes_beneficios[codigo] = info
 
         return render_template(
             'comercio.html',
             comercio=comercio,
             productos=productos,
             tasa=tasa_actual,
-            whatsapp=whatsapp,
+            whatsapp=obtener_config('whatsapp_soporte', WHATSAPP_SOPORTE),
             whatsapp_url=WHATSAPP_SOPORTE_URL,
             plan_info=plan_info,
             avisos=avisos,
-            pago_movil=pago_movil,
-            planes=PLANES,
-            planes_beneficios=planes_beneficios,
-            abrir_pago=request.args.get('abrir_pago'),
+            nav_activo='panel',
         )
     except psycopg2.Error:
         raise
@@ -773,6 +783,43 @@ def panel_comercio():
             'No se pudo cargar el panel del comercio. Intenta de nuevo en unos segundos.',
             'error',
         )
+        return redirect(url_for('panel_comercio'))
+
+
+@app.route('/comercio/planes')
+@login_requerido
+def comercio_planes():
+    usuario_id = session.get('usuario_id')
+    try:
+        comercio, productos, tasa_actual, categorias = _cargar_datos_comercio_usuario(
+            usuario_id
+        )
+        if categorias is not None:
+            return redirect(url_for('panel_comercio'))
+
+        plan_info = PLANES.get(comercio.get('plan_tipo', 'gratis'), PLANES['gratis'])
+        avisos = obtener_avisos_suscripcion(comercio)
+        pago_movil = obtener_datos_pago_movil()
+        planes_beneficios = _planes_beneficios_para_comercio(comercio, tasa_actual)
+
+        return render_template(
+            'comercio_planes.html',
+            comercio=comercio,
+            productos=productos,
+            tasa=tasa_actual,
+            plan_info=plan_info,
+            avisos=avisos,
+            pago_movil=pago_movil,
+            planes=PLANES,
+            planes_beneficios=planes_beneficios,
+            abrir_pago=request.args.get('abrir_pago'),
+            nav_activo='planes',
+        )
+    except psycopg2.Error:
+        raise
+    except Exception as error:
+        print(f'Error al cargar planes del comercio: {error}')
+        flash('No se pudo cargar la página de planes.', 'error')
         return redirect(url_for('panel_comercio'))
 
 
@@ -882,26 +929,12 @@ def editar_comercio():
         zona = request.form.get('zona', '').strip()
         maps_url = request.form.get('maps_url', '').strip()
         logo_archivo = request.files.get('logo')
-        banner_archivo = request.files.get('banner')
 
         logo_url = None
         if logo_archivo and logo_archivo.filename:
             try:
                 logo_url = procesar_logo_comercio(
                     logo_archivo, prefijo=f'logo_{comercio["id"]}'
-                )
-            except SupabaseUploadError as error:
-                flash(str(error), 'error')
-                return redirect(url_for('editar_comercio'))
-
-        banner_url = None
-        if banner_archivo and banner_archivo.filename:
-            try:
-                banner_url = procesar_imagen_subida(
-                    banner_archivo,
-                    prefijo=f'banner_{comercio["id"]}',
-                    carpeta='banners',
-                    max_dimension=1920,
                 )
             except SupabaseUploadError as error:
                 flash(str(error), 'error')
@@ -921,7 +954,6 @@ def editar_comercio():
             zona=zona,
             maps_url=maps_url,
             logo_url=logo_url,
-            banner_url=banner_url,
         )
         flash(mensaje, 'exito' if exito else 'error')
         return redirect(url_for('panel_comercio'))
@@ -929,6 +961,7 @@ def editar_comercio():
     return render_template(
         'editar_comercio.html',
         comercio=_normalizar_imagenes_comercio(comercio),
+        nav_activo='editar',
     )
 
 
@@ -963,7 +996,7 @@ def nuevo_producto():
             flash(msg_limite, 'error')
             destino = url_for('panel_comercio')
             if 'vencido' in msg_limite.lower() or 'límite' in msg_limite.lower():
-                destino = url_for('panel_comercio', abrir_pago='pro')
+                destino = url_for('comercio_planes', abrir_pago='pro')
             return redirect(destino)
 
         try:
@@ -1147,7 +1180,7 @@ def cargar_csv():
         flash(mensaje, 'limite_plan')
         return redirect(
             url_for(
-                'panel_comercio',
+                'comercio_planes',
                 abrir_pago=meta['plan_sugerido'],
             )
         )
@@ -1209,7 +1242,7 @@ def suscripcion_solicitar_pago():
         'El sistema validará referencia, monto y datos oficiales con OCR.',
         'info',
     )
-    return redirect(url_for('panel_comercio', abrir_pago=plan_tipo))
+    return redirect(url_for('comercio_planes', abrir_pago=plan_tipo))
 
 
 # ==========================================

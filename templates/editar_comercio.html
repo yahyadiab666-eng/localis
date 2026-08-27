@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>Editar Comercio - Localis</title>
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
@@ -14,42 +15,19 @@
     .font-display { font-family: 'Fraunces', serif; }
   </style>
 </head>
-<body class="min-h-screen" style="background: rgb(254, 251, 246);">
+<body class="min-h-screen flex flex-col panel-comercio" style="background: rgb(254, 251, 246);">
 
-  <header class="bg-stone-900 border-b border-stone-800">
-    <nav class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-      <a href="{{ url_for('index') }}" class="font-display text-white text-2xl font-black">localis</a>
-      <a href="{{ url_for('panel_comercio') }}" class="text-sm text-stone-300 hover:text-white flex items-center gap-1">
-        <i data-lucide="arrow-left" style="width:16px;height:16px;"></i> Volver al Panel
-      </a>
-    </nav>
-  </header>
+  {% include 'partials/nav_comercio.html' %}
 
-  <main class="max-w-xl mx-auto px-6 py-10">
-    <div class="bg-white rounded-2xl p-8 shadow-sm border border-stone-200 space-y-6">
+  <main class="max-w-xl mx-auto px-4 sm:px-6 py-8 sm:py-10 flex-1 w-full">
+    <div class="bg-white rounded-2xl p-6 sm:p-8 shadow-sm border border-stone-200 space-y-6">
       <div class="text-center">
-        <h2 class="font-display text-3xl font-bold text-stone-900">Editar Datos del Comercio</h2>
-        <p class="text-stone-500 text-sm mt-1">Actualiza nombre, contacto, ubicación, logo y banner.</p>
+        <h2 class="font-display text-2xl sm:text-3xl font-bold text-stone-900">Editar Datos del Comercio</h2>
+        <p class="text-stone-500 text-sm mt-1">Actualiza nombre, contacto, ubicación y logo.</p>
       </div>
 
-      <form action="{{ url_for('editar_comercio') }}" method="POST" enctype="multipart/form-data" class="space-y-5">
+      <form action="{{ url_for('editar_comercio') }}" method="POST" enctype="multipart/form-data" class="space-y-5 panel-comercio-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-
-        <div id="banner-tienda" class="space-y-3 pt-1 border-b border-stone-100 pb-5">
-          <label class="block text-xs font-bold uppercase text-stone-700">Banner de la tienda</label>
-          <p class="text-[11px] text-stone-500 leading-relaxed">
-            Imagen horizontal para la cabecera pública. Si no subes ninguna, se muestra un fondo naranja vacío.
-            No uses el logo aquí: son elementos distintos.
-          </p>
-          <div class="w-full h-28 rounded-xl overflow-hidden border border-amber-200"
-               style="background: linear-gradient(135deg, #f59e0b 0%, #ea580c 100%);">
-            {% if comercio.banner_completo %}
-              <img src="{{ comercio.banner_completo }}" alt="Banner actual" class="w-full h-full object-cover">
-            {% endif %}
-          </div>
-          <input type="file" name="banner" accept="image/*"
-                 class="w-full text-xs file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-amber-100 file:text-amber-800">
-        </div>
 
         <div class="space-y-2">
           <label class="block text-xs font-bold uppercase text-stone-700">Logo / Foto de perfil</label>
@@ -64,56 +42,58 @@
         <div>
           <label for="nombre" class="block text-xs font-bold uppercase text-stone-700 mb-1.5">Nombre</label>
           <input type="text" id="nombre" name="nombre" value="{{ comercio.nombre }}" required
-                 class="w-full px-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:border-amber-500 outline-none">
+                 class="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:border-amber-500 outline-none">
         </div>
 
         <div>
           <label for="telefono" class="block text-xs font-bold uppercase text-stone-700 mb-1.5">Teléfono</label>
           <input type="text" id="telefono" name="telefono" value="{{ comercio.telefono or '' }}"
-                 class="w-full px-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:border-amber-500 outline-none">
+                 class="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:border-amber-500 outline-none">
         </div>
 
         <div>
           <label for="descripcion" class="block text-xs font-bold uppercase text-stone-700 mb-1.5">Descripción</label>
           <textarea id="descripcion" name="descripcion" rows="3"
-                    class="w-full px-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm resize-none focus:border-amber-500 outline-none">{{ comercio.descripcion or '' }}</textarea>
+                    class="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-sm resize-none focus:border-amber-500 outline-none">{{ comercio.descripcion or '' }}</textarea>
         </div>
 
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label for="ciudad" class="block text-xs font-bold uppercase text-stone-700 mb-1.5">Ciudad</label>
             <input type="text" id="ciudad" name="ciudad" value="{{ comercio.ciudad or '' }}"
-                   class="w-full px-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:border-amber-500 outline-none">
+                   class="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:border-amber-500 outline-none">
           </div>
           <div>
             <label for="zona" class="block text-xs font-bold uppercase text-stone-700 mb-1.5">Zona</label>
             <input type="text" id="zona" name="zona" value="{{ comercio.zona or '' }}"
-                   class="w-full px-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:border-amber-500 outline-none">
+                   class="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:border-amber-500 outline-none">
           </div>
         </div>
 
         <div>
           <label for="direccion" class="block text-xs font-bold uppercase text-stone-700 mb-1.5">Dirección</label>
           <input type="text" id="direccion" name="direccion" value="{{ comercio.direccion or '' }}" required minlength="5"
-                 class="w-full px-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:border-amber-500 outline-none">
+                 class="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:border-amber-500 outline-none">
         </div>
 
         <div>
           <label for="maps_url" class="block text-xs font-bold uppercase text-stone-700 mb-1.5">Enlace de Google Maps</label>
           <input type="url" id="maps_url" name="maps_url" value="{{ comercio.maps_url or '' }}"
                  placeholder="https://maps.google.com/..."
-                 class="w-full px-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:border-amber-500 outline-none">
-          <a href="https://maps.google.com" target="_blank" rel="noopener"
-             class="inline-flex items-center gap-1 mt-2 text-xs font-semibold text-amber-700 hover:text-amber-800">
-            Abrir Google Maps para obtener ubicación
-          </a>
-          <button type="button" id="btn-ubicacion-actual"
-                  class="inline-flex items-center gap-1 mt-2 ml-3 text-xs font-semibold text-emerald-700 hover:text-emerald-800">
-            📍 Usar mi ubicación actual
-          </button>
+                 class="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:border-amber-500 outline-none">
+          <div class="flex flex-wrap gap-3 mt-2">
+            <a href="https://maps.google.com" target="_blank" rel="noopener"
+               class="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 hover:text-amber-800">
+              Abrir Google Maps
+            </a>
+            <button type="button" id="btn-ubicacion-actual"
+                    class="btn-touch inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:text-emerald-800">
+              Usar mi ubicación actual
+            </button>
+          </div>
         </div>
 
-        <button type="submit" class="w-full py-3 rounded-full font-bold text-sm" style="background: rgb(245, 158, 11); color: rgb(26, 26, 26);">
+        <button type="submit" class="btn-touch w-full py-3 rounded-full font-bold text-sm" style="background: rgb(245, 158, 11); color: rgb(26, 26, 26);">
           Guardar Cambios
         </button>
       </form>

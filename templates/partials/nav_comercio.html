@@ -1,0 +1,38 @@
+{# nav_activo: 'panel' | 'planes' | 'editar' #}
+<header class="w-full bg-stone-900 border-b border-stone-800">
+  <nav class="nav-comercio-top flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 max-w-6xl w-full mx-auto gap-3">
+    <div class="flex items-center gap-2 sm:gap-3 min-w-0">
+      <a href="{{ url_for('index') }}" class="font-display text-white text-xl sm:text-[28px] font-black tracking-tight shrink-0">localis</a>
+      <span class="hidden xs:inline bg-amber-500/20 text-amber-400 text-[10px] sm:text-[11px] font-bold px-2 sm:px-2.5 py-0.5 rounded-full uppercase tracking-wider truncate">Panel comerciante</span>
+    </div>
+
+    <div class="nav-comercio-links flex items-center gap-2 sm:gap-4 flex-wrap justify-end">
+      <a href="{{ url_for('panel_comercio') }}"
+         class="btn-touch text-xs sm:text-sm font-medium px-2.5 py-1.5 rounded-full transition flex items-center gap-1 {% if nav_activo == 'panel' %}bg-white/10 text-white{% else %}text-stone-300 hover:text-white{% endif %}">
+        <i data-lucide="layout-dashboard" style="width:15px;height:15px;"></i>
+        <span class="hidden sm:inline">Panel</span>
+      </a>
+      <a href="{{ url_for('comercio_planes') }}"
+         class="btn-touch text-xs sm:text-sm font-medium px-2.5 py-1.5 rounded-full transition flex items-center gap-1 {% if nav_activo == 'planes' %}bg-amber-500/20 text-amber-300{% else %}text-stone-300 hover:text-white{% endif %}">
+        <i data-lucide="credit-card" style="width:15px;height:15px;"></i>
+        <span class="hidden sm:inline">Planes</span>
+      </a>
+      <a href="{{ url_for('editar_comercio') }}"
+         class="btn-touch text-xs sm:text-sm font-medium px-2.5 py-1.5 rounded-full transition flex items-center gap-1 {% if nav_activo == 'editar' %}bg-white/10 text-white{% else %}text-stone-300 hover:text-white{% endif %}">
+        <i data-lucide="settings" style="width:15px;height:15px;"></i>
+        <span class="hidden sm:inline">Editar</span>
+      </a>
+      {% if comercio and comercio.id %}
+      <a href="{{ url_for('tienda_publica', comercio_id=comercio.id) }}"
+         class="btn-touch text-xs sm:text-sm font-medium text-stone-300 hover:text-white transition hidden md:flex items-center gap-1">
+        <i data-lucide="store" style="width:15px;height:15px;"></i> Ver tienda
+      </a>
+      {% endif %}
+      <a href="{{ url_for('logout') }}"
+         class="btn-touch px-3 py-1.5 rounded-full text-xs sm:text-sm font-semibold bg-red-500/10 text-red-400 hover:bg-red-500/20 flex items-center gap-1">
+        <i data-lucide="log-out" style="width:15px;height:15px;"></i>
+        <span class="hidden sm:inline">Salir</span>
+      </a>
+    </div>
+  </nav>
+</header>

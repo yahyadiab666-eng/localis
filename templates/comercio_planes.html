@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>Localis - Planes y Suscripción</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}">
+  <style>
+    body { font-family: 'DM Sans', sans-serif; }
+    .font-display { font-family: 'Fraunces', serif; }
+    .modal-push { display: none; position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.55); align-items: center; justify-content: center; padding: 1rem; }
+    .modal-push.activo { display: flex; }
+    .modal-push .panel { background: #fff; border-radius: 1rem; max-width: 520px; width: 100%; max-height: 90vh; overflow-y: auto; box-shadow: 0 25px 50px rgba(0,0,0,.25); }
+  </style>
+</head>
+<body class="w-full min-h-screen flex flex-col" style="background: rgb(254, 251, 246);">
+
+  {% include 'partials/nav_comercio.html' %}
+
+  {% with mensajes = get_flashed_messages(with_categories=true) %}
+    {% if mensajes %}
+      <div class="fixed top-4 right-4 z-50 space-y-2 flash-mobile max-w-md">
+        {% for categoria, mensaje in mensajes %}
+          <div class="p-4 rounded-xl shadow-lg text-white text-sm flex items-center gap-3 localis-flash-alerta flash-auto-dismiss {% if categoria == 'error' %}bg-red-500{% elif categoria == 'exito' %}bg-emerald-600{% else %}bg-amber-600{% endif %}">
+            <i data-lucide="info" style="width:18px;height:18px;"></i>
+            <span>{{ mensaje }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-10 w-full flex-1 space-y-8">
+
+    <div class="text-center sm:text-left space-y-2">
+      <h1 class="font-display text-2xl sm:text-3xl font-bold text-gray-900">Planes y Suscripción</h1>
+      <p class="text-stone-500 text-sm">Elige el plan que mejor se adapte a tu comercio. Puedes escalar o ajustar tu categoría cuando lo necesites.</p>
+    </div>
+
+    <!-- Plan actual -->
+    <section class="bg-gradient-to-br from-amber-500 to-orange-600 rounded-2xl p-6 sm:p-8 text-white shadow-lg">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div class="space-y-2">
+          <p class="text-amber-100 text-xs font-bold uppercase tracking-wider">Tu plan actual</p>
+          <h2 class="font-display text-2xl sm:text-3xl font-bold">{{ plan_info.nombre }}</h2>
+          <p class="text-amber-50 text-sm">
+            {% if plan_info.precio_usd == 0 %}
+              Prueba gratuita · hasta {{ plan_info.limite_productos }} productos
+            {% else %}
+              ${{ plan_info.precio_usd }} USD/mes ·
+              {% if plan_info.limite_productos < 0 %}productos ilimitados{% else %}hasta {{ plan_info.limite_productos }} productos{% endif %}
+            {% endif %}
+          </p>
+          <div class="flex flex-wrap gap-3 text-xs text-amber-50 pt-1">
+            <span class="inline-flex items-center gap-1.5 bg-white/15 px-2.5 py-1 rounded-full">
+              <i data-lucide="shield-check" style="width:14px;height:14px;"></i>
+              Estado: <span data-estado-suscripcion>{{ comercio.estado_pago or 'activo' }}</span>
+            </span>
+            {% if comercio.fecha_vencimiento %}
+            <span class="inline-flex items-center gap-1.5 bg-white/15 px-2.5 py-1 rounded-full">
+              <i data-lucide="calendar" style="width:14px;height:14px;"></i>
+              Vence: <span data-fecha-vencimiento>{{ comercio.fecha_vencimiento|fecha_corta }}</span>
+            </span>
+            {% endif %}
+          </div>
+          {% if comercio.plan_pendiente %}
+          <p class="text-sm bg-white/20 border border-white/30 rounded-xl px-4 py-2 mt-2">
+            Cambio programado al plan <strong>{{ comercio.plan_pendiente | capitalize }}</strong>
+            al finalizar el periodo actual{% if comercio.fecha_vencimiento %} ({{ comercio.fecha_vencimiento|fecha_corta }}){% endif %}.
+          </p>
+          {% endif %}
+        </div>
+        <a href="{{ url_for('panel_comercio') }}"
+           class="btn-touch inline-flex items-center justify-center gap-2 bg-white text-amber-900 font-bold px-5 py-3 rounded-full text-sm shrink-0">
+          <i data-lucide="layout-dashboard" style="width:16px;height:16px;"></i>
+          Volver al panel
+        </a>
+      </div>
+    </section>
+
+    <!-- Catálogo de planes -->
+    <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+      {% for codigo in ['gratis', 'basica', 'pro', 'business'] %}
+        {% set plan = planes[codigo] %}
+        {% set info = planes_beneficios.get(codigo, {}) %}
+        {% set es_actual = (comercio.plan_tipo or 'gratis') == codigo %}
+        {% set limite_txt = 'Ilimitados' if plan.limite_productos < 0 else plan.limite_productos ~ ' productos' %}
+        <article class="plan-card bg-white rounded-2xl border {% if es_actual %}border-amber-400 ring-2 ring-amber-400/40{% else %}border-stone-200{% endif %} p-5 sm:p-6 flex flex-col shadow-sm card-hover">
+          {% if es_actual %}
+          <span class="inline-flex self-start items-center gap-1 text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-800 px-2.5 py-1 rounded-full mb-3">
+            <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Plan actual
+          </span>
+          {% elif codigo == 'pro' %}
+          <span class="inline-flex self-start items-center gap-1 text-[10px] font-bold uppercase tracking-wider bg-violet-100 text-violet-700 px-2.5 py-1 rounded-full mb-3">Recomendado</span>
+          {% else %}
+          <span class="h-6 mb-3 block"></span>
+          {% endif %}
+
+          <h3 class="font-display text-xl font-bold text-gray-900">{{ plan.nombre }}</h3>
+          <p class="mt-2">
+            {% if plan.precio_usd == 0 %}
+              <span class="text-2xl font-bold text-gray-900">Gratis</span>
+              <span class="text-stone-500 text-sm block mt-0.5">30 días de prueba</span>
+            {% else %}
+              <span class="text-2xl font-bold text-gray-900">${{ plan.precio_usd }}</span>
+              <span class="text-stone-500 text-sm"> USD/mes</span>
+            {% endif %}
+          </p>
+          <p class="text-stone-600 text-sm mt-3 font-medium">{{ limite_txt }}</p>
+
+          <ul class="mt-4 space-y-2 text-sm text-stone-600 flex-1">
+            {% if info.beneficios %}
+              {% for b in info.beneficios[:4] %}
+              <li class="flex gap-2"><span class="text-emerald-600 shrink-0">✓</span><span>{{ b }}</span></li>
+              {% endfor %}
+            {% else %}
+              <li class="flex gap-2"><span class="text-emerald-600 shrink-0">✓</span><span>Catálogo en Localis</span></li>
+              <li class="flex gap-2"><span class="text-emerald-600 shrink-0">✓</span><span>{{ limite_txt }}</span></li>
+              <li class="flex gap-2"><span class="text-emerald-600 shrink-0">✓</span><span>Soporte por WhatsApp</span></li>
+            {% endif %}
+          </ul>
+
+          <div class="mt-5 pt-4 border-t border-stone-100">
+            {% if es_actual %}
+            <button type="button" disabled
+                    class="w-full py-2.5 rounded-full text-sm font-bold bg-stone-100 text-stone-400 cursor-not-allowed">
+              Plan activo
+            </button>
+            {% elif codigo == 'gratis' %}
+            <button type="button" disabled
+                    class="w-full py-2.5 rounded-full text-sm font-bold border border-stone-200 text-stone-400 cursor-not-allowed"
+                    title="Contacta soporte para volver al plan gratuito">
+              Solo periodo de prueba
+            </button>
+            {% else %}
+            <button type="button" onclick="abrirModalPlan('{{ codigo }}')"
+                    class="btn-touch w-full py-2.5 rounded-full text-sm font-bold transition
+                           {% if codigo == 'pro' %}bg-violet-600 text-white hover:bg-violet-500
+                           {% elif codigo == 'business' %}bg-stone-900 text-white hover:bg-stone-800
+                           {% else %}border border-amber-400 text-amber-800 hover:bg-amber-50{% endif %}">
+              {% if info.tipo_cambio == 'downgrade' %}Programar cambio{% else %}Elegir {{ plan.nombre }}{% endif %}
+            </button>
+            {% endif %}
+          </div>
+        </article>
+      {% endfor %}
+    </section>
+
+    <section class="bg-stone-50 border border-stone-200 rounded-2xl p-5 sm:p-6 text-sm text-stone-600 space-y-2">
+      <p class="font-bold text-stone-800 flex items-center gap-2">
+        <i data-lucide="info" style="width:16px;height:16px;"></i> Información sobre cambios de plan
+      </p>
+      <ul class="list-disc list-inside space-y-1 text-xs sm:text-sm">
+        <li><strong>Upgrade:</strong> se aplica de inmediato con ajuste prorrateado del periodo.</li>
+        <li><strong>Downgrade:</strong> se programa para el final de tu ciclo actual; conservas las funciones hasta entonces.</li>
+        <li><strong>Renovación:</strong> suma 30 días a tu fecha de vencimiento.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="w-full py-6 px-6 text-center mt-auto" style="background: rgb(17, 17, 17);">
+    <p class="text-xs text-stone-500">© 2026 Localis · Planes y suscripción</p>
+  </footer>
+
+  <!-- MODAL: Cambio de plan + Pago Móvil -->
+  <div id="modal-plan" class="modal-push">
+    <div class="panel p-5 sm:p-6 space-y-5">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <h3 class="font-display text-xl font-bold text-gray-900" id="modal-plan-titulo">Cambiar plan</h3>
+          <p class="text-stone-500 text-xs mt-1" id="modal-plan-precio"></p>
+        </div>
+        <button type="button" onclick="cerrarModal('modal-plan')" class="btn-touch text-stone-400 hover:text-stone-700 text-2xl leading-none">&times;</button>
+      </div>
+
+      <ul id="modal-plan-beneficios" class="space-y-2 text-sm text-stone-700 bg-stone-50 rounded-xl p-4"></ul>
+
+      <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm space-y-1">
+        <p class="font-bold text-amber-900">Datos para Pago Móvil</p>
+        <p><span class="text-stone-500">Banco:</span> {{ pago_movil.banco }}</p>
+        <p><span class="text-stone-500">Cédula/RIF:</span> {{ pago_movil.cedula_rif }}</p>
+        <p><span class="text-stone-500">Teléfono:</span> {{ pago_movil.telefono }}</p>
+        <p class="pt-2 border-t border-amber-200 mt-2">
+          <span class="text-stone-500">Tasa BCV:</span>
+          <strong>{{ tasa }} Bs/USD</strong>
+        </p>
+        <p id="modal-plan-monto-bs" class="font-bold text-amber-900 text-base"></p>
+        <p id="modal-plan-mensaje" class="text-xs text-stone-600 mt-2"></p>
+      </div>
+
+      <div id="contenedor-form-pago">
+        <form id="form-pago-movil" enctype="multipart/form-data" class="space-y-4">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="plan_tipo" id="input-plan-tipo" value="pro">
+
+          <div id="bloque-comprobante">
+            <label for="comprobante" class="block text-xs font-bold uppercase text-stone-600 mb-1">Captura del comprobante</label>
+            <input type="file" id="comprobante" name="comprobante" accept="image/png, image/jpeg, image/webp"
+                   class="w-full text-xs text-stone-600 file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-amber-500 file:text-stone-900 hover:file:bg-amber-400 bg-white rounded-xl border border-stone-200 cursor-pointer">
+            <p class="text-[11px] text-stone-500 mt-1">
+              Sube la captura del pago móvil. Validamos con OCR la referencia, el monto en Bs
+              y que el destino sea {{ pago_movil.banco }} (RIF {{ pago_movil.cedula_rif }}).
+            </p>
+          </div>
+
+          <div id="preview-comprobante" class="rounded-xl border border-dashed border-stone-200 bg-stone-50 p-3 min-h-[80px] flex items-center justify-center text-xs text-stone-400">
+            Vista previa del comprobante
+          </div>
+
+          <p id="modal-plan-ayuda" class="text-xs text-stone-500"></p>
+
+          <button type="submit" id="btn-verificar-pago"
+                  class="btn-touch w-full py-3 rounded-full font-bold text-sm bg-stone-900 text-white flex items-center justify-center gap-2 disabled:opacity-60">
+            <span id="btn-verificar-pago-spinner" class="hidden w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+            <span id="btn-verificar-pago-texto">Verificar comprobante y activar plan</span>
+          </button>
+        </form>
+      </div>
+
+      <div id="contenedor-pago-exito" class="hidden text-center space-y-3 py-4">
+        <div class="w-14 h-14 bg-emerald-100 rounded-2xl flex items-center justify-center mx-auto text-2xl">✓</div>
+        <p class="font-bold text-emerald-700">¡Pago verificado!</p>
+        <p class="text-sm text-stone-600">Tu tienda está <strong data-estado-suscripcion>activo</strong> con la nueva fecha de vencimiento aplicada.</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const planesBeneficios = {{ planes_beneficios | tojson }};
+    const TASA_CAMBIO = {{ tasa }};
+    const PLAN_ACTUAL = {{ (comercio.plan_tipo or 'gratis') | tojson }};
+    let cotizacionPlanActual = null;
+
+    function cerrarModal(id) {
+      document.getElementById(id)?.classList.remove('activo');
+    }
+
+    function actualizarUiModalPlan(cotizacion, codigo) {
+      const plan = planesBeneficios[codigo];
+      const montoBsEl = document.getElementById('modal-plan-monto-bs');
+      const mensajeEl = document.getElementById('modal-plan-mensaje');
+      const ayudaEl = document.getElementById('modal-plan-ayuda');
+      const bloqueComprobante = document.getElementById('bloque-comprobante');
+      const preview = document.getElementById('preview-comprobante');
+      const inputComprobante = document.getElementById('comprobante');
+      const btnTexto = document.getElementById('btn-verificar-pago-texto');
+      if (!plan || !montoBsEl) return;
+
+      cotizacionPlanActual = cotizacion || null;
+      window.cotizacionPlanActual = cotizacionPlanActual;
+      const tipo = (cotizacion && cotizacion.tipo_cambio) || plan.tipo_cambio || 'renovacion';
+      const requierePago = cotizacion ? cotizacion.requiere_pago !== false : plan.requiere_pago !== false;
+      const montoUsd = cotizacion ? cotizacion.monto_usd : (plan.monto_usd != null ? plan.monto_usd : plan.precio_usd);
+      const montoBs = cotizacion ? cotizacion.monto_bs : (plan.monto_bs != null ? plan.monto_bs : (plan.precio_usd * TASA_CAMBIO));
+
+      if (tipo === 'downgrade' || !requierePago) {
+        montoBsEl.textContent = 'Sin pago ahora — cambio programado';
+        if (mensajeEl) mensajeEl.textContent = cotizacion?.mensaje || plan.mensaje_cambio || '';
+        if (ayudaEl) ayudaEl.textContent = 'Conservarás las funciones de tu plan actual hasta que finalice el periodo pagado.';
+        if (bloqueComprobante) bloqueComprobante.classList.add('hidden');
+        if (preview) preview.classList.add('hidden');
+        if (inputComprobante) inputComprobante.removeAttribute('required');
+        if (btnTexto) btnTexto.textContent = 'Programar cambio de plan';
+      } else {
+        montoBsEl.textContent =
+          'Monto a pagar: ' + Number(montoBs).toFixed(2) + ' Bs (' +
+          Number(montoUsd).toFixed(2) + ' USD)';
+        if (mensajeEl) mensajeEl.textContent = cotizacion?.mensaje || plan.mensaje_cambio || '';
+        if (ayudaEl) {
+          ayudaEl.textContent = tipo === 'upgrade'
+            ? 'El upgrade es inmediato: tu nuevo ciclo comienza hoy.'
+            : 'Renovación: se suman 30 días a tu vencimiento actual.';
+        }
+        if (bloqueComprobante) bloqueComprobante.classList.remove('hidden');
+        if (preview) preview.classList.remove('hidden');
+        if (inputComprobante) inputComprobante.setAttribute('required', 'required');
+        if (btnTexto) btnTexto.textContent = 'Verificar comprobante y activar plan';
+      }
+    }
+
+    function actualizarMontoPlan(codigo) {
+      fetch('/api/pagos/cotizacion?plan=' + encodeURIComponent(codigo), { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data.ok) actualizarUiModalPlan(data, codigo);
+          else actualizarUiModalPlan(null, codigo);
+        })
+        .catch(function () { actualizarUiModalPlan(null, codigo); });
+    }
+
+    function abrirModalPlan(codigo) {
+      const plan = planesBeneficios[codigo];
+      if (!plan) return;
+      if (codigo === PLAN_ACTUAL) {
+        window.mostrarAlertaLocalis?.('Ya tienes este plan activo.', 'info');
+        return;
+      }
+      document.getElementById('input-plan-tipo').value = codigo;
+      document.getElementById('modal-plan-titulo').textContent = 'Cambiar a ' + plan.nombre;
+      document.getElementById('modal-plan-precio').textContent =
+        '$' + plan.precio_usd + ' USD / mes · ' + plan.limite_texto + ' productos';
+      actualizarMontoPlan(codigo);
+      const lista = document.getElementById('modal-plan-beneficios');
+      lista.innerHTML = (plan.beneficios || []).map(function (b) {
+        return '<li class="flex gap-2"><span class="text-emerald-600">✓</span><span>' + b + '</span></li>';
+      }).join('');
+      document.getElementById('modal-plan').classList.add('activo');
+      document.getElementById('contenedor-form-pago')?.classList.remove('hidden');
+      document.getElementById('contenedor-pago-exito')?.classList.add('hidden');
+      const formPago = document.getElementById('form-pago-movil');
+      if (formPago) formPago.reset();
+      const preview = document.getElementById('preview-comprobante');
+      if (preview) preview.innerHTML = 'Vista previa del comprobante';
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    const planAbrirDesdeServidor = {{ abrir_pago | tojson }};
+    const paramsUrl = new URLSearchParams(window.location.search);
+    const planAbrir = planAbrirDesdeServidor || paramsUrl.get('abrir_pago');
+    if (planAbrir && typeof abrirModalPlan === 'function') {
+      abrirModalPlan(planAbrir);
+    }
+
+    lucide.createIcons();
+  </script>
+  <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/localis.js') }}"></script>
+</body>
+</html>
