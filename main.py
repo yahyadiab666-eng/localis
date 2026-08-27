@@ -25,7 +25,7 @@ if supabase_api_habilitado():
     if not obtener_cliente_storage():
         print('Aviso: no hay cliente Storage disponible para subidas.')
 else:
-    print('Aviso: Supabase API no disponible. Subidas usarán respaldo local si aplica.')
+    print('Aviso: Supabase Storage no disponible; las subidas manuales fallarán hasta configurarlo.')
 
 import sqlite3
 
@@ -290,9 +290,18 @@ def procesar_imagen_subida(
     carpeta='comercios',
     max_dimension=800,
 ):
-    """Sube imagen a Supabase Storage o, si falla la red, a static/uploads/."""
+    """
+    Subida manual de archivo → Supabase Storage.
+    Retorna la URL pública del bucket o lanza SupabaseUploadError.
+    """
     if not file_storage or not getattr(file_storage, 'filename', ''):
         return None
+
+    if not obtener_cliente_storage():
+        raise SupabaseUploadError(
+            'Supabase Storage no está configurado. '
+            'Define SUPABASE_URL y SUPABASE_KEY (o SUPABASE_SERVICE_ROLE_KEY) en el entorno.'
+        )
 
     return subir_imagen_a_supabase(
         file_storage,
@@ -1331,6 +1340,11 @@ def api_verificar_pago():
     comprobante_url = None
 
     try:
+        if not obtener_cliente_storage():
+            raise SupabaseUploadError(
+                'Supabase Storage no está configurado para almacenar comprobantes.'
+            )
+
         comprimido = comprimir_bytes_a_bytes(
             data_bytes,
             prefijo=f'pago_{comercio["id"]}',

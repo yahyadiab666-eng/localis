@@ -518,7 +518,7 @@ def actualizar_producto(
             if not imagen_nueva:
                 return (
                     False,
-                    'No se pudo subir la imagen del producto.',
+                    'No se pudo subir la imagen del producto a Supabase Storage.',
                 )
             campos['imagen_url'] = imagen_nueva
 

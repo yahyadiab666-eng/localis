@@ -21,7 +21,7 @@ from backend.catalogo_maestro import (
 from backend.utils import (
     imagen_url_almacenada,
     normalizar_codigo_barras,
-    url_imagen_supabase_valida,
+    url_imagen_subida_storage_valida,
 )
 
 _USER_AGENT = 'LocalisApp/1.0 (Localis; contacto@localis.app)'
@@ -81,11 +81,11 @@ def optimizar_url_wsrv(url_original):
 
 
 def _url_manual_valida(imagen_manual):
-    """Subida Supabase o enlace https explícito del comercio."""
+    """URL ya en BD: Storage (subida manual) o https externa (texto/catálogo)."""
     manual = imagen_url_almacenada(imagen_manual)
     if not manual:
         return None
-    if url_imagen_supabase_valida(manual):
+    if url_imagen_subida_storage_valida(manual):
         return manual
     return optimizar_url_wsrv(manual) or manual
 
