@@ -36,11 +36,19 @@ from backend.subscriptions import (
 )
 
 _FILTRO_COMERCIO_PUBLICO = (
-    " AND c.visible = 1 AND c.estado_pago IN ('activo', 'gratis')"
+    " AND COALESCE(c.visible, 1) = 1"
+    " AND LOWER(TRIM(c.estado_pago)) IN ('activo', 'gratis')"
 )
 
 _CONFIG_TTL_SEG = 120
 _POOL_MUESTRA_ALEATORIA = 400
+
+
+def _valor_fila(fila, clave, indice=0):
+    """Lee columna de fila dict (PostgreSQL) o tupla (consultas sin row_factory)."""
+    if isinstance(fila, dict):
+        return fila.get(clave)
+    return fila[indice]
 
 
 def _cargar_tasa_dolar_db():
@@ -51,7 +59,7 @@ def _cargar_tasa_dolar_db():
                 "SELECT valor FROM configuracion_sistema WHERE clave = 'tasa_dolar'"
             )
             fila = cursor.fetchone()
-            return float(fila[0]) if fila else 36.50
+            return float(_valor_fila(fila, 'valor', 0)) if fila else 36.50
     except Exception:
         return 36.50
 
@@ -69,7 +77,10 @@ def _cargar_config_map_db(claves):
                 f'SELECT clave, valor FROM configuracion_sistema WHERE clave IN ({placeholders})',
                 tuple(claves),
             )
-            return {fila[0]: fila[1] for fila in cursor.fetchall()}
+            return {
+                _valor_fila(fila, 'clave', 0): _valor_fila(fila, 'valor', 1)
+                for fila in cursor.fetchall()
+            }
     except Exception:
         return {}
 
@@ -476,7 +487,11 @@ def buscar_y_filtrar_productos(
                 query_ids += ' ORDER BY p.id DESC LIMIT ?'
                 params_ids.append(pool_size)
                 cursor.execute(query_ids, params_ids)
-                ids = [fila[0] for fila in cursor.fetchall()]
+                ids = [
+                    _valor_fila(fila, 'id', 0)
+                    for fila in cursor.fetchall()
+                    if _valor_fila(fila, 'id', 0) is not None
+                ]
                 if not ids:
                     return []
                 ids = random.sample(ids, min(int(limit), len(ids)))
@@ -499,7 +514,7 @@ def buscar_y_filtrar_productos(
 
             productos = []
             for fila in filas:
-                d = dict(fila)
+                d = dict(fila) if not isinstance(fila, dict) else fila
                 try:
                     precio = float(d.get('precio_usd') or 0)
                 except (TypeError, ValueError):
@@ -510,7 +525,10 @@ def buscar_y_filtrar_productos(
 
             return imagen_urls_para_catalogo(productos)
     except Exception as e:
-        print(f'Error en la búsqueda de productos: {str(e)}')
+        import traceback
+
+        print(f'Error en la búsqueda de productos: {e}')
+        traceback.print_exc()
         return []
 
 
@@ -526,8 +544,8 @@ def obtener_producto_publico(producto_id):
                        c.telefono AS comercio_telefono
                 FROM productos p
                 JOIN comercios c ON p.comercio_id = c.id
-                WHERE p.id = ? AND c.visible = 1
-                  AND c.estado_pago IN ('activo', 'gratis')
+                WHERE p.id = ? AND COALESCE(c.visible, 1) = 1
+                  AND LOWER(TRIM(c.estado_pago)) IN ('activo', 'gratis')
                 """,
                 (producto_id,),
             )
