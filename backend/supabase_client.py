@@ -142,7 +142,7 @@ _URL_INFO = sanitizar_url_supabase(_URL_RAW, database_url=os.getenv('DATABASE_UR
 _aplicar_config_url(_URL_INFO, _URL_RAW)
 
 SUPABASE_URL = _URL_INFO.url if _URL_INFO.valida else ''
-SUPABASE_URL_VALIDA = _URL_INFO.valida
+SUPABASE_URL_VALIDA = bool(SUPABASE_URL)
 SUPABASE_URL_ADVERTENCIAS = list(_URL_INFO.advertencias)
 SUPABASE_URL_ERRORES = list(_URL_INFO.errores)
 SUPABASE_KEY = _limpiar_valor_env(os.getenv('SUPABASE_KEY'))

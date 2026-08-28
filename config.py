@@ -108,12 +108,6 @@ def validar_config_arranque():
             from backend.supabase_client import obtener_diagnostico_supabase
 
             diag = obtener_diagnostico_supabase()
-            if diag.get('id_sospechoso'):
-                advertencias.append(
-                    'SUPABASE_URL: el ID del proyecto parece mal copiado o no coincide con '
-                    f'DATABASE_URL (ref detectado: {diag.get("project_ref") or "?"}). '
-                    'Copia la Project URL desde Supabase Dashboard -> Settings -> API.'
-                )
             if not diag.get('ok'):
                 errores_url = diag.get('errores') or []
                 if errores_url:
@@ -143,11 +137,6 @@ def validar_config_arranque():
             from backend.supabase_client import obtener_diagnostico_supabase
 
             diag = obtener_diagnostico_supabase()
-            if diag.get('id_sospechoso'):
-                advertencias.append(
-                    'SUPABASE_URL: revisa el ID del proyecto en .env (debe ser el de '
-                    'Settings -> API en supabase.com/dashboard, 20 caracteres).'
-                )
             for aviso_url in diag.get('advertencias') or []:
                 advertencias.append(f'SUPABASE_URL: {aviso_url}')
 
