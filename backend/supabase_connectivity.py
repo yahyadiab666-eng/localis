@@ -14,6 +14,9 @@ import httpx
 
 LOG_PREFIX = '[Localis Supabase Red]'
 _HOST_SUPABASE_RE = re.compile(r'^[a-z0-9-]+\.supabase\.co$', re.IGNORECASE)
+_REF_PROYECTO_RE = re.compile(r'^[a-z0-9]{12,30}$')
+_REF_PROYECTO_LONGITUD_ESTANDAR = 20
+_SUFIJO_HOST_SUPABASE = '.supabase.co'
 _PATHS_ERRONEOS = (
     '/rest/v1',
     '/rest/v1/',
@@ -36,12 +39,127 @@ def _limpiar_texto_env(valor):
 class ResultadoUrlSupabase:
     url: str = ''
     host: str = ''
+    project_ref: str = ''
     valida: bool = False
+    id_sospechoso: bool = False
     advertencias: list[str] = field(default_factory=list)
     errores: list[str] = field(default_factory=list)
 
 
-def sanitizar_url_supabase(raw_url: str | None) -> ResultadoUrlSupabase:
+def extraer_ref_proyecto_de_host(host: str | None) -> str:
+    """Extrae REF de REF.supabase.co."""
+    texto = (host or '').strip().lower()
+    if not texto.endswith(_SUFIJO_HOST_SUPABASE):
+        return ''
+    return texto[: -len(_SUFIJO_HOST_SUPABASE)]
+
+
+def extraer_ref_proyecto_de_database_url(database_url: str | None) -> str:
+    """
+    Obtiene el project ref desde DATABASE_URL de Supabase.
+    Formatos: db.REF.supabase.co o usuario postgres.REF en pooler.
+    """
+    from urllib.parse import unquote
+
+    valor = _limpiar_texto_env(database_url)
+    if not valor:
+        return ''
+
+    parsed = urlparse(valor)
+    usuario = unquote(parsed.username or '')
+    if usuario.startswith('postgres.') and len(usuario) > len('postgres.'):
+        candidato = usuario.split('.', 1)[1].strip().lower()
+        if _REF_PROYECTO_RE.fullmatch(candidato):
+            return candidato
+
+    host = (parsed.hostname or '').lower()
+    if host.startswith('db.') and host.endswith(_SUFIJO_HOST_SUPABASE):
+        candidato = host[3 : -len(_SUFIJO_HOST_SUPABASE)]
+        if _REF_PROYECTO_RE.fullmatch(candidato):
+            return candidato
+    return ''
+
+
+def _validar_id_proyecto(ref: str, database_url: str | None = None) -> tuple[list[str], list[str], bool]:
+    """Valida formato del ID de proyecto Supabase; retorna errores, advertencias, sospechoso."""
+    errores: list[str] = []
+    advertencias: list[str] = []
+    sospechoso = False
+
+    if not ref:
+        errores.append(
+            'No se pudo extraer el ID del proyecto del host (esperado REF.supabase.co).'
+        )
+        return errores, advertencias, True
+
+    if not _REF_PROYECTO_RE.fullmatch(ref):
+        errores.append(
+            f'ID de proyecto "{ref}" inválido: solo letras minúsculas y números, '
+            f'sin guiones ni caracteres especiales.'
+        )
+        sospechoso = True
+
+    if len(ref) != _REF_PROYECTO_LONGITUD_ESTANDAR:
+        advertencias.append(
+            f'ID "{ref}" tiene {len(ref)} caracteres; en Supabase suele ser '
+            f'exactamente {_REF_PROYECTO_LONGITUD_ESTANDAR}. '
+            'Puede ser un error tipográfico al copiar desde el dashboard.'
+        )
+        sospechoso = True
+
+    if re.search(r'(.)\1{2,}', ref):
+        advertencias.append(
+            f'ID "{ref}" tiene letras/números repetidos seguidos (p. ej. "nnn", "zzz"); '
+            'revisa si pegaste mal la URL del proyecto.'
+        )
+        sospechoso = True
+
+    ref_db = extraer_ref_proyecto_de_database_url(database_url)
+    if ref_db and ref and ref_db != ref:
+        advertencias.append(
+            f'SUPABASE_URL apunta al proyecto "{ref}" pero DATABASE_URL usa "{ref_db}". '
+            'Ambos deben ser el mismo proyecto (Settings -> API en supabase.com/dashboard).'
+        )
+        sospechoso = True
+
+    return errores, advertencias, sospechoso
+
+
+def imprimir_alerta_supabase_url(resultado: ResultadoUrlSupabase, url_raw: str | None = None) -> None:
+    """Aviso visible en consola al arrancar si la URL parece mal copiada."""
+    if not resultado.host and not resultado.errores and not resultado.advertencias:
+        return
+
+    raw = _limpiar_texto_env(url_raw)
+    if resultado.valida and not resultado.id_sospechoso and not resultado.advertencias:
+        return
+
+    print(f'{LOG_PREFIX} ===== REVISION SUPABASE_URL =====')
+    if raw and raw != resultado.url:
+        print(f'{LOG_PREFIX} Valor en entorno (raw): {raw}')
+    if resultado.url:
+        print(f'{LOG_PREFIX} URL sanitizada: {resultado.url}')
+    if resultado.project_ref:
+        print(f'{LOG_PREFIX} ID de proyecto detectado: {resultado.project_ref}')
+
+    for error in resultado.errores:
+        print(f'{LOG_PREFIX} ERROR: {error}')
+    for aviso in resultado.advertencias:
+        print(f'{LOG_PREFIX} AVISO: {aviso}')
+
+    if resultado.id_sospechoso or resultado.errores:
+        print(
+            f'{LOG_PREFIX} Accion: abre Supabase Dashboard -> Settings -> API -> '
+            'Project URL y copia exactamente https://TU_REF.supabase.co en Render '
+            '(variable SUPABASE_URL, sin comillas ni /rest/v1).'
+        )
+    print(f'{LOG_PREFIX} =================================')
+
+def sanitizar_url_supabase(
+    raw_url: str | None,
+    *,
+    database_url: str | None = None,
+) -> ResultadoUrlSupabase:
     """
     Normaliza SUPABASE_URL para evitar fallos DNS por barras finales, paths extra
     o caracteres inválidos copiados desde el panel de Render/Supabase.
@@ -100,6 +218,17 @@ def sanitizar_url_supabase(raw_url: str | None) -> ResultadoUrlSupabase:
         resultado.advertencias.append(
             f'Host "{host}" no coincide con el patrón REF.supabase.co; verifica el valor en el dashboard.'
         )
+        resultado.id_sospechoso = True
+
+    resultado.project_ref = extraer_ref_proyecto_de_host(host)
+    errores_id, advertencias_id, sospechoso_id = _validar_id_proyecto(
+        resultado.project_ref,
+        database_url=database_url,
+    )
+    resultado.errores.extend(errores_id)
+    resultado.advertencias.extend(advertencias_id)
+    if sospechoso_id:
+        resultado.id_sospechoso = True
 
     if parsed.username or parsed.password:
         resultado.errores.append(
@@ -236,10 +365,18 @@ def _recomendacion_fallo(resultado: dict[str, Any]) -> str:
             '(sin /rest/v1, sin barra final, sin comillas).'
         )
     if capa == 'dns':
-        return (
-            'El contenedor no resuelve el host de Supabase (DNS). Verifica SUPABASE_URL, '
-            'reinicia el servicio en Render y confirma que no haya firewall saliente bloqueando *.supabase.co:443.'
+        ref = extraer_ref_proyecto_de_host(resultado.get('host'))
+        base = (
+            'El contenedor no resuelve el host de Supabase (DNS). '
+            'Verifica SUPABASE_URL en Render y confirma que el ID del proyecto '
+            'coincida con Settings -> API en supabase.com/dashboard.'
         )
+        if ref:
+            return (
+                f'{base} Host actual: {ref}.supabase.co — si el ID tiene letras '
+                'duplicadas o longitud distinta de 20, probablemente está mal copiado.'
+            )
+        return base
     if capa == 'ssl/tls':
         return (
             'Fallo TLS hacia Supabase. Revisa fecha/hora del servidor y que Python tenga '
@@ -285,13 +422,15 @@ def diagnosticar_conectividad_supabase(
     key = _limpiar_texto_env(supabase_key if supabase_key is not None else SUPABASE_KEY)
     bucket_nombre = (bucket or SUPABASE_BUCKET_IMAGENES or 'imagenes').strip('/')
 
-    url_info = sanitizar_url_supabase(url_raw)
+    url_info = sanitizar_url_supabase(url_raw, database_url=os.getenv('DATABASE_URL'))
     informe: dict[str, Any] = {
         'ok': False,
         'config_ok': url_info.valida and bool(key),
         'url': url_info.url,
         'url_raw_presente': bool(_limpiar_texto_env(url_raw)),
         'host': url_info.host,
+        'project_ref': url_info.project_ref,
+        'id_sospechoso': url_info.id_sospechoso,
         'advertencias_config': url_info.advertencias,
         'errores_config': url_info.errores,
         'key_presente': bool(key),
@@ -303,6 +442,10 @@ def diagnosticar_conectividad_supabase(
         informe['capa_fallo'] = 'config'
         informe['recomendacion'] = _recomendacion_fallo(informe)
         return informe
+
+    if url_info.id_sospechoso:
+        informe['advertencias_config'] = list(url_info.advertencias)
+        imprimir_alerta_supabase_url(url_info, url_raw)
 
     if not key:
         informe['errores_config'].append('SUPABASE_KEY ausente para probar la API REST.')

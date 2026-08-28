@@ -83,6 +83,19 @@ def obtener_estado_sistema(*, probar_supabase: bool = False):
 
 def ejecutar_diagnostico_inicio():
     """Ejecuta diagnóstico al iniciar la app e imprime resumen en consola."""
+    try:
+        from backend.supabase_client import obtener_diagnostico_supabase
+
+        diag_url = obtener_diagnostico_supabase()
+        if diag_url.get('id_sospechoso'):
+            print(
+                '[Localis Diagnóstico] SUPABASE_URL sospechosa: '
+                f'ref={diag_url.get("project_ref") or "?"} — '
+                'revisa Settings -> API en el dashboard de Supabase.'
+            )
+    except Exception:
+        pass
+
     estado = obtener_estado_sistema(probar_supabase=True)
     bd = estado['database']
     if bd.get('ok'):

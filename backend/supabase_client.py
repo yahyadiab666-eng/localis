@@ -12,6 +12,7 @@ from supabase.lib.client_options import SyncClientOptions
 
 from backend.supabase_connectivity import (
     ResultadoUrlSupabase,
+    imprimir_alerta_supabase_url,
     sanitizar_url_supabase,
 )
 
@@ -91,12 +92,8 @@ def _crear_cliente_supabase(api_key, etiqueta='anon'):
         return None
 
 
-def _aplicar_config_url(resultado: ResultadoUrlSupabase) -> None:
-    prefijo = '[Localis Supabase]'
-    for aviso in resultado.advertencias:
-        print(f'{prefijo} URL: {aviso}')
-    for error in resultado.errores:
-        print(f'{prefijo} URL inválida: {error}')
+def _aplicar_config_url(resultado: ResultadoUrlSupabase, url_raw: str | None = None) -> None:
+    imprimir_alerta_supabase_url(resultado, url_raw)
 
 
 def _imprimir_estado_supabase():
@@ -140,8 +137,9 @@ def _imprimir_estado_supabase():
         )
 
 
-_URL_INFO = sanitizar_url_supabase(os.getenv('SUPABASE_URL'))
-_aplicar_config_url(_URL_INFO)
+_URL_RAW = os.getenv('SUPABASE_URL')
+_URL_INFO = sanitizar_url_supabase(_URL_RAW, database_url=os.getenv('DATABASE_URL'))
+_aplicar_config_url(_URL_INFO, _URL_RAW)
 
 SUPABASE_URL = _URL_INFO.url if _URL_INFO.valida else ''
 SUPABASE_URL_VALIDA = _URL_INFO.valida
@@ -238,8 +236,10 @@ def obtener_diagnostico_supabase():
         'raw_presente': bool(_limpiar_valor_env(os.getenv('SUPABASE_URL'))),
         'advertencias': SUPABASE_URL_ADVERTENCIAS,
         'errores': SUPABASE_URL_ERRORES,
+        'project_ref': _URL_INFO.project_ref,
+        'id_sospechoso': _URL_INFO.id_sospechoso,
         'postgrest_circuito_abierto': postgrest_circuito_abierto(),
-        'url_raw': _limpiar_valor_env(os.getenv('SUPABASE_URL')),
+        'url_raw': _limpiar_valor_env(_URL_RAW),
     }
 
 
