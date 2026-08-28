@@ -13,9 +13,6 @@ from urllib.parse import urlparse
 import httpx
 
 LOG_PREFIX = '[Localis Supabase Red]'
-# Cualquier subdominio alfanumerico valido antes de .supabase.co (p. ej. wesnnnvoavprgqcczzsg).
-_HOST_SUPABASE_RE = re.compile(r'^[a-z0-9-]+\.supabase\.co$', re.IGNORECASE)
-_REF_PROYECTO_RE = re.compile(r'^[a-z0-9-]+$', re.IGNORECASE)
 _SUFIJO_HOST_SUPABASE = '.supabase.co'
 _PATHS_ERRONEOS = (
     '/rest/v1',
@@ -68,44 +65,22 @@ def extraer_ref_proyecto_de_database_url(database_url: str | None) -> str:
     parsed = urlparse(valor)
     usuario = unquote(parsed.username or '')
     if usuario.startswith('postgres.') and len(usuario) > len('postgres.'):
-        candidato = usuario.split('.', 1)[1].strip().lower()
-        if _REF_PROYECTO_RE.fullmatch(candidato):
-            return candidato
+        return usuario.split('.', 1)[1].strip().lower()
 
     host = (parsed.hostname or '').lower()
     if host.startswith('db.') and host.endswith(_SUFIJO_HOST_SUPABASE):
-        candidato = host[3 : -len(_SUFIJO_HOST_SUPABASE)]
-        if _REF_PROYECTO_RE.fullmatch(candidato):
-            return candidato
+        return host[3 : -len(_SUFIJO_HOST_SUPABASE)]
     return ''
 
 
-def _validar_id_proyecto(ref: str, database_url: str | None = None) -> tuple[list[str], list[str], bool]:
-    """Valida formato del subdominio del proyecto; retorna errores, advertencias, sospechoso."""
-    errores: list[str] = []
-    advertencias: list[str] = []
-
-    if not ref:
-        errores.append(
-            'No se pudo extraer el ID del proyecto del host (esperado REF.supabase.co).'
-        )
-        return errores, advertencias, True
-
-    if not _REF_PROYECTO_RE.fullmatch(ref):
-        errores.append(
-            f'ID de proyecto "{ref}" invalido: use solo letras, numeros y guiones '
-            f'antes de .supabase.co.'
-        )
-        return errores, advertencias, True
-
+def _advertir_mismatch_database_url(ref: str, database_url: str | None = None) -> list[str]:
     ref_db = extraer_ref_proyecto_de_database_url(database_url)
-    if ref_db and ref_db != ref:
-        advertencias.append(
+    if ref_db and ref and ref_db != ref:
+        return [
             f'SUPABASE_URL usa "{ref}" pero DATABASE_URL usa "{ref_db}". '
             'Verifica que ambas apunten al mismo proyecto si estan configuradas.'
-        )
-
-    return errores, advertencias, False
+        ]
+    return []
 
 
 def imprimir_alerta_supabase_url(resultado: ResultadoUrlSupabase, url_raw: str | None = None) -> None:
@@ -164,14 +139,14 @@ def sanitizar_url_supabase(
     texto = re.sub(r'\s+', '', texto)
 
     if not re.match(r'^https?://', texto, re.IGNORECASE):
-        if re.match(r'^[a-z0-9-]+\.supabase\.co', texto, re.IGNORECASE):
+        if _SUFIJO_HOST_SUPABASE in texto.lower():
             texto = f'https://{texto}'
             resultado.advertencias.append(
                 'SUPABASE_URL no tenía esquema; se añadió https:// automáticamente.'
             )
         else:
             resultado.errores.append(
-                'SUPABASE_URL debe comenzar con https:// (p. ej. https://REF.supabase.co).'
+                'SUPABASE_URL debe comenzar con https:// y apuntar a *.supabase.co.'
             )
             return resultado
 
@@ -191,29 +166,23 @@ def sanitizar_url_supabase(
     resultado.host = host
 
     if parsed.scheme.lower() != 'https':
-        resultado.advertencias.append(
-            f'Esquema {parsed.scheme}: se recomienda https:// para Supabase en la nube.'
-        )
+        resultado.errores.append('SUPABASE_URL debe comenzar con https://.')
+        return resultado
 
     if not host:
         resultado.errores.append('SUPABASE_URL no contiene un hostname válido.')
         return resultado
 
-    if not _HOST_SUPABASE_RE.match(host):
+    if not host.endswith(_SUFIJO_HOST_SUPABASE):
         resultado.errores.append(
-            f'Host "{host}" invalido: debe ser un subdominio alfanumerico antes de .supabase.co.'
+            f'Host "{host}" invalido: la URL debe terminar en {_SUFIJO_HOST_SUPABASE}.'
         )
         return resultado
 
     resultado.project_ref = extraer_ref_proyecto_de_host(host)
-    errores_id, advertencias_id, sospechoso_id = _validar_id_proyecto(
-        resultado.project_ref,
-        database_url=database_url,
+    resultado.advertencias.extend(
+        _advertir_mismatch_database_url(resultado.project_ref, database_url)
     )
-    resultado.errores.extend(errores_id)
-    resultado.advertencias.extend(advertencias_id)
-    if sospechoso_id:
-        resultado.id_sospechoso = True
 
     if parsed.username or parsed.password:
         resultado.errores.append(
