@@ -4,6 +4,10 @@ __pycache__/
 instance/
 test_app_localis.py
 
+# Subidas locales de respaldo (no versionar archivos de usuario)
+static/uploads/**
+!static/uploads/.gitkeep
+
 # Capacitor / Android
 node_modules/
 android/.gradle/

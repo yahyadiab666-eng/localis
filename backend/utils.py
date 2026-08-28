@@ -114,14 +114,28 @@ def url_imagen_subida_storage_valida(valor):
     return texto
 
 
+def url_imagen_local_valida(valor):
+    """Ruta pública /static/uploads/... tras respaldo local en disco."""
+    texto = texto_campo_imagen(valor, default=None)
+    if not texto or es_imagen_generica(texto):
+        return None
+    if not texto.startswith('/static/uploads/'):
+        return None
+    if '..' in texto.replace('\\', '/'):
+        return None
+    return texto
+
+
 # Alias histórico
 url_imagen_supabase_valida = url_imagen_subida_storage_valida
 
 
 def url_imagen_usable(valor):
-    """True si hay URL externa (texto) o enlace de subida manual a Storage."""
+    """True si hay URL externa, Storage o respaldo local /static/uploads/."""
     return bool(
-        url_imagen_subida_storage_valida(valor) or url_imagen_externa_valida(valor)
+        url_imagen_subida_storage_valida(valor)
+        or url_imagen_local_valida(valor)
+        or url_imagen_externa_valida(valor)
     )
 
 
@@ -129,9 +143,14 @@ def imagen_url_almacenada(valor):
     """
     Valor persistible en PostgreSQL:
     - URL externa / catálogo maestro (texto https), o
-    - enlace público de Supabase Storage (subida manual).
+    - enlace público de Supabase Storage, o
+    - ruta /static/uploads/... (respaldo local).
     """
-    return url_imagen_subida_storage_valida(valor) or url_imagen_externa_valida(valor)
+    return (
+        url_imagen_subida_storage_valida(valor)
+        or url_imagen_local_valida(valor)
+        or url_imagen_externa_valida(valor)
+    )
 
 
 def imagen_url_para_persistir(valor):
@@ -151,8 +170,10 @@ def imagen_url_para_actualizacion(nueva, existente):
 
 
 def es_url_subida_storage(valor):
-    """True si el valor es enlace público de una subida manual a Supabase Storage."""
-    return bool(url_imagen_subida_storage_valida(valor))
+    """True si el valor es enlace público de Supabase Storage o respaldo local."""
+    return bool(
+        url_imagen_subida_storage_valida(valor) or url_imagen_local_valida(valor)
+    )
 
 
 def es_url_externa_texto(valor):
@@ -172,7 +193,7 @@ def normalizar_url_imagen(valor, default=None):
 
 def url_banner_principal(valor, default=None):
     """
-    URL segura para banner promocional (https externo o subida Storage).
+    URL segura para banner promocional (https, Storage o respaldo local).
     Evita rutas /static/... inexistentes en el despliegue.
     """
     from config import DEFAULT_BANNER_URL
@@ -181,10 +202,15 @@ def url_banner_principal(valor, default=None):
     texto = texto_campo_imagen(valor, default=None)
     if not texto:
         return fallback
+
+    almacenada = imagen_url_almacenada(texto)
+    if almacenada:
+        if almacenada.startswith('/static/') and not url_estatica_existe(almacenada):
+            return fallback
+        return almacenada
+
     if texto.startswith('/static/'):
         return fallback
-    if imagen_url_almacenada(texto):
-        return texto
     return fallback
 
 

@@ -23,23 +23,64 @@ from database import DATABASE_URL, diagnosticar_postgresql
 
 _bloqueo_envio = threading.Lock()
 _ultimos_envios = {}
+_cache_diagnostico_supabase = None
 
 
-def obtener_estado_sistema():
+def _diagnostico_supabase_red(*, forzar: bool = False):
+    """Conectividad Supabase (DNS + HTTP directo + SDK); no bloquea el arranque."""
+    global _cache_diagnostico_supabase
+    if _cache_diagnostico_supabase is not None and not forzar:
+        return _cache_diagnostico_supabase
+
+    try:
+        from backend.supabase_connectivity import (
+            diagnosticar_conectividad_supabase,
+            imprimir_diagnostico_conectividad,
+        )
+        from backend.supabase_client import SUPABASE_URL
+
+        if not SUPABASE_URL:
+            _cache_diagnostico_supabase = {
+                'ok': False,
+                'omitido': True,
+                'motivo': 'SUPABASE_URL no configurada',
+            }
+            return _cache_diagnostico_supabase
+
+        informe = diagnosticar_conectividad_supabase(probar_sdk=True)
+        imprimir_diagnostico_conectividad(informe)
+        _cache_diagnostico_supabase = informe
+        return informe
+    except Exception as error:
+        print(f'[Localis Supabase Red] No se pudo ejecutar diagnóstico: {error}')
+        _cache_diagnostico_supabase = {'ok': False, 'error': str(error)}
+        return _cache_diagnostico_supabase
+
+
+def obtener_estado_sistema(*, probar_supabase: bool = False):
     """Estado consolidado para health checks y arranque."""
     diag_bd = diagnosticar_postgresql()
+    diag_supabase = _diagnostico_supabase_red(forzar=probar_supabase)
+    ok_bd = diag_bd.get('ok', False)
+    ok_supabase = (
+        diag_supabase.get('ok', True)
+        if diag_supabase.get('omitido')
+        else diag_supabase.get('ok', False)
+    )
     return {
-        'ok': diag_bd.get('ok', False),
+        'ok': ok_bd,
         'entorno': APP_ENV,
         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'database': diag_bd,
         'database_url_configurada': bool(DATABASE_URL),
+        'supabase': diag_supabase,
+        'supabase_conectado': ok_supabase,
     }
 
 
 def ejecutar_diagnostico_inicio():
     """Ejecuta diagnóstico al iniciar la app e imprime resumen en consola."""
-    estado = obtener_estado_sistema()
+    estado = obtener_estado_sistema(probar_supabase=True)
     bd = estado['database']
     if bd.get('ok'):
         print(
@@ -49,6 +90,21 @@ def ejecutar_diagnostico_inicio():
     else:
         print(
             f"[Localis Diagnóstico] PostgreSQL FALLO: {bd.get('error') or 'tablas incompletas'}"
+        )
+
+    supabase = estado.get('supabase') or {}
+    if supabase.get('omitido'):
+        print('[Localis Diagnóstico] Supabase: omitido (URL no configurada).')
+    elif supabase.get('ok'):
+        print(
+            f"[Localis Diagnóstico] Supabase OK "
+            f"host={supabase.get('host')} "
+            f"rest={(supabase.get('http_rest') or {}).get('latencia_ms')}ms"
+        )
+    else:
+        print(
+            f"[Localis Diagnóstico] Supabase FALLO capa={supabase.get('capa_fallo')}: "
+            f"{supabase.get('recomendacion') or supabase.get('error') or 'sin detalle'}"
         )
     return estado
 

@@ -10,10 +10,15 @@ import httpx
 from supabase import Client, create_client
 from supabase.lib.client_options import SyncClientOptions
 
+from backend.supabase_connectivity import (
+    ResultadoUrlSupabase,
+    sanitizar_url_supabase,
+)
+
 _STORAGE_PUBLIC_PREFIX = '/storage/v1/object/public/'
 _SUBASE_TYPO_RE = re.compile(r'/subase/', re.IGNORECASE)
 SUPABASE_HTTP_TIMEOUT = 10.0
-SUPABASE_CONNECT_TIMEOUT = 2.0
+SUPABASE_CONNECT_TIMEOUT = 5.0
 
 
 def _limpiar_valor_env(valor):
@@ -39,51 +44,37 @@ def _mascara_secreto(valor, visible=4):
     return f'{texto[:visible]}…{texto[-visible:]}'
 
 
-def _imprimir_estado_supabase():
-    """Log legible al arrancar; no imprime claves completas."""
-    prefijo = '[Localis Supabase]'
-
-    if not SUPABASE_URL and not SUPABASE_KEY:
-        print(
-            f'{prefijo} No configurado (SUPABASE_URL/SUPABASE_KEY ausentes). '
-            'Catálogo maestro usará PostgreSQL directo.'
-        )
-        return
-
-    if not SUPABASE_URL:
-        print(f'{prefijo} SUPABASE_URL vacía.')
-        return
-
-    host = _extraer_host_desde_url(SUPABASE_URL) or SUPABASE_URL
-    print(
-        f'{prefijo} URL={SUPABASE_URL} host={host} | '
-        f'SUPABASE_KEY={_mascara_secreto(SUPABASE_KEY)} | '
-        f'SERVICE_ROLE={_mascara_secreto(SUPABASE_SERVICE_ROLE_KEY)}'
+def _timeout_http_supabase() -> httpx.Timeout:
+    """Timeouts recomendados para entornos cloud (Render): fail-fast en DNS/connect."""
+    return httpx.Timeout(
+        connect=SUPABASE_CONNECT_TIMEOUT,
+        read=SUPABASE_HTTP_TIMEOUT,
+        write=SUPABASE_HTTP_TIMEOUT,
+        pool=SUPABASE_CONNECT_TIMEOUT,
     )
 
-    if supabase:
-        print(f'{prefijo} Cliente API inicializado (PostgREST + Storage).')
-    else:
-        clave_msg = 'SUPABASE_KEY ausente' if not SUPABASE_KEY else 'fallo al crear cliente'
-        print(
-            f'{prefijo} Cliente API no disponible ({clave_msg}). '
-            'Catálogo maestro usará PostgreSQL.'
-        )
 
+def _opciones_cliente_supabase() -> SyncClientOptions:
+    """
+    Opciones del SDK supabase-py 2.x.
 
-def _opciones_cliente_supabase():
-    """Timeout HTTP uniforme para PostgREST, Storage y Functions."""
-    timeout = httpx.Timeout(SUPABASE_HTTP_TIMEOUT, connect=SUPABASE_CONNECT_TIMEOUT)
+    No inyectamos un httpx.Client compartido: el SDK lo reutiliza entre PostgREST,
+    Storage y Auth y puede mutar base_url entre servicios (bug conocido en versiones
+    recientes). Cada subservicio crea su propio cliente httpx con estos timeouts.
+    """
+    timeout = _timeout_http_supabase()
     return SyncClientOptions(
         postgrest_client_timeout=timeout,
         storage_client_timeout=int(SUPABASE_HTTP_TIMEOUT),
         function_client_timeout=int(SUPABASE_HTTP_TIMEOUT),
-        httpx_client=httpx.Client(timeout=timeout),
+        httpx_client=None,
     )
 
 
 def _crear_cliente_supabase(api_key, etiqueta='anon'):
     if not SUPABASE_URL or not api_key:
+        return None
+    if not SUPABASE_URL_VALIDA:
         return None
     try:
         return create_client(
@@ -100,7 +91,59 @@ def _crear_cliente_supabase(api_key, etiqueta='anon'):
         return None
 
 
-SUPABASE_URL = (os.getenv('SUPABASE_URL') or '').strip()
+def _aplicar_config_url(resultado: ResultadoUrlSupabase) -> None:
+    prefijo = '[Localis Supabase]'
+    for aviso in resultado.advertencias:
+        print(f'{prefijo} URL: {aviso}')
+    for error in resultado.errores:
+        print(f'{prefijo} URL inválida: {error}')
+
+
+def _imprimir_estado_supabase():
+    """Log legible al arrancar; no imprime claves completas."""
+    prefijo = '[Localis Supabase]'
+
+    if not SUPABASE_URL and not SUPABASE_KEY:
+        print(
+            f'{prefijo} No configurado (SUPABASE_URL/SUPABASE_KEY ausentes). '
+            'Subidas manuales usarán respaldo local (static/uploads/). '
+            'Catálogo maestro usará PostgreSQL directo.'
+        )
+        return
+
+    if not SUPABASE_URL:
+        print(f'{prefijo} SUPABASE_URL vacía o inválida tras sanitización.')
+        return
+
+    host = _extraer_host_desde_url(SUPABASE_URL) or SUPABASE_URL
+    print(
+        f'{prefijo} URL={SUPABASE_URL} host={host} | '
+        f'SUPABASE_KEY={_mascara_secreto(SUPABASE_KEY)} | '
+        f'SERVICE_ROLE={_mascara_secreto(SUPABASE_SERVICE_ROLE_KEY)}'
+    )
+
+    if supabase:
+        print(
+            f'{prefijo} Cliente API inicializado (PostgREST + Storage). '
+            'Si Storage falla por red, las subidas usan respaldo local.'
+        )
+    else:
+        clave_msg = 'SUPABASE_KEY ausente' if not SUPABASE_KEY else 'fallo al crear cliente'
+        if not SUPABASE_URL_VALIDA:
+            clave_msg = 'SUPABASE_URL inválida'
+        print(
+            f'{prefijo} Cliente API no disponible ({clave_msg}). '
+            'Subidas manuales usarán static/uploads/. Catálogo maestro: PostgreSQL.'
+        )
+
+
+_URL_INFO = sanitizar_url_supabase(os.getenv('SUPABASE_URL'))
+_aplicar_config_url(_URL_INFO)
+
+SUPABASE_URL = _URL_INFO.url if _URL_INFO.valida else ''
+SUPABASE_URL_VALIDA = _URL_INFO.valida
+SUPABASE_URL_ADVERTENCIAS = list(_URL_INFO.advertencias)
+SUPABASE_URL_ERRORES = list(_URL_INFO.errores)
 SUPABASE_KEY = _limpiar_valor_env(os.getenv('SUPABASE_KEY'))
 SUPABASE_SERVICE_ROLE_KEY = _limpiar_valor_env(os.getenv('SUPABASE_SERVICE_ROLE_KEY'))
 SUPABASE_BUCKET_IMAGENES = _limpiar_valor_env(os.getenv('SUPABASE_BUCKET_IMAGENES')) or 'imagenes'
@@ -125,12 +168,14 @@ def supabase_api_habilitado():
 
 
 def obtener_diagnostico_supabase():
-    """Estado de configuración (compatibilidad con config.py)."""
+    """Estado de configuración y URL sanitizada."""
     return {
-        'ok': bool(SUPABASE_URL),
+        'ok': SUPABASE_URL_VALIDA and bool(SUPABASE_KEY),
         'url_sanitizada': SUPABASE_URL,
         'host': _extraer_host_desde_url(SUPABASE_URL),
-        'raw_presente': bool(SUPABASE_URL),
+        'raw_presente': bool(_limpiar_valor_env(os.getenv('SUPABASE_URL'))),
+        'advertencias': SUPABASE_URL_ADVERTENCIAS,
+        'errores': SUPABASE_URL_ERRORES,
     }
 
 
@@ -194,7 +239,7 @@ def construir_url_publica_storage(ruta: str, bucket: str | None = None) -> str:
 
 
 def corregir_typo_ruta_storage(url: str) -> str:
-    """Corrige /subase/ → /storage/ en URLs legacy o mal formadas."""
+    """Corrige /subase/ -> /storage/ en URLs legacy o mal formadas."""
     if not url:
         return url
     return _SUBASE_TYPO_RE.sub('/storage/', url)
@@ -257,6 +302,11 @@ def es_host_supabase(url: str) -> bool:
         return False
     host_config = _host_supabase()
     return host_config in corregir_typo_ruta_storage(url or '').lower()
+
+
+def storage_supabase_disponible():
+    """True si hay cliente Storage configurado (no implica conectividad de red)."""
+    return obtener_cliente_storage() is not None
 
 
 def obtener_cliente_storage():

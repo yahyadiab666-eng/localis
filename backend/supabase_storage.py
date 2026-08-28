@@ -1,23 +1,27 @@
 """
-Subida manual de archivos al bucket Supabase Storage.
+Subida de archivos: Supabase Storage (primario) con respaldo local automático.
 
 Arquitectura híbrida Localis:
-- URLs externas / catálogo maestro → texto https en PostgreSQL (sin pasar por aquí).
-- Archivos subidos por el usuario → comprimir y subir a Storage; persistir URL pública.
+- URLs externas / catálogo maestro → texto https en PostgreSQL.
+- Archivos subidos → Supabase Storage; si falla la red o la config, static/uploads/.
 """
 
 from backend.images import comprimir_file_storage_a_bytes, validar_archivo_subida
+from backend.local_storage import guardar_bytes_local
 from backend.supabase_client import (
     SUPABASE_BUCKET_IMAGENES,
     construir_url_publica_storage,
+    es_error_red_supabase,
     obtener_cliente_storage,
     storage_usa_service_role,
 )
 from backend.utils import url_imagen_subida_storage_valida
 
+LOG_PREFIX = '[Localis Storage]'
+
 
 class SupabaseUploadError(Exception):
-    """Error al subir un archivo manualmente a Supabase Storage."""
+    """Error irrecuperable al procesar o persistir una subida de imagen."""
 
 
 def _validar_url_publica_subida(url):
@@ -72,14 +76,32 @@ def _mensaje_error_storage(error):
     return f'Error al subir imagen a Supabase ({SUPABASE_BUCKET_IMAGENES}): {error}'
 
 
+def _describir_error(error):
+    if isinstance(error, SupabaseUploadError):
+        return str(error)
+    nombre = type(error).__name__
+    if es_error_red_supabase(error):
+        return f'red/DNS ({nombre})'
+    return f'{nombre}: {error}'
+
+
+def _registrar_fallo_supabase(error, carpeta, filename):
+    print(
+        f'{LOG_PREFIX} Supabase no disponible ({_describir_error(error)}). '
+        f'Respaldo local -> static/uploads/{carpeta.strip("/")}/{filename}'
+    )
+
+
+def _registrar_exito_supabase(ruta_storage):
+    print(f'{LOG_PREFIX} Supabase OK: {SUPABASE_BUCKET_IMAGENES}/{ruta_storage}')
+
+
+def _registrar_exito_local(url_local):
+    print(f'{LOG_PREFIX} Respaldo local OK: {url_local}')
+
+
 def _resolver_cliente_storage(supabase_client):
-    cliente = supabase_client or obtener_cliente_storage()
-    if not cliente:
-        raise SupabaseUploadError(
-            'Supabase Storage no está configurado. '
-            'Define SUPABASE_URL y SUPABASE_KEY (o SUPABASE_SERVICE_ROLE_KEY) en el entorno.'
-        )
-    return cliente
+    return supabase_client or obtener_cliente_storage()
 
 
 def _url_publica_tras_subida(cliente, ruta_storage):
@@ -117,14 +139,46 @@ def _subir_bytes_al_bucket(cliente, ruta_storage, data, content_type):
     return _url_publica_tras_subida(cliente, ruta_storage)
 
 
-def subir_imagen_a_supabase(
+def _persistir_con_respaldo(data, filename, content_type, carpeta, supabase_client=None):
+    """Intenta Supabase; ante cualquier fallo operativo usa static/uploads/."""
+    ruta_storage = f'{carpeta.strip("/")}/{filename}'
+    cliente = _resolver_cliente_storage(supabase_client)
+
+    if cliente:
+        try:
+            url = _subir_bytes_al_bucket(cliente, ruta_storage, data, content_type)
+            _registrar_exito_supabase(ruta_storage)
+            return url
+        except Exception as error:
+            _registrar_fallo_supabase(error, carpeta, filename)
+    else:
+        print(
+            f'{LOG_PREFIX} Supabase Storage no configurado. '
+            f'Usando respaldo local -> static/uploads/{carpeta.strip("/")}/{filename}'
+        )
+
+    try:
+        url_local = guardar_bytes_local(data, filename, carpeta)
+        _registrar_exito_local(url_local)
+        return url_local
+    except Exception as error:
+        print(
+            f'{LOG_PREFIX} ERROR CRÍTICO: respaldo local falló '
+            f'({type(error).__name__}: {error})'
+        )
+        raise SupabaseUploadError(
+            f'No se pudo guardar la imagen (Supabase ni disco local): {error}'
+        ) from error
+
+
+def subir_imagen_con_respaldo(
     file_storage,
     supabase_client=None,
     prefijo='img',
     carpeta='comercios',
     max_dimension=800,
 ):
-    """Subida manual de archivo → URL pública de Supabase Storage."""
+    """Subida manual: Supabase primario, static/uploads/ si la red o Storage fallan."""
     if not file_storage:
         raise SupabaseUploadError('No se recibió ningún archivo de imagen.')
 
@@ -139,10 +193,50 @@ def subir_imagen_a_supabase(
         raise SupabaseUploadError('No se pudo comprimir la imagen subida.')
 
     data, content_type, filename = comprimido
-    ruta_storage = f'{carpeta.strip("/")}/{filename}'
-    cliente = _resolver_cliente_storage(supabase_client)
+    return _persistir_con_respaldo(
+        data,
+        filename,
+        content_type,
+        carpeta,
+        supabase_client=supabase_client,
+    )
 
-    return _subir_bytes_al_bucket(cliente, ruta_storage, data, content_type)
+
+def subir_bytes_con_respaldo(
+    data,
+    filename,
+    supabase_client=None,
+    content_type='image/webp',
+    carpeta='pagos',
+):
+    """Subida de bytes (comprobantes): Supabase primario, respaldo local automático."""
+    if not data:
+        raise SupabaseUploadError('No hay datos de imagen para subir.')
+
+    return _persistir_con_respaldo(
+        data,
+        filename,
+        content_type,
+        carpeta,
+        supabase_client=supabase_client,
+    )
+
+
+def subir_imagen_a_supabase(
+    file_storage,
+    supabase_client=None,
+    prefijo='img',
+    carpeta='comercios',
+    max_dimension=800,
+):
+    """Alias retrocompatible → subir_imagen_con_respaldo."""
+    return subir_imagen_con_respaldo(
+        file_storage,
+        supabase_client=supabase_client,
+        prefijo=prefijo,
+        carpeta=carpeta,
+        max_dimension=max_dimension,
+    )
 
 
 def subir_bytes_a_supabase(
@@ -152,10 +246,11 @@ def subir_bytes_a_supabase(
     content_type='image/webp',
     carpeta='pagos',
 ):
-    """Subida manual de bytes (p. ej. comprobante de pago) → URL pública de Storage."""
-    if not data:
-        raise SupabaseUploadError('No hay datos de imagen para subir.')
-
-    ruta_storage = f'{carpeta.strip("/")}/{filename}'
-    cliente = _resolver_cliente_storage(supabase_client)
-    return _subir_bytes_al_bucket(cliente, ruta_storage, data, content_type)
+    """Alias retrocompatible → subir_bytes_con_respaldo."""
+    return subir_bytes_con_respaldo(
+        data,
+        filename=filename,
+        supabase_client=supabase_client,
+        content_type=content_type,
+        carpeta=carpeta,
+    )

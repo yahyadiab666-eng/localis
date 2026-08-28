@@ -101,22 +101,26 @@ def validar_config_arranque():
             os.environ.get('SUPABASE_KEY') or ''
         ).strip():
             advertencias.append(
-                'SUPABASE_URL/SUPABASE_KEY no configurados: las subidas de imágenes fallarán.'
+                'SUPABASE_URL/SUPABASE_KEY no configurados: las subidas usarán '
+                'respaldo local en static/uploads/.'
             )
         else:
             from backend.supabase_client import obtener_diagnostico_supabase
 
             diag = obtener_diagnostico_supabase()
             if not diag.get('ok'):
-                advertencias.append(
-                    'SUPABASE_URL inválida o malformada: '
-                    + (diag.get('pista') or 'usa https://TU_REF.supabase.co en una sola línea.')
-                )
-            elif not diag.get('url_sanitizada'):
-                advertencias.append(
-                    'SUPABASE_URL parece malformada (revisa comillas, saltos de línea y '
-                    'formato https://REF.supabase.co en Render).'
-                )
+                errores_url = diag.get('errores') or []
+                if errores_url:
+                    advertencias.append(
+                        'SUPABASE_URL inválida: ' + '; '.join(errores_url)
+                    )
+                elif not diag.get('url_sanitizada'):
+                    advertencias.append(
+                        'SUPABASE_URL parece malformada (revisa comillas, saltos de línea y '
+                        'formato https://REF.supabase.co en Render).'
+                    )
+            for aviso_url in diag.get('advertencias') or []:
+                advertencias.append(f'SUPABASE_URL: {aviso_url}')
     else:
         if not (os.environ.get('LOCALIS_SECRET_KEY') or '').strip():
             advertencias.append(
@@ -126,7 +130,8 @@ def validar_config_arranque():
             os.environ.get('SUPABASE_KEY') or ''
         ).strip():
             advertencias.append(
-                'SUPABASE_URL/SUPABASE_KEY no configurados: subidas y catálogo maestro vía Supabase no funcionarán.'
+                'SUPABASE_URL/SUPABASE_KEY no configurados: subidas vía respaldo local '
+                'en static/uploads/; catálogo maestro usará PostgreSQL directo.'
             )
 
     if errores:
