@@ -116,6 +116,9 @@ def _imprimir_estado_supabase():
         return
 
     host = _extraer_host_desde_url(SUPABASE_URL) or SUPABASE_URL
+    raw_host = _extraer_host_desde_url(_limpiar_valor_env(os.getenv('SUPABASE_URL')))
+    if raw_host and raw_host != host:
+        print(f'{prefijo} Host tras sanitización: {raw_host} -> {host}')
     print(
         f'{prefijo} URL={SUPABASE_URL} host={host} | '
         f'SUPABASE_KEY={_mascara_secreto(SUPABASE_KEY)} | '
@@ -150,6 +153,65 @@ SUPABASE_BUCKET_IMAGENES = _limpiar_valor_env(os.getenv('SUPABASE_BUCKET_IMAGENE
 
 supabase: Optional[Client] = None
 supabase_storage_admin: Optional[Client] = None
+_postgrest_circuito_abierto = False
+_modo_catalogo_logeado = False
+
+
+def abrir_circuito_postgrest(motivo: str = '') -> None:
+    """Tras fallo de red, deja de intentar PostgREST HTTP hasta reiniciar el proceso."""
+    global _postgrest_circuito_abierto
+    if _postgrest_circuito_abierto:
+        return
+    _postgrest_circuito_abierto = True
+    detalle = f' ({motivo})' if motivo else ''
+    print(
+        f'[Localis Supabase] PostgREST deshabilitado por red{detalle}. '
+        'Catálogo maestro usará PostgreSQL directo (DATABASE_URL).'
+    )
+
+
+def postgrest_circuito_abierto() -> bool:
+    return _postgrest_circuito_abierto
+
+
+def postgrest_http_habilitado() -> bool:
+    return SUPABASE_URL_VALIDA and bool(SUPABASE_KEY) and not _postgrest_circuito_abierto
+
+
+def aplicar_diagnostico_conectividad(informe: dict) -> None:
+    """Tras diagnóstico de arranque, abre circuito si la API HTTP no es alcanzable."""
+    if informe.get('omitido'):
+        return
+    if informe.get('ok'):
+        return
+    capa = informe.get('capa_fallo') or 'desconocida'
+    abrir_circuito_postgrest(f'diagnóstico arranque: capa={capa}')
+    for aviso in informe.get('advertencias_config') or []:
+        print(f'[Localis Supabase] URL: {aviso}')
+    for error in informe.get('errores_config') or []:
+        print(f'[Localis Supabase] URL inválida: {error}')
+
+
+def registrar_modo_catalogo_maestro() -> None:
+    """Log único del backend elegido para catálogo maestro."""
+    global _modo_catalogo_logeado
+    if _modo_catalogo_logeado:
+        return
+    _modo_catalogo_logeado = True
+    from backend.db import DATABASE_URL, using_postgres
+
+    if using_postgres() and DATABASE_URL:
+        print(
+            '[Localis Catálogo maestro] Backend: PostgreSQL directo (DATABASE_URL). '
+            'PostgREST HTTP solo si PostgreSQL no está disponible.'
+        )
+    elif postgrest_http_habilitado():
+        print(
+            '[Localis Catálogo maestro] Backend: PostgREST HTTP (httpx, sin SDK).'
+        )
+    else:
+        print('[Localis Catálogo maestro] Backend: no disponible (revisa DATABASE_URL).')
+
 
 if SUPABASE_URL and SUPABASE_KEY:
     supabase = _crear_cliente_supabase(SUPABASE_KEY, etiqueta='anon')
@@ -176,6 +238,8 @@ def obtener_diagnostico_supabase():
         'raw_presente': bool(_limpiar_valor_env(os.getenv('SUPABASE_URL'))),
         'advertencias': SUPABASE_URL_ADVERTENCIAS,
         'errores': SUPABASE_URL_ERRORES,
+        'postgrest_circuito_abierto': postgrest_circuito_abierto(),
+        'url_raw': _limpiar_valor_env(os.getenv('SUPABASE_URL')),
     }
 
 

@@ -49,6 +49,9 @@ def _diagnostico_supabase_red(*, forzar: bool = False):
 
         informe = diagnosticar_conectividad_supabase(probar_sdk=True)
         imprimir_diagnostico_conectividad(informe)
+        from backend.supabase_client import aplicar_diagnostico_conectividad
+
+        aplicar_diagnostico_conectividad(informe)
         _cache_diagnostico_supabase = informe
         return informe
     except Exception as error:
