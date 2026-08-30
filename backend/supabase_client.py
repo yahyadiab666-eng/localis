@@ -13,6 +13,7 @@ from supabase.lib.client_options import SyncClientOptions
 from backend.supabase_connectivity import (
     ResultadoUrlSupabase,
     _limpiar_texto_env,
+    _origen_basico_supabase,
     imprimir_alerta_supabase_url,
     sanitizar_url_supabase,
 )
@@ -142,12 +143,16 @@ def _imprimir_estado_supabase():
 
 _URL_RAW = os.getenv('SUPABASE_URL')
 _URL_INFO = sanitizar_url_supabase(_URL_RAW, database_url=os.getenv('DATABASE_URL'))
-if not _URL_INFO.url and _URL_RAW:
-    # Nunca descartar un *.supabase.co presente en el entorno.
-    _URL_INFO = sanitizar_url_supabase(_limpiar_valor_env(_URL_RAW))
+_origen_fallback = _origen_basico_supabase(_URL_RAW or '')
+if not _URL_INFO.url and _origen_fallback:
+    _URL_INFO.url = _origen_fallback
+    _URL_INFO.host = _origen_fallback[len('https://') :]
+    _URL_INFO.valida = True
+    _URL_INFO.errores.clear()
 _aplicar_config_url(_URL_INFO, _URL_RAW)
 
-SUPABASE_URL = _URL_INFO.url
+# Si el env tiene https://...supabase.co, el cliente SIEMPRE recibe esa URL.
+SUPABASE_URL = _URL_INFO.url or _origen_fallback
 SUPABASE_URL_VALIDA = bool(SUPABASE_URL)
 SUPABASE_URL_ADVERTENCIAS = list(_URL_INFO.advertencias)
 SUPABASE_URL_ERRORES = list(_URL_INFO.errores)

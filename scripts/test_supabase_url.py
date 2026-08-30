@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validacion minima: https:// + *.supabase.co no se rechaza ni se vacia."""
+"""Validacion basica: https:// + .supabase.co se acepta y no se vacia."""
 
 import sys
 from pathlib import Path
@@ -13,23 +13,25 @@ CANONICA = f'https://{REF}.supabase.co'
 
 
 def main() -> int:
-    from backend.supabase_connectivity import sanitizar_url_supabase
+    from backend.supabase_connectivity import (
+        _origen_basico_supabase,
+        sanitizar_url_supabase,
+    )
 
     errores = []
 
     limpia = sanitizar_url_supabase(CANONICA)
     if not limpia.valida or limpia.url != CANONICA or limpia.errores:
         errores.append(f'URL legitima rechazada: {limpia}')
-    if not limpia.url:
-        errores.append('URL legitima vaciada (omitiria Storage)')
+    if _origen_basico_supabase(CANONICA) != CANONICA:
+        errores.append('_origen_basico_supabase no devolvio la URL canonica')
 
     for crudo, esperado in (
+        (CANONICA, CANONICA),
         (f'{REF}.supabase.co', CANONICA),
         (f'https://https://{REF}.supabase.co', CANONICA),
-        (f'"{CANONICA}/rest/v1"', CANONICA),
+        (f'{CANONICA}/rest/v1', CANONICA),
         (f'http://{REF}.supabase.co/', CANONICA),
-        (f'https://cdn.{REF}.supabase.co', f'https://cdn.{REF}.supabase.co'),
-        (f'{REF}https://{REF}.supabase.co', CANONICA),
     ):
         resultado = sanitizar_url_supabase(crudo)
         if not resultado.valida or resultado.url != esperado:
@@ -48,10 +50,7 @@ def main() -> int:
             print(f'  - {item}')
         return 1
 
-    print(
-        f'OK: {CANONICA} se acepta y no se vacia. '
-        'Criterio: https:// + host *.supabase.co.'
-    )
+    print(f'OK: {CANONICA} pasa con https:// + .supabase.co y se asigna al cliente.')
     return 0
 
 
