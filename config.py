@@ -119,6 +119,18 @@ def validar_config_arranque():
                         'SUPABASE_URL parece malformada (revisa comillas, saltos de línea y '
                         'formato https://REF.supabase.co en Render).'
                     )
+            if diag.get('id_sospechoso') and diag.get('url_recomendada'):
+                advertencias.append(
+                    'SUPABASE_URL tenia prefijo o host malformado. En Render deja exactamente '
+                    f"{diag['url_recomendada']}."
+                )
+            elif diag.get('url_recomendada') and diag.get('url_sanitizada') != diag.get(
+                'url_recomendada'
+            ):
+                advertencias.append(
+                    'En Render, SUPABASE_URL debe ser exactamente '
+                    f"{diag['url_recomendada']}."
+                )
             for aviso_url in diag.get('advertencias') or []:
                 advertencias.append(f'SUPABASE_URL: {aviso_url}')
     else:

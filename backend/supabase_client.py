@@ -117,6 +117,13 @@ def _imprimir_estado_supabase():
     raw_host = _extraer_host_desde_url(_limpiar_valor_env(os.getenv('SUPABASE_URL')))
     if raw_host and raw_host != host:
         print(f'{prefijo} Host tras sanitización: {raw_host} -> {host}')
+    raw_limpia = _limpiar_valor_env(_URL_RAW).rstrip('/')
+    if _URL_INFO.url_recomendada and (
+        _URL_INFO.id_sospechoso
+        or _URL_INFO.advertencias
+        or raw_limpia != SUPABASE_URL
+    ):
+        print(f'{prefijo} Valor correcto en Render: SUPABASE_URL={_URL_INFO.url_recomendada}')
     print(
         f'{prefijo} URL={SUPABASE_URL} host={host} | '
         f'SUPABASE_KEY={_mascara_secreto(SUPABASE_KEY)} | '
@@ -240,6 +247,7 @@ def obtener_diagnostico_supabase():
         'errores': SUPABASE_URL_ERRORES,
         'project_ref': _URL_INFO.project_ref,
         'id_sospechoso': _URL_INFO.id_sospechoso,
+        'url_recomendada': _URL_INFO.url_recomendada,
         'postgrest_circuito_abierto': postgrest_circuito_abierto(),
         'url_raw': _limpiar_valor_env(_URL_RAW),
     }
@@ -268,6 +276,8 @@ def es_error_red_supabase(error):
             'errno -3',
             'getaddrinfo failed',
             'failed to resolve',
+            'name not resolved',
+            'nameresolutionerror',
             'temporary failure in name resolution',
             'connection refused',
             'network is unreachable',
@@ -349,12 +359,11 @@ def normalizar_url_publica_storage(
 
 
 def url_publica_desde_sdk(ruta: str, bucket: str | None = None) -> str:
-    """get_public_url del SDK + normalización al dominio SUPABASE_URL."""
-    bucket_nombre = bucket or SUPABASE_BUCKET_IMAGENES
-    if supabase:
-        url_sdk = supabase.storage.from_(bucket_nombre).get_public_url(ruta)
-        return normalizar_url_publica_storage(url_sdk, ruta=ruta, bucket=bucket_nombre)
-    return construir_url_publica_storage(ruta, bucket_nombre)
+    """
+    URL canonica local. No llama a get_public_url del SDK: ese metodo puede
+    devolver un host malformado si SUPABASE_URL llego sucia al cliente.
+    """
+    return construir_url_publica_storage(ruta, bucket)
 
 
 def url_publica_bucket(carpeta: str, nombre_archivo: str) -> str:

@@ -109,6 +109,11 @@ def ejecutar_diagnostico_inicio():
             f"[Localis Diagnóstico] Supabase FALLO capa={supabase.get('capa_fallo')}: "
             f"{supabase.get('recomendacion') or supabase.get('error') or 'sin detalle'}"
         )
+        if supabase.get('url_recomendada'):
+            print(
+                '[Localis Diagnóstico] En Render, SUPABASE_URL debe ser exactamente '
+                f"{supabase['url_recomendada']}"
+            )
     return estado
 
 

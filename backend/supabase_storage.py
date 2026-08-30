@@ -132,7 +132,7 @@ def _resolver_cliente_storage(supabase_client):
 
 
 def _url_publica_tras_subida(ruta_storage):
-    """Tras upload exitoso, usa solo la URL canonica construida desde SUPABASE_URL."""
+    """Solo se llama despues de un upload exitoso. Nunca anticipa la URL publica."""
     url_canonica = construir_url_publica_storage(ruta_storage)
     return _validar_url_publica_subida(url_canonica)
 
@@ -152,7 +152,15 @@ def _subir_bytes_al_bucket(cliente, ruta_storage, data, content_type):
     except Exception as error:
         raise SupabaseUploadError(_mensaje_error_storage(error)) from error
 
-    return _url_publica_tras_subida(ruta_storage)
+    try:
+        return _url_publica_tras_subida(ruta_storage)
+    except SupabaseUploadError:
+        raise
+    except Exception as error:
+        raise SupabaseUploadError(
+            'La imagen se subio a Storage pero no se pudo construir la URL publica. '
+            f'Detalle: {type(error).__name__}: {error}'
+        ) from error
 
 
 def _persistir_en_supabase(data, filename, content_type, carpeta, supabase_client=None):
@@ -167,8 +175,6 @@ def _persistir_en_supabase(data, filename, content_type, carpeta, supabase_clien
 
     try:
         url = _subir_bytes_al_bucket(cliente, ruta_storage, data, content_type)
-        _registrar_exito_supabase(ruta_storage, url)
-        return url
     except SupabaseUploadError as error:
         _registrar_fallo_supabase(error, ruta_storage)
         raise
@@ -176,6 +182,9 @@ def _persistir_en_supabase(data, filename, content_type, carpeta, supabase_clien
         upload_error = SupabaseUploadError(_mensaje_error_storage(error))
         _registrar_fallo_supabase(upload_error, ruta_storage)
         raise upload_error from error
+
+    _registrar_exito_supabase(ruta_storage, url)
+    return url
 
 
 # Alias interno usado por scripts de prueba

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import socket
 import ssl
@@ -14,6 +15,9 @@ import httpx
 
 LOG_PREFIX = '[Localis Supabase Red]'
 _SUFIJO_HOST_SUPABASE = '.supabase.co'
+_RE_HOST_SUPABASE = re.compile(r'(?:[a-z0-9-]+\.)*supabase\.co', re.IGNORECASE)
+_RE_ESQUEMAS_INICIALES = re.compile(r'^(?:https?://)+', re.IGNORECASE)
+_RE_REF_PROYECTO = re.compile(r'^[a-z0-9]{15,32}$')
 _CHARS_INVISIBLES_URL = (
     '\ufeff',  # BOM
     '\u200b',  # zero-width space
@@ -54,12 +58,17 @@ def _normalizar_esquema_https(texto: str) -> tuple[str, list[str]]:
     """Fuerza https:// sin importar mayusculas en el esquema; evita doble prefijo."""
     advertencias: list[str] = []
     candidato = texto.strip()
-    coincidencia = _RE_ESQUEMA_URL.match(candidato)
+    coincidencia = _RE_ESQUEMAS_INICIALES.match(candidato)
     if not coincidencia:
         return candidato, advertencias
 
+    esquemas = re.findall(r'https?://', coincidencia.group(0), flags=re.IGNORECASE)
     resto = candidato[coincidencia.end() :].lstrip('/')
-    if coincidencia.group(1).lower() == 'http':
+    if len(esquemas) > 1:
+        advertencias.append(
+            'SUPABASE_URL tenia el esquema https:// duplicado al inicio; se dejo uno solo.'
+        )
+    elif esquemas and esquemas[0].lower().startswith('http://'):
         advertencias.append('SUPABASE_URL usaba http://; se normalizo a https://.')
     return f'https://{resto}', advertencias
 
@@ -97,6 +106,7 @@ class ResultadoUrlSupabase:
     project_ref: str = ''
     valida: bool = False
     id_sospechoso: bool = False
+    url_recomendada: str = ''
     advertencias: list[str] = field(default_factory=list)
     errores: list[str] = field(default_factory=list)
 
@@ -106,7 +116,102 @@ def extraer_ref_proyecto_de_host(host: str | None) -> str:
     texto = _normalizar_host_supabase(host)
     if not _es_host_supabase_oficial(texto) or texto == 'supabase.co':
         return ''
-    return texto[: -len(_SUFIJO_HOST_SUPABASE)]
+    prefijo = texto[: -len(_SUFIJO_HOST_SUPABASE)]
+    if prefijo.startswith('db.') and '.' not in prefijo[3:]:
+        return prefijo[3:]
+    return prefijo
+
+
+def url_canonica_proyecto(ref: str | None) -> str:
+    """Origen API de un project ref: https://REF.supabase.co."""
+    texto = (ref or '').strip().lower()
+    if not texto or '.' in texto:
+        return ''
+    return f'https://{texto}{_SUFIJO_HOST_SUPABASE}'
+
+
+def _es_ref_proyecto_estandar(ref: str | None) -> bool:
+    return bool(_RE_REF_PROYECTO.fullmatch((ref or '').strip().lower()))
+
+
+def _extraer_hosts_supabase(texto: str) -> list[str]:
+    return [
+        _normalizar_host_supabase(coincidencia.group(0))
+        for coincidencia in _RE_HOST_SUPABASE.finditer(texto or '')
+    ]
+
+
+def _colapsar_host_malformado(host: str) -> tuple[str, list[str]]:
+    """
+    Quita prefijos duplicados o de Postgres: REF.REF.supabase.co y db.REF.supabase.co
+    pasan a REF.supabase.co.
+    """
+    advertencias: list[str] = []
+    texto = _normalizar_host_supabase(host)
+    if not _es_host_supabase_oficial(texto) or texto == 'supabase.co':
+        return texto, advertencias
+
+    prefijo = texto[: -len(_SUFIJO_HOST_SUPABASE)]
+    if prefijo.startswith('db.') and '.' not in prefijo[3:]:
+        canonico = f'{prefijo[3:]}{_SUFIJO_HOST_SUPABASE}'
+        advertencias.append(
+            f'Host "{texto}" es el de Postgres (db.*); se uso el origen API {canonico}.'
+        )
+        return canonico, advertencias
+
+    partes = [parte for parte in prefijo.split('.') if parte]
+    if len(partes) >= 2 and all(parte == partes[0] for parte in partes):
+        canonico = f'{partes[0]}{_SUFIJO_HOST_SUPABASE}'
+        advertencias.append(
+            f'Host "{texto}" tenia el project ref duplicado como prefijo; '
+            f'se normalizo a {canonico}.'
+        )
+        return canonico, advertencias
+
+    return texto, advertencias
+
+
+def _elegir_host_canonico(
+    hosts: list[str],
+    ref_db: str = '',
+) -> tuple[str, list[str], bool]:
+    advertencias: list[str] = []
+    sospechoso = False
+    candidatos: list[str] = []
+    vistos: set[str] = set()
+
+    for host in hosts:
+        colapsado, avisos = _colapsar_host_malformado(host)
+        advertencias.extend(avisos)
+        if avisos:
+            sospechoso = True
+        if not colapsado or colapsado in vistos:
+            continue
+        vistos.add(colapsado)
+        candidatos.append(colapsado)
+
+    if not candidatos:
+        return '', advertencias, sospechoso
+
+    if len(candidatos) > 1:
+        sospechoso = True
+        advertencias.append(
+            'SUPABASE_URL contenia mas de un host *.supabase.co; '
+            'se eligio el origen API del proyecto.'
+        )
+
+    if ref_db:
+        esperado = f'{ref_db}{_SUFIJO_HOST_SUPABASE}'
+        for candidato in candidatos:
+            if candidato == esperado or extraer_ref_proyecto_de_host(candidato) == ref_db:
+                return esperado, advertencias, sospechoso
+
+    for candidato in candidatos:
+        ref = extraer_ref_proyecto_de_host(candidato)
+        if ref and '.' not in ref:
+            return candidato, advertencias, sospechoso
+
+    return candidatos[-1], advertencias, sospechoso
 
 
 def extraer_ref_proyecto_de_database_url(database_url: str | None) -> str:
@@ -147,9 +252,13 @@ def imprimir_alerta_supabase_url(resultado: ResultadoUrlSupabase, url_raw: str |
         return
 
     raw = _limpiar_texto_env(url_raw)
-    if resultado.valida and not resultado.errores:
+    if resultado.valida and not resultado.errores and not resultado.id_sospechoso:
         for aviso in resultado.advertencias:
             print(f'{LOG_PREFIX} URL: {aviso}')
+        if resultado.url_recomendada:
+            print(
+                f'{LOG_PREFIX} Valor correcto en Render: SUPABASE_URL={resultado.url_recomendada}'
+            )
         return
 
     print(f'{LOG_PREFIX} ===== REVISION SUPABASE_URL =====')
@@ -159,13 +268,25 @@ def imprimir_alerta_supabase_url(resultado: ResultadoUrlSupabase, url_raw: str |
         print(f'{LOG_PREFIX} URL sanitizada: {resultado.url}')
     if resultado.project_ref:
         print(f'{LOG_PREFIX} ID de proyecto detectado: {resultado.project_ref}')
+    if resultado.id_sospechoso:
+        print(
+            f'{LOG_PREFIX} ID/host sospechoso: el valor de Render tenia prefijo '
+            'duplicado o basura pegada al inicio.'
+        )
 
     for error in resultado.errores:
         print(f'{LOG_PREFIX} ERROR: {error}')
     for aviso in resultado.advertencias:
         print(f'{LOG_PREFIX} AVISO: {aviso}')
 
-    if resultado.errores:
+    recomendada = resultado.url_recomendada or resultado.url
+    if recomendada:
+        print(
+            f'{LOG_PREFIX} Accion: en Render -> Environment -> SUPABASE_URL deja exactamente '
+            f'{recomendada} (https://REF.supabase.co, sin comillas, sin /rest/v1, '
+            'sin host pegado delante).'
+        )
+    else:
         print(
             f'{LOG_PREFIX} Accion: abre Supabase Dashboard -> Settings -> API -> '
             'Project URL y copia exactamente https://TU_REF.supabase.co en Render '
@@ -173,17 +294,21 @@ def imprimir_alerta_supabase_url(resultado: ResultadoUrlSupabase, url_raw: str |
         )
     print(f'{LOG_PREFIX} =================================')
 
+
 def sanitizar_url_supabase(
     raw_url: str | None,
     *,
     database_url: str | None = None,
 ) -> ResultadoUrlSupabase:
     """
-    Normaliza SUPABASE_URL para evitar fallos DNS por barras finales, paths extra
-    o caracteres invalidos copiados desde el panel de Render/Supabase.
+    Normaliza SUPABASE_URL para evitar fallos DNS por barras finales, paths extra,
+    esquemas duplicados o prefijos pegados al copiar en Render.
     """
     resultado = ResultadoUrlSupabase()
     texto = _limpiar_texto_env(raw_url)
+    ref_db = extraer_ref_proyecto_de_database_url(database_url)
+    if ref_db:
+        resultado.url_recomendada = url_canonica_proyecto(ref_db)
 
     if not texto:
         resultado.errores.append('SUPABASE_URL vacia o ausente.')
@@ -197,6 +322,16 @@ def sanitizar_url_supabase(
 
     texto = re.sub(r'\s+', '', texto)
     texto = re.sub(r'(\.supabase\.co)\.+', r'\1', texto, flags=re.IGNORECASE)
+
+    coincidencia_esquema = _RE_ESQUEMA_URL.search(texto)
+    if coincidencia_esquema and coincidencia_esquema.start() > 0:
+        prefijo_basura = texto[: coincidencia_esquema.start()]
+        texto = texto[coincidencia_esquema.start() :]
+        resultado.id_sospechoso = True
+        resultado.advertencias.append(
+            f'SUPABASE_URL tenia el prefijo invalido "{prefijo_basura}" pegado antes de '
+            'https://; se descarto.'
+        )
 
     if not _RE_ESQUEMA_URL.search(texto):
         if _SUFIJO_HOST_SUPABASE in texto.lower():
@@ -212,6 +347,8 @@ def sanitizar_url_supabase(
 
     texto, advertencias_esquema = _normalizar_esquema_https(texto)
     resultado.advertencias.extend(advertencias_esquema)
+    if any('duplicado' in aviso for aviso in advertencias_esquema):
+        resultado.id_sospechoso = True
     texto = texto.rstrip('/')
 
     for path_erroneo in _PATHS_ERRONEOS:
@@ -224,7 +361,17 @@ def sanitizar_url_supabase(
             break
 
     parsed = urlparse(texto)
-    host = _extraer_host_desde_texto_url(texto)
+    hosts_detectados = _extraer_hosts_supabase(texto)
+    host_parseado = _extraer_host_desde_texto_url(texto)
+    if host_parseado and host_parseado not in hosts_detectados:
+        hosts_detectados.insert(0, host_parseado)
+    if len(hosts_detectados) > 1:
+        resultado.id_sospechoso = True
+
+    host, avisos_host, sospechoso_host = _elegir_host_canonico(hosts_detectados, ref_db)
+    resultado.advertencias.extend(avisos_host)
+    if sospechoso_host:
+        resultado.id_sospechoso = True
     resultado.host = host
 
     if not host:
@@ -239,9 +386,26 @@ def sanitizar_url_supabase(
         )
         return resultado
 
-    resultado.project_ref = extraer_ref_proyecto_de_host(host)
+    ref = extraer_ref_proyecto_de_host(host)
+    if '.' in ref:
+        resultado.id_sospechoso = True
+        if ref_db:
+            host = f'{ref_db}{_SUFIJO_HOST_SUPABASE}'
+            ref = ref_db
+            resultado.host = host
+            resultado.advertencias.append(
+                f'Host malformado; se reconstruyo el origen API desde DATABASE_URL: '
+                f'{url_canonica_proyecto(ref_db)}.'
+            )
+        else:
+            resultado.errores.append(
+                f'Host "{host}" no es un Project URL valido (tiene subdominios extra). '
+                'En Render deja solo https://TU_REF.supabase.co.'
+            )
+            return resultado
+
     resultado.advertencias.extend(
-        _advertir_mismatch_database_url(resultado.project_ref, database_url)
+        _advertir_mismatch_database_url(ref, database_url)
     )
 
     if parsed.username or parsed.password:
@@ -260,7 +424,16 @@ def sanitizar_url_supabase(
             f'SUPABASE_URL especifica puerto {parsed.port}; se omitio al reconstruir la URL canonica.'
         )
 
+    if ref and not _es_ref_proyecto_estandar(ref):
+        resultado.id_sospechoso = True
+        resultado.advertencias.append(
+            f'El project ref "{ref}" no tiene el formato habitual de Supabase '
+            '(15-32 caracteres [a-z0-9]). Verifica Settings -> API -> Project URL.'
+        )
+
+    resultado.project_ref = ref
     resultado.url = f'https://{host}'
+    resultado.url_recomendada = url_canonica_proyecto(ref) or resultado.url
     resultado.valida = not resultado.errores
     return resultado
 
@@ -280,6 +453,8 @@ def _clasificar_excepcion_red(error: Exception) -> str:
         frag in mensaje
         for frag in (
             'name or service not known',
+            'name not resolved',
+            'nameresolutionerror',
             'getaddrinfo failed',
             'failed to resolve',
             'nodename nor servname',
@@ -370,17 +545,26 @@ def _probar_endpoint_http(
 def _recomendacion_fallo(resultado: dict[str, Any]) -> str:
     capa = resultado.get('capa_fallo')
     if capa == 'config':
+        recomendada = resultado.get('url_recomendada')
+        if recomendada:
+            return (
+                f'Corrige SUPABASE_URL en Render: deja exactamente {recomendada} '
+                '(sin /rest/v1, sin barra final, sin comillas ni prefijo pegado).'
+            )
         return (
             'Corrige SUPABASE_URL en Render: solo https://TU_REF.supabase.co '
             '(sin /rest/v1, sin barra final, sin comillas).'
         )
     if capa == 'dns':
+        recomendada = resultado.get('url_recomendada')
         ref = extraer_ref_proyecto_de_host(resultado.get('host'))
         base = (
-            'El contenedor no resuelve el host de Supabase (DNS). '
+            'El contenedor no resuelve el host de Supabase (DNS / name not resolved). '
             'Verifica SUPABASE_URL en Render y confirma que coincida con '
             'Settings -> API en supabase.com/dashboard.'
         )
+        if recomendada:
+            return f'{base} Valor correcto: {recomendada}'
         if ref:
             return f'{base} Host actual: {ref}.supabase.co'
         return base
@@ -438,6 +622,7 @@ def diagnosticar_conectividad_supabase(
         'host': url_info.host,
         'project_ref': url_info.project_ref,
         'id_sospechoso': url_info.id_sospechoso,
+        'url_recomendada': url_info.url_recomendada,
         'advertencias_config': url_info.advertencias,
         'errores_config': url_info.errores,
         'key_presente': bool(key),
