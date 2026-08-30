@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pruebas: cualquier *.supabase.co es valido y no se vacia."""
+"""Validacion minima: https:// + *.supabase.co no se rechaza ni se vacia."""
 
 import sys
 from pathlib import Path
@@ -10,14 +10,6 @@ if str(RAIZ) not in sys.path:
 
 REF = 'wesnnnvoavprgqcczzsg'
 CANONICA = f'https://{REF}.supabase.co'
-DATABASE_URL = (
-    f'postgresql://postgres.{REF}:secret@aws-0-us-east-1.pooler.supabase.com:5432/postgres'
-)
-
-
-def _asignar_cliente(resultado) -> str:
-    """Misma regla que backend.supabase_client: no vaciar si hay origen usable."""
-    return resultado.url or ''
 
 
 def main() -> int:
@@ -25,46 +17,30 @@ def main() -> int:
 
     errores = []
 
-    limpia = sanitizar_url_supabase(CANONICA, database_url=DATABASE_URL)
+    limpia = sanitizar_url_supabase(CANONICA)
     if not limpia.valida or limpia.url != CANONICA or limpia.errores:
         errores.append(f'URL legitima rechazada: {limpia}')
-    if limpia.id_sospechoso:
-        errores.append('URL legitima marcada como id_sospechoso')
-    if _asignar_cliente(limpia) != CANONICA:
-        errores.append(f'cliente no recibio la URL: {_asignar_cliente(limpia)!r}')
+    if not limpia.url:
+        errores.append('URL legitima vaciada (omitiria Storage)')
 
-    subdominio_extra = sanitizar_url_supabase(f'https://cdn.{REF}.supabase.co')
-    if not subdominio_extra.valida or not subdominio_extra.url.endswith('.supabase.co'):
-        errores.append(f'subdominio extra rechazado: {subdominio_extra}')
-    if not _asignar_cliente(subdominio_extra):
-        errores.append('subdominio extra vaciado para el cliente')
-
-    casos_sanos = [
+    for crudo, esperado in (
         (f'{REF}.supabase.co', CANONICA),
         (f'https://https://{REF}.supabase.co', CANONICA),
         (f'"{CANONICA}/rest/v1"', CANONICA),
         (f'http://{REF}.supabase.co/', CANONICA),
-        (f'https://db.{REF}.supabase.co', f'https://db.{REF}.supabase.co'),
-    ]
-    for crudo, esperado in casos_sanos:
-        resultado = sanitizar_url_supabase(crudo, database_url=DATABASE_URL)
-        asignada = _asignar_cliente(resultado)
-        if not resultado.valida or asignada != esperado:
+        (f'https://cdn.{REF}.supabase.co', f'https://cdn.{REF}.supabase.co'),
+        (f'{REF}https://{REF}.supabase.co', CANONICA),
+    ):
+        resultado = sanitizar_url_supabase(crudo)
+        if not resultado.valida or resultado.url != esperado:
             errores.append(
-                f'{crudo!r} -> valida={resultado.valida} url={asignada!r} '
-                f'(esperado {esperado}) errores={resultado.errores}'
+                f'{crudo!r} -> valida={resultado.valida} url={resultado.url!r} '
+                f'(esperado {esperado})'
             )
 
-    sucia = f'{REF}https://{REF}.supabase.co'
-    resultado_sucia = sanitizar_url_supabase(sucia)
-    if resultado_sucia.url != CANONICA or not resultado_sucia.valida:
-        errores.append(f'prefijo pegado no se recupero: {resultado_sucia}')
-    if _asignar_cliente(resultado_sucia) != CANONICA:
-        errores.append('prefijo pegado dejo la URL vacia en el cliente')
-
     invalida = sanitizar_url_supabase('https://ejemplo.com')
-    if invalida.valida or _asignar_cliente(invalida):
-        errores.append('https://ejemplo.com debia rechazarse y no asignarse')
+    if invalida.valida or invalida.url:
+        errores.append('https://ejemplo.com debia rechazarse')
 
     if errores:
         print('FALLO sanitizacion SUPABASE_URL:')
@@ -73,8 +49,8 @@ def main() -> int:
         return 1
 
     print(
-        f'OK: {CANONICA} se acepta, no se vacia y se asigna al cliente. '
-        'Cualquier *.supabase.co es valido.'
+        f'OK: {CANONICA} se acepta y no se vacia. '
+        'Criterio: https:// + host *.supabase.co.'
     )
     return 0
 

@@ -1,5 +1,6 @@
 """Diagnóstico automático del sistema y alertas por correo ante errores críticos."""
 
+import os
 import smtplib
 import threading
 import traceback
@@ -38,8 +39,11 @@ def _diagnostico_supabase_red(*, forzar: bool = False):
             imprimir_diagnostico_conectividad,
         )
         from backend.supabase_client import SUPABASE_URL
+        from backend.supabase_connectivity import _limpiar_texto_env
 
-        if not SUPABASE_URL:
+        raw_env = _limpiar_texto_env(os.getenv('SUPABASE_URL'))
+        url_usar = SUPABASE_URL or raw_env
+        if not url_usar:
             _cache_diagnostico_supabase = {
                 'ok': False,
                 'omitido': True,
@@ -47,7 +51,10 @@ def _diagnostico_supabase_red(*, forzar: bool = False):
             }
             return _cache_diagnostico_supabase
 
-        informe = diagnosticar_conectividad_supabase(probar_sdk=True)
+        informe = diagnosticar_conectividad_supabase(
+            supabase_url=url_usar,
+            probar_sdk=True,
+        )
         imprimir_diagnostico_conectividad(informe)
         from backend.supabase_client import aplicar_diagnostico_conectividad
 
@@ -109,7 +116,7 @@ def ejecutar_diagnostico_inicio():
             f"[Localis Diagnóstico] Supabase FALLO capa={supabase.get('capa_fallo')}: "
             f"{supabase.get('recomendacion') or supabase.get('error') or 'sin detalle'}"
         )
-        if supabase.get('url_recomendada'):
+        if supabase.get('capa_fallo') == 'config' and supabase.get('url_recomendada'):
             print(
                 '[Localis Diagnóstico] En Render, SUPABASE_URL debe ser exactamente '
                 f"{supabase['url_recomendada']}"

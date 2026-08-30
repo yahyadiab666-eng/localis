@@ -287,128 +287,62 @@ def imprimir_alerta_supabase_url(resultado: ResultadoUrlSupabase, url_raw: str |
     print(f'{LOG_PREFIX} =================================')
 
 
+def _aceptar_host_supabase(host: str, resultado: ResultadoUrlSupabase) -> ResultadoUrlSupabase:
+    """Criterio unico: host *.supabase.co -> URL limpia y valida (nunca vaciar)."""
+    host_norm = _normalizar_host_supabase(host)
+    if not host_norm.endswith(_SUFIJO_HOST_SUPABASE) or host_norm == 'supabase.co':
+        return resultado
+    resultado.host = host_norm
+    resultado.url = f'https://{host_norm}'
+    resultado.project_ref = extraer_ref_proyecto_de_host(host_norm)
+    resultado.url_recomendada = resultado.url
+    resultado.valida = True
+    resultado.errores.clear()
+    return resultado
+
+
 def sanitizar_url_supabase(
     raw_url: str | None,
     *,
     database_url: str | None = None,
 ) -> ResultadoUrlSupabase:
     """
-    Normaliza SUPABASE_URL para evitar fallos DNS por barras finales, paths extra,
-    esquemas duplicados o prefijos pegados al copiar en Render.
+    Validacion minima de SUPABASE_URL: https:// + cualquier subdominio *.supabase.co.
+    No rechaza refs legitimos (p. ej. wesnnnvoavprgqcczzsg.supabase.co).
     """
+    del database_url  # no se usa para aceptar/rechazar; evita falsos negativos
     resultado = ResultadoUrlSupabase()
     texto = _limpiar_texto_env(raw_url)
-    ref_db = extraer_ref_proyecto_de_database_url(database_url)
-    if ref_db:
-        resultado.url_recomendada = url_canonica_proyecto(ref_db)
-
     if not texto:
         resultado.errores.append('SUPABASE_URL vacia o ausente.')
         return resultado
 
-    if texto != _quitar_caracteres_invisibles(str(raw_url or '').strip()):
-        resultado.advertencias.append(
-            'SUPABASE_URL contenia comillas, saltos de linea, espacios extra o caracteres '
-            'invisibles; se limpio.'
-        )
-
     texto = re.sub(r'\s+', '', texto)
-    texto = re.sub(r'(\.supabase\.co)\.+', r'\1', texto, flags=re.IGNORECASE)
-
-    coincidencia_esquema = _RE_ESQUEMA_URL.search(texto)
-    if coincidencia_esquema and coincidencia_esquema.start() > 0:
-        prefijo_basura = texto[: coincidencia_esquema.start()]
-        texto = texto[coincidencia_esquema.start() :]
-        resultado.id_sospechoso = True
-        resultado.advertencias.append(
-            f'SUPABASE_URL tenia el prefijo invalido "{prefijo_basura}" pegado antes de '
-            'https://; se descarto.'
-        )
-
-    if not _RE_ESQUEMA_URL.search(texto):
-        if _SUFIJO_HOST_SUPABASE in texto.lower():
-            texto = f'https://{texto.lstrip("/")}'
-            resultado.advertencias.append(
-                'SUPABASE_URL no tenia esquema; se anadio https:// automaticamente.'
-            )
-        else:
-            resultado.errores.append(
-                'SUPABASE_URL debe comenzar con https:// y apuntar a *.supabase.co.'
-            )
-            return resultado
-
-    texto, advertencias_esquema = _normalizar_esquema_https(texto)
-    resultado.advertencias.extend(advertencias_esquema)
-    if any('duplicado' in aviso for aviso in advertencias_esquema):
-        resultado.id_sospechoso = True
     texto = texto.rstrip('/')
 
+    # 1) Cualquier *.supabase.co en el valor (aunque venga con basura alrededor).
+    coincidencia = _RE_HOST_SUPABASE.search(texto)
+    if coincidencia:
+        return _aceptar_host_supabase(coincidencia.group(0), resultado)
+
+    # 2) https://host.supabase.co via parseo clasico.
+    if not _RE_ESQUEMA_URL.search(texto):
+        texto = f'https://{texto.lstrip("/")}'
+    else:
+        texto, _avisos = _normalizar_esquema_https(texto)
     for path_erroneo in _PATHS_ERRONEOS:
         sufijo = path_erroneo.rstrip('/')
         if texto.lower().endswith(sufijo):
             texto = texto[: -len(sufijo)].rstrip('/')
-            resultado.advertencias.append(
-                f'SUPABASE_URL incluia el path {sufijo}; se normalizo al origen del proyecto.'
-            )
             break
 
-    parsed = urlparse(texto)
-    host_parseado = _extraer_host_desde_texto_url(texto)
-    hosts_detectados = _extraer_hosts_supabase(texto)
-    if host_parseado and host_parseado not in hosts_detectados:
-        hosts_detectados.insert(0, host_parseado)
+    host = _extraer_host_desde_texto_url(texto)
+    if host.endswith(_SUFIJO_HOST_SUPABASE) and host != 'supabase.co':
+        return _aceptar_host_supabase(host, resultado)
 
-    # Preferir el hostname parseado si ya es *.supabase.co; no descartarlo.
-    if _es_host_supabase_oficial(host_parseado):
-        host = host_parseado
-        avisos_host: list[str] = []
-        sospechoso_host = False
-    else:
-        host, avisos_host, sospechoso_host = _elegir_host_canonico(
-            hosts_detectados, ref_db
-        )
-    resultado.advertencias.extend(avisos_host)
-    if sospechoso_host:
-        resultado.id_sospechoso = True
-    resultado.host = host
-
-    if not host:
-        resultado.errores.append('SUPABASE_URL no contiene un hostname valido.')
-        return resultado
-
-    if not _es_host_supabase_oficial(host):
-        host_mostrado = _quitar_caracteres_invisibles(parsed.hostname or host)
-        resultado.errores.append(
-            f'Host "{host_mostrado}" invalido: la URL debe apuntar a un subdominio de '
-            f'{_SUFIJO_HOST_SUPABASE} (por ejemplo https://TU_REF.supabase.co).'
-        )
-        return resultado
-
-    ref = extraer_ref_proyecto_de_host(host)
-    resultado.advertencias.extend(
-        _advertir_mismatch_database_url(ref, database_url)
+    resultado.errores.append(
+        'SUPABASE_URL debe comenzar con https:// y el host debe terminar en .supabase.co.'
     )
-
-    if parsed.username or parsed.password:
-        resultado.advertencias.append(
-            'SUPABASE_URL incluia credenciales embebidas; se usara solo el origen https.'
-        )
-
-    if parsed.query or parsed.fragment:
-        resultado.advertencias.append(
-            'SUPABASE_URL contenia query o fragmento; se descarto para usar solo el origen.'
-        )
-
-    if parsed.port and parsed.port not in (443, 80):
-        resultado.advertencias.append(
-            f'SUPABASE_URL especifica puerto {parsed.port}; se omitio al reconstruir la URL canonica.'
-        )
-
-    # Cualquier *.supabase.co es valido: asignar siempre el origen, no vaciar.
-    resultado.project_ref = ref
-    resultado.url = f'https://{host}'
-    resultado.url_recomendada = resultado.url
-    resultado.valida = True
     return resultado
 
 

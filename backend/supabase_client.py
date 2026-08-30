@@ -142,9 +142,11 @@ def _imprimir_estado_supabase():
 
 _URL_RAW = os.getenv('SUPABASE_URL')
 _URL_INFO = sanitizar_url_supabase(_URL_RAW, database_url=os.getenv('DATABASE_URL'))
+if not _URL_INFO.url and _URL_RAW:
+    # Nunca descartar un *.supabase.co presente en el entorno.
+    _URL_INFO = sanitizar_url_supabase(_limpiar_valor_env(_URL_RAW))
 _aplicar_config_url(_URL_INFO, _URL_RAW)
 
-# Si el host es *.supabase.co, usar esa URL. No vaciar por avisos o id_sospechoso.
 SUPABASE_URL = _URL_INFO.url
 SUPABASE_URL_VALIDA = bool(SUPABASE_URL)
 SUPABASE_URL_ADVERTENCIAS = list(_URL_INFO.advertencias)
