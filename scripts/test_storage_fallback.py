@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prueba de integridad: respaldo local cuando Supabase Storage no responde."""
+"""Prueba de integridad: Storage sin respaldo local y validacion de URL canonica."""
 
 import sys
 from pathlib import Path
@@ -10,35 +10,51 @@ if str(RAIZ) not in sys.path:
 
 
 def main():
-    from backend.local_storage import UPLOADS_STATIC_PREFIX, guardar_bytes_local
-    from backend.supabase_storage import _persistir_con_respaldo
-    from backend.utils import imagen_url_almacenada, url_imagen_local_valida
+    from backend.supabase_client import SUPABASE_URL, construir_url_publica_storage
+    from backend.supabase_storage import SupabaseUploadError, _persistir_con_respaldo
+    from backend.utils import imagen_url_almacenada, url_imagen_subida_storage_valida
 
     errores = []
 
-    try:
-        url = guardar_bytes_local(b'test-bytes', 'integrity_local.webp', 'comercios')
-        if not url.startswith(UPLOADS_STATIC_PREFIX):
-            errores.append(f'URL local invalida: {url}')
-        if not url_imagen_local_valida(url):
-            errores.append('url_imagen_local_valida rechazo la ruta local')
-        if imagen_url_almacenada(url) != url:
-            errores.append('imagen_url_almacenada no reconoce ruta local')
-    except Exception as error:
-        errores.append(f'guardar_bytes_local: {error}')
+    url_mayusculas = (
+        'https://ejemplo.supabase.co/Storage/V1/Object/Public/imagenes/productos/x.webp'
+    )
+    if not url_imagen_subida_storage_valida(url_mayusculas):
+        errores.append('Validacion case-insensitive fallo para ruta /Storage/V1/...')
+
+    if SUPABASE_URL:
+        ruta = 'productos/test_canonical.webp'
+        url_canonica = construir_url_publica_storage(ruta)
+        if not url_canonica:
+            errores.append('construir_url_publica_storage devolvio vacio')
+        elif not url_imagen_subida_storage_valida(url_canonica):
+            errores.append(f'URL canonica rechazada: {url_canonica}')
+        elif imagen_url_almacenada(url_canonica) != url_canonica:
+            errores.append('imagen_url_almacenada no reconoce URL de Storage')
+    else:
+        url_canonica = (
+            'https://ejemplo.supabase.co/storage/v1/object/public/imagenes/productos/x.webp'
+        )
+        if imagen_url_almacenada(url_canonica) != url_canonica:
+            errores.append('imagen_url_almacenada no reconoce URL de Storage (sin env)')
 
     try:
-        url_fallback = _persistir_con_respaldo(
+        _persistir_con_respaldo(
             b'fallback-bytes',
-            'integrity_fallback.webp',
+            'integrity_no_client.webp',
             'image/webp',
             'productos',
             supabase_client=None,
         )
-        if not url_fallback.startswith(UPLOADS_STATIC_PREFIX):
-            errores.append(f'fallback URL invalida: {url_fallback}')
+        errores.append(
+            '_persistir_con_respaldo sin cliente Supabase deberia lanzar SupabaseUploadError'
+        )
+    except SupabaseUploadError as error:
+        mensaje = str(error).lower()
+        if 'supabase' not in mensaje and 'storage' not in mensaje:
+            errores.append(f'Mensaje poco claro sin cliente: {error}')
     except Exception as error:
-        errores.append(f'_persistir_con_respaldo sin Supabase: {error}')
+        errores.append(f'_persistir_con_respaldo sin Supabase: {type(error).__name__}: {error}')
 
     if errores:
         print('FALLO integridad storage:')
@@ -46,7 +62,10 @@ def main():
             print(f'  - {item}')
         return 1
 
-    print('OK integridad storage: respaldo local y resolucion de URLs funcionan.')
+    print(
+        'OK integridad storage: URL canonica valida, case-insensitive OK, '
+        'sin cliente lanza SupabaseUploadError.'
+    )
     return 0
 
 

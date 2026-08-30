@@ -24,13 +24,13 @@ if supabase_api_habilitado():
     print('Supabase Storage configurado correctamente.')
     if not obtener_cliente_storage():
         print(
-            'Aviso: no hay cliente Storage para subidas; se usará respaldo local '
-            'en static/uploads/.'
+            'Aviso: no hay cliente Storage para subidas; las subidas fallaran con '
+            'SupabaseUploadError. Configura SUPABASE_SERVICE_ROLE_KEY o SUPABASE_KEY.'
         )
 else:
     print(
-        'Aviso: Supabase Storage no disponible; las subidas manuales usarán '
-        'respaldo local en static/uploads/.'
+        'Aviso: Supabase Storage no disponible; las subidas manuales fallaran con '
+        'SupabaseUploadError hasta configurar SUPABASE_URL y claves en el entorno.'
     )
 
 import sqlite3
@@ -300,9 +300,8 @@ def procesar_imagen_subida(
     max_dimension=800,
 ):
     """
-    Subida manual: Supabase Storage con respaldo automático en static/uploads/.
-    Retorna URL pública o ruta /static/uploads/...; lanza SupabaseUploadError solo
-    si fallan validación, compresión y disco local.
+    Subida manual obligatoria a Supabase Storage.
+    Retorna URL publica canonica del bucket; lanza SupabaseUploadError si falla.
     """
     if not file_storage or not getattr(file_storage, 'filename', ''):
         return None
@@ -529,6 +528,31 @@ def index():
         banner_url=banner_url,
         default_banner=DEFAULT_BANNER,
         whatsapp=whatsapp,
+        whatsapp_url=WHATSAPP_SOPORTE_URL,
+    )
+
+
+@app.route('/como-funciona')
+@app.route('/ayuda')
+def como_funciona():
+    """Guía de uso para consumidores y comercios."""
+    comercio = None
+    es_comerciante = False
+    usuario_id = session.get('usuario_id')
+    if usuario_id:
+        try:
+            comercio_db, _, _, categorias = _cargar_datos_comercio_usuario(usuario_id)
+            if categorias is None and comercio_db:
+                comercio = _normalizar_imagenes_comercio(dict(comercio_db))
+                es_comerciante = True
+        except Exception:
+            pass
+
+    return render_template(
+        'como_funciona.html',
+        comercio=comercio,
+        es_comerciante=es_comerciante,
+        nav_activo='ayuda',
         whatsapp_url=WHATSAPP_SOPORTE_URL,
     )
 
@@ -1013,7 +1037,8 @@ def nuevo_producto():
                 imagen_url = imagen_url_para_persistir(imagen_subida)
                 if not imagen_url:
                     flash(
-                        'La imagen no se pudo subir o Supabase no devolvió una URL pública válida.',
+                        'La subida a Supabase Storage no produjo una URL canonica valida. '
+                        'Revisa los logs del servidor ([Localis Storage]).',
                         'error',
                     )
                     return redirect(url_for('nuevo_producto'))
@@ -1104,7 +1129,8 @@ def editar_producto(producto_id):
                 imagen_persistida = imagen_url_para_persistir(imagen_url)
                 if not imagen_persistida:
                     flash(
-                        'La imagen no se pudo subir o Supabase no devolvió una URL pública válida.',
+                        'La subida a Supabase Storage no produjo una URL canonica valida. '
+                        'Revisa los logs del servidor ([Localis Storage]).',
                         'error',
                     )
                     return redirect(
@@ -1297,8 +1323,8 @@ def api_crear_producto():
                 return jsonify(
                     {
                         'error': (
-                            'La imagen no se pudo subir o Supabase no devolvió '
-                            'una URL pública válida.'
+                            'La subida a Supabase Storage no produjo una URL canonica valida. '
+                            'Revisa los logs del servidor ([Localis Storage]).'
                         )
                     }
                 ), 400

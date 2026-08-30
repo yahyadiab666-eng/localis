@@ -101,8 +101,8 @@ def validar_config_arranque():
             os.environ.get('SUPABASE_KEY') or ''
         ).strip():
             advertencias.append(
-                'SUPABASE_URL/SUPABASE_KEY no configurados: las subidas usarán '
-                'respaldo local en static/uploads/.'
+                'SUPABASE_URL/SUPABASE_KEY no configurados: las subidas a Storage fallaran '
+                'con SupabaseUploadError hasta configurar Supabase en Render.'
             )
         else:
             from backend.supabase_client import obtener_diagnostico_supabase
@@ -130,8 +130,8 @@ def validar_config_arranque():
             os.environ.get('SUPABASE_KEY') or ''
         ).strip():
             advertencias.append(
-                'SUPABASE_URL/SUPABASE_KEY no configurados: subidas vía respaldo local '
-                'en static/uploads/; catálogo maestro usará PostgreSQL directo.'
+                'SUPABASE_URL/SUPABASE_KEY no configurados: las subidas a Storage fallaran '
+                'con SupabaseUploadError; el catalogo maestro usara PostgreSQL directo.'
             )
         else:
             from backend.supabase_client import obtener_diagnostico_supabase

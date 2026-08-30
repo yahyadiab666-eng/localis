@@ -100,16 +100,17 @@ url_imagen_manual_valida = url_imagen_externa_valida
 
 
 def url_imagen_subida_storage_valida(valor):
-    """URL pública del bucket Supabase tras una subida manual de archivo."""
+    """URL publica del bucket Supabase tras una subida manual de archivo."""
     from backend.supabase_client import corregir_typo_ruta_storage
 
     texto = texto_campo_imagen(valor, default=None)
     if not texto or es_imagen_generica(texto):
         return None
     texto = corregir_typo_ruta_storage(texto)
-    if not texto.startswith('https://'):
+    texto_lower = texto.lower()
+    if not texto_lower.startswith('https://'):
         return None
-    if '/storage/v1/object/public/' not in texto:
+    if '/storage/v1/object/public/' not in texto_lower:
         return None
     return texto
 

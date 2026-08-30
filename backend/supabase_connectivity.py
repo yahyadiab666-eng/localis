@@ -335,8 +335,8 @@ def _recomendacion_fallo(resultado: dict[str, Any]) -> str:
         )
     if capa == 'timeout':
         return (
-            'Timeout de red hacia Supabase. Puede ser latencia o restricción saliente en Render; '
-            'el respaldo local en static/uploads/ seguirá operativo.'
+            'Timeout de red hacia Supabase. Puede ser latencia o restriccion saliente en Render; '
+            'las subidas a Storage fallaran con SupabaseUploadError hasta restablecer la conexion.'
         )
     if capa == 'http':
         return (

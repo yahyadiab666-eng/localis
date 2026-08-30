@@ -1,15 +1,16 @@
 """
-Subida de archivos: Supabase Storage (primario) con respaldo local automático.
+Subida de archivos a Supabase Storage (obligatorio en produccion).
 
-Arquitectura híbrida Localis:
-- URLs externas / catálogo maestro → texto https en PostgreSQL.
-- Archivos subidos → Supabase Storage; si falla la red o la config, static/uploads/.
+- URLs externas / catalogo maestro -> texto https en PostgreSQL.
+- Archivos subidos -> Supabase Storage; si falla, SupabaseUploadError explicito (sin disco local).
 """
 
 from backend.images import comprimir_file_storage_a_bytes, validar_archivo_subida
-from backend.local_storage import guardar_bytes_local
 from backend.supabase_client import (
     SUPABASE_BUCKET_IMAGENES,
+    SUPABASE_KEY,
+    SUPABASE_URL,
+    SUPABASE_URL_VALIDA,
     construir_url_publica_storage,
     es_error_red_supabase,
     obtener_cliente_storage,
@@ -21,21 +22,50 @@ LOG_PREFIX = '[Localis Storage]'
 
 
 class SupabaseUploadError(Exception):
-    """Error irrecuperable al procesar o persistir una subida de imagen."""
+    """Error al subir o persistir una imagen en Supabase Storage."""
 
 
 def _validar_url_publica_subida(url):
     valida = url_imagen_subida_storage_valida(url)
     if not valida:
         raise SupabaseUploadError(
-            'Supabase no devolvió una URL pública válida del bucket. '
-            'Verifica que el bucket sea público y que la ruta incluya '
-            '/storage/v1/object/public/.'
+            'La URL canonica de Supabase Storage no paso la validacion interna. '
+            'Verifica SUPABASE_URL y que el bucket sea publico '
+            '(/storage/v1/object/public/).'
         )
     return valida
 
 
+def _mensaje_cliente_no_configurado() -> str:
+    if not SUPABASE_URL_VALIDA or not SUPABASE_URL:
+        return (
+            'Supabase Storage no disponible: SUPABASE_URL ausente o invalida. '
+            'Define https://TU_REF.supabase.co en el entorno (Render).'
+        )
+    if not storage_usa_service_role() and not SUPABASE_KEY:
+        return (
+            'Supabase Storage no disponible: configura SUPABASE_SERVICE_ROLE_KEY '
+            '(recomendado para subidas server-side) o SUPABASE_KEY en el entorno.'
+        )
+    return (
+        'Supabase Storage no disponible: no se pudo crear el cliente SDK. '
+        'Revisa SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY y los logs de arranque '
+        '([Localis Supabase]).'
+    )
+
+
 def _mensaje_error_storage(error):
+    if isinstance(error, SupabaseUploadError):
+        return str(error)
+
+    if es_error_red_supabase(error):
+        return (
+            'No se pudo conectar con Supabase Storage (error de red o DNS). '
+            'Verifica SUPABASE_URL, que el host resuelva en DNS y que el servidor '
+            'tenga salida HTTPS hacia *.supabase.co:443. '
+            f'Detalle: {type(error).__name__}: {error}'
+        )
+
     try:
         from storage3.exceptions import StorageApiError
 
@@ -51,25 +81,27 @@ def _mensaje_error_storage(error):
             if status == 403:
                 if storage_usa_service_role():
                     return (
-                        f'Supabase Storage rechazó la subida por permisos en el bucket '
-                        f'"{SUPABASE_BUCKET_IMAGENES}". Revisa políticas RLS del bucket.'
+                        f'Supabase Storage rechazo la subida (HTTP 403) en el bucket '
+                        f'"{SUPABASE_BUCKET_IMAGENES}". Revisa politicas RLS/politicas '
+                        f'del bucket en Supabase Dashboard -> Storage.'
+                        f' Detalle: {mensaje}'
                     )
                 return (
-                    f'Supabase Storage rechazó la subida por permisos (RLS). '
-                    f'Configura SUPABASE_SERVICE_ROLE_KEY en el servidor (Settings → API → '
-                    f'service_role) o añade una política INSERT en el bucket '
+                    f'Supabase Storage rechazo la subida por permisos (HTTP 403 / RLS). '
+                    f'Configura SUPABASE_SERVICE_ROLE_KEY en Render (Settings -> API -> '
+                    f'service_role) o anade una politica INSERT en el bucket '
                     f'"{SUPABASE_BUCKET_IMAGENES}". Detalle: {mensaje}'
                 )
             if status == 413:
-                return 'La imagen supera el tamaño permitido por Supabase Storage.'
+                return 'La imagen supera el tamano permitido por Supabase Storage (HTTP 413).'
             if status == 404:
                 return (
-                    f'El bucket "{SUPABASE_BUCKET_IMAGENES}" no existe o no es accesible. '
-                    f'Verifica SUPABASE_BUCKET_IMAGENES en el entorno.'
+                    f'El bucket "{SUPABASE_BUCKET_IMAGENES}" no existe o no es accesible '
+                    f'(HTTP 404). Verifica SUPABASE_BUCKET_IMAGENES en el entorno.'
                 )
             if status == 400:
-                return f'Petición inválida a Supabase Storage: {mensaje}'
-            return f'Error de Supabase Storage ({status}): {mensaje}'
+                return f'Peticion invalida a Supabase Storage (HTTP 400): {mensaje}'
+            return f'Error de Supabase Storage (HTTP {status}): {mensaje}'
     except ImportError:
         pass
 
@@ -79,46 +111,30 @@ def _mensaje_error_storage(error):
 def _describir_error(error):
     if isinstance(error, SupabaseUploadError):
         return str(error)
-    nombre = type(error).__name__
-    if es_error_red_supabase(error):
-        return f'red/DNS ({nombre})'
-    return f'{nombre}: {error}'
+    return _mensaje_error_storage(error)
 
 
-def _registrar_fallo_supabase(error, carpeta, filename):
+def _registrar_fallo_supabase(error, ruta_storage):
     print(
-        f'{LOG_PREFIX} Supabase no disponible ({_describir_error(error)}). '
-        f'Respaldo local -> static/uploads/{carpeta.strip("/")}/{filename}'
+        f'{LOG_PREFIX} FALLO subida '
+        f'({SUPABASE_BUCKET_IMAGENES}/{ruta_storage}): {_describir_error(error)}'
     )
 
 
-def _registrar_exito_supabase(ruta_storage):
-    print(f'{LOG_PREFIX} Supabase OK: {SUPABASE_BUCKET_IMAGENES}/{ruta_storage}')
-
-
-def _registrar_exito_local(url_local):
-    print(f'{LOG_PREFIX} Respaldo local OK: {url_local}')
+def _registrar_exito_supabase(ruta_storage, url_publica):
+    print(
+        f'{LOG_PREFIX} Supabase OK: {SUPABASE_BUCKET_IMAGENES}/{ruta_storage} -> {url_publica}'
+    )
 
 
 def _resolver_cliente_storage(supabase_client):
     return supabase_client or obtener_cliente_storage()
 
 
-def _url_publica_tras_subida(cliente, ruta_storage):
-    """Construye y valida la URL pública canónica tras un upload exitoso."""
+def _url_publica_tras_subida(ruta_storage):
+    """Tras upload exitoso, usa solo la URL canonica construida desde SUPABASE_URL."""
     url_canonica = construir_url_publica_storage(ruta_storage)
-    try:
-        url_sdk = cliente.storage.from_(SUPABASE_BUCKET_IMAGENES).get_public_url(ruta_storage)
-        from backend.supabase_client import normalizar_url_publica_storage
-
-        url_normalizada = normalizar_url_publica_storage(
-            url_sdk,
-            ruta=ruta_storage,
-        )
-    except Exception:
-        url_normalizada = url_canonica
-
-    return _validar_url_publica_subida(url_normalizada or url_canonica)
+    return _validar_url_publica_subida(url_canonica)
 
 
 def _subir_bytes_al_bucket(cliente, ruta_storage, data, content_type):
@@ -136,39 +152,34 @@ def _subir_bytes_al_bucket(cliente, ruta_storage, data, content_type):
     except Exception as error:
         raise SupabaseUploadError(_mensaje_error_storage(error)) from error
 
-    return _url_publica_tras_subida(cliente, ruta_storage)
+    return _url_publica_tras_subida(ruta_storage)
 
 
-def _persistir_con_respaldo(data, filename, content_type, carpeta, supabase_client=None):
-    """Intenta Supabase; ante cualquier fallo operativo usa static/uploads/."""
+def _persistir_en_supabase(data, filename, content_type, carpeta, supabase_client=None):
+    """Sube a Supabase Storage o lanza SupabaseUploadError; sin respaldo local."""
     ruta_storage = f'{carpeta.strip("/")}/{filename}'
     cliente = _resolver_cliente_storage(supabase_client)
 
-    if cliente:
-        try:
-            url = _subir_bytes_al_bucket(cliente, ruta_storage, data, content_type)
-            _registrar_exito_supabase(ruta_storage)
-            return url
-        except Exception as error:
-            _registrar_fallo_supabase(error, carpeta, filename)
-    else:
-        print(
-            f'{LOG_PREFIX} Supabase Storage no configurado. '
-            f'Usando respaldo local -> static/uploads/{carpeta.strip("/")}/{filename}'
-        )
+    if not cliente:
+        mensaje = _mensaje_cliente_no_configurado()
+        print(f'{LOG_PREFIX} {mensaje}')
+        raise SupabaseUploadError(mensaje)
 
     try:
-        url_local = guardar_bytes_local(data, filename, carpeta)
-        _registrar_exito_local(url_local)
-        return url_local
+        url = _subir_bytes_al_bucket(cliente, ruta_storage, data, content_type)
+        _registrar_exito_supabase(ruta_storage, url)
+        return url
+    except SupabaseUploadError as error:
+        _registrar_fallo_supabase(error, ruta_storage)
+        raise
     except Exception as error:
-        print(
-            f'{LOG_PREFIX} ERROR CRÍTICO: respaldo local falló '
-            f'({type(error).__name__}: {error})'
-        )
-        raise SupabaseUploadError(
-            f'No se pudo guardar la imagen (Supabase ni disco local): {error}'
-        ) from error
+        upload_error = SupabaseUploadError(_mensaje_error_storage(error))
+        _registrar_fallo_supabase(upload_error, ruta_storage)
+        raise upload_error from error
+
+
+# Alias interno usado por scripts de prueba
+_persistir_con_respaldo = _persistir_en_supabase
 
 
 def subir_imagen_con_respaldo(
@@ -178,9 +189,9 @@ def subir_imagen_con_respaldo(
     carpeta='comercios',
     max_dimension=800,
 ):
-    """Subida manual: Supabase primario, static/uploads/ si la red o Storage fallan."""
+    """Subida manual a Supabase Storage (sin respaldo en disco local)."""
     if not file_storage:
-        raise SupabaseUploadError('No se recibió ningún archivo de imagen.')
+        raise SupabaseUploadError('No se recibio ningun archivo de imagen.')
 
     error_validacion = validar_archivo_subida(file_storage)
     if error_validacion:
@@ -193,7 +204,7 @@ def subir_imagen_con_respaldo(
         raise SupabaseUploadError('No se pudo comprimir la imagen subida.')
 
     data, content_type, filename = comprimido
-    return _persistir_con_respaldo(
+    return _persistir_en_supabase(
         data,
         filename,
         content_type,
@@ -209,11 +220,11 @@ def subir_bytes_con_respaldo(
     content_type='image/webp',
     carpeta='pagos',
 ):
-    """Subida de bytes (comprobantes): Supabase primario, respaldo local automático."""
+    """Subida de bytes (comprobantes) a Supabase Storage."""
     if not data:
         raise SupabaseUploadError('No hay datos de imagen para subir.')
 
-    return _persistir_con_respaldo(
+    return _persistir_en_supabase(
         data,
         filename,
         content_type,
@@ -229,7 +240,7 @@ def subir_imagen_a_supabase(
     carpeta='comercios',
     max_dimension=800,
 ):
-    """Alias retrocompatible → subir_imagen_con_respaldo."""
+    """Alias retrocompatible -> subir_imagen_con_respaldo."""
     return subir_imagen_con_respaldo(
         file_storage,
         supabase_client=supabase_client,
@@ -246,7 +257,7 @@ def subir_bytes_a_supabase(
     content_type='image/webp',
     carpeta='pagos',
 ):
-    """Alias retrocompatible → subir_bytes_con_respaldo."""
+    """Alias retrocompatible -> subir_bytes_con_respaldo."""
     return subir_bytes_con_respaldo(
         data,
         filename=filename,

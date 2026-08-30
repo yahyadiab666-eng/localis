@@ -103,13 +103,15 @@ def _imprimir_estado_supabase():
     if not SUPABASE_URL and not SUPABASE_KEY:
         print(
             f'{prefijo} No configurado (SUPABASE_URL/SUPABASE_KEY ausentes). '
-            'Subidas manuales usarán respaldo local (static/uploads/). '
-            'Catálogo maestro usará PostgreSQL directo.'
+            'Las subidas a Storage fallaran hasta configurar Supabase.'
         )
         return
 
     if not SUPABASE_URL:
-        print(f'{prefijo} SUPABASE_URL vacía o inválida tras sanitización.')
+        print(
+            f'{prefijo} SUPABASE_URL vacia o invalida tras sanitizacion. '
+            'Las subidas a Storage fallaran.'
+        )
         return
 
     host = _extraer_host_desde_url(SUPABASE_URL) or SUPABASE_URL
@@ -123,17 +125,18 @@ def _imprimir_estado_supabase():
     )
 
     if supabase:
+        rol_storage = 'service_role' if supabase_storage_admin else 'anon'
         print(
             f'{prefijo} Cliente API inicializado (PostgREST + Storage). '
-            'Si Storage falla por red, las subidas usan respaldo local.'
+            f'Storage uploads: cliente {rol_storage}.'
         )
     else:
         clave_msg = 'SUPABASE_KEY ausente' if not SUPABASE_KEY else 'fallo al crear cliente'
         if not SUPABASE_URL_VALIDA:
-            clave_msg = 'SUPABASE_URL inválida'
+            clave_msg = 'SUPABASE_URL invalida'
         print(
             f'{prefijo} Cliente API no disponible ({clave_msg}). '
-            'Subidas manuales usarán static/uploads/. Catálogo maestro: PostgreSQL.'
+            'Las subidas a Storage fallaran con SupabaseUploadError.'
         )
 
 
