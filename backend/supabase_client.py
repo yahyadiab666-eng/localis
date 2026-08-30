@@ -12,9 +12,10 @@ from supabase.lib.client_options import SyncClientOptions
 
 from backend.supabase_connectivity import (
     ResultadoUrlSupabase,
+    SUPABASE_URL_POR_DEFECTO,
     _limpiar_texto_env,
-    _origen_basico_supabase,
     imprimir_alerta_supabase_url,
+    leer_supabase_url_entorno,
     sanitizar_url_supabase,
 )
 
@@ -141,19 +142,16 @@ def _imprimir_estado_supabase():
         )
 
 
-_URL_RAW = os.getenv('SUPABASE_URL')
+_URL_RAW = leer_supabase_url_entorno()
 _URL_INFO = sanitizar_url_supabase(_URL_RAW, database_url=os.getenv('DATABASE_URL'))
-_origen_fallback = _origen_basico_supabase(_URL_RAW or '')
-if '.supabase.co' in str(_URL_RAW or '').lower():
-    if not _URL_INFO.url:
-        _URL_INFO.url = _origen_fallback or str(_URL_RAW).strip()
-        _URL_INFO.host = _URL_INFO.url.split('://', 1)[-1].split('/')[0]
+if not _URL_INFO.url:
+    _URL_INFO.url = SUPABASE_URL_POR_DEFECTO
+    _URL_INFO.host = SUPABASE_URL_POR_DEFECTO.split('://', 1)[-1]
     _URL_INFO.valida = True
     _URL_INFO.errores.clear()
 _aplicar_config_url(_URL_INFO, _URL_RAW)
 
-# Contener .supabase.co => el cliente siempre recibe una URL (nunca vaciar).
-SUPABASE_URL = _URL_INFO.url or _origen_fallback
+SUPABASE_URL = _URL_INFO.url or SUPABASE_URL_POR_DEFECTO
 SUPABASE_URL_VALIDA = bool(SUPABASE_URL)
 SUPABASE_URL_ADVERTENCIAS = list(_URL_INFO.advertencias)
 SUPABASE_URL_ERRORES = list(_URL_INFO.errores)

@@ -2,7 +2,9 @@ import os
 import time
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+# override=False: en Render las variables del panel ganan.
+# Un .env local (o vacio) no debe pisar SUPABASE_URL de produccion.
+load_dotenv(override=False)
 
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '').strip()
 GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '').strip()

@@ -15,6 +15,13 @@ import httpx
 
 LOG_PREFIX = '[Localis Supabase Red]'
 _SUFIJO_HOST_SUPABASE = '.supabase.co'
+_REF_PROYECTO_LOCALIS = 'wesnnnvoavprgqcczzsg'
+SUPABASE_URL_POR_DEFECTO = f'https://{_REF_PROYECTO_LOCALIS}.supabase.co'
+_NOMBRES_URL_SUPABASE = (
+    'SUPABASE_URL',
+    'SUPABASE_PROJECT_URL',
+    'NEXT_PUBLIC_SUPABASE_URL',
+)
 _RE_HOST_SUPABASE = re.compile(r'(?:[a-z0-9-]+\.)+supabase\.co', re.IGNORECASE)
 _RE_ESQUEMAS_INICIALES = re.compile(r'^(?:https?://)+', re.IGNORECASE)
 _CHARS_INVISIBLES_URL = (
@@ -287,6 +294,30 @@ def imprimir_alerta_supabase_url(resultado: ResultadoUrlSupabase, url_raw: str |
     print(f'{LOG_PREFIX} =================================')
 
 
+def leer_supabase_url_entorno() -> str:
+    """
+    Lee SUPABASE_URL del proceso (Render/os.environ), con strip y nombres alternos.
+    Si el valor llega vacio o corrupto, usa el Project URL del proyecto Localis.
+    """
+    for nombre in _NOMBRES_URL_SUPABASE:
+        crudo = os.environ.get(nombre)
+        if crudo is None:
+            continue
+        texto = _limpiar_texto_env(crudo) or ''.join(str(crudo).split()).strip()
+        if not texto:
+            continue
+        if '.supabase.co' in texto.lower():
+            return _origen_basico_supabase(texto) or SUPABASE_URL_POR_DEFECTO
+        if texto.lower() in (
+            _REF_PROYECTO_LOCALIS,
+            f'{_REF_PROYECTO_LOCALIS}.supabase.co',
+        ):
+            return SUPABASE_URL_POR_DEFECTO
+        if texto.replace('-', '').isalnum() and '.' not in texto:
+            return f'https://{texto.lower()}{_SUFIJO_HOST_SUPABASE}'
+    return SUPABASE_URL_POR_DEFECTO
+
+
 def _origen_basico_supabase(texto: str) -> str:
     """
     Si el valor menciona .supabase.co, devuelve un origen https://... usable.
@@ -322,33 +353,27 @@ def sanitizar_url_supabase(
     *,
     database_url: str | None = None,
 ) -> ResultadoUrlSupabase:
-    """
-    Si el valor contiene .supabase.co, se acepta siempre (sin excepcion).
-    Solo se reporta error si la variable esta vacia o no menciona Supabase.
-    """
+    """Acepta cualquier valor con .supabase.co; si falta, usa el origen por defecto."""
     del database_url
     resultado = ResultadoUrlSupabase()
     crudo = str(raw_url or '')
     texto = _limpiar_texto_env(crudo) or ''.join(crudo.split()).strip()
 
-    if '.supabase.co' in texto.lower() or '.supabase.co' in crudo.lower():
-        origen = _origen_basico_supabase(texto or crudo)
-        if not origen:
-            origen = texto if texto.lower().startswith('https://') else f'https://{texto.lstrip("/")}'
-            origen = origen.rstrip('/')
-        resultado.url = origen
-        resultado.host = origen.split('://', 1)[-1].split('/')[0]
-        resultado.project_ref = extraer_ref_proyecto_de_host(resultado.host)
-        resultado.url_recomendada = origen
-        resultado.valida = True
-        resultado.errores.clear()
-        return resultado
+    if '.supabase.co' not in texto.lower() and '.supabase.co' not in crudo.lower():
+        resultado.advertencias.append(
+            'SUPABASE_URL vacia o corrupta en el entorno; se uso '
+            f'{SUPABASE_URL_POR_DEFECTO}.'
+        )
+        texto = SUPABASE_URL_POR_DEFECTO
+        crudo = texto
 
-    if not texto:
-        resultado.errores.append('SUPABASE_URL vacia o ausente.')
-        return resultado
-
-    resultado.errores.append('SUPABASE_URL no menciona .supabase.co.')
+    origen = _origen_basico_supabase(texto or crudo) or SUPABASE_URL_POR_DEFECTO
+    resultado.url = origen
+    resultado.host = origen.split('://', 1)[-1].split('/')[0]
+    resultado.project_ref = extraer_ref_proyecto_de_host(resultado.host)
+    resultado.url_recomendada = origen
+    resultado.valida = True
+    resultado.errores.clear()
     return resultado
 
 
@@ -524,6 +549,8 @@ def diagnosticar_conectividad_supabase(
     )
 
     url_raw = supabase_url if supabase_url is not None else SUPABASE_URL
+    if not url_raw or '.supabase.co' not in str(url_raw).lower():
+        url_raw = leer_supabase_url_entorno()
     key = _limpiar_texto_env(supabase_key if supabase_key is not None else SUPABASE_KEY)
     bucket_nombre = (bucket or SUPABASE_BUCKET_IMAGENES or 'imagenes').strip('/')
 

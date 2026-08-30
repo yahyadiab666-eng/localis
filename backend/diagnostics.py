@@ -39,10 +39,9 @@ def _diagnostico_supabase_red(*, forzar: bool = False):
             imprimir_diagnostico_conectividad,
         )
         from backend.supabase_client import SUPABASE_URL
-        from backend.supabase_connectivity import _limpiar_texto_env
+        from backend.supabase_connectivity import leer_supabase_url_entorno
 
-        raw_env = _limpiar_texto_env(os.getenv('SUPABASE_URL'))
-        url_usar = SUPABASE_URL or raw_env
+        url_usar = SUPABASE_URL or leer_supabase_url_entorno()
         if not url_usar:
             _cache_diagnostico_supabase = {
                 'ok': False,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validacion basica: https:// + .supabase.co se acepta y no se vacia."""
+"""SUPABASE_URL se acepta o cae al origen por defecto del proyecto."""
 
 import sys
 from pathlib import Path
@@ -14,7 +14,7 @@ CANONICA = f'https://{REF}.supabase.co'
 
 def main() -> int:
     from backend.supabase_connectivity import (
-        _origen_basico_supabase,
+        SUPABASE_URL_POR_DEFECTO,
         sanitizar_url_supabase,
     )
 
@@ -23,8 +23,6 @@ def main() -> int:
     limpia = sanitizar_url_supabase(CANONICA)
     if not limpia.valida or limpia.url != CANONICA or limpia.errores:
         errores.append(f'URL legitima rechazada: {limpia}')
-    if _origen_basico_supabase(CANONICA) != CANONICA:
-        errores.append('_origen_basico_supabase no devolvio la URL canonica')
 
     for crudo, esperado in (
         (CANONICA, CANONICA),
@@ -32,19 +30,20 @@ def main() -> int:
         (f'https://https://{REF}.supabase.co', CANONICA),
         (f'{CANONICA}/rest/v1', CANONICA),
         (f'http://{REF}.supabase.co/', CANONICA),
+        ('', SUPABASE_URL_POR_DEFECTO),
+        ('   ', SUPABASE_URL_POR_DEFECTO),
+        ('https://ejemplo.com', SUPABASE_URL_POR_DEFECTO),
+        (REF, SUPABASE_URL_POR_DEFECTO),
     ):
         resultado = sanitizar_url_supabase(crudo)
-        if not resultado.valida or resultado.url != esperado:
+        if not resultado.valida or resultado.url != esperado or resultado.errores:
             errores.append(
                 f'{crudo!r} -> valida={resultado.valida} url={resultado.url!r} '
-                f'(esperado {esperado})'
+                f'errores={resultado.errores} (esperado {esperado})'
             )
 
-    invalida = sanitizar_url_supabase('https://ejemplo.com')
-    if invalida.valida or invalida.url:
-        errores.append('https://ejemplo.com (sin .supabase.co) debia rechazarse')
-    if any('contener .supabase.co' in e for e in (invalida.errores or [])):
-        errores.append('el mensaje estricto de https:// + host no debe volver a emitirse')
+    if SUPABASE_URL_POR_DEFECTO != CANONICA:
+        errores.append(f'defecto {SUPABASE_URL_POR_DEFECTO!r} != {CANONICA!r}')
 
     if errores:
         print('FALLO sanitizacion SUPABASE_URL:')
@@ -52,7 +51,7 @@ def main() -> int:
             print(f'  - {item}')
         return 1
 
-    print(f'OK: {CANONICA} pasa con https:// + .supabase.co y se asigna al cliente.')
+    print(f'OK: URL valida se respeta; vacia/corrupta usa {CANONICA}.')
     return 0
 
 
