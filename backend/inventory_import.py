@@ -4,6 +4,7 @@ import csv
 import io
 import os
 import re
+import traceback
 import unicodedata
 
 import openpyxl
@@ -103,6 +104,8 @@ MAX_IMPORT_FILE_BYTES = min(
     MAX_UPLOAD_BYTES,
 )
 IMPORT_BATCH_SIZE = int(os.getenv('IMPORT_BATCH_SIZE', '500'))
+LOG_PREFIX = '[Localis CSV]'
+_MAX_FLASH_CHARS = 1400
 
 INSERT_PRODUCTO_SQL = """
     INSERT INTO productos (
@@ -223,6 +226,20 @@ def _extension_archivo(archivo):
     return archivo.filename.rsplit('.', 1)[-1].lower()
 
 
+def recortar_mensaje_importacion(mensaje):
+    """Evita flashes enormes que rompen la cookie de sesión (500 al redirigir)."""
+    texto = str(mensaje or '').strip() or 'No se pudo completar la importación.'
+    if len(texto) <= _MAX_FLASH_CHARS:
+        return texto
+    sufijo = '\n… (mensaje recortado).'
+    return texto[: max(0, _MAX_FLASH_CHARS - len(sufijo))].rstrip() + sufijo
+
+
+def _registrar_fallo_importacion(etapa, exc):
+    print(f'{LOG_PREFIX} FALLO etapa={etapa} {type(exc).__name__}: {exc}')
+    traceback.print_exc()
+
+
 def cargar_archivo_inventario(archivo):
     """Lee el archivo subido con límite de tamaño. Retorna (bytes, extension, error)."""
     if not archivo or not getattr(archivo, 'filename', ''):
@@ -232,11 +249,16 @@ def cargar_archivo_inventario(archivo):
     if extension not in {'csv', 'xlsx'}:
         return None, None, 'El archivo debe tener extensión .csv o .xlsx.'
 
-    stream = getattr(archivo, 'stream', archivo)
-    if hasattr(stream, 'seek'):
-        stream.seek(0)
+    try:
+        stream = getattr(archivo, 'stream', archivo)
+        if hasattr(stream, 'seek'):
+            stream.seek(0)
 
-    data = stream.read(MAX_IMPORT_FILE_BYTES + 1)
+        data = stream.read(MAX_IMPORT_FILE_BYTES + 1)
+    except Exception as exc:
+        _registrar_fallo_importacion('leer_stream', exc)
+        return None, None, 'No se pudo leer el archivo subido. Intenta de nuevo.'
+
     if not data:
         return None, None, 'El archivo está vacío.'
 
@@ -249,20 +271,36 @@ def cargar_archivo_inventario(archivo):
             'Divide el inventario en archivos más pequeños e intenta de nuevo.',
         )
 
+    es_utf16 = data.startswith(b'\xff\xfe') or data.startswith(b'\xfe\xff')
+    if extension == 'csv' and not es_utf16 and b'\x00' in data[:65536]:
+        return (
+            None,
+            None,
+            'El archivo no es un CSV de texto válido (parece binario o Excel). '
+            'En Excel usa «Guardar como → CSV UTF-8» e intenta de nuevo.',
+        )
+
     return data, extension, None
 
 
 def _detectar_delimitador_csv(muestra):
-    try:
-        dialecto = csv.Sniffer().sniff(muestra, delimiters=',;\t|')
-        return dialecto.delimiter
-    except csv.Error:
-        primera_linea = muestra.splitlines()[0] if muestra else ''
-        if ';' in primera_linea and primera_linea.count(';') >= primera_linea.count(','):
-            return ';'
-        if '\t' in primera_linea:
-            return '\t'
+    texto = muestra or ''
+    primera_linea = next((linea for linea in texto.splitlines() if linea.strip()), '')
+    if not primera_linea:
         return ','
+    try:
+        if len(primera_linea) >= 8 and (',' in primera_linea or ';' in primera_linea):
+            dialecto = csv.Sniffer().sniff(primera_linea, delimiters=',;\t|')
+            return dialecto.delimiter
+    except (csv.Error, TypeError, ValueError):
+        pass
+    if primera_linea.count(';') >= primera_linea.count(',') and ';' in primera_linea:
+        return ';'
+    if '\t' in primera_linea:
+        return '\t'
+    if '|' in primera_linea:
+        return '|'
+    return ','
 
 
 _ENCODINGS_CSV = ('utf-8-sig', 'utf-8', 'cp1252', 'latin-1', 'iso-8859-1')
@@ -275,11 +313,23 @@ _MENSAJE_CODIFICACION_CSV = (
 def _decodificar_csv(data):
     if not data:
         return None
+    if data.startswith(b'\xff\xfe') or data.startswith(b'\xfe\xff'):
+        try:
+            texto = data.decode('utf-16')
+            if '\x00' not in texto:
+                return texto
+        except UnicodeDecodeError:
+            pass
+    if b'\x00' in data[:65536]:
+        return None
     for encoding in _ENCODINGS_CSV:
         try:
-            return data.decode(encoding)
+            texto = data.decode(encoding)
         except UnicodeDecodeError:
             continue
+        if '\x00' in texto:
+            continue
+        return texto
     return None
 
 
@@ -317,8 +367,18 @@ def leer_encabezados_inventario(data, extension):
         if not encabezados:
             return None, 'El archivo CSV no tiene encabezados en la primera fila.'
         return encabezados, None
+    except csv.Error as exc:
+        _registrar_fallo_importacion('encabezados_csv', exc)
+        return None, (
+            'El CSV no se pudo interpretar. Revisa la primera fila '
+            '(delimitadores, comillas y caracteres especiales) y guárdalo como CSV UTF-8.'
+        )
     except Exception as exc:
-        return None, f'Error al leer encabezados: {exc}'
+        _registrar_fallo_importacion('leer_encabezados', exc)
+        return None, (
+            'No se pudieron leer los encabezados del archivo. '
+            'Verifica que sea un CSV o Excel válido e intenta de nuevo.'
+        )
 
 
 def _fila_tiene_datos(fila_dict):
@@ -365,15 +425,22 @@ def iter_filas_inventario_enumeradas(data, extension, encabezados):
         raise ErrorImportacionInventario(_MENSAJE_CODIFICACION_CSV)
 
     delimitador = _detectar_delimitador_csv(contenido[:4096])
-    reader = csv.DictReader(io.StringIO(contenido), delimiter=delimitador)
-    for indice, fila in enumerate(reader, start=2):
-        fila_limpia = {
-            str(clave).strip(): valor
-            for clave, valor in fila.items()
-            if clave is not None and str(clave).strip()
-        }
-        if _fila_tiene_datos(fila_limpia):
-            yield indice, fila_limpia
+    try:
+        reader = csv.DictReader(io.StringIO(contenido), delimiter=delimitador)
+        for indice, fila in enumerate(reader, start=2):
+            fila_limpia = {
+                str(clave).strip(): valor
+                for clave, valor in fila.items()
+                if clave is not None and str(clave).strip()
+            }
+            if _fila_tiene_datos(fila_limpia):
+                yield indice, fila_limpia
+    except csv.Error as exc:
+        _registrar_fallo_importacion('parsear_csv', exc)
+        raise ErrorImportacionInventario(
+            'El CSV no se pudo interpretar. Revisa delimitadores, comillas '
+            'y caracteres especiales. Guárdalo como CSV UTF-8 e intenta de nuevo.'
+        ) from exc
 
 
 def iter_filas_inventario(data, extension, encabezados):
@@ -481,20 +548,29 @@ def validar_inventario_previo(
     filas_con_datos = 0
     filas_validas = 0
 
-    for numero_fila, fila in iter_filas_inventario_enumeradas(
-        data, extension, encabezados
-    ):
-        filas_con_datos += 1
-        errores_fila = diagnosticar_fila_obligatoria(
-            fila, mapeo, meta, numero_fila, tasa_dolar=tasa_dolar
-        )
-        if errores_fila:
-            errores.extend(errores_fila)
-            continue
-        if parsear_fila_inventario(
-            fila, mapeo, meta, tasa_dolar=tasa_dolar, imagen_default=None
+    try:
+        for numero_fila, fila in iter_filas_inventario_enumeradas(
+            data, extension, encabezados
         ):
-            filas_validas += 1
+            filas_con_datos += 1
+            errores_fila = diagnosticar_fila_obligatoria(
+                fila, mapeo, meta, numero_fila, tasa_dolar=tasa_dolar
+            )
+            if errores_fila:
+                errores.extend(errores_fila)
+                continue
+            if parsear_fila_inventario(
+                fila, mapeo, meta, tasa_dolar=tasa_dolar, imagen_default=None
+            ):
+                filas_validas += 1
+    except ErrorImportacionInventario:
+        raise
+    except Exception as exc:
+        _registrar_fallo_importacion('validacion_filas', exc)
+        raise ErrorImportacionInventario(
+            'No se pudieron leer las filas del archivo. '
+            'Revisa la codificación y el formato e intenta de nuevo.'
+        ) from exc
 
     if filas_con_datos == 0:
         return False, 'El archivo no contiene filas de datos debajo de los encabezados.', None
@@ -781,6 +857,11 @@ def mensaje_error_importacion(exc):
         return (
             'El archivo es demasiado grande para procesarlo en este momento. '
             'Reduce el tamaño o divide el inventario en varios archivos.'
+        )
+    if isinstance(exc, csv.Error) or isinstance(exc, UnicodeError):
+        return (
+            'El CSV no se pudo leer. Revisa la codificación (UTF-8 o Latin-1), '
+            'los delimitadores y que no haya caracteres binarios.'
         )
     return (
         'No se pudo completar la importación. '

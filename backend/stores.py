@@ -1,6 +1,7 @@
 import os
 import random
 import sqlite3
+import traceback
 
 import psycopg2
 
@@ -14,12 +15,14 @@ from backend.image_lookup import (
 )
 from backend.utils import imagen_url_para_persistir, normalizar_codigo_barras, validar_ubicacion_comercio
 from backend.inventory_import import (
+    LOG_PREFIX as CSV_LOG,
     cargar_archivo_inventario,
     detectar_mapeo_columnas,
     iter_lotes_productos,
     leer_encabezados_inventario,
     mensaje_error_importacion,
     persistir_importacion_por_lotes,
+    recortar_mensaje_importacion,
     validar_inventario_previo,
 )
 from backend.plans import (
@@ -685,24 +688,38 @@ def procesar_csv_productos(comercio_id, archivo_csv):
     Importador inteligente con reemplazo total del inventario.
     Procesa por lotes en memoria acotada y transacciones PostgreSQL seguras.
     """
+    etapa = 'inicio'
+    nombre_archivo = getattr(archivo_csv, 'filename', None)
+    print(f'{CSV_LOG} inicio comercio={comercio_id} archivo={nombre_archivo!r}')
     try:
+        etapa = 'leer_archivo'
         data, extension, error_lectura = cargar_archivo_inventario(archivo_csv)
         if error_lectura:
-            return False, error_lectura, None
+            print(f'{CSV_LOG} rechazo etapa={etapa}: {error_lectura}')
+            return False, recortar_mensaje_importacion(error_lectura), None
 
+        etapa = 'encabezados'
         encabezados, error_enc = leer_encabezados_inventario(data, extension)
         if error_enc:
-            return False, error_enc, None
+            print(f'{CSV_LOG} rechazo etapa={etapa}: {error_enc}')
+            return False, recortar_mensaje_importacion(error_enc), None
 
+        etapa = 'mapeo_columnas'
         mapeo, meta, error_mapeo = detectar_mapeo_columnas(encabezados)
         if error_mapeo:
-            return False, error_mapeo, None
+            print(f'{CSV_LOG} rechazo etapa={etapa}: {error_mapeo}')
+            return False, recortar_mensaje_importacion(error_mapeo), None
 
+        etapa = 'permiso_inventario'
         ok, msg = comercio_puede_gestionar_inventario(comercio_id)
         if not ok:
-            return False, msg, None
+            print(f'{CSV_LOG} rechazo etapa={etapa}: {msg}')
+            return False, recortar_mensaje_importacion(msg), None
 
+        etapa = 'tasa_dolar'
         tasa = float(obtener_tasa_dolar() or 1.0)
+
+        etapa = 'validacion'
         valido, error_validacion, meta_validacion = validar_inventario_previo(
             data,
             extension,
@@ -712,8 +729,10 @@ def procesar_csv_productos(comercio_id, archivo_csv):
             tasa_dolar=tasa,
         )
         if not valido:
-            return False, error_validacion, None
+            print(f'{CSV_LOG} rechazo etapa={etapa}: {error_validacion}')
+            return False, recortar_mensaje_importacion(error_validacion), None
 
+        etapa = 'limite_plan'
         total_validos = (meta_validacion or {}).get('filas_validas', 0)
         limite = obtener_limite_productos_comercio(comercio_id)
         if not es_limite_ilimitado(limite) and total_validos > limite:
@@ -728,7 +747,9 @@ def procesar_csv_productos(comercio_id, archivo_csv):
             mensaje, plan_sugerido = mensaje_limite_importacion(
                 plan_tipo, total_validos, limite
             )
-            return False, mensaje, {'plan_sugerido': plan_sugerido}
+            return False, recortar_mensaje_importacion(mensaje), {
+                'plan_sugerido': plan_sugerido
+            }
 
         def _generador_lotes():
             return iter_lotes_productos(
@@ -741,9 +762,20 @@ def procesar_csv_productos(comercio_id, archivo_csv):
                 imagen_default=None,
             )
 
+        etapa = 'persistir'
         insertados = persistir_importacion_por_lotes(comercio_id, _generador_lotes)
-        asociar_imagenes_inventario(comercio_id)
 
+        etapa = 'asociar_imagenes'
+        try:
+            asociar_imagenes_inventario(comercio_id)
+        except Exception as exc_img:
+            print(
+                f'{CSV_LOG} aviso etapa={etapa} {type(exc_img).__name__}: {exc_img} '
+                '(el inventario ya se guardó)'
+            )
+            traceback.print_exc()
+
+        print(f'{CSV_LOG} ok comercio={comercio_id} insertados={insertados}')
         return (
             True,
             f'Importación completada: {insertados} productos cargados. '
@@ -752,4 +784,6 @@ def procesar_csv_productos(comercio_id, archivo_csv):
         )
 
     except Exception as exc:
-        return False, mensaje_error_importacion(exc), None
+        print(f'{CSV_LOG} FALLO etapa={etapa} {type(exc).__name__}: {exc}')
+        traceback.print_exc()
+        return False, recortar_mensaje_importacion(mensaje_error_importacion(exc)), None

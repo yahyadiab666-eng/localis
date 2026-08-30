@@ -232,5 +232,9 @@ def asociar_imagenes_inventario(comercio_id):
     if not pendientes:
         return 0
 
-    aplicar_respaldo_imagenes(pendientes, persistir=True)
+    try:
+        aplicar_respaldo_imagenes(pendientes, persistir=True)
+    except Exception as error:
+        print(f'Error al persistir imágenes post-importación: {error}')
+        return 0
     return len(pendientes)

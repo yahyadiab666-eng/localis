@@ -1,5 +1,6 @@
 import os
 import time
+import traceback
 from dotenv import load_dotenv
 
 # override=False: en Render las variables del panel ganan.
@@ -129,6 +130,7 @@ from backend.session_comercio import (
     limpiar_contexto_comercio,
     vincular_comercio_en_sesion,
 )
+from backend.inventory_import import recortar_mensaje_importacion
 from backend.stores import (
     actualizar_datos_comercio,
     actualizar_producto,
@@ -1202,20 +1204,48 @@ def cargar_csv():
     if bloqueo:
         return bloqueo
 
-    archivo = request.files.get('archivo_csv')
-    exito, mensaje, meta = procesar_csv_productos(comercio['id'], archivo)
-
-    if not exito and meta and meta.get('plan_sugerido'):
-        flash(mensaje, 'limite_plan')
-        return redirect(
-            url_for(
-                'comercio_planes',
-                abrir_pago=meta['plan_sugerido'],
-            )
+    try:
+        archivo = request.files.get('archivo_csv')
+        print(
+            f'[Localis CSV] POST comercio={comercio["id"]} '
+            f'archivo={getattr(archivo, "filename", None)!r}'
         )
+        exito, mensaje, meta = procesar_csv_productos(comercio['id'], archivo)
+        mensaje = recortar_mensaje_importacion(mensaje)
+    except Exception as exc:
+        print(f'[Localis CSV] FALLO etapa=ruta {type(exc).__name__}: {exc}')
+        traceback.print_exc()
+        flash(
+            'No se pudo completar la importación. El inventario no fue modificado. '
+            'Revisa que el archivo sea CSV UTF-8 o Excel (.xlsx) e intenta de nuevo.',
+            'error',
+        )
+        return redirect(url_for('panel_comercio'))
 
-    flash(mensaje, 'exito' if exito else 'error')
-    return redirect(url_for('panel_comercio'))
+    try:
+        if not exito and meta and meta.get('plan_sugerido'):
+            flash(mensaje, 'limite_plan')
+            return redirect(
+                url_for(
+                    'comercio_planes',
+                    abrir_pago=meta['plan_sugerido'],
+                )
+            )
+
+        flash(mensaje, 'exito' if exito else 'error')
+        return redirect(url_for('panel_comercio'))
+    except Exception as exc:
+        print(f'[Localis CSV] FALLO etapa=respuesta {type(exc).__name__}: {exc}')
+        traceback.print_exc()
+        try:
+            flash(
+                'La importación terminó, pero no se pudo mostrar el detalle. '
+                'Revisa tu inventario e intenta de nuevo si faltan productos.',
+                'error',
+            )
+        except Exception:
+            pass
+        return redirect(url_for('panel_comercio'))
 
 
 @app.route('/comercio/productos/cargar-csv', methods=['GET'])
