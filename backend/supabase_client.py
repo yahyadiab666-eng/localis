@@ -12,6 +12,7 @@ from supabase.lib.client_options import SyncClientOptions
 
 from backend.supabase_connectivity import (
     ResultadoUrlSupabase,
+    _limpiar_texto_env,
     imprimir_alerta_supabase_url,
     sanitizar_url_supabase,
 )
@@ -23,10 +24,8 @@ SUPABASE_CONNECT_TIMEOUT = 5.0
 
 
 def _limpiar_valor_env(valor):
-    """Limpia claves/env auxiliares (comillas y saltos de línea al copiar en Render)."""
-    if valor is None:
-        return ''
-    return str(valor).strip().strip('"').strip("'").replace('\r', '').replace('\n', '').strip()
+    """Limpia claves/env auxiliares (comillas y saltos de linea al copiar en Render)."""
+    return _limpiar_texto_env(valor)
 
 
 def _extraer_host_desde_url(url):

@@ -14,6 +14,15 @@ import httpx
 
 LOG_PREFIX = '[Localis Supabase Red]'
 _SUFIJO_HOST_SUPABASE = '.supabase.co'
+_CHARS_INVISIBLES_URL = (
+    '\ufeff',  # BOM
+    '\u200b',  # zero-width space
+    '\u200c',
+    '\u200d',
+    '\u2060',
+    '\u00ad',  # soft hyphen
+)
+_RE_ESQUEMA_URL = re.compile(r'^(https?)://', re.IGNORECASE)
 _PATHS_ERRONEOS = (
     '/rest/v1',
     '/rest/v1/',
@@ -26,10 +35,59 @@ _PATHS_ERRONEOS = (
 )
 
 
+def _quitar_caracteres_invisibles(texto: str) -> str:
+    resultado = str(texto or '')
+    for caracter in _CHARS_INVISIBLES_URL:
+        resultado = resultado.replace(caracter, '')
+    return resultado
+
+
 def _limpiar_texto_env(valor):
     if valor is None:
         return ''
-    return str(valor).strip().strip('"').strip("'").replace('\r', '').replace('\n', '').strip()
+    texto = str(valor).strip().strip('"').strip("'").replace('\r', '').replace('\n', '')
+    texto = _quitar_caracteres_invisibles(texto)
+    return texto.strip()
+
+
+def _normalizar_esquema_https(texto: str) -> tuple[str, list[str]]:
+    """Fuerza https:// sin importar mayusculas en el esquema; evita doble prefijo."""
+    advertencias: list[str] = []
+    candidato = texto.strip()
+    coincidencia = _RE_ESQUEMA_URL.match(candidato)
+    if not coincidencia:
+        return candidato, advertencias
+
+    resto = candidato[coincidencia.end() :].lstrip('/')
+    if coincidencia.group(1).lower() == 'http':
+        advertencias.append('SUPABASE_URL usaba http://; se normalizo a https://.')
+    return f'https://{resto}', advertencias
+
+
+def _normalizar_host_supabase(host: str | None) -> str:
+    """Host en minusculas, sin puerto, puntos finales ni caracteres invisibles."""
+    host_limpio = _quitar_caracteres_invisibles((host or '').strip()).lower()
+    return host_limpio.rstrip('.')
+
+
+def _es_host_supabase_oficial(host: str | None) -> bool:
+    host_normalizado = _normalizar_host_supabase(host)
+    if not host_normalizado:
+        return False
+    return host_normalizado == 'supabase.co' or host_normalizado.endswith(_SUFIJO_HOST_SUPABASE)
+
+
+def _extraer_host_desde_texto_url(texto: str) -> str:
+    """Extrae hostname sin puerto; tolera esquemas en mayusculas y host plano sin https://."""
+    parsed = urlparse(texto)
+    if parsed.hostname:
+        return _normalizar_host_supabase(parsed.hostname)
+
+    candidato = texto.split('://', 1)[-1]
+    candidato = candidato.split('/', 1)[0]
+    candidato = candidato.split('@', 1)[-1]
+    candidato = candidato.split(':', 1)[0]
+    return _normalizar_host_supabase(candidato)
 
 
 @dataclass
@@ -44,9 +102,9 @@ class ResultadoUrlSupabase:
 
 
 def extraer_ref_proyecto_de_host(host: str | None) -> str:
-    """Extrae REF de REF.supabase.co."""
-    texto = (host or '').strip().lower()
-    if not texto.endswith(_SUFIJO_HOST_SUPABASE):
+    """Extrae REF de REF.supabase.co (o db.REF.supabase.co)."""
+    texto = _normalizar_host_supabase(host)
+    if not _es_host_supabase_oficial(texto) or texto == 'supabase.co':
         return ''
     return texto[: -len(_SUFIJO_HOST_SUPABASE)]
 
@@ -122,27 +180,29 @@ def sanitizar_url_supabase(
 ) -> ResultadoUrlSupabase:
     """
     Normaliza SUPABASE_URL para evitar fallos DNS por barras finales, paths extra
-    o caracteres inválidos copiados desde el panel de Render/Supabase.
+    o caracteres invalidos copiados desde el panel de Render/Supabase.
     """
     resultado = ResultadoUrlSupabase()
     texto = _limpiar_texto_env(raw_url)
 
     if not texto:
-        resultado.errores.append('SUPABASE_URL vacía o ausente.')
+        resultado.errores.append('SUPABASE_URL vacia o ausente.')
         return resultado
 
-    if texto != (raw_url or '').strip():
+    if texto != _quitar_caracteres_invisibles(str(raw_url or '').strip()):
         resultado.advertencias.append(
-            'SUPABASE_URL contenía comillas, saltos de línea o espacios extra; se limpió.'
+            'SUPABASE_URL contenia comillas, saltos de linea, espacios extra o caracteres '
+            'invisibles; se limpio.'
         )
 
     texto = re.sub(r'\s+', '', texto)
+    texto = re.sub(r'(\.supabase\.co)\.+', r'\1', texto, flags=re.IGNORECASE)
 
-    if not re.match(r'^https?://', texto, re.IGNORECASE):
+    if not _RE_ESQUEMA_URL.search(texto):
         if _SUFIJO_HOST_SUPABASE in texto.lower():
-            texto = f'https://{texto}'
+            texto = f'https://{texto.lstrip("/")}'
             resultado.advertencias.append(
-                'SUPABASE_URL no tenía esquema; se añadió https:// automáticamente.'
+                'SUPABASE_URL no tenia esquema; se anadio https:// automaticamente.'
             )
         else:
             resultado.errores.append(
@@ -150,6 +210,8 @@ def sanitizar_url_supabase(
             )
             return resultado
 
+    texto, advertencias_esquema = _normalizar_esquema_https(texto)
+    resultado.advertencias.extend(advertencias_esquema)
     texto = texto.rstrip('/')
 
     for path_erroneo in _PATHS_ERRONEOS:
@@ -157,25 +219,23 @@ def sanitizar_url_supabase(
         if texto.lower().endswith(sufijo):
             texto = texto[: -len(sufijo)].rstrip('/')
             resultado.advertencias.append(
-                f'SUPABASE_URL incluía el path {sufijo}; se normalizó al origen del proyecto.'
+                f'SUPABASE_URL incluia el path {sufijo}; se normalizo al origen del proyecto.'
             )
             break
 
     parsed = urlparse(texto)
-    host = (parsed.hostname or '').lower()
+    host = _extraer_host_desde_texto_url(texto)
     resultado.host = host
 
-    if parsed.scheme.lower() != 'https':
-        resultado.errores.append('SUPABASE_URL debe comenzar con https://.')
-        return resultado
-
     if not host:
-        resultado.errores.append('SUPABASE_URL no contiene un hostname válido.')
+        resultado.errores.append('SUPABASE_URL no contiene un hostname valido.')
         return resultado
 
-    if not host.endswith(_SUFIJO_HOST_SUPABASE):
+    if not _es_host_supabase_oficial(host):
+        host_mostrado = _quitar_caracteres_invisibles(parsed.hostname or host)
         resultado.errores.append(
-            f'Host "{host}" invalido: la URL debe terminar en {_SUFIJO_HOST_SUPABASE}.'
+            f'Host "{host_mostrado}" invalido: la URL debe apuntar a un subdominio de '
+            f'{_SUFIJO_HOST_SUPABASE} (por ejemplo https://TU_REF.supabase.co).'
         )
         return resultado
 
@@ -192,19 +252,15 @@ def sanitizar_url_supabase(
 
     if parsed.query or parsed.fragment:
         resultado.advertencias.append(
-            'SUPABASE_URL contenía query o fragmento; se descartó para usar solo el origen.'
+            'SUPABASE_URL contenia query o fragmento; se descarto para usar solo el origen.'
         )
 
     if parsed.port and parsed.port not in (443, 80):
         resultado.advertencias.append(
-            f'SUPABASE_URL especifica puerto {parsed.port}; lo habitual es omitir el puerto.'
+            f'SUPABASE_URL especifica puerto {parsed.port}; se omitio al reconstruir la URL canonica.'
         )
 
-    netloc = host
-    if parsed.port and parsed.port not in (443, 80):
-        netloc = f'{host}:{parsed.port}'
-
-    resultado.url = f'{parsed.scheme}://{netloc}'.rstrip('/')
+    resultado.url = f'https://{host}'
     resultado.valida = not resultado.errores
     return resultado
 
