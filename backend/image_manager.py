@@ -8,6 +8,7 @@ Flujo:
 4. None si no hay imagen apta (sin placeholder genérico)
 """
 
+import socket
 import time
 from urllib.parse import quote
 
@@ -32,8 +33,18 @@ _WSRV_FIT = 'cover'
 _WSRV_FORMATO = 'webp'
 _WSRV_CALIDAD = 80
 _PAUSA_OFF_SEG = 0.12
-_OFF_TIMEOUT_SEG = 2
+_OFF_TIMEOUT_SEG = 3
+_LOG_IMAGEN = '[Localis Imagen]'
 _MIN_LADO_PX = 200
+_ERRORES_RED_IMAGEN = (
+    requests.Timeout,
+    requests.ConnectionError,
+    requests.RequestException,
+    socket.gaierror,
+    socket.timeout,
+    TimeoutError,
+    OSError,
+)
 
 _HOSTS_OFICIALES = (
     'openfoodfacts.org',
@@ -60,6 +71,26 @@ _PATRONES_RECHAZO = (
     'emoji',
     'icon',
 )
+
+
+def _advertir_fallo_imagen(contexto, error):
+    print(f'{_LOG_IMAGEN} aviso {contexto}: {type(error).__name__}')
+
+
+def _http_get_imagen(url, headers=None):
+    """GET externo de imagen/metadatos. Timeout corto; nunca propaga red/DNS."""
+    try:
+        return requests.get(
+            url,
+            headers=headers or {'User-Agent': _USER_AGENT},
+            timeout=_OFF_TIMEOUT_SEG,
+        )
+    except _ERRORES_RED_IMAGEN as error:
+        _advertir_fallo_imagen(url, error)
+        return None
+    except Exception as error:
+        _advertir_fallo_imagen(url, error)
+        return None
 
 
 def optimizar_url_wsrv(url_original):
@@ -143,17 +174,13 @@ def _candidatos_imagen_off(producto):
 
 def _buscar_openfoodfacts_por_codigo(codigo_barras):
     """Consulta exclusiva por código EAN/UPC en OpenFoodFacts."""
-    codigo = normalizar_codigo_barras(codigo_barras)
-    if not codigo or not codigo.isdigit() or len(codigo) < 8:
-        return None
-
     try:
-        respuesta = requests.get(
-            _OFF_API.format(codigo=codigo),
-            headers={'User-Agent': _USER_AGENT},
-            timeout=_OFF_TIMEOUT_SEG,
-        )
-        if respuesta.status_code != 200:
+        codigo = normalizar_codigo_barras(codigo_barras)
+        if not codigo or not codigo.isdigit() or len(codigo) < 8:
+            return None
+
+        respuesta = _http_get_imagen(_OFF_API.format(codigo=codigo))
+        if respuesta is None or respuesta.status_code != 200:
             return None
         datos = respuesta.json() or {}
         if datos.get('status') != 1:
@@ -165,10 +192,8 @@ def _buscar_openfoodfacts_por_codigo(codigo_barras):
         for url, ancho, alto in _candidatos_imagen_off(producto):
             if _url_pasa_filtro_calidad(url, ancho, alto):
                 return url
-    except (requests.Timeout, requests.ConnectionError, requests.RequestException) as error:
-        print(f'Error OpenFoodFacts ({codigo}): {type(error).__name__}: {error}')
     except Exception as error:
-        print(f'Error OpenFoodFacts ({codigo}): {error}')
+        _advertir_fallo_imagen('OpenFoodFacts', error)
     return None
 
 
@@ -193,7 +218,7 @@ def _descubrir_y_persistir_oficial(codigo_barras):
         guardar_imagen_maestro(codigo, url_final)
         return url_final
     except Exception as error:
-        print(f'Error al descubrir imagen oficial ({codigo}): {error}')
+        _advertir_fallo_imagen(f'descubrir:{codigo}', error)
         return None
 
 
@@ -213,12 +238,15 @@ def resolver_imagen(
     buscar_oficial=False → no consulta OpenFoodFacts (ruta crítica CSV).
     """
     del para_escritura
-    manual = _url_manual_valida(imagen_manual)
-    if manual:
-        return manual
+    try:
+        manual = _url_manual_valida(imagen_manual)
+        if manual:
+            return manual
 
-    codigo = normalizar_codigo_barras(codigo_barras)
-    if codigo:
+        codigo = normalizar_codigo_barras(codigo_barras)
+        if not codigo:
+            return None
+
         url = None
         if mapa_maestro is not None:
             url = mapa_maestro.get(codigo)
@@ -229,14 +257,16 @@ def resolver_imagen(
                 mapa_maestro[codigo] = url
             return url
 
-        if buscar_oficial:
-            url = _descubrir_y_persistir_oficial(codigo)
-            if url:
-                if mapa_maestro is not None:
-                    mapa_maestro[codigo] = url
-                return url
+        if not buscar_oficial:
+            return None
 
-    return None
+        url = _descubrir_y_persistir_oficial(codigo)
+        if url and mapa_maestro is not None:
+            mapa_maestro[codigo] = url
+        return url
+    except Exception as error:
+        _advertir_fallo_imagen('resolver_imagen', error)
+        return None
 
 
 def resolver_imagen_escritura(
@@ -247,13 +277,17 @@ def resolver_imagen_escritura(
     buscar_oficial=True,
 ):
     """URL para guardar en PostgreSQL (productos). NULL si no hay imagen real."""
-    return resolver_imagen(
-        codigo_barras=codigo_barras,
-        imagen_manual=imagen_manual,
-        mapa_maestro=mapa_maestro,
-        para_escritura=True,
-        buscar_oficial=buscar_oficial,
-    )
+    try:
+        return resolver_imagen(
+            codigo_barras=codigo_barras,
+            imagen_manual=imagen_manual,
+            mapa_maestro=mapa_maestro,
+            para_escritura=True,
+            buscar_oficial=buscar_oficial,
+        )
+    except Exception as error:
+        _advertir_fallo_imagen('resolver_imagen_escritura', error)
+        return None
 
 
 def resolver_imagen_catalogo(
@@ -262,18 +296,22 @@ def resolver_imagen_catalogo(
     mapa_maestro=None,
 ):
     """URL para mostrar en catálogo. Solo lectura: PostgreSQL → catálogo maestro."""
-    manual = imagen_url_almacenada(imagen_url)
-    if manual:
-        return manual
+    try:
+        manual = imagen_url_almacenada(imagen_url)
+        if manual:
+            return manual
 
-    codigo = normalizar_codigo_barras(codigo_barras)
-    if not codigo:
+        codigo = normalizar_codigo_barras(codigo_barras)
+        if not codigo:
+            return None
+
+        if mapa_maestro is not None:
+            return mapa_maestro.get(codigo)
+
+        return imagen_maestro_por_codigo(codigo) or None
+    except Exception as error:
+        _advertir_fallo_imagen('resolver_imagen_catalogo', error)
         return None
-
-    if mapa_maestro is not None:
-        return mapa_maestro.get(codigo)
-
-    return imagen_maestro_por_codigo(codigo) or None
 
 
 def completar_mapa_imagenes(codigos, mapa_maestro=None, buscar_oficial=True):
@@ -281,37 +319,41 @@ def completar_mapa_imagenes(codigos, mapa_maestro=None, buscar_oficial=True):
     Completa mapa codigo → url_imagen.
     Consulta catálogo maestro en lote; opcionalmente OpenFoodFacts para faltantes.
     """
-    mapa = dict(mapa_maestro or {})
-    normalizados = []
-    vistos = set()
-    for codigo in codigos or []:
-        limpio = normalizar_codigo_barras(codigo)
-        if limpio and limpio not in vistos:
-            vistos.add(limpio)
-            normalizados.append(limpio)
+    try:
+        mapa = dict(mapa_maestro or {})
+        normalizados = []
+        vistos = set()
+        for codigo in codigos or []:
+            limpio = normalizar_codigo_barras(codigo)
+            if limpio and limpio not in vistos:
+                vistos.add(limpio)
+                normalizados.append(limpio)
 
-    faltantes = [c for c in normalizados if c not in mapa]
-    if faltantes:
-        try:
-            mapa.update(mapa_imagenes_maestro(faltantes))
-        except Exception as error:
-            print(f'Error al consultar catálogo maestro de imágenes: {error}')
-        faltantes = [c for c in faltantes if c not in mapa]
+        faltantes = [c for c in normalizados if c not in mapa]
+        if faltantes:
+            try:
+                mapa.update(mapa_imagenes_maestro(faltantes))
+            except Exception as error:
+                _advertir_fallo_imagen('catalogo_maestro', error)
+            faltantes = [c for c in faltantes if c not in mapa]
 
-    if not buscar_oficial:
+        if not buscar_oficial:
+            return mapa
+
+        for codigo in faltantes:
+            try:
+                url = _descubrir_y_persistir_oficial(codigo)
+                if url:
+                    mapa[codigo] = url
+            except Exception as error:
+                _advertir_fallo_imagen(f'OpenFoodFacts:{codigo}', error)
+            if _PAUSA_OFF_SEG:
+                time.sleep(_PAUSA_OFF_SEG)
+
         return mapa
-
-    for codigo in faltantes:
-        try:
-            url = _descubrir_y_persistir_oficial(codigo)
-            if url:
-                mapa[codigo] = url
-        except Exception as error:
-            print(f'Error OpenFoodFacts lote ({codigo}): {error}')
-        if _PAUSA_OFF_SEG:
-            time.sleep(_PAUSA_OFF_SEG)
-
-    return mapa
+    except Exception as error:
+        _advertir_fallo_imagen('completar_mapa_imagenes', error)
+        return dict(mapa_maestro or {})
 
 
 def preparar_mapa_imagenes_importacion(productos, snapshot_imagenes=None):

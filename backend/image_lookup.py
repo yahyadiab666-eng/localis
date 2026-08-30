@@ -4,7 +4,6 @@ import os
 import sqlite3
 import threading
 import time
-import traceback
 
 from backend.catalogo_maestro import imagen_maestro_por_codigo, mapa_imagenes_maestro
 from backend.db import get_db_connection
@@ -25,6 +24,8 @@ EXPR_CODIGO_BARRAS = (
     "regexp_replace(TRIM(BOTH FROM CAST(codigo_barras AS TEXT)), '\\s+', '', 'g'), "
     "'\\.0+$', '', 'g')"
 )
+_LOG_CSV = '[Localis CSV]'
+_PRESUPUESTO_OFF_SEG = int(os.getenv('IMPORT_OFF_BUDGET_SEC', '90'))
 
 
 def _url_almacenada_o_none(valor):
@@ -38,11 +39,15 @@ def _resolver_url_escritura(
     mapa_maestro=None,
 ):
     """Resolución al crear/importar: manual → catálogo maestro → OpenFoodFacts."""
-    return resolver_imagen_escritura(
-        imagen_manual=imagen_url,
-        codigo_barras=codigo_barras,
-        mapa_maestro=mapa_maestro,
-    )
+    try:
+        return resolver_imagen_escritura(
+            imagen_manual=imagen_url,
+            codigo_barras=codigo_barras,
+            mapa_maestro=mapa_maestro,
+        )
+    except Exception as error:
+        print(f'{_LOG_CSV} aviso resolver imagen: {type(error).__name__}')
+        return None
 
 
 def imagen_url_para_catalogo(imagen_url=None, codigo_barras=None):
@@ -95,11 +100,15 @@ def resolver_imagen_url_definitiva(
     Persiste URL del catálogo maestro; NULL si no hay imagen.
     """
     del nombre, descripcion, mapa_codigos, mapa_nombres
-    return _resolver_url_escritura(
-        imagen_url=imagen_url,
-        codigo_barras=codigo_barras,
-        mapa_maestro=mapa_maestro,
-    )
+    try:
+        return _resolver_url_escritura(
+            imagen_url=imagen_url,
+            codigo_barras=codigo_barras,
+            mapa_maestro=mapa_maestro,
+        )
+    except Exception as error:
+        print(f'{_LOG_CSV} aviso imagen definitiva: {type(error).__name__}')
+        return None
 
 
 def normalizar_imagen_registro(imagen_url=None, codigo_barras=None, nombre=None, descripcion=None):
@@ -212,16 +221,20 @@ def aplicar_respaldo_imagenes(productos, persistir=False):
     return imagen_urls_para_catalogo(productos)
 
 
-_LOG_CSV = '[Localis CSV]'
-_PRESUPUESTO_OFF_SEG = int(os.getenv('IMPORT_OFF_BUDGET_SEC', '90'))
-
-
 def asociar_imagenes_inventario(comercio_id):
     """
     Completa imágenes faltantes tras el CSV (catálogo maestro + OpenFoodFacts).
     Cada producto va en try/except propio; un fallo de red no corta el lote.
     Pensado para correr en segundo plano, no dentro del request de importación.
     """
+    try:
+        return _asociar_imagenes_inventario(comercio_id)
+    except Exception as error:
+        print(f'{_LOG_CSV} aviso asociar_imagenes: {type(error).__name__}')
+        return 0
+
+
+def _asociar_imagenes_inventario(comercio_id):
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
@@ -282,8 +295,8 @@ def asociar_imagenes_inventario(comercio_id):
             prod['imagen_url'] = url_final
         except Exception as error:
             print(
-                f'{_LOG_CSV} aviso imagen producto={producto_id} '
-                f'{type(error).__name__}: {error}'
+                f'{_LOG_CSV} aviso imagen producto={producto_id}: '
+                f'{type(error).__name__}'
             )
             continue
 
@@ -316,10 +329,9 @@ def programar_asociacion_imagenes_inventario(comercio_id):
             )
         except Exception as error:
             print(
-                f'{_LOG_CSV} OFF diferido fallo comercio={comercio_id} '
-                f'{type(error).__name__}: {error}'
+                f'{_LOG_CSV} aviso OFF diferido comercio={comercio_id}: '
+                f'{type(error).__name__}'
             )
-            traceback.print_exc()
 
     hilo = threading.Thread(
         target=_trabajo,
