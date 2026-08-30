@@ -32,6 +32,7 @@ _WSRV_FIT = 'cover'
 _WSRV_FORMATO = 'webp'
 _WSRV_CALIDAD = 80
 _PAUSA_OFF_SEG = 0.12
+_OFF_TIMEOUT_SEG = 2
 _MIN_LADO_PX = 200
 
 _HOSTS_OFICIALES = (
@@ -150,7 +151,7 @@ def _buscar_openfoodfacts_por_codigo(codigo_barras):
         respuesta = requests.get(
             _OFF_API.format(codigo=codigo),
             headers={'User-Agent': _USER_AGENT},
-            timeout=5,
+            timeout=_OFF_TIMEOUT_SEG,
         )
         if respuesta.status_code != 200:
             return None
@@ -164,6 +165,8 @@ def _buscar_openfoodfacts_por_codigo(codigo_barras):
         for url, ancho, alto in _candidatos_imagen_off(producto):
             if _url_pasa_filtro_calidad(url, ancho, alto):
                 return url
+    except (requests.Timeout, requests.ConnectionError, requests.RequestException) as error:
+        print(f'Error OpenFoodFacts ({codigo}): {type(error).__name__}: {error}')
     except Exception as error:
         print(f'Error OpenFoodFacts ({codigo}): {error}')
     return None
@@ -178,16 +181,20 @@ def _descubrir_y_persistir_oficial(codigo_barras):
     if not codigo:
         return None
 
-    url_origen = _buscar_openfoodfacts_por_codigo(codigo)
-    if not url_origen:
-        return None
+    try:
+        url_origen = _buscar_openfoodfacts_por_codigo(codigo)
+        if not url_origen:
+            return None
 
-    url_final = optimizar_url_wsrv(url_origen)
-    if not url_final:
-        return None
+        url_final = optimizar_url_wsrv(url_origen)
+        if not url_final:
+            return None
 
-    guardar_imagen_maestro(codigo, url_final)
-    return url_final
+        guardar_imagen_maestro(codigo, url_final)
+        return url_final
+    except Exception as error:
+        print(f'Error al descubrir imagen oficial ({codigo}): {error}')
+        return None
 
 
 def resolver_imagen(
@@ -196,13 +203,16 @@ def resolver_imagen(
     mapa_maestro=None,
     *,
     para_escritura=False,
+    buscar_oficial=True,
 ):
     """
     Resuelve la imagen de un producto.
 
     para_escritura=True → None si no hay imagen (no persistir en productos).
     para_escritura=False → None si no hay imagen (vista sin comodín).
+    buscar_oficial=False → no consulta OpenFoodFacts (ruta crítica CSV).
     """
+    del para_escritura
     manual = _url_manual_valida(imagen_manual)
     if manual:
         return manual
@@ -219,11 +229,12 @@ def resolver_imagen(
                 mapa_maestro[codigo] = url
             return url
 
-        url = _descubrir_y_persistir_oficial(codigo)
-        if url:
-            if mapa_maestro is not None:
-                mapa_maestro[codigo] = url
-            return url
+        if buscar_oficial:
+            url = _descubrir_y_persistir_oficial(codigo)
+            if url:
+                if mapa_maestro is not None:
+                    mapa_maestro[codigo] = url
+                return url
 
     return None
 
@@ -232,6 +243,8 @@ def resolver_imagen_escritura(
     imagen_manual=None,
     codigo_barras=None,
     mapa_maestro=None,
+    *,
+    buscar_oficial=True,
 ):
     """URL para guardar en PostgreSQL (productos). NULL si no hay imagen real."""
     return resolver_imagen(
@@ -239,6 +252,7 @@ def resolver_imagen_escritura(
         imagen_manual=imagen_manual,
         mapa_maestro=mapa_maestro,
         para_escritura=True,
+        buscar_oficial=buscar_oficial,
     )
 
 
@@ -278,16 +292,22 @@ def completar_mapa_imagenes(codigos, mapa_maestro=None, buscar_oficial=True):
 
     faltantes = [c for c in normalizados if c not in mapa]
     if faltantes:
-        mapa.update(mapa_imagenes_maestro(faltantes))
+        try:
+            mapa.update(mapa_imagenes_maestro(faltantes))
+        except Exception as error:
+            print(f'Error al consultar catálogo maestro de imágenes: {error}')
         faltantes = [c for c in faltantes if c not in mapa]
 
     if not buscar_oficial:
         return mapa
 
     for codigo in faltantes:
-        url = _descubrir_y_persistir_oficial(codigo)
-        if url:
-            mapa[codigo] = url
+        try:
+            url = _descubrir_y_persistir_oficial(codigo)
+            if url:
+                mapa[codigo] = url
+        except Exception as error:
+            print(f'Error OpenFoodFacts lote ({codigo}): {error}')
         if _PAUSA_OFF_SEG:
             time.sleep(_PAUSA_OFF_SEG)
 
@@ -296,8 +316,8 @@ def completar_mapa_imagenes(codigos, mapa_maestro=None, buscar_oficial=True):
 
 def preparar_mapa_imagenes_importacion(productos, snapshot_imagenes=None):
     """
-    Precalcula imágenes antes del INSERT masivo (fuera del lock de BD).
-    Respeta URL manual del CSV y snapshot del comercio; completa vía maestro + OFF.
+    Precalcula imágenes locales antes del INSERT (CSV, snapshot, catálogo maestro).
+    No consulta OpenFoodFacts: eso se difiere al hilo post-importación.
     """
     snapshot_imagenes = snapshot_imagenes or {}
     mapa = dict(snapshot_imagenes)
@@ -313,4 +333,6 @@ def preparar_mapa_imagenes_importacion(productos, snapshot_imagenes=None):
         vistos.add(codigo)
         codigos_a_resolver.append(codigo)
 
-    return completar_mapa_imagenes(codigos_a_resolver, mapa_maestro=mapa, buscar_oficial=True)
+    return completar_mapa_imagenes(
+        codigos_a_resolver, mapa_maestro=mapa, buscar_oficial=False
+    )

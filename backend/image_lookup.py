@@ -1,6 +1,10 @@
 """Imágenes: catálogo maestro + image_manager en escritura; lectura instantánea."""
 
+import os
 import sqlite3
+import threading
+import time
+import traceback
 
 from backend.catalogo_maestro import imagen_maestro_por_codigo, mapa_imagenes_maestro
 from backend.db import get_db_connection
@@ -177,7 +181,7 @@ def aplicar_respaldo_imagenes(productos, persistir=False):
         ]
         mapa_maestro = completar_mapa_imagenes(
             [c for c in codigos if c],
-            buscar_oficial=True,
+            buscar_oficial=False,
         )
 
         with get_db_connection() as conexion:
@@ -187,10 +191,11 @@ def aplicar_respaldo_imagenes(productos, persistir=False):
                 producto_id = prod.get('id')
                 if not producto_id:
                     continue
-                url_final = _resolver_url_escritura(
-                    prod.get('imagen_url'),
-                    prod.get('codigo_barras'),
+                url_final = resolver_imagen_escritura(
+                    imagen_manual=prod.get('imagen_url'),
+                    codigo_barras=prod.get('codigo_barras'),
                     mapa_maestro=mapa_maestro,
+                    buscar_oficial=False,
                 )
                 if not url_final:
                     continue
@@ -207,8 +212,16 @@ def aplicar_respaldo_imagenes(productos, persistir=False):
     return imagen_urls_para_catalogo(productos)
 
 
+_LOG_CSV = '[Localis CSV]'
+_PRESUPUESTO_OFF_SEG = int(os.getenv('IMPORT_OFF_BUDGET_SEC', '90'))
+
+
 def asociar_imagenes_inventario(comercio_id):
-    """Post-CSV: persiste URLs del catálogo maestro para productos sin imagen_url."""
+    """
+    Completa imágenes faltantes tras el CSV (catálogo maestro + OpenFoodFacts).
+    Cada producto va en try/except propio; un fallo de red no corta el lote.
+    Pensado para correr en segundo plano, no dentro del request de importación.
+    """
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
@@ -222,7 +235,7 @@ def asociar_imagenes_inventario(comercio_id):
             )
             productos = [dict(fila) for fila in cursor.fetchall()]
     except Exception as error:
-        print(f'Error al leer productos para asociar imágenes: {error}')
+        print(f'{_LOG_CSV} Error al leer productos para asociar imágenes: {error}')
         return 0
 
     pendientes = [
@@ -233,8 +246,85 @@ def asociar_imagenes_inventario(comercio_id):
         return 0
 
     try:
-        aplicar_respaldo_imagenes(pendientes, persistir=True)
+        mapa_maestro = completar_mapa_imagenes(
+            [
+                normalizar_codigo_barras(p.get('codigo_barras'))
+                for p in pendientes
+            ],
+            buscar_oficial=False,
+        )
     except Exception as error:
-        print(f'Error al persistir imágenes post-importación: {error}')
+        print(f'{_LOG_CSV} Error al leer catálogo maestro de imágenes: {error}')
+        mapa_maestro = {}
+
+    inicio = time.monotonic()
+    actualizaciones = []
+    for prod in pendientes:
+        producto_id = prod.get('id')
+        if not producto_id:
+            continue
+        if time.monotonic() - inicio > _PRESUPUESTO_OFF_SEG:
+            print(
+                f'{_LOG_CSV} presupuesto OFF agotado comercio={comercio_id} '
+                f'actualizados={len(actualizaciones)} pendientes={len(pendientes)}'
+            )
+            break
+        try:
+            url_final = resolver_imagen_escritura(
+                imagen_manual=prod.get('imagen_url'),
+                codigo_barras=prod.get('codigo_barras'),
+                mapa_maestro=mapa_maestro,
+                buscar_oficial=True,
+            )
+            if not url_final:
+                continue
+            actualizaciones.append((url_final, int(producto_id)))
+            prod['imagen_url'] = url_final
+        except Exception as error:
+            print(
+                f'{_LOG_CSV} aviso imagen producto={producto_id} '
+                f'{type(error).__name__}: {error}'
+            )
+            continue
+
+    if not actualizaciones:
         return 0
-    return len(pendientes)
+
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.executemany(
+                'UPDATE productos SET imagen_url = ? WHERE id = ?',
+                actualizaciones,
+            )
+            conexion.commit()
+    except Exception as error:
+        print(f'{_LOG_CSV} Error al persistir imágenes post-importación: {error}')
+        return 0
+    return len(actualizaciones)
+
+
+def programar_asociacion_imagenes_inventario(comercio_id):
+    """Lanza la búsqueda de fotos oficiales en un hilo daemon (no bloquea HTTP)."""
+    def _trabajo():
+        try:
+            print(f'{_LOG_CSV} OFF diferido inicio comercio={comercio_id}')
+            actualizados = asociar_imagenes_inventario(comercio_id)
+            print(
+                f'{_LOG_CSV} OFF diferido fin comercio={comercio_id} '
+                f'actualizados={actualizados}'
+            )
+        except Exception as error:
+            print(
+                f'{_LOG_CSV} OFF diferido fallo comercio={comercio_id} '
+                f'{type(error).__name__}: {error}'
+            )
+            traceback.print_exc()
+
+    hilo = threading.Thread(
+        target=_trabajo,
+        name=f'localis-csv-off-{comercio_id}',
+        daemon=True,
+    )
+    hilo.start()
+    return hilo

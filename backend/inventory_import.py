@@ -727,20 +727,17 @@ def _imagen_final_importacion(
     nombre=None,
     descripcion=None,
 ):
-    """URL definitiva para INSERT: manual, snapshot local o image_manager."""
+    """URL para INSERT: solo CSV, snapshot del comercio o catálogo maestro local."""
     del nombre, descripcion
-    from backend.image_manager import resolver_imagen_escritura
-
     nueva = imagen_url_para_persistir(imagen_csv)
     if nueva:
         return nueva
     codigo = normalizar_codigo_barras(codigo_barras)
     if codigo and codigo in snapshot_imagenes:
         return snapshot_imagenes[codigo]
-    return resolver_imagen_escritura(
-        codigo_barras=codigo_barras,
-        mapa_maestro=mapa_maestro,
-    )
+    if codigo and mapa_maestro:
+        return mapa_maestro.get(codigo)
+    return None
 
 
 def _tuplas_insercion(comercio_id, lote, snapshot_imagenes=None, mapa_maestro=None):
@@ -768,7 +765,7 @@ def _tuplas_insercion(comercio_id, lote, snapshot_imagenes=None, mapa_maestro=No
 def persistir_importacion_por_lotes(comercio_id, factory_generador_lotes):
     """
     Transacción atómica con bloqueo por comercio e inserción por lotes.
-    Las imágenes se resuelven antes del lock (catálogo maestro + OpenFoodFacts).
+    Las imágenes del INSERT son solo locales (CSV, snapshot, catálogo maestro).
     """
     from backend.db import ejecutar_con_reintentos_bd, get_db_connection
     from backend.image_manager import preparar_mapa_imagenes_importacion
@@ -789,10 +786,14 @@ def persistir_importacion_por_lotes(comercio_id, factory_generador_lotes):
         cursor = conexion.cursor()
         snapshot_imagenes = _snapshot_imagenes_por_codigo(cursor, comercio_id)
 
-    mapa_imagenes = preparar_mapa_imagenes_importacion(
-        productos_finales,
-        snapshot_imagenes,
-    )
+    try:
+        mapa_imagenes = preparar_mapa_imagenes_importacion(
+            productos_finales,
+            snapshot_imagenes,
+        )
+    except Exception as exc:
+        print(f'{LOG_PREFIX} aviso mapa local de imágenes: {exc}')
+        mapa_imagenes = dict(snapshot_imagenes)
 
     def _operacion(conexion):
         cursor = conexion.cursor()

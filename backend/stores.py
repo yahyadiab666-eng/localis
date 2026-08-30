@@ -9,9 +9,9 @@ from backend.db import get_db_connection
 from backend.runtime_cache import get_or_load, invalidate
 from backend.image_lookup import (
     EXPR_CODIGO_BARRAS,
-    asociar_imagenes_inventario,
     imagen_url_para_catalogo,
     imagen_urls_para_catalogo,
+    programar_asociacion_imagenes_inventario,
 )
 from backend.utils import imagen_url_para_persistir, normalizar_codigo_barras, validar_ubicacion_comercio
 from backend.inventory_import import (
@@ -767,11 +767,11 @@ def procesar_csv_productos(comercio_id, archivo_csv):
 
         etapa = 'asociar_imagenes'
         try:
-            asociar_imagenes_inventario(comercio_id)
+            programar_asociacion_imagenes_inventario(comercio_id)
         except Exception as exc_img:
             print(
                 f'{CSV_LOG} aviso etapa={etapa} {type(exc_img).__name__}: {exc_img} '
-                '(el inventario ya se guardó)'
+                '(el inventario ya se guardó; las fotos oficiales se omiten)'
             )
             traceback.print_exc()
 
@@ -779,7 +779,8 @@ def procesar_csv_productos(comercio_id, archivo_csv):
         return (
             True,
             f'Importación completada: {insertados} productos cargados. '
-            'Columnas reconocidas automáticamente desde la primera fila.',
+            'Columnas reconocidas automáticamente desde la primera fila. '
+            'Las fotos oficiales se completarán en segundo plano.',
             None,
         )
 
