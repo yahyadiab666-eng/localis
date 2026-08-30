@@ -288,34 +288,33 @@ def imprimir_alerta_supabase_url(resultado: ResultadoUrlSupabase, url_raw: str |
 
 
 def _origen_basico_supabase(texto: str) -> str:
-    """https:// + primer host que contenga .supabase.co. Sin regex de subdominio."""
+    """
+    Si el valor menciona .supabase.co, devuelve un origen https://... usable.
+    No usa regex ni urlparse: no puede rechazar un Project URL legitimo.
+    """
     limpio = ''.join(str(texto or '').split()).strip().strip('"').strip("'")
-    if not limpio:
+    if '.supabase.co' not in limpio.lower():
         return ''
-    lower = limpio.lower()
-    if lower.startswith('http://'):
+    while True:
+        bajo = limpio.lower()
+        if bajo.startswith(('https://https://', 'https://http://', 'http://https://', 'http://http://')):
+            limpio = limpio.split('://', 1)[-1].lstrip('/')
+            continue
+        break
+    if limpio.lower().startswith('http://'):
         limpio = 'https://' + limpio[7:]
-        lower = limpio.lower()
-    elif not lower.startswith('https://') and '.supabase.co' in lower:
+    elif not limpio.lower().startswith('https://'):
         limpio = 'https://' + limpio.lstrip('/')
-        lower = limpio.lower()
-    if not lower.startswith('https://') or '.supabase.co' not in lower:
-        return ''
-    host = limpio.split('://', 1)[-1].split('/')[0].split('?')[0].split('#')[0]
-    host = host.split('@')[-1]
-    if ':' in host and not host.endswith(']'):
-        host = host.rsplit(':', 1)[0]
-    host = host.strip().strip('.').lower()
-    if '.supabase.co' not in host:
-        marca = lower.find('.supabase.co')
-        if marca < 0:
-            return ''
-        inicio = lower.rfind('://', 0, marca)
-        fragmento = limpio[inicio + 3 : marca + len('.supabase.co')] if inicio >= 0 else limpio
-        host = fragmento.split('/')[0].split('@')[-1].strip().lower()
-    if '.supabase.co' not in host:
-        return ''
-    return f'https://{host}'
+    resto = limpio.split('://', 1)[-1]
+    host = resto.split('/')[0].split('?')[0].split('#')[0].split('@')[-1]
+    if ':' in host:
+        posible, _, cola = host.rpartition(':')
+        if cola.isdigit():
+            host = posible
+    host = host.strip().strip('.')
+    if '.supabase.co' in host.lower():
+        return f'https://{host}'
+    return limpio.split('?')[0].split('#')[0].rstrip('/')
 
 
 def sanitizar_url_supabase(
@@ -324,28 +323,32 @@ def sanitizar_url_supabase(
     database_url: str | None = None,
 ) -> ResultadoUrlSupabase:
     """
-    Comprobacion simple: la cadena, ya limpia, empieza por https:// y contiene
-    .supabase.co. Si cumple, la URL se acepta y nunca se vacia.
+    Si el valor contiene .supabase.co, se acepta siempre (sin excepcion).
+    Solo se reporta error si la variable esta vacia o no menciona Supabase.
     """
     del database_url
     resultado = ResultadoUrlSupabase()
-    texto = _limpiar_texto_env(raw_url)
+    crudo = str(raw_url or '')
+    texto = _limpiar_texto_env(crudo) or ''.join(crudo.split()).strip()
+
+    if '.supabase.co' in texto.lower() or '.supabase.co' in crudo.lower():
+        origen = _origen_basico_supabase(texto or crudo)
+        if not origen:
+            origen = texto if texto.lower().startswith('https://') else f'https://{texto.lstrip("/")}'
+            origen = origen.rstrip('/')
+        resultado.url = origen
+        resultado.host = origen.split('://', 1)[-1].split('/')[0]
+        resultado.project_ref = extraer_ref_proyecto_de_host(resultado.host)
+        resultado.url_recomendada = origen
+        resultado.valida = True
+        resultado.errores.clear()
+        return resultado
+
     if not texto:
         resultado.errores.append('SUPABASE_URL vacia o ausente.')
         return resultado
 
-    origen = _origen_basico_supabase(texto)
-    if origen:
-        resultado.url = origen
-        resultado.host = origen[len('https://') :]
-        resultado.project_ref = extraer_ref_proyecto_de_host(resultado.host)
-        resultado.url_recomendada = origen
-        resultado.valida = True
-        return resultado
-
-    resultado.errores.append(
-        'SUPABASE_URL debe comenzar con https:// y contener .supabase.co.'
-    )
+    resultado.errores.append('SUPABASE_URL no menciona .supabase.co.')
     return resultado
 
 
@@ -525,6 +528,13 @@ def diagnosticar_conectividad_supabase(
     bucket_nombre = (bucket or SUPABASE_BUCKET_IMAGENES or 'imagenes').strip('/')
 
     url_info = sanitizar_url_supabase(url_raw, database_url=os.getenv('DATABASE_URL'))
+    if not url_info.valida and url_raw and '.supabase.co' in str(url_raw).lower():
+        forzado = _origen_basico_supabase(str(url_raw)) or str(url_raw).strip()
+        url_info.url = forzado
+        url_info.host = forzado.split('://', 1)[-1].split('/')[0]
+        url_info.valida = True
+        url_info.errores.clear()
+
     informe: dict[str, Any] = {
         'ok': False,
         'config_ok': url_info.valida and bool(key),

@@ -144,14 +144,15 @@ def _imprimir_estado_supabase():
 _URL_RAW = os.getenv('SUPABASE_URL')
 _URL_INFO = sanitizar_url_supabase(_URL_RAW, database_url=os.getenv('DATABASE_URL'))
 _origen_fallback = _origen_basico_supabase(_URL_RAW or '')
-if not _URL_INFO.url and _origen_fallback:
-    _URL_INFO.url = _origen_fallback
-    _URL_INFO.host = _origen_fallback[len('https://') :]
+if '.supabase.co' in str(_URL_RAW or '').lower():
+    if not _URL_INFO.url:
+        _URL_INFO.url = _origen_fallback or str(_URL_RAW).strip()
+        _URL_INFO.host = _URL_INFO.url.split('://', 1)[-1].split('/')[0]
     _URL_INFO.valida = True
     _URL_INFO.errores.clear()
 _aplicar_config_url(_URL_INFO, _URL_RAW)
 
-# Si el env tiene https://...supabase.co, el cliente SIEMPRE recibe esa URL.
+# Contener .supabase.co => el cliente siempre recibe una URL (nunca vaciar).
 SUPABASE_URL = _URL_INFO.url or _origen_fallback
 SUPABASE_URL_VALIDA = bool(SUPABASE_URL)
 SUPABASE_URL_ADVERTENCIAS = list(_URL_INFO.advertencias)

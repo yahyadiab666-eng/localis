@@ -42,7 +42,9 @@ def main() -> int:
 
     invalida = sanitizar_url_supabase('https://ejemplo.com')
     if invalida.valida or invalida.url:
-        errores.append('https://ejemplo.com debia rechazarse')
+        errores.append('https://ejemplo.com (sin .supabase.co) debia rechazarse')
+    if any('contener .supabase.co' in e for e in (invalida.errores or [])):
+        errores.append('el mensaje estricto de https:// + host no debe volver a emitirse')
 
     if errores:
         print('FALLO sanitizacion SUPABASE_URL:')
