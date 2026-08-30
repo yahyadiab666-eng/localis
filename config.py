@@ -108,31 +108,18 @@ def validar_config_arranque():
             from backend.supabase_client import obtener_diagnostico_supabase
 
             diag = obtener_diagnostico_supabase()
-            if not diag.get('ok'):
-                errores_url = diag.get('errores') or []
-                if errores_url:
-                    advertencias.append(
-                        'SUPABASE_URL inválida: ' + '; '.join(errores_url)
-                    )
-                elif not diag.get('url_sanitizada'):
-                    advertencias.append(
-                        'SUPABASE_URL parece malformada (revisa comillas, saltos de línea y '
-                        'formato https://REF.supabase.co en Render).'
-                    )
-            if diag.get('id_sospechoso') and diag.get('url_recomendada'):
+            if diag.get('url_sanitizada'):
+                for aviso_url in diag.get('advertencias') or []:
+                    advertencias.append(f'SUPABASE_URL: {aviso_url}')
+            elif diag.get('errores'):
                 advertencias.append(
-                    'SUPABASE_URL tenia prefijo o host malformado. En Render deja exactamente '
-                    f"{diag['url_recomendada']}."
+                    'SUPABASE_URL inválida: ' + '; '.join(diag.get('errores') or [])
                 )
-            elif diag.get('url_recomendada') and diag.get('url_sanitizada') != diag.get(
-                'url_recomendada'
-            ):
+            else:
                 advertencias.append(
-                    'En Render, SUPABASE_URL debe ser exactamente '
-                    f"{diag['url_recomendada']}."
+                    'SUPABASE_URL parece malformada (revisa comillas, saltos de línea y '
+                    'formato https://REF.supabase.co en Render).'
                 )
-            for aviso_url in diag.get('advertencias') or []:
-                advertencias.append(f'SUPABASE_URL: {aviso_url}')
     else:
         if not (os.environ.get('LOCALIS_SECRET_KEY') or '').strip():
             advertencias.append(

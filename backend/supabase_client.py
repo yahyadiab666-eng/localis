@@ -74,8 +74,6 @@ def _opciones_cliente_supabase() -> SyncClientOptions:
 def _crear_cliente_supabase(api_key, etiqueta='anon'):
     if not SUPABASE_URL or not api_key:
         return None
-    if not SUPABASE_URL_VALIDA:
-        return None
     try:
         return create_client(
             SUPABASE_URL,
@@ -118,12 +116,8 @@ def _imprimir_estado_supabase():
     if raw_host and raw_host != host:
         print(f'{prefijo} Host tras sanitización: {raw_host} -> {host}')
     raw_limpia = _limpiar_valor_env(_URL_RAW).rstrip('/')
-    if _URL_INFO.url_recomendada and (
-        _URL_INFO.id_sospechoso
-        or _URL_INFO.advertencias
-        or raw_limpia != SUPABASE_URL
-    ):
-        print(f'{prefijo} Valor correcto en Render: SUPABASE_URL={_URL_INFO.url_recomendada}')
+    if raw_limpia and SUPABASE_URL and raw_limpia != SUPABASE_URL:
+        print(f'{prefijo} URL sanitizada para el cliente: {SUPABASE_URL}')
     print(
         f'{prefijo} URL={SUPABASE_URL} host={host} | '
         f'SUPABASE_KEY={_mascara_secreto(SUPABASE_KEY)} | '
@@ -150,7 +144,8 @@ _URL_RAW = os.getenv('SUPABASE_URL')
 _URL_INFO = sanitizar_url_supabase(_URL_RAW, database_url=os.getenv('DATABASE_URL'))
 _aplicar_config_url(_URL_INFO, _URL_RAW)
 
-SUPABASE_URL = _URL_INFO.url if _URL_INFO.valida else ''
+# Si el host es *.supabase.co, usar esa URL. No vaciar por avisos o id_sospechoso.
+SUPABASE_URL = _URL_INFO.url
 SUPABASE_URL_VALIDA = bool(SUPABASE_URL)
 SUPABASE_URL_ADVERTENCIAS = list(_URL_INFO.advertencias)
 SUPABASE_URL_ERRORES = list(_URL_INFO.errores)
