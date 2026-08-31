@@ -1,5 +1,6 @@
 """Catálogo maestro de imágenes: PostgreSQL directo (preferido) + PostgREST httpx opcional."""
 
+import os
 from urllib.parse import quote
 
 from backend.db import DATABASE_URL, using_postgres
@@ -10,7 +11,6 @@ from backend.postgrest_http import (
     postgrest_http_configurado,
 )
 from backend.supabase_client import (
-    postgrest_circuito_abierto,
     postgrest_http_habilitado,
     registrar_modo_catalogo_maestro,
 )
@@ -82,103 +82,119 @@ def _url_maestro_valida(valor):
     return None
 
 
+def _debug_imagen(mensaje, error=None):
+    """Solo con LOCALIS_IMAGEN_DEBUG=1; no satura la consola en producción."""
+    if os.getenv('LOCALIS_IMAGEN_DEBUG', '').strip().lower() not in ('1', 'true', 'yes'):
+        return
+    detalle = f': {type(error).__name__}' if error is not None else ''
+    print(f'{_LOG} {mensaje}{detalle}')
+
+
 def _postgresql_directo_disponible() -> bool:
-    return using_postgres() and bool((DATABASE_URL or '').strip())
+    try:
+        return using_postgres() and bool((DATABASE_URL or '').strip())
+    except Exception:
+        return False
 
 
 def _postgrest_disponible() -> bool:
-    return postgrest_http_configurado() and postgrest_http_habilitado()
+    try:
+        return postgrest_http_configurado() and postgrest_http_habilitado()
+    except Exception:
+        return False
 
 
 def _catalogo_disponible():
-    registrar_modo_catalogo_maestro()
+    try:
+        registrar_modo_catalogo_maestro()
+    except Exception:
+        pass
     return _postgresql_directo_disponible() or _postgrest_disponible()
 
 
 def _imagen_maestro_por_codigo_postgres(codigo):
     from backend.db import get_db_connection
 
-    try:
-        with get_db_connection() as conexion:
-            cursor = conexion.cursor()
-            cursor.execute(
-                f"""
-                SELECT url_imagen
-                FROM {TABLA_CATALOGO_MAESTRO}
-                WHERE {_EXPR_CODIGO} = ?
-                  AND {_URL_NO_VACIA}
-                LIMIT 1
-                """,
-                (codigo,),
-            )
-            fila = cursor.fetchone()
-            if not fila:
-                print(f'{_LOG} catalogo_maestro sin URL para codigo={codigo!r}')
-                return None
-            url_raw = fila[0] if not isinstance(fila, dict) else fila.get('url_imagen')
-            url = _url_maestro_valida(url_raw)
-            if not url:
-                print(
-                    f'{_LOG} catalogo_maestro URL invalida o nula '
-                    f'codigo={codigo!r} raw={url_raw!r}'
-                )
-            return url
-    except Exception as error:
-        print(f'{_LOG} error consultando catalogo_maestro ({codigo}): {error}')
-        return None
+    with get_db_connection() as conexion:
+        cursor = conexion.cursor()
+        cursor.execute(
+            f"""
+            SELECT url_imagen
+            FROM {TABLA_CATALOGO_MAESTRO}
+            WHERE {_EXPR_CODIGO} = ?
+              AND {_URL_NO_VACIA}
+            LIMIT 1
+            """,
+            (codigo,),
+        )
+        fila = cursor.fetchone()
+        if not fila:
+            return None
+        url_raw = fila[0] if not isinstance(fila, dict) else fila.get('url_imagen')
+        return _url_maestro_valida(url_raw)
 
 
 def _imagen_maestro_por_codigo_postgrest(codigo):
-    try:
-        url = consultar_imagen_maestro(codigo)
-        return _url_maestro_valida(url)
-    except Exception as error:
-        print(f'{_LOG} error PostgREST catalogo_maestro ({codigo}): {error}')
-        return None
+    return _url_maestro_valida(consultar_imagen_maestro(codigo))
 
 
-def _resolver_imagen_maestro(codigo):
+def _consultar_catalogo_supabase(codigo):
+    """
+    Fuente 1: tabla catalogo_maestro_imagenes (Postgres, luego PostgREST).
+    Si un transporte falla, prueba el siguiente. Si responde vacío, no insiste.
+    Nunca propaga la excepción.
+    """
+    transportes = []
     if _postgresql_directo_disponible():
-        return _imagen_maestro_por_codigo_postgres(codigo)
-
+        transportes.append(('postgres', _imagen_maestro_por_codigo_postgres))
     if _postgrest_disponible():
-        url = _imagen_maestro_por_codigo_postgrest(codigo)
-        if url or not postgrest_circuito_abierto():
-            return url
+        transportes.append(('postgrest', _imagen_maestro_por_codigo_postgrest))
 
-    if _postgresql_directo_disponible():
-        return _imagen_maestro_por_codigo_postgres(codigo)
+    for nombre, consultar in transportes:
+        try:
+            url = _url_maestro_valida(consultar(codigo))
+            if url:
+                return url
+            return None
+        except Exception as error:
+            _debug_imagen(f'catalogo_maestro {nombre}', error)
+            continue
+    return None
+
+
+def _consultar_semilla_memoria(codigo):
+    """Fuente 2: diccionario en memoria (URLs públicas OFF/wsrv). Sin red."""
+    return _url_maestro_valida(IMAGENES_CATALOGO_SEMILLA.get(codigo))
+
+
+def _resolver_en_cascada(codigo):
+    """Prueba cada fuente; un fallo silencioso pasa a la siguiente."""
+    fuentes = (
+        ('supabase', _consultar_catalogo_supabase),
+        ('semilla', _consultar_semilla_memoria),
+    )
+    for nombre, consultar in fuentes:
+        try:
+            url = _url_maestro_valida(consultar(codigo))
+            if url:
+                return url
+        except Exception as error:
+            _debug_imagen(nombre, error)
+            continue
     return None
 
 
 def imagen_maestro_por_codigo(codigo_barras):
     """
-    URL de imagen para un código de barras.
-    PostgreSQL/PostgREST primero; si fallan, no responden o no hay fila,
-    usa IMAGENES_CATALOGO_SEMILLA de inmediato (sin depender de Supabase).
+    URL de imagen por código de barras, en cascada:
+    1) catalogo_maestro_imagenes (Postgres / PostgREST)
+    2) IMAGENES_CATALOGO_SEMILLA en memoria (respaldo público, sin HTTP)
+    Cualquier error se traga y se sigue; no bloquea el render.
     """
     codigo = normalizar_codigo_barras(codigo_barras)
     if not codigo:
-        print(f'{_LOG} codigo_barras vacio o nulo; no se consulta catalogo_maestro')
         return None
-
-    url = None
-    if _catalogo_disponible():
-        try:
-            url = _resolver_imagen_maestro(codigo)
-        except Exception as error:
-            print(f'{_LOG} fallo al resolver catalogo_maestro ({codigo}): {error}')
-            url = None
-        if url:
-            return url
-    else:
-        print(f'{_LOG} catalogo_maestro no disponible; fallback a semilla codigo={codigo!r}')
-
-    semilla = IMAGENES_CATALOGO_SEMILLA.get(codigo)
-    if semilla:
-        print(f'{_LOG} catalogo_maestro usa semilla en memoria codigo={codigo!r}')
-        return semilla
-    return None
+    return _resolver_en_cascada(codigo)
 
 
 def _asegurar_indice_unico_codigo(cursor):
@@ -238,35 +254,31 @@ def _mapa_imagenes_maestro_postgres(lote):
 
     placeholders = ','.join(['?'] * len(lote))
     resultado = {}
-    try:
-        with get_db_connection() as conexion:
-            cursor = conexion.cursor()
-            cursor.execute(
-                f"""
-                SELECT codigo_barras, url_imagen
-                FROM {TABLA_CATALOGO_MAESTRO}
-                WHERE {_EXPR_CODIGO} IN ({placeholders})
-                  AND {_URL_NO_VACIA}
-                """,
-                lote,
-            )
-            for fila in cursor.fetchall():
-                if isinstance(fila, dict):
-                    codigo_raw, url_raw = fila.get('codigo_barras'), fila.get('url_imagen')
-                else:
-                    codigo_raw, url_raw = fila[0], fila[1]
-                codigo_db = normalizar_codigo_barras(codigo_raw)
-                url = _url_maestro_valida(url_raw)
-                if codigo_db and url and codigo_db not in resultado:
-                    resultado[codigo_db] = url
-    except Exception as error:
-        print(f'{_LOG} error lote catalogo_maestro: {error}')
-        return {}
+    with get_db_connection() as conexion:
+        cursor = conexion.cursor()
+        cursor.execute(
+            f"""
+            SELECT codigo_barras, url_imagen
+            FROM {TABLA_CATALOGO_MAESTRO}
+            WHERE {_EXPR_CODIGO} IN ({placeholders})
+              AND {_URL_NO_VACIA}
+            """,
+            lote,
+        )
+        for fila in cursor.fetchall():
+            if isinstance(fila, dict):
+                codigo_raw, url_raw = fila.get('codigo_barras'), fila.get('url_imagen')
+            else:
+                codigo_raw, url_raw = fila[0], fila[1]
+            codigo_db = normalizar_codigo_barras(codigo_raw)
+            url = _url_maestro_valida(url_raw)
+            if codigo_db and url and codigo_db not in resultado:
+                resultado[codigo_db] = url
     return resultado
 
 
 def _mapa_imagenes_maestro_postgrest(lote):
-    mapa = consultar_mapa_maestro(lote)
+    mapa = consultar_mapa_maestro(lote) or {}
     resultado = {}
     for codigo_raw, url_raw in mapa.items():
         codigo_db = normalizar_codigo_barras(codigo_raw)
@@ -277,21 +289,24 @@ def _mapa_imagenes_maestro_postgrest(lote):
 
 
 def _mapa_lote(lote):
+    """Una pasada al catálogo remoto. No lanza: fallo → {}."""
+    transportes = []
     if _postgresql_directo_disponible():
-        return _mapa_imagenes_maestro_postgres(lote)
-
+        transportes.append(('postgres', _mapa_imagenes_maestro_postgres))
     if _postgrest_disponible():
-        mapa = _mapa_imagenes_maestro_postgrest(lote)
-        if mapa or not postgrest_circuito_abierto():
-            return mapa
+        transportes.append(('postgrest', _mapa_imagenes_maestro_postgrest))
 
-    if _postgresql_directo_disponible():
-        return _mapa_imagenes_maestro_postgres(lote)
+    for nombre, consultar in transportes:
+        try:
+            return consultar(lote) or {}
+        except Exception as error:
+            _debug_imagen(f'lote {nombre}', error)
+            continue
     return {}
 
 
 def mapa_imagenes_maestro(codigos):
-    """Mapa codigo_barras normalizado -> url_imagen desde el catálogo maestro en lote."""
+    """Mapa codigo → url: Supabase en lote, luego semilla en memoria para faltantes."""
     normalizados = []
     vistos = set()
     for codigo in codigos or []:
@@ -303,18 +318,12 @@ def mapa_imagenes_maestro(codigos):
         return {}
 
     resultado = {}
-    if _catalogo_disponible():
-        try:
-            for inicio in range(0, len(normalizados), _LOTE_CONSULTA):
-                lote = normalizados[inicio : inicio + _LOTE_CONSULTA]
-                resultado.update(_mapa_lote(lote))
-        except Exception as error:
-            print(f'{_LOG} error lote catalogo_maestro: {error}')
-    else:
-        print(
-            f'{_LOG} catalogo_maestro no disponible; lote usa semilla '
-            f'({len(normalizados)} codigo(s))'
-        )
+    try:
+        for inicio in range(0, len(normalizados), _LOTE_CONSULTA):
+            lote = normalizados[inicio : inicio + _LOTE_CONSULTA]
+            resultado.update(_mapa_lote(lote))
+    except Exception as error:
+        _debug_imagen('lote catalogo_maestro', error)
     return _completar_con_semilla(resultado, normalizados)
 
 
