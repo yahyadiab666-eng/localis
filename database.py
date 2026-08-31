@@ -963,6 +963,7 @@ def _asegurar_indices_unicos(cursor):
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_correo ON usuarios(correo)',
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_categorias_nombre ON categorias(nombre)',
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_planes_codigo ON planes(codigo)',
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_catalogo_maestro_codigo ON catalogo_maestro_imagenes(codigo_barras)',
     ]
     for ddl in indices:
         _ejecutar_ddl_seguro(cursor, ddl)
@@ -1170,6 +1171,9 @@ def init_db():
             _crear_indices(cursor)
 
             conexion.commit()
+        from backend.catalogo_maestro import sembrar_catalogo_maestro_imagenes
+
+        sembrar_catalogo_maestro_imagenes()
         return True
     except Exception as error:
         print(f'Error en init_db(): {error}')

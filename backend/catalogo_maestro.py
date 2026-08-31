@@ -1,5 +1,7 @@
 """Catálogo maestro de imágenes: PostgreSQL directo (preferido) + PostgREST httpx opcional."""
 
+from urllib.parse import quote
+
 from backend.db import DATABASE_URL, using_postgres
 from backend.postgrest_http import (
     consultar_imagen_maestro,
@@ -116,10 +118,27 @@ def imagen_maestro_por_codigo(codigo_barras):
         )
         return None
     try:
-        return _resolver_imagen_maestro(codigo)
+        url = _resolver_imagen_maestro(codigo)
+        if url:
+            return url
     except Exception as error:
         print(f'{_LOG} fallo al resolver catalogo_maestro ({codigo}): {error}')
-        return None
+        url = None
+    semilla = _url_semilla_por_codigo(codigo)
+    if semilla:
+        print(f'{_LOG} catalogo_maestro usa semilla en memoria codigo={codigo!r}')
+        return semilla
+    return url
+
+
+def _asegurar_indice_unico_codigo(cursor):
+    """En Supabase el PK es id (uuid); el upsert va por codigo_barras."""
+    cursor.execute(
+        f"""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_catalogo_maestro_codigo
+        ON {TABLA_CATALOGO_MAESTRO} (codigo_barras)
+        """
+    )
 
 
 def _guardar_imagen_maestro_postgres(codigo, url):
@@ -127,6 +146,7 @@ def _guardar_imagen_maestro_postgres(codigo, url):
 
     with get_db_connection() as conexion:
         cursor = conexion.cursor()
+        _asegurar_indice_unico_codigo(cursor)
         cursor.execute(
             f"""
             INSERT INTO {TABLA_CATALOGO_MAESTRO} (codigo_barras, url_imagen)
@@ -242,4 +262,50 @@ def mapa_imagenes_maestro(codigos):
             resultado.update(_mapa_lote(lote))
     except Exception as error:
         print(f'Error al consultar catálogo maestro en lote: {error}')
+    for codigo in normalizados:
+        if codigo not in resultado:
+            semilla = IMAGENES_CATALOGO_SEMILLA.get(codigo)
+            if semilla:
+                resultado[codigo] = semilla
     return resultado
+
+
+def _url_wsrv_oficial(url_origen):
+    return (
+        'https://wsrv.nl/?url='
+        + quote(url_origen, safe='')
+        + '&w=300&h=300&fit=cover&output=webp&q=80'
+    )
+
+
+# Fotos públicas (Open Food Facts) para códigos de prueba y EAN reales Polar/Vatel.
+_URL_HARINA_PAN = _url_wsrv_oficial(
+    'https://images.openfoodfacts.org/images/products/759/100/200/0547/front_es.24.400.jpg'
+)
+_URL_ACEITE_VATEL = _url_wsrv_oficial(
+    'https://images.openfoodfacts.org/images/products/759/104/900/1903/front_es.3.400.jpg'
+)
+
+IMAGENES_CATALOGO_SEMILLA = {
+    '7591001000011': _URL_HARINA_PAN,  # Harina PAN (código de prueba)
+    '7591002000011': _URL_HARINA_PAN,  # Polar Harina PAN
+    '7591002000547': _URL_HARINA_PAN,  # Harina PAN 1 kg (OFF)
+    '7591001000035': _URL_ACEITE_VATEL,  # Aceite Vatel (código de prueba)
+    '7591049001903': _URL_ACEITE_VATEL,  # Aceite Vatel 1 L (OFF)
+}
+
+
+def _url_semilla_por_codigo(codigo):
+    return IMAGENES_CATALOGO_SEMILLA.get(normalizar_codigo_barras(codigo) or '')
+
+
+def sembrar_catalogo_maestro_imagenes():
+    """Upsert de URLs de prueba en catalogo_maestro_imagenes."""
+    guardados = 0
+    for codigo, url in IMAGENES_CATALOGO_SEMILLA.items():
+        if guardar_imagen_maestro(codigo, url):
+            guardados += 1
+        else:
+            print(f'{_LOG} no se pudo sembrar catalogo_maestro codigo={codigo!r}')
+    print(f'{_LOG} catalogo_maestro semilla: {guardados}/{len(IMAGENES_CATALOGO_SEMILLA)} URL(s)')
+    return guardados
