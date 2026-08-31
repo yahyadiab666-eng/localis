@@ -5,7 +5,12 @@ import sqlite3
 import threading
 import time
 
-from backend.catalogo_maestro import imagen_maestro_por_codigo, mapa_imagenes_maestro
+from backend.catalogo_maestro import (
+    IMAGENES_CATALOGO_SEMILLA,
+    imagen_maestro_por_codigo,
+    mapa_imagenes_maestro,
+    url_semilla_catalogo,
+)
 from backend.db import get_db_connection
 from backend.image_manager import (
     completar_mapa_imagenes,
@@ -31,7 +36,34 @@ _PRESUPUESTO_OFF_SEG = int(os.getenv('IMPORT_OFF_BUDGET_SEC', '90'))
 
 def _url_almacenada_o_none(valor):
     """URL ya persistida en PostgreSQL (Supabase, local o https explícita)."""
-    return imagen_url_almacenada(valor)
+    try:
+        return imagen_url_almacenada(valor)
+    except Exception:
+        return None
+
+
+def _respaldo_en_cascada(codigo_barras):
+    """
+    1) catalogo_maestro_imagenes (vía imagen_maestro_por_codigo)
+    2) IMAGENES_CATALOGO_SEMILLA en memoria
+    Cualquier fallo se traga; None si no hay URL.
+    """
+    try:
+        url = imagen_maestro_por_codigo(codigo_barras)
+        if url:
+            return url
+    except Exception:
+        pass
+    try:
+        url = url_semilla_catalogo(codigo_barras)
+        if url:
+            return url
+        codigo = normalizar_codigo_barras(codigo_barras)
+        if codigo:
+            return IMAGENES_CATALOGO_SEMILLA.get(codigo)
+    except Exception:
+        pass
+    return None
 
 
 def _resolver_url_escritura(
@@ -46,88 +78,96 @@ def _resolver_url_escritura(
             codigo_barras=codigo_barras,
             mapa_maestro=mapa_maestro,
         )
-    except Exception as error:
-        print(f'{_LOG_CSV} aviso resolver imagen: {type(error).__name__}')
-        return None
+    except Exception:
+        return _respaldo_en_cascada(codigo_barras)
 
 
 def imagen_url_para_catalogo(imagen_url=None, codigo_barras=None):
-    """URL para catálogo: PostgreSQL → catálogo maestro; None si no hay imagen."""
-    url = resolver_imagen_catalogo(
-        imagen_url=imagen_url,
-        codigo_barras=codigo_barras,
-    )
-    return url or None
+    """URL para catálogo: persistida → cascada maestro/semilla; None si no hay."""
+    try:
+        url = resolver_imagen_catalogo(
+            imagen_url=imagen_url,
+            codigo_barras=codigo_barras,
+        )
+        if url:
+            return url
+    except Exception:
+        pass
+    try:
+        directa = _url_almacenada_o_none(imagen_url)
+        if directa:
+            return directa
+        return _respaldo_en_cascada(codigo_barras)
+    except Exception:
+        return None
 
 
 def imagen_url_para_guardar(imagen_manual=None, codigo_barras=None):
     """
     URL a persistir en productos.imagen_url:
-    campo/archivo del formulario, o respaldo por código en catalogo_maestro_imagenes.
+    campo/archivo del formulario, o respaldo por código (maestro → semilla).
     """
-    persistida = imagen_url_para_persistir(imagen_manual)
-    if persistida:
-        return persistida
     try:
-        return imagen_maestro_por_codigo(codigo_barras) or None
-    except Exception as error:
-        print(f'{_LOG_CSV} aviso imagen para guardar: {type(error).__name__}')
+        persistida = imagen_url_para_persistir(imagen_manual)
+        if persistida:
+            return persistida
+        return _respaldo_en_cascada(codigo_barras)
+    except Exception:
         return None
 
 
 def url_imagen_con_respaldo(imagen_url=None, codigo_barras=None):
-    """Vista: imagen del producto o catálogo maestro por código de barras."""
+    """Vista Flask: URL del producto o cascada (Supabase → semilla). Nunca lanza."""
     try:
         directa = _url_almacenada_o_none(imagen_url)
         if directa:
             return directa
-        codigo = normalizar_codigo_barras(codigo_barras)
-        if not codigo:
-            return None
-        respaldo = imagen_maestro_por_codigo(codigo)
-        if respaldo:
-            print(
-                f'{_LOG_CSV} respaldo catalogo_maestro codigo={codigo!r} '
-                f'url={respaldo!r}'
-            )
-            return respaldo
-        print(
-            f'{_LOG_CSV} sin imagen directa ni catalogo_maestro '
-            f'codigo={codigo!r}'
-        )
-        return None
-    except Exception as error:
-        print(f'{_LOG_CSV} aviso respaldo imagen: {type(error).__name__}: {error}')
+        return _respaldo_en_cascada(codigo_barras)
+    except Exception:
         return None
 
 
 def imagen_urls_para_catalogo(productos):
-    """Resuelve imágenes en lote (PostgreSQL → catálogo maestro; sin placeholder)."""
+    """Resuelve imágenes en lote (persistida → maestro/semilla). No rompe el render."""
     if not productos:
         return productos
 
-    codigos = []
-    vistos = set()
-    for prod in productos:
-        if _url_almacenada_o_none(prod.get('imagen_url')):
-            continue
-        codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
-        if codigo and codigo not in vistos:
-            vistos.add(codigo)
-            codigos.append(codigo)
+    try:
+        codigos = []
+        vistos = set()
+        for prod in productos:
+            try:
+                if _url_almacenada_o_none(prod.get('imagen_url')):
+                    continue
+                codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
+                if codigo and codigo not in vistos:
+                    vistos.add(codigo)
+                    codigos.append(codigo)
+            except Exception:
+                continue
 
-    mapa = mapa_imagenes_maestro(codigos) if codigos else {}
+        try:
+            mapa = mapa_imagenes_maestro(codigos) if codigos else {}
+        except Exception:
+            mapa = {}
 
-    for prod in productos:
-        url = _url_almacenada_o_none(prod.get('imagen_url'))
-        if not url:
-            codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
-            url = mapa.get(codigo) if codigo else None
-            if not url and codigo:
-                url = imagen_maestro_por_codigo(codigo)
-        prod['imagen_url'] = url or None
-
-    return productos
+        for prod in productos:
+            try:
+                url = _url_almacenada_o_none(prod.get('imagen_url'))
+                if not url:
+                    codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
+                    url = mapa.get(codigo) if codigo else None
+                    if not url and codigo:
+                        url = _respaldo_en_cascada(codigo)
+                prod['imagen_url'] = url or None
+            except Exception:
+                try:
+                    prod['imagen_url'] = prod.get('imagen_url') or None
+                except Exception:
+                    pass
+        return productos
+    except Exception:
+        return productos
 
 
 def resolver_imagen_url_definitiva(
@@ -150,9 +190,8 @@ def resolver_imagen_url_definitiva(
             codigo_barras=codigo_barras,
             mapa_maestro=mapa_maestro,
         )
-    except Exception as error:
-        print(f'{_LOG_CSV} aviso imagen definitiva: {type(error).__name__}')
-        return None
+    except Exception:
+        return _respaldo_en_cascada(codigo_barras)
 
 
 def normalizar_imagen_registro(imagen_url=None, codigo_barras=None, nombre=None, descripcion=None):
@@ -179,8 +218,7 @@ def obtener_imagen_url_producto(producto_id):
                 registro.get('imagen_url'),
                 codigo_barras=registro.get('codigo_barras'),
             )
-    except Exception as error:
-        print(f'Error al leer imagen del producto {producto_id}: {error}')
+    except Exception:
         return None
 
 
@@ -196,23 +234,26 @@ def resolver_imagen_producto(
 ):
     del buscar_web, nombre, descripcion
 
-    if persistir:
-        url = resolver_imagen_url_definitiva(
-            imagen_url,
-            codigo_barras,
-        )
-        return url if url and url != excluir_url else None
+    try:
+        if persistir:
+            url = resolver_imagen_url_definitiva(
+                imagen_url,
+                codigo_barras,
+            )
+            return url if url and url != excluir_url else None
 
-    url = imagen_url_para_catalogo(imagen_url, codigo_barras=codigo_barras)
-    if url and url != excluir_url:
-        return url
+        url = imagen_url_para_catalogo(imagen_url, codigo_barras=codigo_barras)
+        if url and url != excluir_url:
+            return url
 
-    if producto_id:
-        url_bd = obtener_imagen_url_producto(producto_id)
-        if url_bd and url_bd != excluir_url:
-            return url_bd
+        if producto_id:
+            url_bd = obtener_imagen_url_producto(producto_id)
+            if url_bd and url_bd != excluir_url:
+                return url_bd
 
-    return None
+        return None
+    except Exception:
+        return None
 
 
 def aplicar_respaldo_imagenes(productos, persistir=False):
@@ -223,46 +264,54 @@ def aplicar_respaldo_imagenes(productos, persistir=False):
     if not productos:
         return productos
 
-    if persistir:
-        pendientes = [
-            p for p in productos
-            if not _url_almacenada_o_none(p.get('imagen_url'))
-        ]
-        codigos = [
-            normalizar_codigo_barras(p.get('codigo_barras'))
-            for p in pendientes
-        ]
-        mapa_maestro = completar_mapa_imagenes(
-            [c for c in codigos if c],
-            buscar_oficial=False,
-        )
-
-        with get_db_connection() as conexion:
-            cursor = conexion.cursor()
-            actualizaciones = []
-            for prod in pendientes:
-                producto_id = prod.get('id')
-                if not producto_id:
-                    continue
-                url_final = resolver_imagen_escritura(
-                    imagen_manual=prod.get('imagen_url'),
-                    codigo_barras=prod.get('codigo_barras'),
-                    mapa_maestro=mapa_maestro,
+    try:
+        if persistir:
+            pendientes = [
+                p for p in productos
+                if not _url_almacenada_o_none(p.get('imagen_url'))
+            ]
+            codigos = [
+                normalizar_codigo_barras(p.get('codigo_barras'))
+                for p in pendientes
+            ]
+            try:
+                mapa_maestro = completar_mapa_imagenes(
+                    [c for c in codigos if c],
                     buscar_oficial=False,
                 )
-                if not url_final:
-                    continue
-                actualizaciones.append((url_final, int(producto_id)))
-                prod['imagen_url'] = url_final
-            if actualizaciones:
-                cursor.executemany(
-                    'UPDATE productos SET imagen_url = ? WHERE id = ?',
-                    actualizaciones,
-                )
-            conexion.commit()
-        return productos
+            except Exception:
+                mapa_maestro = {}
 
-    return imagen_urls_para_catalogo(productos)
+            with get_db_connection() as conexion:
+                cursor = conexion.cursor()
+                actualizaciones = []
+                for prod in pendientes:
+                    producto_id = prod.get('id')
+                    if not producto_id:
+                        continue
+                    url_final = resolver_imagen_escritura(
+                        imagen_manual=prod.get('imagen_url'),
+                        codigo_barras=prod.get('codigo_barras'),
+                        mapa_maestro=mapa_maestro,
+                        buscar_oficial=False,
+                    )
+                    if not url_final:
+                        url_final = _respaldo_en_cascada(prod.get('codigo_barras'))
+                    if not url_final:
+                        continue
+                    actualizaciones.append((url_final, int(producto_id)))
+                    prod['imagen_url'] = url_final
+                if actualizaciones:
+                    cursor.executemany(
+                        'UPDATE productos SET imagen_url = ? WHERE id = ?',
+                        actualizaciones,
+                    )
+                conexion.commit()
+            return productos
+
+        return imagen_urls_para_catalogo(productos)
+    except Exception:
+        return imagen_urls_para_catalogo(productos)
 
 
 def asociar_imagenes_inventario(comercio_id):

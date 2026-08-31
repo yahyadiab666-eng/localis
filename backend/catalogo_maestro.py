@@ -19,6 +19,8 @@ from backend.utils import normalizar_codigo_barras, texto_campo_imagen
 TABLA_CATALOGO_MAESTRO = 'catalogo_maestro_imagenes'
 _LOTE_CONSULTA = 100
 _LOG = '[Localis Imagen]'
+# Timeout corto en lectura: si la tabla no responde, se pasa a la semilla.
+_TIMEOUT_LECTURA_MS = int(os.getenv('CATALOGO_IMAGEN_TIMEOUT_MS', '2000'))
 # Misma normalización que productos: recorta espacios y sufijo .0 de Excel.
 _EXPR_CODIGO = (
     "regexp_replace("
@@ -112,11 +114,21 @@ def _catalogo_disponible():
     return _postgresql_directo_disponible() or _postgrest_disponible()
 
 
+def _aplicar_timeout_lectura(cursor):
+    if _TIMEOUT_LECTURA_MS <= 0:
+        return
+    try:
+        cursor.execute(f'SET LOCAL statement_timeout = {_TIMEOUT_LECTURA_MS}')
+    except Exception:
+        pass
+
+
 def _imagen_maestro_por_codigo_postgres(codigo):
     from backend.db import get_db_connection
 
     with get_db_connection() as conexion:
         cursor = conexion.cursor()
+        _aplicar_timeout_lectura(cursor)
         cursor.execute(
             f"""
             SELECT url_imagen
@@ -164,7 +176,16 @@ def _consultar_catalogo_supabase(codigo):
 
 def _consultar_semilla_memoria(codigo):
     """Fuente 2: diccionario en memoria (URLs públicas OFF/wsrv). Sin red."""
-    return _url_maestro_valida(IMAGENES_CATALOGO_SEMILLA.get(codigo))
+    try:
+        clave = normalizar_codigo_barras(codigo) or codigo or ''
+        return _url_maestro_valida(IMAGENES_CATALOGO_SEMILLA.get(clave))
+    except Exception:
+        return None
+
+
+def url_semilla_catalogo(codigo_barras):
+    """Respaldo en memoria. Nunca lanza; None si no hay código clave."""
+    return _consultar_semilla_memoria(codigo_barras)
 
 
 def _resolver_en_cascada(codigo):
@@ -189,12 +210,22 @@ def imagen_maestro_por_codigo(codigo_barras):
     URL de imagen por código de barras, en cascada:
     1) catalogo_maestro_imagenes (Postgres / PostgREST)
     2) IMAGENES_CATALOGO_SEMILLA en memoria (respaldo público, sin HTTP)
-    Cualquier error se traga y se sigue; no bloquea el render.
+    Error, timeout o vacío → siguiente fuente. Si todo falla, None.
+    Nunca propaga excepción (no rompe el render de Flask).
     """
-    codigo = normalizar_codigo_barras(codigo_barras)
-    if not codigo:
-        return None
-    return _resolver_en_cascada(codigo)
+    try:
+        codigo = normalizar_codigo_barras(codigo_barras)
+        if not codigo:
+            return None
+        url = _resolver_en_cascada(codigo)
+        if url:
+            return url
+        return _consultar_semilla_memoria(codigo)
+    except Exception:
+        try:
+            return _consultar_semilla_memoria(codigo_barras)
+        except Exception:
+            return None
 
 
 def _asegurar_indice_unico_codigo(cursor):
@@ -256,6 +287,7 @@ def _mapa_imagenes_maestro_postgres(lote):
     resultado = {}
     with get_db_connection() as conexion:
         cursor = conexion.cursor()
+        _aplicar_timeout_lectura(cursor)
         cursor.execute(
             f"""
             SELECT codigo_barras, url_imagen
@@ -307,24 +339,30 @@ def _mapa_lote(lote):
 
 def mapa_imagenes_maestro(codigos):
     """Mapa codigo → url: Supabase en lote, luego semilla en memoria para faltantes."""
-    normalizados = []
-    vistos = set()
-    for codigo in codigos or []:
-        limpio = normalizar_codigo_barras(codigo)
-        if limpio and limpio not in vistos:
-            vistos.add(limpio)
-            normalizados.append(limpio)
-    if not normalizados:
-        return {}
-
-    resultado = {}
     try:
-        for inicio in range(0, len(normalizados), _LOTE_CONSULTA):
-            lote = normalizados[inicio : inicio + _LOTE_CONSULTA]
-            resultado.update(_mapa_lote(lote))
-    except Exception as error:
-        _debug_imagen('lote catalogo_maestro', error)
-    return _completar_con_semilla(resultado, normalizados)
+        normalizados = []
+        vistos = set()
+        for codigo in codigos or []:
+            limpio = normalizar_codigo_barras(codigo)
+            if limpio and limpio not in vistos:
+                vistos.add(limpio)
+                normalizados.append(limpio)
+        if not normalizados:
+            return {}
+
+        resultado = {}
+        try:
+            for inicio in range(0, len(normalizados), _LOTE_CONSULTA):
+                lote = normalizados[inicio : inicio + _LOTE_CONSULTA]
+                resultado.update(_mapa_lote(lote))
+        except Exception as error:
+            _debug_imagen('lote catalogo_maestro', error)
+        return _completar_con_semilla(resultado, normalizados)
+    except Exception:
+        try:
+            return _completar_con_semilla({}, codigos)
+        except Exception:
+            return {}
 
 
 def sembrar_catalogo_maestro_imagenes():
