@@ -78,9 +78,26 @@ def imagen_url_para_guardar(imagen_manual=None, codigo_barras=None):
 def url_imagen_con_respaldo(imagen_url=None, codigo_barras=None):
     """Vista: imagen del producto o catálogo maestro por código de barras."""
     try:
-        return imagen_url_para_catalogo(imagen_url, codigo_barras=codigo_barras) or None
+        directa = _url_almacenada_o_none(imagen_url)
+        if directa:
+            return directa
+        codigo = normalizar_codigo_barras(codigo_barras)
+        if not codigo:
+            return None
+        respaldo = imagen_maestro_por_codigo(codigo)
+        if respaldo:
+            print(
+                f'{_LOG_CSV} respaldo catalogo_maestro codigo={codigo!r} '
+                f'url={respaldo!r}'
+            )
+            return respaldo
+        print(
+            f'{_LOG_CSV} sin imagen directa ni catalogo_maestro '
+            f'codigo={codigo!r}'
+        )
+        return None
     except Exception as error:
-        print(f'{_LOG_CSV} aviso respaldo imagen: {type(error).__name__}')
+        print(f'{_LOG_CSV} aviso respaldo imagen: {type(error).__name__}: {error}')
         return None
 
 
@@ -106,6 +123,8 @@ def imagen_urls_para_catalogo(productos):
         if not url:
             codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
             url = mapa.get(codigo) if codigo else None
+            if not url and codigo:
+                url = imagen_maestro_por_codigo(codigo)
         prod['imagen_url'] = url or None
 
     return productos

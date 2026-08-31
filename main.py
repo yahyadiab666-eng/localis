@@ -183,6 +183,27 @@ def _filtro_url_imagen_producto(producto):
         codigo = getattr(producto, 'codigo_barras', None)
     return url_imagen_con_respaldo(url, codigo_barras=codigo) or ''
 
+
+def _debug_imagenes_antes_de_render(productos, origen):
+    """Print de control: nombre, código de barras y URL que verá la plantilla."""
+    lista = list(productos or [])
+    print(f'[Localis Imagen] render origen={origen} productos={len(lista)}')
+    for prod in lista[:50]:
+        if hasattr(prod, 'get'):
+            nombre = prod.get('nombre')
+            codigo = prod.get('codigo_barras')
+            url_bd = prod.get('imagen_url')
+        else:
+            nombre = getattr(prod, 'nombre', None)
+            codigo = getattr(prod, 'codigo_barras', None)
+            url_bd = getattr(prod, 'imagen_url', None)
+        url = url_imagen_con_respaldo(url_bd, codigo_barras=codigo)
+        print(
+            f'[Localis Imagen] nombre={nombre!r} codigo={codigo!r} url={url!r}'
+        )
+    if len(lista) > 50:
+        print(f'[Localis Imagen] ... {len(lista) - 50} producto(s) más')
+
 DEFAULT_BANNER = DEFAULT_BANNER_URL
 
 
@@ -538,6 +559,7 @@ def index():
     banner_url = url_banner_principal(configs['banner_principal'], default=DEFAULT_BANNER)
     whatsapp = configs['whatsapp_soporte']
 
+    _debug_imagenes_antes_de_render(productos, 'index')
     return render_template(
         'cliente.html',
         productos=productos,
@@ -619,6 +641,7 @@ def tienda_publica(comercio_id):
     comercio['whatsapp_numero'] = normalizar_telefono_whatsapp(comercio.get('telefono'))
     comercio['maps_link'] = url_maps_comercio(comercio)
 
+    _debug_imagenes_antes_de_render(productos, 'tienda_publica')
     return render_template(
         'tienda_publica.html',
         comercio=comercio,
@@ -730,8 +753,8 @@ def _productos_desde_filas(productos_db, tasa_actual):
             'descripcion': p['descripcion'] or 'Sin descripción',
             'precio_usd': precio_usd,
             'precio_bs': round(precio_usd * tasa_actual, 2),
-            'codigo_barras': p['codigo_barras'] or '',
-            'imagen_url': p.get('imagen_url'),
+            'codigo_barras': '' if p['codigo_barras'] is None else p['codigo_barras'],
+            'imagen_url': p['imagen_url'],
         })
     imagen_urls_para_catalogo(productos)
     return productos
@@ -808,6 +831,7 @@ def panel_comercio():
         plan_info = PLANES.get(comercio.get('plan_tipo', 'gratis'), PLANES['gratis'])
         avisos = obtener_avisos_suscripcion(comercio)
 
+        _debug_imagenes_antes_de_render(productos, 'panel_comercio')
         return render_template(
             'comercio.html',
             comercio=comercio,
@@ -1203,6 +1227,7 @@ def editar_producto(producto_id):
         )
         if respaldo:
             producto['imagen_url'] = respaldo
+    _debug_imagenes_antes_de_render([producto], 'editar_producto')
     return render_template('nuevo_producto.html', producto=producto)
 
 
