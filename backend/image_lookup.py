@@ -15,6 +15,7 @@ from backend.image_manager import (
 from backend.utils import (
     es_imagen_generica,
     imagen_url_almacenada,
+    imagen_url_para_persistir,
     normalizar_codigo_barras,
     texto_campo_imagen,
 )
@@ -57,6 +58,30 @@ def imagen_url_para_catalogo(imagen_url=None, codigo_barras=None):
         codigo_barras=codigo_barras,
     )
     return url or None
+
+
+def imagen_url_para_guardar(imagen_manual=None, codigo_barras=None):
+    """
+    URL a persistir en productos.imagen_url:
+    campo/archivo del formulario, o respaldo por código en catalogo_maestro_imagenes.
+    """
+    persistida = imagen_url_para_persistir(imagen_manual)
+    if persistida:
+        return persistida
+    try:
+        return imagen_maestro_por_codigo(codigo_barras) or None
+    except Exception as error:
+        print(f'{_LOG_CSV} aviso imagen para guardar: {type(error).__name__}')
+        return None
+
+
+def url_imagen_con_respaldo(imagen_url=None, codigo_barras=None):
+    """Vista: imagen del producto o catálogo maestro por código de barras."""
+    try:
+        return imagen_url_para_catalogo(imagen_url, codigo_barras=codigo_barras) or None
+    except Exception as error:
+        print(f'{_LOG_CSV} aviso respaldo imagen: {type(error).__name__}')
+        return None
 
 
 def imagen_urls_para_catalogo(productos):

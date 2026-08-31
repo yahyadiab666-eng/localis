@@ -106,8 +106,9 @@
       <div class="grid grid-cols-2 md:grid-cols-4 gap-5 grid-productos-mobile">
         {% for producto in productos %}
           <div class="card-hover card-producto-mobile rounded-xl overflow-hidden bg-white shadow border border-stone-100 flex flex-col h-full">
-            <div class="localis-img-producto-wrap{% if not producto.imagen_url %} localis-img-producto-wrap--vacio{% endif %}">
-              <img{% if producto.imagen_url %} src="{{ producto.imagen_url }}"{% endif %}
+            {% set img_producto = producto|url_imagen_producto %}
+            <div class="localis-img-producto-wrap{% if not img_producto %} localis-img-producto-wrap--vacio{% endif %}">
+              <img{% if img_producto %} src="{{ img_producto }}"{% endif %}
                    alt="{{ producto.nombre }}"
                    data-producto-id="{{ producto.id }}"
                    class="localis-img-producto" loading="lazy" referrerpolicy="no-referrer"

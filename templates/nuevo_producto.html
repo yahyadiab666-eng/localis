@@ -122,26 +122,33 @@
           </div>
 
           <!-- Imagen del Producto -->
+          {% set img_producto = producto|url_imagen_producto if producto else '' %}
           <div>
             <label for="imagen" class="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-1.5">Imagen del Producto (Opcional)</label>
 
-            {% if producto and producto.imagen_url %}
+            {% if img_producto %}
               <div class="flex items-center gap-3 mb-2 p-2 bg-stone-50 border border-stone-200 rounded-xl">
-                <img src="{{ producto.imagen_url }}" alt="Imagen actual"
+                <img src="{{ img_producto }}" alt="Imagen actual"
                      data-producto-id="{{ producto.id }}"
                      class="localis-img-producto-thumb rounded-lg border border-stone-200"
                      onerror="window.rescatarImagenProducto(this)">
                 <div class="text-xs text-stone-600">
                   <p class="font-medium">Imagen actual vinculada</p>
-                  <p class="text-[10px] text-stone-400">Sube un archivo nuevo para reemplazarla.</p>
+                  <p class="text-[10px] text-stone-400">Sube un archivo nuevo o cambia la URL para reemplazarla.</p>
                 </div>
               </div>
             {% endif %}
 
+            <label for="imagen_url" class="block text-[11px] font-semibold text-stone-600 mb-1">URL de la imagen</label>
+            <input type="url" id="imagen_url" name="imagen_url"
+                   value="{{ img_producto }}"
+                   placeholder="https://… (se guarda en productos.imagen_url)"
+                   class="w-full mb-2 px-3 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm text-stone-900 focus:outline-none focus:border-amber-500 focus:bg-white transition">
+
             <div class="relative flex items-center">
               <input type="file" id="imagen" name="imagen" accept="image/*" class="w-full text-xs text-stone-500 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 cursor-pointer bg-stone-50 border border-stone-200 rounded-xl py-1.5 px-2 focus:outline-none focus:border-amber-500 transition">
             </div>
-            <p class="text-[11px] text-stone-400 mt-1">Si no adjuntas foto, el producto quedará sin imagen hasta que subas una manualmente o importes una URL exacta en el CSV.</p>
+            <p class="text-[11px] text-stone-400 mt-1">El archivo subido tiene prioridad. Si dejas la URL y el código de barras, se usará el catálogo maestro cuando no haya foto propia.</p>
           </div>
 
           <!-- Botón de Envío -->

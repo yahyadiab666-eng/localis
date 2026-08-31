@@ -206,10 +206,11 @@
                     data-producto-busqueda="{{ producto.nombre }} {{ producto.descripcion }} {{ producto.codigo_barras }}">
                   <td class="py-4 px-4 sm:px-6 font-semibold text-gray-900">
                     <div class="flex items-center gap-3 min-w-0">
-                      <img{% if producto.imagen_url %} src="{{ producto.imagen_url }}"{% endif %}
+                      {% set img_producto = producto|url_imagen_producto %}
+                      <img{% if img_producto %} src="{{ img_producto }}"{% endif %}
                            alt=""
                            data-producto-id="{{ producto.id }}"
-                           class="localis-img-producto-thumb rounded-lg border border-stone-200{% if not producto.imagen_url %} localis-img-producto-thumb--vacio{% endif %}"
+                           class="localis-img-producto-thumb rounded-lg border border-stone-200{% if not img_producto %} localis-img-producto-thumb--vacio{% endif %}"
                            onerror="window.rescatarImagenProducto(this)">
                       <span class="truncate">{{ producto.nombre }}</span>
                     </div>
@@ -271,10 +272,11 @@
         <article class="panel-producto-card bg-white rounded-2xl border border-stone-200 p-4 shadow-sm"
                  data-producto-busqueda="{{ producto.nombre }} {{ producto.descripcion }} {{ producto.codigo_barras }}">
           <div class="flex gap-3">
-            <img{% if producto.imagen_url %} src="{{ producto.imagen_url }}"{% endif %}
+            {% set img_producto = producto|url_imagen_producto %}
+            <img{% if img_producto %} src="{{ img_producto }}"{% endif %}
                  alt=""
                  data-producto-id="{{ producto.id }}"
-                 class="localis-img-producto-thumb w-14 h-14 rounded-xl border border-stone-200{% if not producto.imagen_url %} localis-img-producto-thumb--vacio{% endif %}"
+                 class="localis-img-producto-thumb w-14 h-14 rounded-xl border border-stone-200{% if not img_producto %} localis-img-producto-thumb--vacio{% endif %}"
                  onerror="window.rescatarImagenProducto(this)">
             <div class="flex-1 min-w-0">
               <h4 class="font-bold text-gray-900 text-sm truncate">{{ producto.nombre }}</h4>

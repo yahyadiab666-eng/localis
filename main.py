@@ -85,9 +85,10 @@ from backend.diagnostics import ejecutar_diagnostico_inicio, obtener_estado_sist
 from backend.error_handlers import registrar_manejadores_errores
 from backend.image_lookup import (
     imagen_url_para_catalogo,
+    imagen_url_para_guardar,
     imagen_urls_para_catalogo,
     obtener_imagen_url_producto,
-    resolver_imagen_url_definitiva,
+    url_imagen_con_respaldo,
 )
 from backend.db import get_db_connection
 from database import init_db, normalize_database_url
@@ -167,6 +168,20 @@ registrar_manejadores_errores(app)
 @app.template_filter('fecha_corta')
 def _filtro_fecha_corta(valor):
     return formatear_fecha(valor) or '—'
+
+
+@app.template_filter('url_imagen_producto')
+def _filtro_url_imagen_producto(producto):
+    """imagen_url del producto o respaldo por código en catalogo_maestro_imagenes."""
+    if not producto:
+        return ''
+    if hasattr(producto, 'get'):
+        url = producto.get('imagen_url')
+        codigo = producto.get('codigo_barras')
+    else:
+        url = getattr(producto, 'imagen_url', None)
+        codigo = getattr(producto, 'codigo_barras', None)
+    return url_imagen_con_respaldo(url, codigo_barras=codigo) or ''
 
 DEFAULT_BANNER = DEFAULT_BANNER_URL
 
@@ -1011,6 +1026,7 @@ def nuevo_producto():
         precio_raw = request.form.get('precio_usd')
         codigo_barras = normalizar_codigo_barras(request.form.get('codigo_barras'))
         imagen_archivo = request.files.get('imagen')
+        imagen_url_form = request.form.get('imagen_url')
 
         precio_usd, error_precio = parsear_precio_form(precio_raw)
         if not nombre or not nombre.strip():
@@ -1047,11 +1063,8 @@ def nuevo_producto():
                     )
                     return redirect(url_for('nuevo_producto'))
             else:
-                imagen_url = None
-
-            if not imagen_url:
-                imagen_url = resolver_imagen_url_definitiva(
-                    None,
+                imagen_url = imagen_url_para_guardar(
+                    imagen_url_form,
                     codigo_barras,
                 )
         except SupabaseUploadError as error:
@@ -1102,6 +1115,7 @@ def editar_producto(producto_id):
         descripcion = request.form.get('descripcion')
         codigo_barras = normalizar_codigo_barras(request.form.get('codigo_barras'))
         imagen_archivo = request.files.get('imagen')
+        imagen_url_form = request.form.get('imagen_url')
 
         precio_usd, error_precio = parsear_precio_form(precio_raw)
         if not nombre or not nombre.strip():
@@ -1113,10 +1127,11 @@ def editar_producto(producto_id):
 
         try:
             imagen_url = None
-            incluir_imagen = bool(
+            hay_archivo = bool(
                 imagen_archivo and getattr(imagen_archivo, 'filename', '')
             )
-            if incluir_imagen:
+            incluir_imagen = False
+            if hay_archivo:
                 try:
                     imagen_url = procesar_imagen_para_producto(
                         imagen_archivo,
@@ -1141,6 +1156,13 @@ def editar_producto(producto_id):
                         url_for('editar_producto', producto_id=producto_id)
                     )
                 imagen_url = imagen_persistida
+                incluir_imagen = True
+            else:
+                imagen_url = imagen_url_para_guardar(
+                    imagen_url_form,
+                    codigo_barras,
+                )
+                incluir_imagen = bool(imagen_url)
 
             exito, mensaje = actualizar_producto(
                 producto_id,
@@ -1174,7 +1196,14 @@ def editar_producto(producto_id):
         flash('El producto no existe o no tienes permiso para modificarlo.', 'error')
         return redirect(url_for('panel_comercio'))
 
-    return render_template('nuevo_producto.html', producto=dict(producto_row))
+    producto = dict(producto_row)
+    if not imagen_url_almacenada(producto.get('imagen_url')):
+        respaldo = url_imagen_con_respaldo(
+            None, codigo_barras=producto.get('codigo_barras')
+        )
+        if respaldo:
+            producto['imagen_url'] = respaldo
+    return render_template('nuevo_producto.html', producto=producto)
 
 
 @app.route('/comercio/producto/eliminar/<int:producto_id>', methods=['POST'])
@@ -1332,6 +1361,7 @@ def api_crear_producto():
     precio_raw = request.form.get('precio_usd')
     codigo_barras = normalizar_codigo_barras(request.form.get('codigo_barras'))
     imagen_archivo = request.files.get('imagen')
+    imagen_url_form = request.form.get('imagen_url')
 
     if not nombre or not nombre.strip():
         return jsonify({'error': 'El nombre es obligatorio.'}), 400
@@ -1361,8 +1391,8 @@ def api_crear_producto():
                     }
                 ), 400
         else:
-            imagen_url = resolver_imagen_url_definitiva(
-                None,
+            imagen_url = imagen_url_para_guardar(
+                imagen_url_form,
                 codigo_barras,
             )
     except SupabaseUploadError as error:
