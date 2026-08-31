@@ -33,6 +33,48 @@ _URL_NO_VACIA = (
 )
 
 
+def _url_wsrv_oficial(url_origen):
+    return (
+        'https://wsrv.nl/?url='
+        + quote(url_origen, safe='')
+        + '&w=300&h=300&fit=cover&output=webp&q=80'
+    )
+
+
+# Activo en memoria: no depende de Supabase ni de catalogo_maestro_imagenes.
+_URL_HARINA_PAN = _url_wsrv_oficial(
+    'https://images.openfoodfacts.org/images/products/759/100/200/0547/front_es.24.400.jpg'
+)
+_URL_ACEITE_VATEL = _url_wsrv_oficial(
+    'https://images.openfoodfacts.org/images/products/759/104/900/1903/front_es.3.400.jpg'
+)
+
+IMAGENES_CATALOGO_SEMILLA = {
+    '7591001000011': _URL_HARINA_PAN,  # Harina PAN (código de prueba)
+    '7591002000011': _URL_HARINA_PAN,  # Polar Harina PAN
+    '7591002000547': _URL_HARINA_PAN,  # Harina PAN 1 kg (OFF)
+    '7591001000035': _URL_ACEITE_VATEL,  # Aceite Vatel (código de prueba)
+    '7591049001903': _URL_ACEITE_VATEL,  # Aceite Vatel 1 L (OFF)
+}
+
+
+def _url_semilla_por_codigo(codigo):
+    clave = normalizar_codigo_barras(codigo) or ''
+    return IMAGENES_CATALOGO_SEMILLA.get(clave)
+
+
+def _completar_con_semilla(mapa, codigos):
+    """Rellena faltantes desde IMAGENES_CATALOGO_SEMILLA (siempre, sin BD)."""
+    resultado = dict(mapa or {})
+    for codigo in codigos or []:
+        clave = normalizar_codigo_barras(codigo) or ''
+        if clave and clave not in resultado:
+            semilla = IMAGENES_CATALOGO_SEMILLA.get(clave)
+            if semilla:
+                resultado[clave] = semilla
+    return resultado
+
+
 def _url_maestro_valida(valor):
     url = (texto_campo_imagen(valor, default=None) or '').strip()
     if url and url.startswith('https://'):
@@ -87,8 +129,12 @@ def _imagen_maestro_por_codigo_postgres(codigo):
 
 
 def _imagen_maestro_por_codigo_postgrest(codigo):
-    url = consultar_imagen_maestro(codigo)
-    return _url_maestro_valida(url)
+    try:
+        url = consultar_imagen_maestro(codigo)
+        return _url_maestro_valida(url)
+    except Exception as error:
+        print(f'{_LOG} error PostgREST catalogo_maestro ({codigo}): {error}')
+        return None
 
 
 def _resolver_imagen_maestro(codigo):
@@ -106,29 +152,33 @@ def _resolver_imagen_maestro(codigo):
 
 
 def imagen_maestro_por_codigo(codigo_barras):
-    """URL de imagen para un código de barras en el catálogo maestro."""
+    """
+    URL de imagen para un código de barras.
+    PostgreSQL/PostgREST primero; si fallan, no responden o no hay fila,
+    usa IMAGENES_CATALOGO_SEMILLA de inmediato (sin depender de Supabase).
+    """
     codigo = normalizar_codigo_barras(codigo_barras)
     if not codigo:
         print(f'{_LOG} codigo_barras vacio o nulo; no se consulta catalogo_maestro')
         return None
-    if not _catalogo_disponible():
-        print(
-            f'{_LOG} catalogo_maestro no disponible; no hay respaldo para '
-            f'codigo={codigo!r}'
-        )
-        return None
-    try:
-        url = _resolver_imagen_maestro(codigo)
+
+    url = None
+    if _catalogo_disponible():
+        try:
+            url = _resolver_imagen_maestro(codigo)
+        except Exception as error:
+            print(f'{_LOG} fallo al resolver catalogo_maestro ({codigo}): {error}')
+            url = None
         if url:
             return url
-    except Exception as error:
-        print(f'{_LOG} fallo al resolver catalogo_maestro ({codigo}): {error}')
-        url = None
-    semilla = _url_semilla_por_codigo(codigo)
+    else:
+        print(f'{_LOG} catalogo_maestro no disponible; fallback a semilla codigo={codigo!r}')
+
+    semilla = IMAGENES_CATALOGO_SEMILLA.get(codigo)
     if semilla:
         print(f'{_LOG} catalogo_maestro usa semilla en memoria codigo={codigo!r}')
         return semilla
-    return url
+    return None
 
 
 def _asegurar_indice_unico_codigo(cursor):
@@ -251,52 +301,21 @@ def mapa_imagenes_maestro(codigos):
             normalizados.append(limpio)
     if not normalizados:
         return {}
-    if not _catalogo_disponible():
-        print(f'{_LOG} catalogo_maestro no disponible; lote de {len(normalizados)} codigo(s) sin respaldo')
-        return {}
 
     resultado = {}
-    try:
-        for inicio in range(0, len(normalizados), _LOTE_CONSULTA):
-            lote = normalizados[inicio : inicio + _LOTE_CONSULTA]
-            resultado.update(_mapa_lote(lote))
-    except Exception as error:
-        print(f'Error al consultar catálogo maestro en lote: {error}')
-    for codigo in normalizados:
-        if codigo not in resultado:
-            semilla = IMAGENES_CATALOGO_SEMILLA.get(codigo)
-            if semilla:
-                resultado[codigo] = semilla
-    return resultado
-
-
-def _url_wsrv_oficial(url_origen):
-    return (
-        'https://wsrv.nl/?url='
-        + quote(url_origen, safe='')
-        + '&w=300&h=300&fit=cover&output=webp&q=80'
-    )
-
-
-# Fotos públicas (Open Food Facts) para códigos de prueba y EAN reales Polar/Vatel.
-_URL_HARINA_PAN = _url_wsrv_oficial(
-    'https://images.openfoodfacts.org/images/products/759/100/200/0547/front_es.24.400.jpg'
-)
-_URL_ACEITE_VATEL = _url_wsrv_oficial(
-    'https://images.openfoodfacts.org/images/products/759/104/900/1903/front_es.3.400.jpg'
-)
-
-IMAGENES_CATALOGO_SEMILLA = {
-    '7591001000011': _URL_HARINA_PAN,  # Harina PAN (código de prueba)
-    '7591002000011': _URL_HARINA_PAN,  # Polar Harina PAN
-    '7591002000547': _URL_HARINA_PAN,  # Harina PAN 1 kg (OFF)
-    '7591001000035': _URL_ACEITE_VATEL,  # Aceite Vatel (código de prueba)
-    '7591049001903': _URL_ACEITE_VATEL,  # Aceite Vatel 1 L (OFF)
-}
-
-
-def _url_semilla_por_codigo(codigo):
-    return IMAGENES_CATALOGO_SEMILLA.get(normalizar_codigo_barras(codigo) or '')
+    if _catalogo_disponible():
+        try:
+            for inicio in range(0, len(normalizados), _LOTE_CONSULTA):
+                lote = normalizados[inicio : inicio + _LOTE_CONSULTA]
+                resultado.update(_mapa_lote(lote))
+        except Exception as error:
+            print(f'{_LOG} error lote catalogo_maestro: {error}')
+    else:
+        print(
+            f'{_LOG} catalogo_maestro no disponible; lote usa semilla '
+            f'({len(normalizados)} codigo(s))'
+        )
+    return _completar_con_semilla(resultado, normalizados)
 
 
 def sembrar_catalogo_maestro_imagenes():
