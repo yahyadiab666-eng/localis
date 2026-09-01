@@ -19,6 +19,7 @@ from backend.supabase_client import (
     SUPABASE_SERVICE_ROLE_KEY,
     SUPABASE_URL,
     SUPABASE_URL_VALIDA,
+    auditar_claves_supabase,
     clave_es_service_role,
     construir_url_publica_storage,
     es_error_red_supabase,
@@ -55,6 +56,16 @@ def _mensaje_cliente_no_configurado() -> str:
             'Define https://TU_REF.supabase.co en el entorno (Render).'
         )
     if not SUPABASE_SERVICE_ROLE_KEY:
+        auditoria = auditar_claves_supabase()
+        if auditoria.get('service_rechazada_al_iniciar') or auditoria.get(
+            'service_jwt_role'
+        ) == 'anon':
+            return (
+                'Supabase Storage no disponible: SUPABASE_SERVICE_ROLE_KEY tiene '
+                f"jwt_role={auditoria.get('service_jwt_role')!r} (se esperaba "
+                'service_role). En Render reemplaza esa variable por la llave secreta '
+                'Dashboard -> Settings -> API -> service_role. No uses la anon.'
+            )
         return (
             'Supabase Storage no disponible: falta SUPABASE_SERVICE_ROLE_KEY. '
             'En el backend las subidas usan solo la llave service_role '
