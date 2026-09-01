@@ -215,7 +215,7 @@ try:
             or 'localis-arranque-sin-secret'
         )
     aplicar_config_sesion_flask(app)
-    app.config['SUPABASE_CLIENT'] = obtener_cliente_storage() or supabase
+    app.config['SUPABASE_CLIENT'] = obtener_cliente_storage()
     app.config['SUPABASE_BUCKET_IMAGENES'] = SUPABASE_BUCKET_IMAGENES
     app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_BYTES
     csrf = CSRFProtect(app)

@@ -2,8 +2,12 @@
 Subida de archivos a Supabase Storage (obligatorio en produccion).
 
 - URLs externas / catalogo maestro -> texto https en PostgreSQL.
-- Archivos subidos -> Supabase Storage; si falla, SupabaseUploadError explicito (sin disco local).
+- Archivos subidos -> Supabase Storage con SUPABASE_SERVICE_ROLE_KEY (nunca anon).
 """
+
+from urllib.parse import quote
+
+import httpx
 
 from backend.images import (
     ImageProcessingError,
@@ -15,10 +19,14 @@ from backend.supabase_client import (
     SUPABASE_SERVICE_ROLE_KEY,
     SUPABASE_URL,
     SUPABASE_URL_VALIDA,
+    clave_es_service_role,
     construir_url_publica_storage,
     es_error_red_supabase,
+    headers_storage_service_role,
     obtener_cliente_storage,
+    supabase as _cliente_anon,
     storage_usa_service_role,
+    _rol_claim_jwt,
 )
 from backend.utils import url_imagen_subida_storage_valida
 
@@ -89,11 +97,13 @@ def _mensaje_error_storage(error):
             mensaje = str(getattr(error, 'message', None) or error.args[0] or error)
 
             if status == 403:
+                rol = _rol_claim_jwt(SUPABASE_SERVICE_ROLE_KEY) or 'ausente'
                 return (
                     f'Supabase Storage rechazo la subida (HTTP 403) en el bucket '
-                    f'"{SUPABASE_BUCKET_IMAGENES}". El backend usa service_role; '
-                    f'revisa que SUPABASE_SERVICE_ROLE_KEY sea la llave de administracion '
-                    f'y que el bucket exista. Detalle: {mensaje}'
+                    f'"{SUPABASE_BUCKET_IMAGENES}" (RLS en storage.objects). '
+                    f'El backend debe usar service_role; jwt_role detectado={rol}. '
+                    f'Revisa SUPABASE_SERVICE_ROLE_KEY (no SUPABASE_KEY/anon) y las '
+                    f'politicas INSERT/SELECT/UPDATE del bucket. Detalle: {mensaje}'
                 )
             if status == 413:
                 return 'La imagen supera el tamano permitido por Supabase Storage (HTTP 413).'
@@ -109,6 +119,27 @@ def _mensaje_error_storage(error):
         pass
 
     return f'Error al subir imagen a Supabase ({SUPABASE_BUCKET_IMAGENES}): {error}'
+
+
+def _mensaje_por_status_http(status, mensaje):
+    dummy = type(
+        'StorageHttpError',
+        (),
+        {'status': status, 'message': mensaje, 'args': (mensaje,)},
+    )()
+    texto = _mensaje_error_storage(dummy)
+    if texto.startswith('Error al subir imagen a Supabase'):
+        if status == 403:
+            rol = _rol_claim_jwt(SUPABASE_SERVICE_ROLE_KEY) or 'ausente'
+            return (
+                f'Supabase Storage rechazo la subida (HTTP 403) en el bucket '
+                f'"{SUPABASE_BUCKET_IMAGENES}" (RLS en storage.objects). '
+                f'El backend debe usar service_role; jwt_role detectado={rol}. '
+                f'Revisa SUPABASE_SERVICE_ROLE_KEY (no SUPABASE_KEY/anon) y las '
+                f'politicas INSERT/SELECT/UPDATE del bucket. Detalle: {mensaje}'
+            )
+        return f'Error de Supabase Storage (HTTP {status}): {mensaje}'
+    return texto
 
 
 def _describir_error(error):
@@ -131,10 +162,26 @@ def _registrar_exito_supabase(ruta_storage, url_publica):
 
 
 def _resolver_cliente_storage(supabase_client):
-    """Solo service_role. Un cliente inyectado (tests) se acepta; si no, el admin."""
+    """Nunca el cliente anon. Un mock de tests se acepta; si no, solo service_role."""
+    if supabase_client is not None and supabase_client is _cliente_anon:
+        print(
+            f'{LOG_PREFIX} Se ignoro el cliente anon/publica; las subidas usan service_role.'
+        )
+        supabase_client = None
     if supabase_client is not None:
         return supabase_client
     return obtener_cliente_storage()
+
+
+def _url_objeto_storage(ruta_storage):
+    partes = [p for p in str(ruta_storage).replace('\\', '/').split('/') if p]
+    ruta_enc = '/'.join(quote(p, safe='') for p in partes)
+    bucket = quote((SUPABASE_BUCKET_IMAGENES or 'imagenes').strip('/'), safe='')
+    return f'{SUPABASE_URL.rstrip("/")}/storage/v1/object/{bucket}/{ruta_enc}'
+
+
+def _timeout_upload():
+    return httpx.Timeout(connect=5.0, read=30.0, write=30.0, pool=5.0)
 
 
 def _url_publica_tras_subida(ruta_storage):
@@ -144,19 +191,32 @@ def _url_publica_tras_subida(ruta_storage):
 
 
 def _subir_bytes_al_bucket(cliente, ruta_storage, data, content_type):
-    bucket = cliente.storage.from_(SUPABASE_BUCKET_IMAGENES)
+    """POST a Storage con Authorization service_role. No usa el SDK anon."""
+    del cliente
+    if not clave_es_service_role(SUPABASE_SERVICE_ROLE_KEY):
+        raise SupabaseUploadError(_mensaje_cliente_no_configurado())
     try:
-        bucket.upload(
-            ruta_storage,
-            data,
-            file_options={
-                'content-type': content_type,
-                'upsert': 'true',
-                'cache-control': '3600',
-            },
+        headers = headers_storage_service_role(
+            {
+                'Content-Type': content_type or 'application/octet-stream',
+                'x-upsert': 'true',
+            }
         )
+    except RuntimeError as error:
+        raise SupabaseUploadError(str(error)) from error
+
+    url = _url_objeto_storage(ruta_storage)
+    try:
+        with httpx.Client(timeout=_timeout_upload(), follow_redirects=True) as http:
+            respuesta = http.post(url, content=data, headers=headers)
+            if respuesta.status_code == 409:
+                respuesta = http.put(url, content=data, headers=headers)
     except Exception as error:
         raise SupabaseUploadError(_mensaje_error_storage(error)) from error
+
+    if respuesta.status_code not in (200, 201):
+        detalle = (respuesta.text or respuesta.reason_phrase or '')[:500]
+        raise SupabaseUploadError(_mensaje_por_status_http(respuesta.status_code, detalle))
 
     try:
         return _url_publica_tras_subida(ruta_storage)
@@ -172,12 +232,12 @@ def _subir_bytes_al_bucket(cliente, ruta_storage, data, content_type):
 def _persistir_en_supabase(data, filename, content_type, carpeta, supabase_client=None):
     """Sube a Supabase Storage o lanza SupabaseUploadError; sin respaldo local."""
     ruta_storage = f'{carpeta.strip("/")}/{filename}'
-    cliente = _resolver_cliente_storage(supabase_client)
-
-    if not cliente:
+    if not clave_es_service_role(SUPABASE_SERVICE_ROLE_KEY):
         mensaje = _mensaje_cliente_no_configurado()
         print(f'{LOG_PREFIX} {mensaje}')
         raise SupabaseUploadError(mensaje)
+
+    cliente = _resolver_cliente_storage(supabase_client)
 
     try:
         url = _subir_bytes_al_bucket(cliente, ruta_storage, data, content_type)

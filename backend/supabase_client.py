@@ -1,5 +1,9 @@
 """Cliente Supabase Storage + helpers de URL pública."""
 
+from __future__ import annotations
+
+import base64
+import json
 import os
 import re
 import socket
@@ -23,6 +27,33 @@ _STORAGE_PUBLIC_PREFIX = '/storage/v1/object/public/'
 _SUBASE_TYPO_RE = re.compile(r'/subase/', re.IGNORECASE)
 SUPABASE_HTTP_TIMEOUT = 10.0
 SUPABASE_CONNECT_TIMEOUT = 5.0
+
+
+def _rol_claim_jwt(token):
+    """Lee el claim `role` de un JWT de Supabase sin verificar firma (solo diagnóstico)."""
+    texto = _limpiar_valor_env(token)
+    if not texto or texto.count('.') < 2:
+        return None
+    try:
+        payload = texto.split('.', 2)[1]
+        payload += '=' * (-len(payload) % 4)
+        datos = json.loads(base64.urlsafe_b64decode(payload.encode('ascii')))
+        rol = datos.get('role')
+        return str(rol) if rol else None
+    except Exception:
+        return None
+
+
+def clave_es_service_role(token):
+    """True si la clave es service_role (JWT legacy) o secret key (sb_secret_…)."""
+    texto = _limpiar_valor_env(token)
+    if not texto:
+        return False
+    if texto.startswith('sb_secret_'):
+        return True
+    if texto.startswith(('sb_publishable_', 'sb_anon_')):
+        return False
+    return _rol_claim_jwt(texto) == 'service_role'
 
 
 def _limpiar_valor_env(valor):
@@ -129,7 +160,7 @@ def _imprimir_estado_supabase():
     if supabase_storage_admin:
         print(
             f'{prefijo} Cliente Storage inicializado con service_role '
-            f'(bucket={SUPABASE_BUCKET_IMAGENES}).'
+            f'(bucket={SUPABASE_BUCKET_IMAGENES}, jwt_role={_rol_claim_jwt(SUPABASE_SERVICE_ROLE_KEY) or "sb_secret"}).'
         )
     else:
         if not SUPABASE_SERVICE_ROLE_KEY:
@@ -161,9 +192,23 @@ SUPABASE_URL = _URL_INFO.url or SUPABASE_URL_POR_DEFECTO
 SUPABASE_URL_VALIDA = bool(SUPABASE_URL)
 SUPABASE_URL_ADVERTENCIAS = list(_URL_INFO.advertencias)
 SUPABASE_URL_ERRORES = list(_URL_INFO.errores)
-SUPABASE_KEY = _limpiar_valor_env(os.getenv('SUPABASE_KEY'))
-SUPABASE_SERVICE_ROLE_KEY = _limpiar_valor_env(os.getenv('SUPABASE_SERVICE_ROLE_KEY'))
+SUPABASE_KEY = _limpiar_valor_env(os.getenv('SUPABASE_KEY')) or _limpiar_valor_env(
+    os.getenv('SUPABASE_ANON_KEY')
+)
+SUPABASE_SERVICE_ROLE_KEY = _limpiar_valor_env(
+    os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+) or _limpiar_valor_env(os.getenv('SUPABASE_SECRET_KEY'))
 SUPABASE_BUCKET_IMAGENES = _limpiar_valor_env(os.getenv('SUPABASE_BUCKET_IMAGENES')) or 'imagenes'
+
+if SUPABASE_SERVICE_ROLE_KEY and not clave_es_service_role(SUPABASE_SERVICE_ROLE_KEY):
+    rol_detectado = _rol_claim_jwt(SUPABASE_SERVICE_ROLE_KEY) or 'desconocido'
+    print(
+        f'[Localis Supabase] ERROR: SUPABASE_SERVICE_ROLE_KEY no es service_role '
+        f'(jwt_role={rol_detectado}). Las subidas a Storage seran 403 por RLS. '
+        'En Dashboard -> Settings -> API copia la llave service_role (o secret), '
+        'no la anon/publishable.'
+    )
+    SUPABASE_SERVICE_ROLE_KEY = ''
 
 supabase: Optional[Client] = None
 supabase_storage_admin: Optional[Client] = None
@@ -172,8 +217,8 @@ _modo_catalogo_logeado = False
 
 
 def clave_api_servidor():
-    """Clave para llamadas server-side: service_role primero, anon como respaldo."""
-    return SUPABASE_SERVICE_ROLE_KEY or SUPABASE_KEY
+    """Clave server-side: solo service_role. Nunca la anon/pública."""
+    return SUPABASE_SERVICE_ROLE_KEY if clave_es_service_role(SUPABASE_SERVICE_ROLE_KEY) else ''
 
 
 def abrir_circuito_postgrest(motivo: str = '') -> None:
@@ -412,6 +457,23 @@ def obtener_cliente_storage():
     (bypasea RLS del bucket). Nunca usa la clave anon/pública.
     """
     return supabase_storage_admin
+
+
+def headers_storage_service_role(extra: dict | None = None) -> dict[str, str]:
+    """Cabeceras HTTP para Storage: Bearer + apikey = service_role, nunca anon."""
+    key = SUPABASE_SERVICE_ROLE_KEY
+    if not clave_es_service_role(key):
+        raise RuntimeError(
+            'Subida a Storage denegada: falta SUPABASE_SERVICE_ROLE_KEY válida '
+            '(jwt role=service_role o sb_secret_). No se usa SUPABASE_KEY/anon.'
+        )
+    headers = {
+        'Authorization': f'Bearer {key}',
+        'apikey': key,
+    }
+    if extra:
+        headers.update(extra)
+    return headers
 
 
 def storage_usa_service_role():
