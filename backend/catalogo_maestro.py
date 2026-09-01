@@ -392,7 +392,7 @@ def mapa_imagenes_maestro(codigos):
 
 
 def purgar_urls_imagen_artificiales():
-    """Quita placeholders locales y Pexels de prueba. Conserva Storage y OFF."""
+    """Quita placeholders locales y Pexels de prueba. Conserva Storage, OFF y /static/uploads/."""
     from backend.db import get_db_connection
 
     sql_productos = """
@@ -401,8 +401,11 @@ def purgar_urls_imagen_artificiales():
         WHERE imagen_url IS NOT NULL
           AND (
             LOWER(CAST(imagen_url AS TEXT)) LIKE '%pexels.com%'
-            OR CAST(imagen_url AS TEXT) LIKE '/static/%'
             OR LOWER(CAST(imagen_url AS TEXT)) LIKE '%default-product%'
+            OR (
+              CAST(imagen_url AS TEXT) LIKE '/static/%'
+              AND CAST(imagen_url AS TEXT) NOT LIKE '/static/uploads/%'
+            )
           )
     """
     sql_maestro = f"""

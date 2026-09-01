@@ -1,4 +1,5 @@
 import logging
+import mimetypes
 import os
 import threading
 import time
@@ -77,13 +78,15 @@ from backend.supabase_client import (
 from backend.supabase_storage import (
     intentar_subir_bytes,
     intentar_subir_imagen,
+    programar_sincronizacion_storage,
 )
 if supabase_storage_habilitado():
     print('Supabase Storage configurado con SUPABASE_SERVICE_ROLE_KEY.')
 else:
     print(
         'Aviso: Storage en modo hibrido (sin SUPABASE_SERVICE_ROLE_KEY valida). '
-        'El catalogo usa fotos oficiales; las subidas al bucket se omiten.'
+        'Las fotos manuales se comprimen y quedan en /static/uploads/; '
+        'el catalogo automatico sigue con fotos oficiales.'
     )
 
 import sqlite3
@@ -209,6 +212,8 @@ from backend.stores import (
 )
 
 print('[Localis] Creando aplicación Flask...', flush=True)
+
+mimetypes.add_type('image/webp', '.webp')
 
 app = Flask(__name__)
 db_url = ''
@@ -486,6 +491,16 @@ def procesar_imagen_para_producto(
         descripcion=descripcion,
         comercio_id=comercio_id,
     )
+
+
+def _sincronizar_foto_local_si_aplica(producto_id, imagen_url, carpeta='productos'):
+    """Si la foto quedó en disco, intenta copiarla al bucket sin bloquear la respuesta."""
+    if not producto_id or not imagen_url:
+        return
+    try:
+        programar_sincronizacion_storage(producto_id, imagen_url, carpeta=carpeta)
+    except Exception as error:
+        print(f'[Localis Imagen] sync diferida no programada: {error}')
 
 
 def _comercio_sesion_validado():
@@ -1209,6 +1224,7 @@ def nuevo_producto():
                     '''
                     INSERT INTO productos (comercio_id, nombre, descripcion, precio_usd, codigo_barras, imagen_url)
                     VALUES (?, ?, ?, ?, ?, ?)
+                    RETURNING id
                     ''',
                     (
                         comercio['id'],
@@ -1219,6 +1235,9 @@ def nuevo_producto():
                         imagen_url,
                     ),
                 )
+                fila = cursor.fetchone()
+                producto_id = fila[0] if fila else None
+            _sincronizar_foto_local_si_aplica(producto_id, imagen_url)
             flash('Producto agregado con éxito.', 'exito')
             return redirect(url_for('panel_comercio'))
         except Exception as e:
@@ -1292,6 +1311,8 @@ def editar_producto(producto_id):
                 imagen_url=imagen_url,
                 incluir_imagen=incluir_imagen,
             )
+            if exito and incluir_imagen:
+                _sincronizar_foto_local_si_aplica(producto_id, imagen_url)
             flash(mensaje, 'exito' if exito else 'error')
             return redirect(url_for('panel_comercio'))
         except Exception as error:
@@ -1507,31 +1528,36 @@ def api_crear_producto():
             nombre=nombre,
         )
 
-    try:
-        with get_db_connection() as conexion:
-            cursor = conexion.cursor()
-            cursor.execute(
-                '''
-                INSERT INTO productos (comercio_id, nombre, descripcion, precio_usd, codigo_barras, imagen_url)
-                VALUES (?, ?, ?, ?, ?, ?)
-                RETURNING id
-                ''',
-                (tienda_id, nombre, descripcion, precio_usd, codigo_barras, imagen_url),
-            )
-            fila = cursor.fetchone()
-            producto_id = fila[0] if fila else None
-            conexion.commit()
+    def _insertar(conexion):
+        cursor = conexion.cursor()
+        cursor.execute(
+            '''
+            INSERT INTO productos (comercio_id, nombre, descripcion, precio_usd, codigo_barras, imagen_url)
+            VALUES (?, ?, ?, ?, ?, ?)
+            RETURNING id
+            ''',
+            (tienda_id, nombre, descripcion, precio_usd, codigo_barras, imagen_url),
+        )
+        fila = cursor.fetchone()
+        return fila[0] if fila else None
 
-        return jsonify(
-            {
-                'ok': True,
-                'mensaje': 'Producto agregado con éxito.',
-                'producto_id': producto_id,
-                **({'aviso': aviso_img} if aviso_img else {}),
-            }
-        ), 201
+    try:
+        from backend.db import ejecutar_con_reintentos_bd
+
+        producto_id = ejecutar_con_reintentos_bd(_insertar)
     except Exception as error:
         return jsonify({'error': f'Error al agregar producto: {error}'}), 500
+
+    _sincronizar_foto_local_si_aplica(producto_id, imagen_url)
+    return jsonify(
+        {
+            'ok': True,
+            'mensaje': 'Producto agregado con éxito.',
+            'producto_id': producto_id,
+            'imagen_url': imagen_url,
+            **({'aviso': aviso_img} if aviso_img else {}),
+        }
+    ), 201
 
 
 @app.route('/api/pagos/cotizacion')

@@ -24,6 +24,7 @@ from backend.utils import (
     imagen_url_almacenada,
     normalizar_codigo_barras,
     url_imagen_catalogo_valida,
+    url_imagen_local_valida,
     url_imagen_subida_storage_valida,
 )
 
@@ -124,9 +125,11 @@ def optimizar_url_wsrv(url_original):
 
 
 def _url_manual_valida(imagen_manual):
-    """URL de Storage o catálogo oficial ya persistida."""
-    return url_imagen_catalogo_valida(imagen_manual) or url_imagen_subida_storage_valida(
-        imagen_manual
+    """URL de Storage, catálogo oficial o foto local subida por el comerciante."""
+    return (
+        url_imagen_catalogo_valida(imagen_manual)
+        or url_imagen_subida_storage_valida(imagen_manual)
+        or url_imagen_local_valida(imagen_manual)
     )
 
 

@@ -74,7 +74,7 @@ def es_hero_aprobado(valor):
 
 def es_asset_estatico_local(valor):
     texto = _texto_url(valor)
-    return texto.startswith('/static/img/')
+    return texto.startswith('/static/img/') or texto.startswith('/static/uploads/')
 
 
 def es_placeholder_local(valor):
@@ -100,6 +100,11 @@ def url_publica_producto_desde_bd(valor):
         catalogo = url_imagen_catalogo_valida(texto)
         if catalogo:
             return catalogo
+        from backend.utils import url_imagen_local_valida
+
+        local = url_imagen_local_valida(texto)
+        if local:
+            return local
         if '://' in texto or texto.startswith('/'):
             return ''
         from backend.supabase_client import construir_url_publica_storage
@@ -146,6 +151,11 @@ def url_mostrable(valor, permitir_estatico=False, permitir_hero=False):
         catalogo = url_imagen_catalogo_valida(texto)
         if catalogo:
             return catalogo
+        from backend.utils import url_imagen_local_valida
+
+        local = url_imagen_local_valida(texto)
+        if local:
+            return local
         if permitir_hero and es_hero_aprobado(texto):
             return texto
         if permitir_estatico and es_asset_estatico_local(texto):

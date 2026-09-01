@@ -2,9 +2,10 @@
 
 import re
 import sqlite3
+import time
 from datetime import datetime, timedelta
 
-from backend.db import get_db_connection
+from backend.db import es_error_bd_transitorio, get_db_connection
 from backend.plans import (
     PLANES,
     MENSAJE_LIMITE_PRODUCTOS,
@@ -126,29 +127,35 @@ def comercio_puede_gestionar_inventario(comercio_id):
 
 
 def contar_productos_comercio(comercio_id):
-    with get_db_connection() as conexion:
-        cursor = conexion.cursor()
-        cursor.execute(
-            'SELECT COUNT(*) FROM productos WHERE comercio_id = ?',
-            (comercio_id,),
-        )
-        return cursor.fetchone()[0]
+    def _una():
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                'SELECT COUNT(*) FROM productos WHERE comercio_id = ?',
+                (comercio_id,),
+            )
+            return cursor.fetchone()[0]
+
+    return _con_reintento_bd(_una)
 
 
 def obtener_limite_productos_comercio(comercio_id):
-    with get_db_connection(row_factory=sqlite3.Row) as conexion:
-        cursor = conexion.cursor()
-        cursor.execute(
-            """
-            SELECT c.plan_id, c.plan_tipo, c.limite_productos, c.estado_pago,
-                   p.limite_productos AS plan_limite
-            FROM comercios c
-            LEFT JOIN planes p ON c.plan_id = p.id
-            WHERE c.id = ?
-            """,
-            (comercio_id,),
-        )
-        fila = cursor.fetchone()
+    def _una():
+        with get_db_connection(row_factory=sqlite3.Row) as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT c.plan_id, c.plan_tipo, c.limite_productos, c.estado_pago,
+                       p.limite_productos AS plan_limite
+                FROM comercios c
+                LEFT JOIN planes p ON c.plan_id = p.id
+                WHERE c.id = ?
+                """,
+                (comercio_id,),
+            )
+            return cursor.fetchone()
+
+    fila = _con_reintento_bd(_una)
 
     if not fila:
         return 50
@@ -163,21 +170,39 @@ def obtener_limite_productos_comercio(comercio_id):
     return limite_para_plan(fila['plan_tipo'])
 
 
+def _con_reintento_bd(operacion):
+    """Reintenta lecturas cortas si Postgres está en deadlock/DDL de arranque."""
+    ultimo = None
+    for intento in range(5):
+        try:
+            return operacion()
+        except Exception as error:
+            ultimo = error
+            if intento < 4 and es_error_bd_transitorio(error):
+                time.sleep(0.25 * (2 ** intento))
+                continue
+            raise
+    raise ultimo
+
+
 def puede_agregar_producto(comercio_id, cantidad_nueva=1):
-    with get_db_connection(row_factory=sqlite3.Row) as conexion:
-        cursor = conexion.cursor()
-        cursor.execute(
-            """
-            SELECT c.estado_pago, c.plan_tipo, c.limite_productos,
-                   p.limite_productos AS plan_limite,
-                   (SELECT COUNT(*) FROM productos WHERE comercio_id = c.id) AS total_productos
-            FROM comercios c
-            LEFT JOIN planes p ON c.plan_id = p.id
-            WHERE c.id = ?
-            """,
-            (comercio_id,),
-        )
-        comercio = cursor.fetchone()
+    def _una():
+        with get_db_connection(row_factory=sqlite3.Row) as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT c.estado_pago, c.plan_tipo, c.limite_productos,
+                       p.limite_productos AS plan_limite,
+                       (SELECT COUNT(*) FROM productos WHERE comercio_id = c.id) AS total_productos
+                FROM comercios c
+                LEFT JOIN planes p ON c.plan_id = p.id
+                WHERE c.id = ?
+                """,
+                (comercio_id,),
+            )
+            return cursor.fetchone()
+
+    comercio = _con_reintento_bd(_una)
 
     if not comercio:
         return False, 'Comercio no encontrado.'

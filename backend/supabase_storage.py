@@ -2,10 +2,12 @@
 Subida de archivos a Supabase Storage (modo hibrido).
 
 - Con SUPABASE_SERVICE_ROLE_KEY valida: sube al bucket imagenes.
-- Sin llave o ante 403 RLS: no bloquea; el caller usa foto oficial / existente.
+- Sin llave o ante 403/red: comprime, guarda en static/uploads/ y no bloquea.
+- En segundo plano intenta copiar la foto local al bucket cuando hay service_role.
 """
 
 from urllib.parse import quote
+import threading
 
 import httpx
 
@@ -195,8 +197,10 @@ def _url_objeto_storage(ruta_storage):
     return f'{SUPABASE_URL.rstrip("/")}/storage/v1/object/{bucket}/{ruta_enc}'
 
 
-def _timeout_upload():
-    return httpx.Timeout(connect=5.0, read=30.0, write=30.0, pool=5.0)
+def _timeout_upload(*, diferido=False):
+    if diferido:
+        return httpx.Timeout(connect=5.0, read=25.0, write=25.0, pool=5.0)
+    return httpx.Timeout(connect=2.0, read=8.0, write=8.0, pool=2.0)
 
 
 def _url_publica_tras_subida(ruta_storage):
@@ -205,7 +209,7 @@ def _url_publica_tras_subida(ruta_storage):
     return _validar_url_publica_subida(url_canonica)
 
 
-def _subir_bytes_al_bucket(cliente, ruta_storage, data, content_type):
+def _subir_bytes_al_bucket(cliente, ruta_storage, data, content_type, *, diferido=False):
     """POST a Storage con Authorization service_role. No usa el SDK anon."""
     del cliente
     if not clave_es_service_role(SUPABASE_SERVICE_ROLE_KEY):
@@ -222,7 +226,7 @@ def _subir_bytes_al_bucket(cliente, ruta_storage, data, content_type):
 
     url = _url_objeto_storage(ruta_storage)
     try:
-        with httpx.Client(timeout=_timeout_upload(), follow_redirects=True) as http:
+        with httpx.Client(timeout=_timeout_upload(diferido=diferido), follow_redirects=True) as http:
             respuesta = http.post(url, content=data, headers=headers)
             if respuesta.status_code == 409:
                 respuesta = http.put(url, content=data, headers=headers)
@@ -244,7 +248,15 @@ def _subir_bytes_al_bucket(cliente, ruta_storage, data, content_type):
         ) from error
 
 
-def _persistir_en_supabase(data, filename, content_type, carpeta, supabase_client=None):
+def _persistir_en_supabase(
+    data,
+    filename,
+    content_type,
+    carpeta,
+    supabase_client=None,
+    *,
+    diferido=False,
+):
     """Sube a Supabase Storage o lanza SupabaseUploadError; sin respaldo local."""
     ruta_storage = f'{carpeta.strip("/")}/{filename}'
     if not clave_es_service_role(SUPABASE_SERVICE_ROLE_KEY):
@@ -255,7 +267,9 @@ def _persistir_en_supabase(data, filename, content_type, carpeta, supabase_clien
     cliente = _resolver_cliente_storage(supabase_client)
 
     try:
-        url = _subir_bytes_al_bucket(cliente, ruta_storage, data, content_type)
+        url = _subir_bytes_al_bucket(
+            cliente, ruta_storage, data, content_type, diferido=diferido
+        )
     except SupabaseUploadError as error:
         _registrar_fallo_supabase(error, ruta_storage)
         raise
@@ -272,6 +286,12 @@ def _persistir_en_supabase(data, filename, content_type, carpeta, supabase_clien
 _persistir_con_respaldo = _persistir_en_supabase
 
 
+def _guardar_respaldo_local(data, filename, carpeta):
+    from backend.uploads_locales import guardar_bytes_upload
+
+    return guardar_bytes_upload(data, filename, carpeta=carpeta)
+
+
 def intentar_subir_imagen(
     file_storage,
     supabase_client=None,
@@ -280,29 +300,107 @@ def intentar_subir_imagen(
     max_dimension=800,
 ):
     """
-    Subida hibrida: (url, None) si Storage responde; (None, aviso) si falta
-    service_role o hay 403. Nunca lanza hacia la ruta HTTP.
+    Comprime el archivo, intenta Storage y si falla deja la foto en
+    static/uploads/. Retorna (url, aviso). Nunca lanza hacia la ruta HTTP.
     """
     if not file_storage or not getattr(file_storage, 'filename', ''):
         return None, None
     try:
-        url = subir_imagen_con_respaldo(
-            file_storage,
-            supabase_client=supabase_client,
-            prefijo=prefijo,
-            carpeta=carpeta,
-            max_dimension=max_dimension,
+        error_validacion = validar_archivo_subida(file_storage)
+        if error_validacion:
+            return None, error_validacion
+        comprimido = comprimir_file_storage_a_bytes(
+            file_storage, prefijo=prefijo, max_dimension=max_dimension
         )
-        return url, None
-    except SupabaseUploadError as error:
-        print(f'{LOG_PREFIX} modo hibrido, subida omitida: {error}')
-        return None, AVISO_HIBRIDO_USUARIO
+    except ImageProcessingError as error:
+        print(f'{LOG_PREFIX} compresion omitida: {error}')
+        return None, str(error)
     except Exception as error:
         print(
             f'{LOG_PREFIX} modo hibrido, error inesperado: '
             f'{type(error).__name__}: {error}'
         )
         return None, AVISO_HIBRIDO_USUARIO
+
+    data, content_type, filename = comprimido
+    try:
+        url = _persistir_en_supabase(
+            data,
+            filename,
+            content_type,
+            carpeta,
+            supabase_client=supabase_client,
+        )
+        return url, None
+    except SupabaseUploadError as error:
+        url_local = _guardar_respaldo_local(data, filename, carpeta)
+        print(f'{LOG_PREFIX} modo hibrido, subida omitida: {error}')
+        if url_local:
+            return url_local, None
+        return None, AVISO_HIBRIDO_USUARIO
+    except Exception as error:
+        print(
+            f'{LOG_PREFIX} modo hibrido, error inesperado: '
+            f'{type(error).__name__}: {error}'
+        )
+        url_local = _guardar_respaldo_local(data, filename, carpeta)
+        if url_local:
+            return url_local, None
+        return None, AVISO_HIBRIDO_USUARIO
+
+
+def programar_sincronizacion_storage(producto_id, ruta_local, carpeta='productos'):
+    """Copia en segundo plano una foto local al bucket y actualiza productos.imagen_url."""
+    from backend.uploads_locales import leer_bytes_upload, url_upload_local_valida
+    from backend.utils import url_imagen_subida_storage_valida
+
+    if not producto_id or not url_upload_local_valida(ruta_local):
+        return
+    if not clave_es_service_role(SUPABASE_SERVICE_ROLE_KEY):
+        return
+
+    def _run():
+        try:
+            data, filename, content_type = leer_bytes_upload(ruta_local)
+            if not data:
+                return
+            url = _persistir_en_supabase(
+                data,
+                filename,
+                content_type,
+                carpeta,
+                diferido=True,
+            )
+            if not url_imagen_subida_storage_valida(url):
+                return
+            from backend.db import get_db_connection
+
+            with get_db_connection() as conexion:
+                cursor = conexion.cursor()
+                cursor.execute(
+                    """
+                    UPDATE productos
+                    SET imagen_url = ?
+                    WHERE id = ? AND imagen_url = ?
+                    """,
+                    (url, int(producto_id), ruta_local),
+                )
+                conexion.commit()
+            print(
+                f'{LOG_PREFIX} sync diferida producto={producto_id} -> {url}'
+            )
+        except Exception as error:
+            print(
+                f'{LOG_PREFIX} sync diferida omitida producto={producto_id}: '
+                f'{type(error).__name__}: {error}'
+            )
+
+    hilo = threading.Thread(
+        target=_run,
+        daemon=True,
+        name=f'localis-sync-storage-{producto_id}',
+    )
+    hilo.start()
 
 
 def intentar_subir_bytes(

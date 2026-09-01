@@ -18,6 +18,7 @@ from backend.utils import (
     imagen_url_almacenada,
     imagen_url_para_persistir,
     normalizar_codigo_barras,
+    url_imagen_local_valida,
     url_imagen_subida_storage_valida,
 )
 
@@ -109,29 +110,34 @@ def persistir_imagen_producto_hibrida(
     existente=None,
 ):
     """
-    Storage si hay service_role; si 403 o no hay llave, cascada oficial.
-    Retorna (url, aviso). Nunca lanza. No interrumpe el alta/edicion.
+    Foto del comerciante: comprime, intenta Storage y, si falla, guarda local.
+    Sin archivo: cascada oficial (maestro / OpenFoodFacts). Nunca lanza.
     """
     del descripcion
     aviso = None
-    url_storage = None
-    if file_storage and getattr(file_storage, 'filename', ''):
+    hubo_archivo = bool(file_storage and getattr(file_storage, 'filename', ''))
+    if hubo_archivo:
         try:
             from backend.supabase_storage import intentar_subir_imagen
 
-            url_storage, aviso = intentar_subir_imagen(
+            url_subida, aviso = intentar_subir_imagen(
                 file_storage,
                 prefijo=f'manual_{comercio_id or "prod"}',
                 carpeta='productos',
+                max_dimension=720,
             )
         except Exception as error:
             _registrar_error_imagen('hibrido subida producto', error)
             from backend.supabase_storage import AVISO_HIBRIDO_USUARIO
 
+            url_subida = None
             aviso = AVISO_HIBRIDO_USUARIO
-    persistida = imagen_url_para_persistir(url_storage)
-    if persistida:
-        return persistida, aviso
+        persistida = imagen_url_para_persistir(url_subida)
+        if persistida:
+            return persistida, aviso
+        respaldo = imagen_url_para_persistir(imagen_url_form) or existente
+        return respaldo, aviso
+
     respaldo = imagen_url_para_guardar(
         imagen_url_form,
         codigo_barras,
@@ -470,6 +476,8 @@ def rellenar_imagenes_catalogo():
     pendientes = []
     for prod in productos:
         if url_imagen_subida_storage_valida(prod.get('imagen_url')):
+            continue
+        if url_imagen_local_valida(prod.get('imagen_url')):
             continue
         pendientes.append(prod)
     if not pendientes:

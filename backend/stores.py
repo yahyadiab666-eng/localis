@@ -457,7 +457,7 @@ _SQL_IMAGEN_URL = 'p.imagen_url AS imagen_url'
 
 
 def _aplicar_url_imagen_producto(fila):
-    """Convierte ruta/URL de Storage o catálogo oficial; deja None si no hay foto."""
+    """Convierte Storage, catálogo oficial o /static/uploads/; None si no hay foto."""
     from utils.images import url_publica_producto_desde_bd
 
     crudo = fila.get('imagen_url')
@@ -890,7 +890,7 @@ def actualizar_producto(
             if not imagen_nueva:
                 return (
                     False,
-                    'No se pudo subir la imagen del producto a Supabase Storage.',
+                    'No se pudo guardar la imagen del producto.',
                 )
             campos['imagen_url'] = imagen_nueva
 

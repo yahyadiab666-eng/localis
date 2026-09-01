@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Prueba de integridad: Storage sin respaldo local y validacion de URL canonica."""
+"""Prueba de integridad: Storage, URL canonica y respaldo local hibrido."""
 
+import io
 import sys
 from pathlib import Path
 
@@ -9,7 +10,19 @@ if str(RAIZ) not in sys.path:
     sys.path.insert(0, str(RAIZ))
 
 
+def _jpeg_prueba():
+    from PIL import Image
+
+    img = Image.new('RGB', (64, 48), (30, 160, 80))
+    buf = io.BytesIO()
+    img.save(buf, 'JPEG', quality=85)
+    buf.seek(0)
+    return buf
+
+
 def main():
+    from werkzeug.datastructures import FileStorage
+
     from backend.supabase_client import SUPABASE_URL, construir_url_publica_storage
     from backend.supabase_storage import (
         SupabaseUploadError,
@@ -67,6 +80,25 @@ def main():
     except Exception as error:
         errores.append(f'modo hibrido lanzo: {type(error).__name__}: {error}')
 
+    archivo = FileStorage(
+        stream=_jpeg_prueba(),
+        filename='foto_manual.jpg',
+        content_type='image/jpeg',
+    )
+    try:
+        url_f, aviso_f = intentar_subir_imagen(
+            archivo, prefijo='integrity_manual', carpeta='productos'
+        )
+        del aviso_f
+        if not imagen_url_almacenada(url_f):
+            errores.append(
+                f'intentar_subir_imagen con archivo no devolvio URL persistible: {url_f!r}'
+            )
+    except Exception as error:
+        errores.append(
+            f'intentar_subir_imagen con archivo lanzo: {type(error).__name__}: {error}'
+        )
+
     if errores:
         print('FALLO integridad storage:')
         for item in errores:
@@ -75,7 +107,8 @@ def main():
 
     print(
         'OK integridad storage: URL canonica valida, case-insensitive OK, '
-        'bajo nivel lanza SupabaseUploadError, hibrido no interrumpe.'
+        'bajo nivel lanza SupabaseUploadError, hibrido no interrumpe, '
+        'archivo manual deja URL persistible.'
     )
     return 0
 

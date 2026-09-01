@@ -11,7 +11,7 @@ from werkzeug.utils import secure_filename
 from config import MAX_UPLOAD_BYTES
 
 MAX_DIMENSION = 800
-QUALITY = 80
+QUALITY = 78
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp'}
 DEFAULT_WORKERS = 8
 
@@ -128,7 +128,7 @@ def comprimir_pil_a_bytes(
         buffer = io.BytesIO()
 
         if extension == 'webp':
-            img.save(buffer, 'WEBP', quality=quality, optimize=True)
+            img.save(buffer, 'WEBP', quality=quality, method=4)
             content_type = 'image/webp'
         else:
             img.save(buffer, 'JPEG', quality=quality, optimize=True)
@@ -155,6 +155,7 @@ def comprimir_bytes_a_bytes(
         raise ImageProcessingError('No hay datos de imagen para comprimir.')
     try:
         img = Image.open(io.BytesIO(data_bytes))
+        img.load()
         return comprimir_pil_a_bytes(
             img, prefijo=prefijo, max_dimension=max_dimension, quality=quality, formato=formato
         )
@@ -182,19 +183,17 @@ def comprimir_file_storage_a_bytes(
     if not nombre_original:
         raise ImageProcessingError('El archivo no tiene un nombre válido.')
 
-    try:
-        file_storage.stream.seek(0)
-        img = Image.open(file_storage.stream)
-        prefijo_base = prefijo or nombre_original.rsplit('.', 1)[0]
-        return comprimir_pil_a_bytes(
-            img, prefijo_base, max_dimension, quality, formato
-        )
-    except ImageProcessingError:
-        raise
-    except Exception as error:
-        raise ImageProcessingError(
-            f'No se pudo procesar el archivo ({type(error).__name__}): {error}'
-        ) from error
+    data, error_lectura = leer_bytes_limitados(file_storage)
+    if error_lectura:
+        raise ImageProcessingError(error_lectura)
+    prefijo_base = prefijo or nombre_original.rsplit('.', 1)[0]
+    return comprimir_bytes_a_bytes(
+        data,
+        prefijo=prefijo_base,
+        max_dimension=max_dimension,
+        quality=quality,
+        formato=formato,
+    )
 
 
 def procesar_tarea_imagen(tarea):

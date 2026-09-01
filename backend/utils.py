@@ -46,8 +46,8 @@ _MARCADORES_IMAGEN_GENERICA = (
 )
 _MARCADORES_URL_ARTIFICIAL = (
     'pexels.com',
-    '/static/uploads/',
     '/static/images/',
+    '/static/img/placeholder',
 )
 _HOSTS_CATALOGO_OFICIAL = (
     'images.openfoodfacts.org',
@@ -157,8 +157,10 @@ def url_imagen_subida_storage_valida(valor):
 
 
 def url_imagen_local_valida(valor):
-    """Legacy: ya no se usa para mostrar. Las vistas van a Supabase Storage."""
-    return None
+    """Foto que el comerciante subió a mano, servida desde static/uploads/."""
+    from backend.uploads_locales import url_upload_local_valida
+
+    return url_upload_local_valida(valor)
 
 
 # Alias histórico
@@ -171,8 +173,8 @@ def url_imagen_usable(valor):
 
 
 def imagen_url_almacenada(valor):
-    """Valor persistible en productos: Storage o catálogo oficial (nunca None vacío)."""
-    return url_imagen_catalogo_valida(valor)
+    """Valor persistible: Storage, catálogo oficial u upload local del comerciante."""
+    return url_imagen_catalogo_valida(valor) or url_imagen_local_valida(valor)
 
 
 def url_imagen_para_vista(valor):
