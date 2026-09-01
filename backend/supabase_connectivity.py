@@ -463,9 +463,11 @@ def _probar_endpoint_http(
             'detalle': respuesta.reason_phrase,
         }
         if codigo in (401, 403):
+            resultado['ok'] = False
             resultado['auth_ok'] = False
             resultado['nota'] = (
-                'La red responde pero la API rechazó la clave; revisa SUPABASE_KEY.'
+                'La red responde pero la API rechazó la clave; '
+                'revisa SUPABASE_SERVICE_ROLE_KEY (backend) o SUPABASE_KEY (anon).'
             )
         else:
             resultado['auth_ok'] = True
@@ -519,7 +521,8 @@ def _recomendacion_fallo(resultado: dict[str, Any]) -> str:
         )
     if capa == 'http':
         return (
-            'Hay conectividad TCP pero la API respondió con error HTTP. Revisa SUPABASE_KEY '
+            'Hay conectividad TCP pero la API respondió con error HTTP. '
+            'Revisa SUPABASE_SERVICE_ROLE_KEY (y SUPABASE_KEY si usas PostgREST anon).'
             'y que el proyecto Supabase no esté pausado.'
         )
     if capa == 'sdk':
@@ -527,7 +530,10 @@ def _recomendacion_fallo(resultado: dict[str, Any]) -> str:
             'La red responde pero el SDK de Python falló. Actualiza supabase/httpx en requirements '
             'y revisa los logs del cliente.'
         )
-    return 'Revisa SUPABASE_URL, SUPABASE_KEY y el estado del proyecto en supabase.com/dashboard.'
+    return (
+        'Revisa SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY y el estado del proyecto '
+        'en supabase.com/dashboard.'
+    )
 
 
 def diagnosticar_conectividad_supabase(
@@ -543,15 +549,17 @@ def diagnosticar_conectividad_supabase(
     """
     from backend.supabase_client import (
         SUPABASE_BUCKET_IMAGENES,
-        SUPABASE_KEY,
         SUPABASE_URL,
+        clave_api_servidor,
         obtener_cliente_storage,
     )
 
     url_raw = supabase_url if supabase_url is not None else SUPABASE_URL
     if not url_raw or '.supabase.co' not in str(url_raw).lower():
         url_raw = leer_supabase_url_entorno()
-    key = _limpiar_texto_env(supabase_key if supabase_key is not None else SUPABASE_KEY)
+    key = _limpiar_texto_env(
+        supabase_key if supabase_key is not None else clave_api_servidor()
+    )
     bucket_nombre = (bucket or SUPABASE_BUCKET_IMAGENES or 'imagenes').strip('/')
 
     url_info = sanitizar_url_supabase(url_raw, database_url=os.getenv('DATABASE_URL'))
@@ -584,9 +592,19 @@ def diagnosticar_conectividad_supabase(
         return informe
 
     if not key:
-        informe['errores_config'].append('SUPABASE_KEY ausente para probar la API REST.')
-        informe['capa_fallo'] = 'config'
-        informe['recomendacion'] = _recomendacion_fallo(informe)
+        informe['errores_config'].append(
+            'Sin SUPABASE_SERVICE_ROLE_KEY ni SUPABASE_KEY: no se prueba Storage.'
+        )
+        informe['http_rest'] = {
+            'ok': True,
+            'omitido': True,
+            'nota': 'Catálogo vía PostgreSQL (DATABASE_URL); PostgREST no se consulta al arrancar.',
+        }
+        informe['ok'] = True
+        informe['capa_fallo'] = None
+        informe['recomendacion'] = (
+            'Las lecturas van por DATABASE_URL. Para subidas define SUPABASE_SERVICE_ROLE_KEY.'
+        )
         return informe
 
     dns = _probar_resolucion_dns(url_info.host)
@@ -601,13 +619,13 @@ def diagnosticar_conectividad_supabase(
         'Authorization': f'Bearer {key}',
     }
 
-    rest = _probar_endpoint_http(
-        'GET',
-        f'{url_info.url}/rest/v1/',
-        headers=headers_api,
-        etiqueta='http_rest',
-    )
-    informe['http_rest'] = rest
+    # El catálogo se lee por DATABASE_URL. No llamar a PostgREST al arrancar:
+    # una SUPABASE_KEY anon ausente o inválida dispara 401 y no aporta imágenes.
+    informe['http_rest'] = {
+        'ok': True,
+        'omitido': True,
+        'nota': 'Catálogo vía PostgreSQL (DATABASE_URL); PostgREST no se consulta al arrancar.',
+    }
 
     storage = _probar_endpoint_http(
         'GET',
@@ -617,8 +635,8 @@ def diagnosticar_conectividad_supabase(
     )
     informe['http_storage'] = storage
 
-    if not rest.get('ok'):
-        informe['capa_fallo'] = rest.get('capa') or 'http'
+    if not storage.get('ok'):
+        informe['capa_fallo'] = storage.get('capa') or 'http'
         informe['recomendacion'] = _recomendacion_fallo(informe)
         return informe
 

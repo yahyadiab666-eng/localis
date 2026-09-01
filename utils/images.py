@@ -27,6 +27,11 @@ HERO_LOCAL = DEFAULT_BANNER_URL
 HERO_ONERROR = '/static/img/hero-compras.svg'
 
 COL_PRODUCTO = 'imagen_url'
+CANDIDATOS_IMAGEN_PRODUCTO = (
+    'imagen_url',
+    'url_imagen',
+    'URL de la imagen',
+)
 _PREFIJO_STORAGE = '/storage/v1/object/public/'
 _MARCA_HERO_APROBADO = 'pexels-photo-18618233'
 _VALORES_VACIOS = frozenset({
@@ -75,6 +80,36 @@ def es_asset_estatico_local(valor):
 def es_placeholder_local(valor):
     texto = _texto_url(valor).lower()
     return '/static/img/placeholder-' in texto or _MARCA_HERO_APROBADO in texto
+
+
+def url_publica_producto_desde_bd(valor):
+    """
+    Convierte el valor persistido (URL pública o ruta del bucket) en URL
+    https://…/storage/v1/object/public/…. Vacío si no hay imagen usable.
+    """
+    try:
+        texto = _texto_url(valor)
+        if not texto:
+            return ''
+        texto = texto.replace('/subase/', '/storage/').replace('/Subase/', '/storage/')
+        if es_url_storage_publica(texto):
+            return texto
+        if '://' in texto or texto.startswith('/'):
+            return ''
+        from backend.supabase_client import construir_url_publica_storage
+
+        canonica = construir_url_publica_storage(texto.lstrip('/'))
+        if es_url_storage_publica(canonica):
+            return canonica
+        return ''
+    except Exception as error:
+        logger.error(
+            'url_publica_producto_desde_bd fallo valor=%r: %s',
+            valor,
+            error,
+            exc_info=True,
+        )
+        return ''
 
 
 def url_storage_o_vacio(valor):
@@ -169,11 +204,11 @@ def imagen_fail_safe(placeholder=PLACEHOLDER_PRODUCTO, permitir_estatico=False, 
 
 @imagen_fail_safe(placeholder=PLACEHOLDER_PRODUCTO)
 def url_imagen_producto(producto=None, imagen_url=None, codigo_barras=None):
-    """productos.imagen_url estrictamente. codigo_barras no dispara red."""
+    """URL pública de Storage ya resuelta en el SELECT. No dispara red."""
     del codigo_barras
     if imagen_url is None and producto is not None:
-        imagen_url = valor_campo(producto, COL_PRODUCTO)
-    return imagen_url
+        imagen_url = valor_campo(producto, *CANDIDATOS_IMAGEN_PRODUCTO)
+    return url_publica_producto_desde_bd(imagen_url)
 
 
 url_imagen_producto_segura = url_imagen_producto

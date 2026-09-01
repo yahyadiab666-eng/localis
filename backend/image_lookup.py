@@ -165,14 +165,35 @@ def obtener_imagen_url_producto(producto_id):
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
             cursor.execute(
-                'SELECT imagen_url, codigo_barras FROM productos WHERE id = ?',
+                f"""
+                SELECT COALESCE(
+                    NULLIF(TRIM(BOTH FROM CAST(p.imagen_url AS TEXT)), ''),
+                    NULLIF(TRIM(BOTH FROM CAST(m.url_imagen AS TEXT)), '')
+                ) AS imagen_url,
+                       p.codigo_barras
+                FROM productos p
+                LEFT JOIN LATERAL (
+                    SELECT m1.url_imagen
+                    FROM catalogo_maestro_imagenes m1
+                    WHERE {EXPR_CODIGO_BARRAS.replace('codigo_barras', 'm1.codigo_barras')}
+                        = {EXPR_CODIGO_BARRAS.replace('codigo_barras', 'p.codigo_barras')}
+                      AND m1.url_imagen IS NOT NULL
+                      AND TRIM(BOTH FROM CAST(m1.url_imagen AS TEXT)) <> ''
+                    ORDER BY m1.updated_at DESC NULLS LAST
+                    LIMIT 1
+                ) m ON TRUE
+                WHERE p.id = ?
+                """,
                 (int(producto_id),),
             )
             fila = cursor.fetchone()
             if not fila:
                 return None
             registro = dict(fila)
-            return _url_almacenada_o_none(registro.get('imagen_url')) or ''
+            from utils.images import url_publica_producto_desde_bd
+
+            url = url_publica_producto_desde_bd(registro.get('imagen_url'))
+            return _url_almacenada_o_none(url) or ''
     except Exception as error:
         _registrar_error_imagen(f'obtener_imagen_url_producto({producto_id})', error)
         return ''

@@ -452,16 +452,93 @@ def buscar_y_filtrar_comercios(
 # ==========================================
 
 
-def _base_query_productos_publicos():
-    return """
-        SELECT p.*, c.nombre AS comercio_nombre, c.telefono AS comercio_telefono,
-               c.id AS comercio_id,
-               cat.nombre AS categoria_nombre
+def _expr_codigo_alias(alias):
+    """Misma normalización que EXPR_CODIGO_BARRAS, calificada por tabla."""
+    col = f'{alias}.codigo_barras'
+    return (
+        "regexp_replace("
+        f"regexp_replace(TRIM(BOTH FROM CAST({col} AS TEXT)), '\\s+', '', 'g'), "
+        "'\\.0+$', '', 'g')"
+    )
+
+
+_SQL_IMAGEN_URL = """
+            COALESCE(
+                NULLIF(TRIM(BOTH FROM CAST(p.imagen_url AS TEXT)), ''),
+                NULLIF(TRIM(BOTH FROM CAST(m.url_imagen AS TEXT)), '')
+            ) AS imagen_url
+"""
+
+_SQL_JOIN_MAESTRO = (
+    'LEFT JOIN LATERAL ('
+    ' SELECT m1.url_imagen'
+    ' FROM catalogo_maestro_imagenes m1'
+    f" WHERE {_expr_codigo_alias('m1')} = {_expr_codigo_alias('p')}"
+    ' AND m1.url_imagen IS NOT NULL'
+    " AND TRIM(BOTH FROM CAST(m1.url_imagen AS TEXT)) <> ''"
+    " AND LOWER(TRIM(BOTH FROM CAST(m1.url_imagen AS TEXT)))"
+    " NOT IN ('none', 'null', 'nan', 'n/a', '-')"
+    ' ORDER BY m1.updated_at DESC NULLS LAST'
+    ' LIMIT 1'
+    ') m ON TRUE'
+)
+
+
+def _aplicar_url_imagen_producto(fila):
+    """Garantiza imagen_url como URL pública de Storage o None (sin placeholder)."""
+    from utils.images import url_publica_producto_desde_bd
+
+    crudo = fila.get('imagen_url')
+    if crudo is None:
+        crudo = fila.get('url_imagen')
+    url = url_publica_producto_desde_bd(crudo)
+    fila['imagen_url'] = url or None
+    return fila
+
+
+def _base_query_productos_publicos(con_maestro=True):
+    imagen = _SQL_IMAGEN_URL if con_maestro else 'p.imagen_url AS imagen_url'
+    join_maestro = _SQL_JOIN_MAESTRO if con_maestro else ''
+    return f"""
+        SELECT
+            p.id,
+            p.comercio_id,
+            p.nombre,
+            p.descripcion,
+            p.precio_usd,
+            p.stock,
+            p.codigo_barras,
+            {imagen},
+            c.nombre AS comercio_nombre,
+            c.telefono AS comercio_telefono,
+            c.id AS comercio_id,
+            cat.nombre AS categoria_nombre
         FROM productos p
+        {join_maestro}
         JOIN comercios c ON p.comercio_id = c.id
         LEFT JOIN categorias cat ON c.categoria_id = cat.id
         WHERE 1=1
     """ + _FILTRO_COMERCIO_PUBLICO
+
+
+def _ejecutar_listado_productos(cursor, conexion, query, parametros):
+    """Ejecuta el SELECT; si el JOIN al maestro falla, reintenta solo con p.imagen_url."""
+    try:
+        cursor.execute(query, parametros)
+        return cursor.fetchall()
+    except Exception as error:
+        print(
+            f'[Localis Imagen] Consulta con catalogo_maestro_imagenes falló '
+            f'({type(error).__name__}: {error}). Se reintenta con p.imagen_url.'
+        )
+        try:
+            conexion.rollback()
+        except Exception:
+            pass
+        query_simple = query.replace(_SQL_JOIN_MAESTRO, ' ')
+        query_simple = query_simple.replace(_SQL_IMAGEN_URL, 'p.imagen_url AS imagen_url')
+        cursor.execute(query_simple, parametros)
+        return cursor.fetchall()
 
 
 def _aplicar_filtros_productos(query, parametros, palabra_clave, categoria_nombre, comercio_id):
@@ -520,8 +597,7 @@ def buscar_y_filtrar_productos(
                 placeholders = ', '.join('?' for _ in ids)
                 query = _base_query_productos_publicos()
                 query += f' AND p.id IN ({placeholders})'
-                cursor.execute(query, ids)
-                filas = cursor.fetchall()
+                filas = _ejecutar_listado_productos(cursor, conexion, query, ids)
             else:
                 query = _base_query_productos_publicos()
                 query, parametros = _aplicar_filtros_productos(
@@ -531,8 +607,7 @@ def buscar_y_filtrar_productos(
                 if limit:
                     query += ' LIMIT ?'
                     parametros.append(int(limit))
-                cursor.execute(query, parametros)
-                filas = cursor.fetchall()
+                filas = _ejecutar_listado_productos(cursor, conexion, query, parametros)
 
             productos = []
             for fila in filas:
@@ -543,7 +618,7 @@ def buscar_y_filtrar_productos(
                     precio = 0.0
                 d['precio_usd'] = precio
                 d['precio_bs'] = round(precio * tasa, 2)
-                d['imagen_url'] = d.get('imagen_url')
+                _aplicar_url_imagen_producto(d)
                 productos.append(d)
 
             return productos
@@ -562,10 +637,21 @@ def obtener_producto_publico(producto_id):
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
             cursor.execute(
-                """
-                SELECT p.*, c.nombre AS comercio_nombre, c.id AS comercio_id,
-                       c.telefono AS comercio_telefono
+                f"""
+                SELECT
+                    p.id,
+                    p.comercio_id,
+                    p.nombre,
+                    p.descripcion,
+                    p.precio_usd,
+                    p.stock,
+                    p.codigo_barras,
+                    {_SQL_IMAGEN_URL},
+                    c.nombre AS comercio_nombre,
+                    c.id AS comercio_id,
+                    c.telefono AS comercio_telefono
                 FROM productos p
+                {_SQL_JOIN_MAESTRO}
                 JOIN comercios c ON p.comercio_id = c.id
                 WHERE p.id = ? AND COALESCE(c.visible, 1) = 1
                   AND LOWER(TRIM(c.estado_pago)) IN ('activo', 'gratis')
@@ -582,7 +668,7 @@ def obtener_producto_publico(producto_id):
                 precio = 0.0
             d['precio_usd'] = precio
             d['precio_bs'] = round(precio * tasa, 2)
-            d['imagen_url'] = d.get('imagen_url')
+            _aplicar_url_imagen_producto(d)
             return d
     except Exception as e:
         print(f'Error al obtener producto público: {e}')
@@ -596,23 +682,83 @@ def obtener_producto_por_id(producto_id, comercio_id=None):
 
             if comercio_id:
                 cursor.execute(
-                    'SELECT * FROM productos WHERE id = ? AND comercio_id = ?',
+                    f"""
+                    SELECT
+                        p.id,
+                        p.comercio_id,
+                        p.nombre,
+                        p.descripcion,
+                        p.precio_usd,
+                        p.stock,
+                        p.codigo_barras,
+                        {_SQL_IMAGEN_URL}
+                    FROM productos p
+                    {_SQL_JOIN_MAESTRO}
+                    WHERE p.id = ? AND p.comercio_id = ?
+                    """,
                     (producto_id, comercio_id),
                 )
             else:
                 cursor.execute(
-                    'SELECT * FROM productos WHERE id = ?', (producto_id,)
+                    f"""
+                    SELECT
+                        p.id,
+                        p.comercio_id,
+                        p.nombre,
+                        p.descripcion,
+                        p.precio_usd,
+                        p.stock,
+                        p.codigo_barras,
+                        {_SQL_IMAGEN_URL}
+                    FROM productos p
+                    {_SQL_JOIN_MAESTRO}
+                    WHERE p.id = ?
+                    """,
+                    (producto_id,),
                 )
 
             fila = cursor.fetchone()
             if not fila:
                 return None
             producto = dict(fila)
-            producto['imagen_url'] = producto.get('imagen_url')
+            _aplicar_url_imagen_producto(producto)
             return producto
     except Exception as e:
         print(f'Error al obtener producto: {e}')
         return None
+
+
+def obtener_productos_comercio(comercio_id):
+    """Inventario del panel comerciante: imagen_url explícita + catálogo maestro."""
+    try:
+        with get_db_connection(row_factory=sqlite3.Row) as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                f"""
+                SELECT
+                    p.id,
+                    p.nombre,
+                    p.descripcion,
+                    p.precio_usd,
+                    p.codigo_barras,
+                    {_SQL_IMAGEN_URL}
+                FROM productos p
+                {_SQL_JOIN_MAESTRO}
+                WHERE p.comercio_id = ?
+                ORDER BY p.id DESC
+                """,
+                (comercio_id,),
+            )
+            productos = []
+            for fila in cursor.fetchall():
+                d = dict(fila) if not isinstance(fila, dict) else fila
+                _aplicar_url_imagen_producto(d)
+                productos.append(d)
+            return productos
+    except Exception as e:
+        print(f'Error al listar productos del comercio: {e}')
+        traceback.print_exc()
+        return []
 
 
 def actualizar_producto(

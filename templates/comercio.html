@@ -212,7 +212,7 @@
                   <td class="py-4 px-4 sm:px-6 font-semibold text-gray-900">
                     <div class="flex items-center gap-3 min-w-0">
                       {% set img_producto = producto|url_imagen_producto %}
-                      <img src="{{ img_producto }}"
+                      <img src="{{ img_producto or placeholder_producto }}"
                            alt=""
                            data-producto-id="{{ producto.id }}"
                            class="localis-img-producto-thumb rounded-lg border border-stone-200"
@@ -279,7 +279,7 @@
                  data-producto-busqueda="{{ producto.nombre }} {{ producto.descripcion }} {{ producto.codigo_barras }}">
           <div class="flex gap-3">
             {% set img_producto = producto|url_imagen_producto %}
-            <img src="{{ img_producto }}"
+            <img src="{{ img_producto or placeholder_producto }}"
                  alt=""
                  data-producto-id="{{ producto.id }}"
                  class="localis-img-producto-thumb w-14 h-14 rounded-xl border border-stone-200"

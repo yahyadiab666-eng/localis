@@ -9,10 +9,10 @@ from urllib.parse import quote
 import httpx
 
 from backend.supabase_client import (
-    SUPABASE_KEY,
     SUPABASE_URL,
     SUPABASE_URL_VALIDA,
     abrir_circuito_postgrest,
+    clave_api_servidor,
     es_error_red_supabase,
 )
 
@@ -23,7 +23,7 @@ _READ_TIMEOUT = 8.0
 
 
 def postgrest_http_configurado() -> bool:
-    return bool(SUPABASE_URL_VALIDA and SUPABASE_URL and SUPABASE_KEY)
+    return bool(SUPABASE_URL_VALIDA and SUPABASE_URL and clave_api_servidor())
 
 
 def _timeout() -> httpx.Timeout:
@@ -36,9 +36,10 @@ def _timeout() -> httpx.Timeout:
 
 
 def _headers(extra: dict[str, str] | None = None) -> dict[str, str]:
+    key = clave_api_servidor()
     headers = {
-        'apikey': SUPABASE_KEY,
-        'Authorization': f'Bearer {SUPABASE_KEY}',
+        'apikey': key,
+        'Authorization': f'Bearer {key}',
         'Accept': 'application/json',
     }
     if extra:

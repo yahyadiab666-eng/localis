@@ -188,6 +188,7 @@ from backend.stores import (
     obtener_comercio_por_usuario,
     obtener_config,
     obtener_producto_publico,
+    obtener_productos_comercio,
     obtener_tasa_dolar,
     procesar_csv_productos,
     registrar_comercio_completo,
@@ -867,8 +868,8 @@ def _productos_desde_filas(productos_db, tasa_actual):
             'descripcion': p['descripcion'] or 'Sin descripción',
             'precio_usd': precio_usd,
             'precio_bs': round(precio_usd * tasa_actual, 2),
-            'codigo_barras': '' if p['codigo_barras'] is None else p['codigo_barras'],
-            'imagen_url': p['imagen_url'] or '',
+            'codigo_barras': '' if p.get('codigo_barras') is None else p.get('codigo_barras'),
+            'imagen_url': p.get('imagen_url') or '',
         })
     return productos
 
@@ -910,17 +911,11 @@ def _cargar_datos_comercio_usuario(usuario_id):
             return None, None, tasa_actual, categorias
 
         vincular_comercio_en_sesion(comercio_db['id'])
-        cursor.execute(
-            '''
-            SELECT id, nombre, descripcion, precio_usd, codigo_barras, imagen_url
-            FROM productos WHERE comercio_id = ?
-            ORDER BY id DESC
-            ''',
-            (comercio_db['id'],),
-        )
-        productos_db = cursor.fetchall()
+        comercio_id = comercio_db['id']
+        comercio_raw = dict(comercio_db)
 
-    comercio = _normalizar_imagenes_comercio(dict(comercio_db))
+    productos_db = obtener_productos_comercio(comercio_id)
+    comercio = _normalizar_imagenes_comercio(comercio_raw)
     comercio['maps_link'] = url_maps_comercio(comercio)
     productos = _productos_desde_filas(productos_db, tasa_actual)
     return comercio, productos, tasa_actual, None

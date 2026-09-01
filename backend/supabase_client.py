@@ -171,6 +171,11 @@ _postgrest_circuito_abierto = False
 _modo_catalogo_logeado = False
 
 
+def clave_api_servidor():
+    """Clave para llamadas server-side: service_role primero, anon como respaldo."""
+    return SUPABASE_SERVICE_ROLE_KEY or SUPABASE_KEY
+
+
 def abrir_circuito_postgrest(motivo: str = '') -> None:
     """Tras fallo de red, deja de intentar PostgREST HTTP hasta reiniciar el proceso."""
     global _postgrest_circuito_abierto
@@ -189,7 +194,11 @@ def postgrest_circuito_abierto() -> bool:
 
 
 def postgrest_http_habilitado() -> bool:
-    return SUPABASE_URL_VALIDA and bool(SUPABASE_KEY) and not _postgrest_circuito_abierto
+    return (
+        SUPABASE_URL_VALIDA
+        and bool(clave_api_servidor())
+        and not _postgrest_circuito_abierto
+    )
 
 
 def aplicar_diagnostico_conectividad(informe: dict) -> None:

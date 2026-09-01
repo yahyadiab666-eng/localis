@@ -122,7 +122,7 @@
           </div>
 
           <!-- Imagen del Producto -->
-          {% set img_producto = producto|url_imagen_producto if producto else '' %}
+          {% set img_producto = producto|url_imagen_producto if producto else placeholder_producto %}
           {% set img_url_form = producto.imagen_url if producto and producto.imagen_url and producto.imagen_url.startswith('https://') else '' %}
           <div>
             <label for="imagen" class="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-1.5">Imagen del Producto (Opcional)</label>

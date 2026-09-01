@@ -89,7 +89,7 @@
                  onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();abrirModalProducto({{ producto.id }});}">
               {% set img_producto = producto|url_imagen_producto %}
               <div class="localis-img-producto-wrap">
-                <img src="{{ img_producto }}"
+                <img src="{{ img_producto or placeholder_producto }}"
                      alt="{{ producto.nombre }}" loading="lazy" decoding="async" referrerpolicy="no-referrer"
                      data-producto-id="{{ producto.id }}"
                      class="localis-img-producto"
@@ -160,7 +160,9 @@
         const res = await fetch(`/api/producto/${id}`);
         if (!res.ok) return;
         const p = await res.json();
-        const imgUrl = p.imagen_url || '{{ placeholder_producto }}';
+        const imgUrl = (p && p.imagen_url && String(p.imagen_url) !== 'None' && String(p.imagen_url) !== 'null')
+          ? p.imagen_url
+          : '{{ placeholder_producto }}';
 
         document.getElementById('modal-imagen').style.backgroundImage = `url('${imgUrl}')`;
         document.getElementById('modal-comercio').textContent = p.comercio_nombre || '';
