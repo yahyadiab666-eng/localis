@@ -45,11 +45,15 @@ _MARCADORES_IMAGEN_GENERICA = (
     'sin-imagen',
 )
 _MARCADORES_URL_ARTIFICIAL = (
-    'openfoodfacts.org',
-    'wsrv.nl',
     'pexels.com',
     '/static/uploads/',
     '/static/images/',
+)
+_HOSTS_CATALOGO_OFICIAL = (
+    'images.openfoodfacts.org',
+    'static.openfoodfacts.org',
+    'world.openfoodfacts.org',
+    'openfoodfacts.org',
 )
 
 
@@ -98,14 +102,36 @@ def es_url_imagen_artificial(valor):
 
 
 def url_imagen_externa_valida(valor):
-    """
-    URL https genérica. No se usa en vistas: el catálogo solo muestra Storage.
-    Se rechazan OFF, wsrv, Pexels y /static/.
-    """
+    """URL https genérica. Rechaza Pexels de prueba y /static/."""
     texto = texto_campo_imagen(valor, default=None)
     if not texto or es_imagen_generica(texto) or es_url_imagen_artificial(texto):
         return None
     if texto.startswith('https://'):
+        return texto
+    return None
+
+
+def url_imagen_catalogo_valida(valor):
+    """
+    URL mostrable/persistible del catálogo: Storage público o foto oficial OFF.
+    Nunca placeholder, Pexels genérico ni /static/.
+    """
+    storage = url_imagen_subida_storage_valida(valor)
+    if storage:
+        return storage
+    texto = texto_campo_imagen(valor, default=None)
+    if not texto or es_imagen_generica(texto):
+        return None
+    if not texto.lower().startswith('https://'):
+        return None
+    lower = texto.lower()
+    if any(marca in lower for marca in ('placeholder', 'no-image', 'default-product', '.svg')):
+        return None
+    if any(host in lower for host in _HOSTS_CATALOGO_OFICIAL):
+        if any(bad in lower for bad in ('thumb', '_small', '/user/', 'avatar')):
+            return None
+        return texto
+    if 'wsrv.nl' in lower and 'openfoodfacts' in lower:
         return texto
     return None
 
@@ -145,16 +171,13 @@ def url_imagen_usable(valor):
 
 
 def imagen_url_almacenada(valor):
-    """
-    Valor persistible y mostrable: solo URL pública de Supabase Storage.
-    OFF, wsrv, Pexels y /static/ se descartan.
-    """
-    return url_imagen_subida_storage_valida(valor)
+    """Valor persistible en productos: Storage o catálogo oficial (nunca None vacío)."""
+    return url_imagen_catalogo_valida(valor)
 
 
 def url_imagen_para_vista(valor):
-    """URL para <img src>. Siempre str: Storage o cadena vacía (nunca None)."""
-    return url_imagen_subida_storage_valida(valor) or ''
+    """URL para <img src>. Siempre str: catálogo usable o cadena vacía (nunca None)."""
+    return url_imagen_catalogo_valida(valor) or ''
 
 
 def imagen_url_para_persistir(valor):

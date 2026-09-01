@@ -352,3 +352,74 @@ def subir_bytes_a_supabase(
         content_type=content_type,
         carpeta=carpeta,
     )
+
+
+def asegurar_politicas_bucket_imagenes():
+    """
+    Políticas RLS del bucket imagenes: lectura pública + escritura service_role.
+    Idempotente. El JWT service_role bypasea RLS; esto cubre upsert (INSERT+SELECT+UPDATE).
+    """
+    from backend.db import get_db_connection, using_postgres
+
+    if not using_postgres():
+        return False
+    sql = """
+    DO $pol$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'storage' AND tablename = 'objects'
+          AND policyname = 'localis_public_select_imagenes'
+      ) THEN
+        CREATE POLICY localis_public_select_imagenes
+          ON storage.objects FOR SELECT
+          TO public
+          USING (bucket_id = 'imagenes');
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'storage' AND tablename = 'objects'
+          AND policyname = 'localis_service_select_imagenes'
+      ) THEN
+        CREATE POLICY localis_service_select_imagenes
+          ON storage.objects FOR SELECT
+          TO service_role
+          USING (bucket_id = 'imagenes');
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'storage' AND tablename = 'objects'
+          AND policyname = 'localis_service_insert_imagenes'
+      ) THEN
+        CREATE POLICY localis_service_insert_imagenes
+          ON storage.objects FOR INSERT
+          TO service_role
+          WITH CHECK (bucket_id = 'imagenes');
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'storage' AND tablename = 'objects'
+          AND policyname = 'localis_service_update_imagenes'
+      ) THEN
+        CREATE POLICY localis_service_update_imagenes
+          ON storage.objects FOR UPDATE
+          TO service_role
+          USING (bucket_id = 'imagenes')
+          WITH CHECK (bucket_id = 'imagenes');
+      END IF;
+    END
+    $pol$;
+    """
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(sql)
+            conexion.commit()
+        print(f'{LOG_PREFIX} Politicas RLS del bucket imagenes verificadas (service_role + SELECT publico).')
+        return True
+    except Exception as error:
+        print(
+            f'{LOG_PREFIX} No se pudieron asegurar politicas RLS: '
+            f'{type(error).__name__}: {error}'
+        )
+        return False

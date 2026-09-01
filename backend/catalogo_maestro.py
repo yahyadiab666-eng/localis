@@ -15,7 +15,7 @@ from backend.supabase_client import (
 )
 from backend.utils import (
     normalizar_codigo_barras,
-    url_imagen_subida_storage_valida,
+    url_imagen_catalogo_valida,
 )
 
 TABLA_CATALOGO_MAESTRO = 'catalogo_maestro_imagenes'
@@ -56,8 +56,8 @@ def _completar_con_semilla(mapa, codigos):
 
 
 def _url_maestro_valida(valor):
-    """Solo URLs públicas del bucket Supabase Storage."""
-    return url_imagen_subida_storage_valida(valor)
+    """URLs públicas de Storage o fotos oficiales del catálogo (OpenFoodFacts)."""
+    return url_imagen_catalogo_valida(valor)
 
 
 def _error_imagen(mensaje, error=None):
@@ -231,8 +231,8 @@ def _resolver_en_cascada(codigo):
 def imagen_maestro_por_codigo(codigo_barras):
     """
     URL de imagen por código de barras:
-    1) catalogo_maestro_imagenes (solo URLs de Supabase Storage)
-    Error de BD/red se registra; vacío o fallo → None (la vista usa '').
+    1) catalogo_maestro_imagenes (Storage o catálogo oficial)
+    Error de BD/red se registra; vacío o fallo → None (la vista usa placeholder).
     """
     try:
         codigo = normalizar_codigo_barras(codigo_barras)
@@ -392,9 +392,7 @@ def mapa_imagenes_maestro(codigos):
 
 
 def purgar_urls_imagen_artificiales():
-    """
-    Quita de productos y catalogo_maestro URLs de prueba (OFF, wsrv, Pexels, /static/).
-    """
+    """Quita placeholders locales y Pexels de prueba. Conserva Storage y OFF."""
     from backend.db import get_db_connection
 
     sql_productos = """
@@ -402,18 +400,16 @@ def purgar_urls_imagen_artificiales():
         SET imagen_url = NULL
         WHERE imagen_url IS NOT NULL
           AND (
-            LOWER(CAST(imagen_url AS TEXT)) LIKE '%openfoodfacts%'
-            OR LOWER(CAST(imagen_url AS TEXT)) LIKE '%wsrv.nl%'
-            OR LOWER(CAST(imagen_url AS TEXT)) LIKE '%pexels.com%'
+            LOWER(CAST(imagen_url AS TEXT)) LIKE '%pexels.com%'
             OR CAST(imagen_url AS TEXT) LIKE '/static/%'
+            OR LOWER(CAST(imagen_url AS TEXT)) LIKE '%default-product%'
           )
     """
     sql_maestro = f"""
         DELETE FROM {TABLA_CATALOGO_MAESTRO}
-        WHERE LOWER(CAST(url_imagen AS TEXT)) LIKE '%openfoodfacts%'
-           OR LOWER(CAST(url_imagen AS TEXT)) LIKE '%wsrv.nl%'
-           OR LOWER(CAST(url_imagen AS TEXT)) LIKE '%pexels.com%'
+        WHERE LOWER(CAST(url_imagen AS TEXT)) LIKE '%pexels.com%'
            OR CAST(url_imagen AS TEXT) LIKE '/static/%'
+           OR LOWER(CAST(url_imagen AS TEXT)) LIKE '%default-product%'
     """
     try:
         with get_db_connection() as conexion:
@@ -486,5 +482,17 @@ def purgar_urls_imagen_artificiales():
 
 
 def sembrar_catalogo_maestro_imagenes():
-    """Ya no siembra URLs de prueba. Purga residuales OFF/wsrv/Pexels."""
-    return purgar_urls_imagen_artificiales()
+    """Políticas Storage + relleno de fotos faltantes en segundo plano."""
+    try:
+        from backend.supabase_storage import asegurar_politicas_bucket_imagenes
+
+        asegurar_politicas_bucket_imagenes()
+    except Exception as error:
+        _error_imagen('politicas storage', error)
+    try:
+        from backend.image_lookup import programar_relleno_imagenes_catalogo
+
+        programar_relleno_imagenes_catalogo()
+    except Exception as error:
+        _error_imagen('relleno catalogo', error)
+    return True

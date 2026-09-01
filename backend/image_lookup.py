@@ -11,12 +11,14 @@ from backend.catalogo_maestro import (
 from backend.db import get_db_connection
 from backend.image_manager import (
     completar_mapa_imagenes,
+    espejar_url_oficial_en_storage,
     resolver_imagen_escritura,
 )
 from backend.utils import (
     imagen_url_almacenada,
     imagen_url_para_persistir,
     normalizar_codigo_barras,
+    url_imagen_subida_storage_valida,
 )
 
 _LOG_CSV = '[Localis CSV]'
@@ -50,13 +52,15 @@ def _resolver_url_escritura(
     imagen_url=None,
     codigo_barras=None,
     mapa_maestro=None,
+    nombre=None,
 ):
-    """Resolución al crear/importar: manual Storage → catálogo maestro."""
+    """Resolución al crear/importar: manual Storage → catálogo maestro → OFF."""
     try:
         return resolver_imagen_escritura(
             imagen_manual=imagen_url,
             codigo_barras=codigo_barras,
             mapa_maestro=mapa_maestro,
+            nombre=nombre,
         )
     except Exception as error:
         _registrar_error_imagen('resolver escritura', error)
@@ -139,12 +143,12 @@ def resolver_imagen_url_definitiva(
     Alta manual e importación CSV.
     Persiste URL del catálogo maestro; NULL si no hay imagen.
     """
-    del nombre, descripcion, mapa_codigos, mapa_nombres
     try:
         return _resolver_url_escritura(
             imagen_url=imagen_url,
             codigo_barras=codigo_barras,
             mapa_maestro=mapa_maestro,
+            nombre=nombre,
         )
     except Exception as error:
         _registrar_error_imagen('resolver_imagen_url_definitiva', error)
@@ -259,6 +263,7 @@ def aplicar_respaldo_imagenes(productos, persistir=False):
                         imagen_manual=prod.get('imagen_url'),
                         codigo_barras=prod.get('codigo_barras'),
                         mapa_maestro=mapa_maestro,
+                        nombre=prod.get('nombre'),
                         buscar_oficial=False,
                     )
                     if not url_final:
@@ -296,7 +301,7 @@ def _asociar_imagenes_inventario(comercio_id):
             cursor = conexion.cursor()
             cursor.execute(
                 """
-                SELECT id, codigo_barras, imagen_url
+                SELECT id, codigo_barras, imagen_url, nombre
                 FROM productos
                 WHERE comercio_id = ?
                 """,
@@ -343,6 +348,7 @@ def _asociar_imagenes_inventario(comercio_id):
                 imagen_manual=prod.get('imagen_url'),
                 codigo_barras=prod.get('codigo_barras'),
                 mapa_maestro=mapa_maestro,
+                nombre=prod.get('nombre'),
                 buscar_oficial=True,
             )
             if not url_final:
@@ -392,6 +398,103 @@ def programar_asociacion_imagenes_inventario(comercio_id):
     hilo = threading.Thread(
         target=_trabajo,
         name=f'localis-csv-off-{comercio_id}',
+        daemon=True,
+    )
+    hilo.start()
+    return hilo
+
+
+def rellenar_imagenes_catalogo():
+    """
+    Rellena productos.imagen_url vacías: maestro → EAN → nombre (OFF).
+    Devuelve cuántas filas se actualizaron. Pensado para tests e init.
+    """
+    try:
+        with get_db_connection(row_factory=sqlite3.Row) as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT id, nombre, codigo_barras, imagen_url
+                FROM productos
+                """
+            )
+            productos = [dict(fila) for fila in cursor.fetchall()]
+    except Exception as error:
+        _registrar_error_imagen('rellenar_imagenes_catalogo leer', error)
+        return 0
+
+    pendientes = []
+    for prod in productos:
+        if url_imagen_subida_storage_valida(prod.get('imagen_url')):
+            continue
+        pendientes.append(prod)
+    if not pendientes:
+        return 0
+
+    actualizaciones = []
+    for prod in pendientes:
+        producto_id = prod.get('id')
+        if not producto_id:
+            continue
+        try:
+            actual = imagen_url_almacenada(prod.get('imagen_url'))
+            if actual and not url_imagen_subida_storage_valida(actual):
+                espejo = espejar_url_oficial_en_storage(
+                    actual, prod.get('codigo_barras') or prod.get('nombre')
+                )
+                if espejo:
+                    actualizaciones.append((espejo, int(producto_id)))
+                    prod['imagen_url'] = espejo
+                    time.sleep(0.15)
+                    continue
+                continue
+            url_final = resolver_imagen_escritura(
+                imagen_manual=prod.get('imagen_url'),
+                codigo_barras=prod.get('codigo_barras'),
+                nombre=prod.get('nombre'),
+                buscar_oficial=True,
+            )
+            if not url_final:
+                continue
+            actualizaciones.append((url_final, int(producto_id)))
+            prod['imagen_url'] = url_final
+            time.sleep(0.15)
+        except Exception as error:
+            _registrar_error_imagen(
+                f"relleno id={producto_id}", error
+            )
+
+    if not actualizaciones:
+        return 0
+
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.executemany(
+                'UPDATE productos SET imagen_url = ? WHERE id = ?',
+                actualizaciones,
+            )
+            conexion.commit()
+    except Exception as error:
+        _registrar_error_imagen('rellenar_imagenes_catalogo persistir', error)
+        return 0
+    print(f'{_LOG_IMAGEN} relleno catalogo actualizados={len(actualizaciones)}')
+    return len(actualizaciones)
+
+
+def programar_relleno_imagenes_catalogo():
+    """Rellena fotos faltantes sin bloquear el arranque HTTP."""
+    def _trabajo():
+        try:
+            print(f'{_LOG_IMAGEN} relleno catalogo inicio')
+            n = rellenar_imagenes_catalogo()
+            print(f'{_LOG_IMAGEN} relleno catalogo fin actualizados={n}')
+        except Exception as error:
+            _registrar_error_imagen('relleno catalogo hilo', error)
+
+    hilo = threading.Thread(
+        target=_trabajo,
+        name='localis-relleno-imagenes',
         daemon=True,
     )
     hilo.start()

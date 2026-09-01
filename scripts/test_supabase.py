@@ -122,6 +122,8 @@ def _probar_subida() -> tuple[bool, str]:
 
 def _probar_productos() -> tuple[bool, str]:
     from backend.db import DATABASE_URL, get_db_connection, using_postgres
+    from backend.utils import url_imagen_catalogo_valida
+    from utils.images import url_publica_producto_desde_bd
 
     if not DATABASE_URL:
         return False, 'DATABASE_URL ausente'
@@ -129,25 +131,82 @@ def _probar_productos() -> tuple[bool, str]:
     try:
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
-            cursor.execute('SELECT COUNT(*) FROM productos')
-            fila = cursor.fetchone()
-            total = fila[0] if not isinstance(fila, dict) else next(iter(fila.values()))
             cursor.execute(
                 """
-                SELECT COUNT(*) FROM productos
-                WHERE imagen_url IS NULL OR TRIM(imagen_url) = ''
+                SELECT id, nombre, codigo_barras, imagen_url
+                FROM productos
+                ORDER BY id
                 """
             )
-            fila_vacias = cursor.fetchone()
-            vacias = (
-                fila_vacias[0]
-                if not isinstance(fila_vacias, dict)
-                else next(iter(fila_vacias.values()))
+            filas = [dict(r) if isinstance(r, dict) else {
+                'id': r[0], 'nombre': r[1], 'codigo_barras': r[2], 'imagen_url': r[3],
+            } for r in cursor.fetchall()]
+        total = len(filas)
+        con_url = 0
+        vacias = []
+        for fila in filas:
+            url = url_publica_producto_desde_bd(fila.get('imagen_url')) or url_imagen_catalogo_valida(
+                fila.get('imagen_url')
             )
-            motor = 'postgres' if using_postgres() else 'sqlite'
-            return True, f'{motor}: {total} productos, {vacias} sin imagen_url'
+            vista = url or 'None'
+            print(
+                f"  id={fila.get('id')} nombre={fila.get('nombre')!r} "
+                f"codigo={fila.get('codigo_barras')!r} url_bd={fila.get('imagen_url')!r} "
+                f"vista={vista!r}"
+            )
+            if url:
+                con_url += 1
+            else:
+                vacias.append(fila.get('nombre') or fila.get('id'))
+        motor = 'postgres' if using_postgres() else 'sqlite'
+        if vacias:
+            return False, (
+                f'{motor}: {con_url}/{total} con imagen; sin URL: {vacias}'
+            )
+        return True, f'{motor}: {con_url}/{total} productos con URL operativa'
     except Exception as error:
         return False, f'{type(error).__name__}: {error}'
+
+
+def _probar_head_imagenes() -> tuple[bool, str]:
+    import httpx
+
+    from backend.db import get_db_connection
+    from utils.images import url_publica_producto_desde_bd
+
+    with get_db_connection() as conexion:
+        cursor = conexion.cursor()
+        cursor.execute(
+            """
+            SELECT imagen_url FROM productos
+            WHERE imagen_url IS NOT NULL AND TRIM(CAST(imagen_url AS TEXT)) <> ''
+            """
+        )
+        urls = []
+        for fila in cursor.fetchall():
+            crudo = fila[0] if not isinstance(fila, dict) else fila.get('imagen_url')
+            url = url_publica_producto_desde_bd(crudo)
+            if url:
+                urls.append(url)
+    if not urls:
+        return False, 'no hay URLs para HEAD'
+    fallos_head = []
+    with httpx.Client(
+        timeout=httpx.Timeout(connect=5.0, read=10.0, write=10.0, pool=5.0),
+        follow_redirects=True,
+    ) as http:
+        for url in urls:
+            try:
+                resp = http.head(url)
+                if resp.status_code >= 400:
+                    resp = http.get(url, headers={'Range': 'bytes=0-64'})
+                if resp.status_code >= 400:
+                    fallos_head.append(f'{resp.status_code} {url[:80]}')
+            except Exception as error:
+                fallos_head.append(f'{type(error).__name__} {url[:80]}')
+    if fallos_head:
+        return False, f'{len(fallos_head)} URL(s) no responden: {fallos_head[:3]}'
+    return True, f'{len(urls)} URL(s) responden HTTP < 400'
 
 
 def main() -> int:
@@ -157,16 +216,28 @@ def main() -> int:
         action='store_true',
         help='No subir el PNG de prueba al bucket imagenes',
     )
+    parser.add_argument(
+        '--sin-relleno',
+        action='store_true',
+        help='No rellenar imagen_url vacias desde OpenFoodFacts',
+    )
     args = parser.parse_args()
 
     _cargar_entorno()
 
     from backend.supabase_client import auditar_claves_supabase
+    from backend.supabase_storage import asegurar_politicas_bucket_imagenes
 
     informe = auditar_claves_supabase()
     _imprimir_auditoria(informe)
 
     fallos = []
+
+    print('\n=== Politicas RLS bucket imagenes ===')
+    ok_pol = asegurar_politicas_bucket_imagenes()
+    print(f'  {"OK" if ok_pol else "FALLO o no postgres"}')
+    if not ok_pol:
+        fallos.append('No se pudieron crear/verificar politicas RLS de Storage')
 
     if not informe.get('service_ok'):
         rol = informe.get('service_jwt_role') or 'ausente'
@@ -192,7 +263,7 @@ def main() -> int:
         if not ok_bucket:
             fallos.append(f'Listado bucket: {detalle_bucket}')
     else:
-        print('  omitido: no hay service_role valida')
+        print('  omitido: no hay service_role valida (las subidas manuales seguiran en 403)')
 
     print('\n=== Subida probe al bucket imagenes ===')
     if args.sin_subida:
@@ -205,11 +276,26 @@ def main() -> int:
         if not ok_subida:
             fallos.append(f'Subida: {detalle_subida}')
 
-    print('\n=== Consulta productos (DATABASE_URL) ===')
+    print('\n=== Relleno cascada (maestro / EAN / nombre) ===')
+    if args.sin_relleno:
+        print('  omitido (--sin-relleno)')
+    else:
+        from backend.image_lookup import rellenar_imagenes_catalogo
+
+        n_fill = rellenar_imagenes_catalogo()
+        print(f'  actualizados={n_fill}')
+
+    print('\n=== Consulta productos (url_bd no None) ===')
     ok_prod, detalle_prod = _probar_productos()
     print(f'  {detalle_prod}')
     if not ok_prod:
         fallos.append(f'Productos: {detalle_prod}')
+    else:
+        print('\n=== HEAD/GET de URLs de imagen ===')
+        ok_head, detalle_head = _probar_head_imagenes()
+        print(f'  {detalle_head}')
+        if not ok_head:
+            fallos.append(f'HEAD imagenes: {detalle_head}')
 
     print('')
     if fallos:
@@ -218,7 +304,7 @@ def main() -> int:
             print(f'  - {item}')
         return 1
 
-    print('RESULTADO: OK (service_role valida, Storage y productos responden)')
+    print('RESULTADO: OK (catalogo con URLs operativas; Storage service_role listo si la llave es valida)')
     return 0
 
 

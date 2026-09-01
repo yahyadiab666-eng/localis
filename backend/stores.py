@@ -457,7 +457,7 @@ _SQL_IMAGEN_URL = 'p.imagen_url AS imagen_url'
 
 
 def _aplicar_url_imagen_producto(fila):
-    """Convierte ruta/URL de Storage; deja None si no hay foto usable."""
+    """Convierte ruta/URL de Storage o catálogo oficial; deja None si no hay foto."""
     from utils.images import url_publica_producto_desde_bd
 
     crudo = fila.get('imagen_url')
@@ -471,7 +471,8 @@ def _aplicar_url_imagen_producto(fila):
 def _completar_imagenes_productos(productos):
     """
     Rellena imagen_url desde el catálogo maestro en una consulta aparte
-    (no comparte transacción con el JOIN comercios/productos).
+    (no comparte transacción con el JOIN comercios/productos) y persiste
+    las URLs encontradas para que url_bd deje de ser None.
     """
     if not productos:
         return productos
@@ -482,27 +483,57 @@ def _completar_imagenes_productos(productos):
     for fila in productos:
         if fila.get('imagen_url'):
             continue
-        codigo = normalizar_codigo_barras(fila.get('codigo_barras'))
-        if codigo:
-            faltantes.append((fila, codigo))
+        faltantes.append(fila)
     if not faltantes:
         return productos
 
     try:
         from backend.catalogo_maestro import mapa_imagenes_maestro
 
-        mapa = mapa_imagenes_maestro([codigo for _, codigo in faltantes]) or {}
+        codigos = [
+            normalizar_codigo_barras(fila.get('codigo_barras'))
+            for fila in faltantes
+        ]
+        mapa = mapa_imagenes_maestro([c for c in codigos if c]) or {}
     except Exception as error:
         print(f'[Localis Imagen] Lote maestro omitido: {type(error).__name__}: {error}')
         traceback.print_exc()
-        return productos
+        mapa = {}
 
+    from backend.utils import url_imagen_catalogo_valida
     from utils.images import url_publica_producto_desde_bd
 
-    for fila, codigo in faltantes:
-        url = url_publica_producto_desde_bd(mapa.get(codigo))
+    persistir = []
+    for fila in faltantes:
+        codigo = normalizar_codigo_barras(fila.get('codigo_barras'))
+        url = url_publica_producto_desde_bd(mapa.get(codigo)) if codigo else ''
+        if not url:
+            url = url_imagen_catalogo_valida(mapa.get(codigo)) if codigo else None
         if url:
             fila['imagen_url'] = url
+            producto_id = fila.get('id')
+            if producto_id:
+                persistir.append((url, int(producto_id)))
+
+    if persistir:
+        try:
+            with get_db_connection() as conexion:
+                cursor = conexion.cursor()
+                cursor.executemany(
+                    """
+                    UPDATE productos SET imagen_url = ?
+                    WHERE id = ?
+                      AND (imagen_url IS NULL OR TRIM(CAST(imagen_url AS TEXT)) = '')
+                    """,
+                    persistir,
+                )
+                conexion.commit()
+        except Exception as error:
+            print(
+                f'[Localis Imagen] No se persistieron URLs de maestro: '
+                f'{type(error).__name__}: {error}'
+            )
+            traceback.print_exc()
     return productos
 
 

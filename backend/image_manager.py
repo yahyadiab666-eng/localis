@@ -10,31 +10,43 @@ Flujo:
 
 import socket
 import time
+import unicodedata
 from urllib.parse import quote
 
 import requests
 
 from backend.catalogo_maestro import (
+    guardar_imagen_maestro,
     imagen_maestro_por_codigo,
     mapa_imagenes_maestro,
 )
 from backend.utils import (
     imagen_url_almacenada,
     normalizar_codigo_barras,
+    url_imagen_catalogo_valida,
     url_imagen_subida_storage_valida,
 )
 
 _USER_AGENT = 'LocalisApp/1.0 (Localis; contacto@localis.app)'
 _OFF_API = 'https://world.openfoodfacts.org/api/v2/product/{codigo}.json'
+_OFF_SEARCH = 'https://search.openfoodfacts.org/search'
 _WSRV_ANCHO = 300
 _WSRV_ALTO = 300
 _WSRV_FIT = 'cover'
 _WSRV_FORMATO = 'webp'
 _WSRV_CALIDAD = 80
 _PAUSA_OFF_SEG = 0.12
-_OFF_TIMEOUT_SEG = 3
+_OFF_TIMEOUT_SEG = 4
 _LOG_IMAGEN = '[Localis Imagen]'
 _MIN_LADO_PX = 200
+_STOP_NOMBRE = frozenset({
+    'de', 'la', 'el', 'los', 'las', 'del', 'y', 'en', 'con',
+    'kg', 'g', 'l', 'ml', 'un', 'una', 'refresco',
+})
+_GENERIC_FOOD = frozenset({
+    'harina', 'arroz', 'aceite', 'cafe', 'pasta', 'spaghetti', 'leche',
+    'atun', 'mantequilla', 'panela', 'refresco', 'pan',
+})
 _ERRORES_RED_IMAGEN = (
     requests.Timeout,
     requests.ConnectionError,
@@ -73,7 +85,7 @@ _PATRONES_RECHAZO = (
 
 
 def _advertir_fallo_imagen(contexto, error):
-    print(f'{_LOG_IMAGEN} aviso {contexto}: {type(error).__name__}')
+    print(f'{_LOG_IMAGEN} aviso {contexto}: {type(error).__name__}: {error}')
 
 
 def _http_get_imagen(url, headers=None):
@@ -112,8 +124,10 @@ def optimizar_url_wsrv(url_original):
 
 
 def _url_manual_valida(imagen_manual):
-    """Solo URL pública de Supabase Storage (no OFF, wsrv ni /static/)."""
-    return url_imagen_subida_storage_valida(imagen_manual)
+    """URL de Storage o catálogo oficial ya persistida."""
+    return url_imagen_catalogo_valida(imagen_manual) or url_imagen_subida_storage_valida(
+        imagen_manual
+    )
 
 
 def _url_pasa_filtro_calidad(url, ancho=None, alto=None):
@@ -189,16 +203,177 @@ def _buscar_openfoodfacts_por_codigo(codigo_barras):
     return None
 
 
-def _descubrir_y_persistir_oficial(codigo_barras):
-    """OFF/wsrv no se persisten: las vistas solo usan el bucket de Storage."""
-    del codigo_barras
+def _slug_archivo(valor):
+    texto = ''.join(
+        ch for ch in unicodedata.normalize('NFKD', str(valor or ''))
+        if not unicodedata.combining(ch)
+    )
+    limpio = ''.join(ch.lower() if ch.isalnum() else '-' for ch in texto)
+    while '--' in limpio:
+        limpio = limpio.replace('--', '-')
+    return (limpio.strip('-') or 'producto')[:40]
+
+
+def _tokens_nombre(nombre):
+    texto = ''.join(
+        ch for ch in unicodedata.normalize('NFKD', str(nombre or '').lower())
+        if not unicodedata.combining(ch)
+    )
+    texto = texto.replace('x', ' ')
+    crudos = []
+    for parte in texto.replace('/', ' ').split():
+        parte = parte.strip('.,;()[]')
+        if not parte or parte in _STOP_NOMBRE:
+            continue
+        if any(ch.isdigit() for ch in parte) and len(parte) <= 5:
+            continue
+        crudos.append(parte)
+    return crudos
+
+
+def _texto_hit(valor):
+    if valor is None:
+        return ''
+    if isinstance(valor, (list, tuple)):
+        return ' '.join(str(item) for item in valor if item)
+    return str(valor)
+
+
+def _score_hit_nombre(tokens, hit):
+    if not tokens:
+        return 0
+    nombre = ' '.join(
+        filter(
+            None,
+            (
+                _texto_hit(hit.get('product_name')),
+                _texto_hit(hit.get('product_name_es')),
+                _texto_hit(hit.get('product_name_en')),
+                _texto_hit(hit.get('brands')),
+            ),
+        )
+    ).lower()
+    nombre_norm = ''.join(
+        ch for ch in unicodedata.normalize('NFKD', nombre)
+        if not unicodedata.combining(ch)
+    )
+    aciertos = sum(1 for tok in tokens if tok in nombre_norm)
+    if aciertos == 0:
+        return 0
+    if len(tokens) == 1:
+        return aciertos * 2
+    if aciertos >= 2 or (aciertos == 1 and len(tokens[0]) >= 5):
+        return aciertos
+    return 0
+
+
+def _url_imagen_hit_off(hit):
+    for campo in ('image_front_url', 'image_url'):
+        url = hit.get(campo)
+        if _url_pasa_filtro_calidad(url):
+            return url
     return None
+
+
+def _buscar_openfoodfacts_por_nombre(nombre):
+    """Busca foto oficial por nombre comercial (search.openfoodfacts.org)."""
+    tokens = _tokens_nombre(nombre)
+    if not tokens:
+        return None
+    consulta = ' '.join(tokens[:4])
+    try:
+        respuesta = requests.get(
+            _OFF_SEARCH,
+            params={'q': consulta, 'page_size': 8},
+            headers={'User-Agent': _USER_AGENT},
+            timeout=_OFF_TIMEOUT_SEG,
+        )
+        if respuesta.status_code != 200:
+            return None
+        hits = (respuesta.json() or {}).get('hits') or []
+        mejor = None
+        mejor_score = 0
+        for hit in hits:
+            score = _score_hit_nombre(tokens, hit)
+            if score <= mejor_score:
+                continue
+            url = _url_imagen_hit_off(hit)
+            if not url:
+                continue
+            mejor = url
+            mejor_score = score
+        return mejor
+    except Exception as error:
+        _advertir_fallo_imagen(f'OFF nombre={nombre!r}', error)
+        return None
+
+
+def _espejar_en_storage(url, clave):
+    """Sube la foto oficial al bucket imagenes si hay service_role. Si no, None."""
+    try:
+        from backend.supabase_client import clave_api_servidor, clave_es_service_role
+
+        if not clave_es_service_role(clave_api_servidor()):
+            return None
+        respuesta = _http_get_imagen(url)
+        if respuesta is None or respuesta.status_code != 200 or not respuesta.content:
+            return None
+        from backend.images import comprimir_bytes_a_bytes
+        from backend.supabase_storage import _subir_bytes_al_bucket
+
+        data, content_type, filename = comprimir_bytes_a_bytes(
+            respuesta.content,
+            prefijo=f'cat_{_slug_archivo(clave)}',
+            max_dimension=400,
+        )
+        return _subir_bytes_al_bucket(None, f'productos/{filename}', data, content_type)
+    except Exception as error:
+        _advertir_fallo_imagen('espejo storage', error)
+        return None
+
+
+def espejar_url_oficial_en_storage(url, clave):
+    """Sube una URL oficial al bucket si hay service_role. None si no aplica."""
+    return _espejar_en_storage(url, clave)
+
+
+def _descubrir_y_persistir_oficial(codigo_barras, nombre=None):
+    """
+    Cascada: OpenFoodFacts por EAN, luego por nombre.
+    Espeja a Storage si hay service_role; si no, cachea la URL oficial.
+    """
+    url = None
+    codigo = normalizar_codigo_barras(codigo_barras)
+    if codigo:
+        url = _buscar_openfoodfacts_por_codigo(codigo)
+    if not url and nombre:
+        url = _buscar_openfoodfacts_por_nombre(nombre)
+    if not url and nombre:
+        for token in _tokens_nombre(nombre):
+            if token in _GENERIC_FOOD or len(token) < 4:
+                continue
+            url = _buscar_openfoodfacts_por_nombre(token)
+            if url:
+                break
+            if _PAUSA_OFF_SEG:
+                time.sleep(_PAUSA_OFF_SEG)
+    if not url:
+        return None
+    espejo = _espejar_en_storage(url, codigo or nombre)
+    final = url_imagen_catalogo_valida(espejo) or url_imagen_catalogo_valida(url)
+    if final and codigo:
+        try:
+            guardar_imagen_maestro(codigo, final)
+        except Exception as error:
+            _advertir_fallo_imagen('guardar maestro', error)
+    return final
 
 
 def resolver_imagen(
     codigo_barras=None,
     imagen_manual=None,
     mapa_maestro=None,
+    nombre=None,
     *,
     para_escritura=False,
     buscar_oficial=True,
@@ -206,8 +381,7 @@ def resolver_imagen(
     """
     Resuelve la imagen de un producto.
 
-    para_escritura=True → None si no hay imagen (no persistir en productos).
-    para_escritura=False → None si no hay imagen (vista sin comodín).
+    para_escritura=True → None si no hay imagen (no persistir placeholder).
     buscar_oficial=False → no consulta OpenFoodFacts (ruta crítica CSV).
     """
     del para_escritura
@@ -217,24 +391,22 @@ def resolver_imagen(
             return manual
 
         codigo = normalizar_codigo_barras(codigo_barras)
-        if not codigo:
-            return None
-
         url = None
-        if mapa_maestro is not None:
-            url = mapa_maestro.get(codigo)
-        if not url:
-            url = imagen_maestro_por_codigo(codigo)
-        if url:
+        if codigo:
             if mapa_maestro is not None:
-                mapa_maestro[codigo] = url
-            return url
+                url = mapa_maestro.get(codigo)
+            if not url:
+                url = imagen_maestro_por_codigo(codigo)
+            if url:
+                if mapa_maestro is not None:
+                    mapa_maestro[codigo] = url
+                return url
 
         if not buscar_oficial:
             return None
 
-        url = _descubrir_y_persistir_oficial(codigo)
-        if url and mapa_maestro is not None:
+        url = _descubrir_y_persistir_oficial(codigo, nombre)
+        if url and codigo and mapa_maestro is not None:
             mapa_maestro[codigo] = url
         return url
     except Exception as error:
@@ -246,6 +418,7 @@ def resolver_imagen_escritura(
     imagen_manual=None,
     codigo_barras=None,
     mapa_maestro=None,
+    nombre=None,
     *,
     buscar_oficial=True,
 ):
@@ -255,6 +428,7 @@ def resolver_imagen_escritura(
             codigo_barras=codigo_barras,
             imagen_manual=imagen_manual,
             mapa_maestro=mapa_maestro,
+            nombre=nombre,
             para_escritura=True,
             buscar_oficial=buscar_oficial,
         )
