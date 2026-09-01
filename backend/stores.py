@@ -1,11 +1,12 @@
 import os
 import random
 import sqlite3
+import time
 import traceback
 
 import psycopg2
 
-from backend.db import get_db_connection
+from backend.db import es_error_bd_transitorio, get_db_connection
 from backend.runtime_cache import get_or_load, invalidate
 from backend.comercio_schema import (
     normalizar_fila_comercio,
@@ -478,7 +479,6 @@ _SQL_JOIN_MAESTRO = (
     " AND TRIM(BOTH FROM CAST(m1.url_imagen AS TEXT)) <> ''"
     " AND LOWER(TRIM(BOTH FROM CAST(m1.url_imagen AS TEXT)))"
     " NOT IN ('none', 'null', 'nan', 'n/a', '-')"
-    ' ORDER BY m1.updated_at DESC NULLS LAST'
     ' LIMIT 1'
     ') m ON TRUE'
 )
@@ -499,6 +499,8 @@ def _aplicar_url_imagen_producto(fila):
 def _base_query_productos_publicos(con_maestro=True):
     imagen = _SQL_IMAGEN_URL if con_maestro else 'p.imagen_url AS imagen_url'
     join_maestro = _SQL_JOIN_MAESTRO if con_maestro else ''
+    # Padre (comercios) primero, luego productos: mismo orden de bloqueo que
+    # las escrituras con FK y menos deadlocks con el importador.
     return f"""
         SELECT
             p.id,
@@ -513,20 +515,42 @@ def _base_query_productos_publicos(con_maestro=True):
             c.telefono AS comercio_telefono,
             c.id AS comercio_id,
             cat.nombre AS categoria_nombre
-        FROM productos p
+        FROM comercios c
+        JOIN productos p ON p.comercio_id = c.id
         {join_maestro}
-        JOIN comercios c ON p.comercio_id = c.id
         LEFT JOIN categorias cat ON c.categoria_id = cat.id
         WHERE 1=1
     """ + _FILTRO_COMERCIO_PUBLICO
 
 
+def _es_columna_inexistente(error):
+    orig = getattr(error, 'orig', error)
+    texto = str(error).lower()
+    return (
+        'UndefinedColumn' in type(orig).__name__
+        or 'undefinedcolumn' in type(error).__name__.lower()
+        or 'does not exist' in texto
+    )
+
+
 def _ejecutar_listado_productos(cursor, conexion, query, parametros):
-    """Ejecuta el SELECT; si el JOIN al maestro falla, reintenta solo con p.imagen_url."""
+    """Ejecuta el SELECT; si falta una columna del maestro, reintenta sin ese JOIN."""
     try:
         cursor.execute(query, parametros)
         return cursor.fetchall()
     except Exception as error:
+        if es_error_bd_transitorio(error) or _es_deadlock(error):
+            try:
+                conexion.rollback()
+            except Exception:
+                pass
+            raise
+        if not _es_columna_inexistente(error):
+            try:
+                conexion.rollback()
+            except Exception:
+                pass
+            raise
         print(
             f'[Localis Imagen] Consulta con catalogo_maestro_imagenes falló '
             f'({type(error).__name__}: {error}). Se reintenta con p.imagen_url.'
@@ -539,6 +563,15 @@ def _ejecutar_listado_productos(cursor, conexion, query, parametros):
         query_simple = query_simple.replace(_SQL_IMAGEN_URL, 'p.imagen_url AS imagen_url')
         cursor.execute(query_simple, parametros)
         return cursor.fetchall()
+
+
+def _es_deadlock(error):
+    orig = getattr(error, 'orig', error)
+    pgcode = getattr(orig, 'pgcode', None) or getattr(error, 'pgcode', None)
+    if pgcode in ('40P01', '40001'):
+        return True
+    texto = f'{type(orig).__name__} {error}'.lower()
+    return 'deadlock' in texto
 
 
 def _aplicar_filtros_productos(query, parametros, palabra_clave, categoria_nombre, comercio_id):
@@ -558,6 +591,9 @@ def _aplicar_filtros_productos(query, parametros, palabra_clave, categoria_nombr
     return query, parametros
 
 
+_MAX_REINTENTOS_LISTADO = 3
+
+
 def buscar_y_filtrar_productos(
     palabra_clave=None,
     categoria_nombre=None,
@@ -565,69 +601,98 @@ def buscar_y_filtrar_productos(
     limit=None,
     orden_aleatorio=False,
 ):
-    try:
-        tasa = obtener_tasa_dolar() or 1.0
-        with get_db_connection(row_factory=sqlite3.Row) as conexion:
-            cursor = conexion.cursor()
-
-            parametros = []
-            if orden_aleatorio and limit and not palabra_clave and not categoria_nombre:
-                query_ids = """
-                    SELECT p.id
-                    FROM productos p
-                    JOIN comercios c ON p.comercio_id = c.id
-                    LEFT JOIN categorias cat ON c.categoria_id = cat.id
-                    WHERE 1=1
-                """ + _FILTRO_COMERCIO_PUBLICO
-                query_ids, params_ids = _aplicar_filtros_productos(
-                    query_ids, [], palabra_clave, categoria_nombre, comercio_id
+    ultimo_error = None
+    for intento in range(_MAX_REINTENTOS_LISTADO):
+        try:
+            return _buscar_y_filtrar_productos_once(
+                palabra_clave=palabra_clave,
+                categoria_nombre=categoria_nombre,
+                comercio_id=comercio_id,
+                limit=limit,
+                orden_aleatorio=orden_aleatorio,
+            )
+        except Exception as e:
+            ultimo_error = e
+            if intento < _MAX_REINTENTOS_LISTADO - 1 and (
+                es_error_bd_transitorio(e) or _es_deadlock(e)
+            ):
+                print(
+                    f'[Localis] Deadlock/transitorio en listado de productos '
+                    f'(intento {intento + 1}/{_MAX_REINTENTOS_LISTADO}): {e}'
                 )
-                pool_size = max(int(limit) * 10, min(_POOL_MUESTRA_ALEATORIA, 400))
-                query_ids += ' ORDER BY p.id DESC LIMIT ?'
-                params_ids.append(pool_size)
-                cursor.execute(query_ids, params_ids)
-                ids = [
-                    _valor_fila(fila, 'id', 0)
-                    for fila in cursor.fetchall()
-                    if _valor_fila(fila, 'id', 0) is not None
-                ]
-                if not ids:
-                    return []
-                ids = random.sample(ids, min(int(limit), len(ids)))
-                placeholders = ', '.join('?' for _ in ids)
-                query = _base_query_productos_publicos()
-                query += f' AND p.id IN ({placeholders})'
-                filas = _ejecutar_listado_productos(cursor, conexion, query, ids)
-            else:
-                query = _base_query_productos_publicos()
-                query, parametros = _aplicar_filtros_productos(
-                    query, parametros, palabra_clave, categoria_nombre, comercio_id
-                )
-                query += ' ORDER BY p.id DESC'
-                if limit:
-                    query += ' LIMIT ?'
-                    parametros.append(int(limit))
-                filas = _ejecutar_listado_productos(cursor, conexion, query, parametros)
+                time.sleep(0.05 * (intento + 1))
+                continue
+            print(f'Error en la búsqueda de productos: {e}')
+            traceback.print_exc()
+            return []
+    print(f'Error en la búsqueda de productos: {ultimo_error}')
+    return []
 
-            productos = []
-            for fila in filas:
-                d = dict(fila) if not isinstance(fila, dict) else fila
-                try:
-                    precio = float(d.get('precio_usd') or 0)
-                except (TypeError, ValueError):
-                    precio = 0.0
-                d['precio_usd'] = precio
-                d['precio_bs'] = round(precio * tasa, 2)
-                _aplicar_url_imagen_producto(d)
-                productos.append(d)
 
-            return productos
-    except Exception as e:
-        import traceback
+def _buscar_y_filtrar_productos_once(
+    palabra_clave=None,
+    categoria_nombre=None,
+    comercio_id=None,
+    limit=None,
+    orden_aleatorio=False,
+):
+    tasa = obtener_tasa_dolar() or 1.0
+    with get_db_connection(row_factory=sqlite3.Row) as conexion:
+        cursor = conexion.cursor()
 
-        print(f'Error en la búsqueda de productos: {e}')
-        traceback.print_exc()
-        return []
+        parametros = []
+        if orden_aleatorio and limit and not palabra_clave and not categoria_nombre:
+            query_ids = """
+                SELECT p.id
+                FROM comercios c
+                JOIN productos p ON p.comercio_id = c.id
+                LEFT JOIN categorias cat ON c.categoria_id = cat.id
+                WHERE 1=1
+            """ + _FILTRO_COMERCIO_PUBLICO
+            query_ids, params_ids = _aplicar_filtros_productos(
+                query_ids, [], palabra_clave, categoria_nombre, comercio_id
+            )
+            pool_size = max(int(limit) * 10, min(_POOL_MUESTRA_ALEATORIA, 400))
+            query_ids += ' ORDER BY p.id DESC LIMIT ?'
+            params_ids.append(pool_size)
+            cursor.execute(query_ids, params_ids)
+            ids = [
+                _valor_fila(fila, 'id', 0)
+                for fila in cursor.fetchall()
+                if _valor_fila(fila, 'id', 0) is not None
+            ]
+            conexion.commit()
+            if not ids:
+                return []
+            ids = random.sample(ids, min(int(limit), len(ids)))
+            placeholders = ', '.join('?' for _ in ids)
+            query = _base_query_productos_publicos()
+            query += f' AND p.id IN ({placeholders})'
+            filas = _ejecutar_listado_productos(cursor, conexion, query, ids)
+        else:
+            query = _base_query_productos_publicos()
+            query, parametros = _aplicar_filtros_productos(
+                query, parametros, palabra_clave, categoria_nombre, comercio_id
+            )
+            query += ' ORDER BY p.id DESC'
+            if limit:
+                query += ' LIMIT ?'
+                parametros.append(int(limit))
+            filas = _ejecutar_listado_productos(cursor, conexion, query, parametros)
+
+        productos = []
+        for fila in filas:
+            d = dict(fila) if not isinstance(fila, dict) else fila
+            try:
+                precio = float(d.get('precio_usd') or 0)
+            except (TypeError, ValueError):
+                precio = 0.0
+            d['precio_usd'] = precio
+            d['precio_bs'] = round(precio * tasa, 2)
+            _aplicar_url_imagen_producto(d)
+            productos.append(d)
+
+        return productos
 
 
 def obtener_producto_publico(producto_id):
@@ -650,9 +715,9 @@ def obtener_producto_publico(producto_id):
                     c.nombre AS comercio_nombre,
                     c.id AS comercio_id,
                     c.telefono AS comercio_telefono
-                FROM productos p
+                FROM comercios c
+                JOIN productos p ON p.comercio_id = c.id
                 {_SQL_JOIN_MAESTRO}
-                JOIN comercios c ON p.comercio_id = c.id
                 WHERE p.id = ? AND COALESCE(c.visible, 1) = 1
                   AND LOWER(TRIM(c.estado_pago)) IN ('activo', 'gratis')
                 """,

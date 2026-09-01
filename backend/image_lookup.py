@@ -179,7 +179,6 @@ def obtener_imagen_url_producto(producto_id):
                         = {EXPR_CODIGO_BARRAS.replace('codigo_barras', 'p.codigo_barras')}
                       AND m1.url_imagen IS NOT NULL
                       AND TRIM(BOTH FROM CAST(m1.url_imagen AS TEXT)) <> ''
-                    ORDER BY m1.updated_at DESC NULLS LAST
                     LIMIT 1
                 ) m ON TRUE
                 WHERE p.id = ?
