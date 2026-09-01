@@ -195,18 +195,23 @@ def normalizar_url_imagen(valor, default=None):
 
 def url_banner_principal(valor, default=None):
     """
-    URL del banner promocional desde configuracion_sistema o Supabase Storage.
-    Descarta /static/ local y URLs de prueba (Pexels).
+    URL del banner promocional (hero). Conserva el Pexels de compras aprobado.
     """
-    from config import url_banner_por_defecto
+    from config import DEFAULT_BANNER_URL
 
-    fallback = default if default is not None else url_banner_por_defecto()
+    fallback = default if default is not None else DEFAULT_BANNER_URL
     texto = texto_campo_imagen(valor, default=None)
     if not texto:
         return fallback
 
     lower = texto.lower()
-    if texto.startswith('/static/') or 'pexels.com' in lower:
+    if 'pexels-photo-18618233' in lower:
+        return texto
+    if texto.startswith('/static/img/hero-compras.svg'):
+        return fallback
+    if texto.startswith('/static/') or (
+        'pexels.com' in lower and '18618233' not in lower
+    ):
         return fallback
 
     almacenada = imagen_url_almacenada(texto)

@@ -35,7 +35,8 @@
 
   <header class="hero-header relative w-full overflow-hidden flex flex-col justify-between" style="height: 70vh;">
     <div class="absolute inset-0 w-full h-full">
-      <img class="w-full h-full object-cover" src="{{ banner_url or hero_local }}" alt="Compras locales" loading="eager" decoding="async" onerror="this.onerror=null;this.src='{{ hero_local }}'">
+      <img class="w-full h-full object-cover" src="{{ default_banner }}" alt="Localis"
+           onerror="this.onerror=null;this.src='{{ default_banner }}';">
     </div>
     <div class="absolute inset-0 bg-gradient-to-b from-black/60 via-black/40 to-black/70"></div>
 
@@ -63,7 +64,7 @@
 
   <section class="max-w-6xl mx-auto px-6 my-8">
     <div class="banner-destacado banner-destacado-bg rounded-2xl overflow-hidden shadow-lg relative flex flex-col md:flex-row items-center p-8 text-white gap-6 min-h-[160px]"
-         style="background-image: linear-gradient(135deg, rgba(217, 119, 6, 0.88), rgba(245, 158, 11, 0.82)), url('{{ banner_url or hero_local }}');">
+         style="background-image: linear-gradient(135deg, rgba(217, 119, 6, 0.88), rgba(245, 158, 11, 0.82)), url('{{ banner_url }}');">
       <div class="flex-1 space-y-3 text-center md:text-left relative z-10">
         <span class="bg-white/20 text-white text-[11px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">Destacado</span>
         <h4 class="font-display text-2xl md:text-3xl font-bold">Apoya lo local, vive mejor</h4>

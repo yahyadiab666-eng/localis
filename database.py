@@ -1180,12 +1180,8 @@ def _sembrar_configuracion(cursor):
 
 
 def _corregir_banner_principal_legacy(cursor):
-    """Sustituye banners de /static o URLs de prueba por la ruta de Supabase Storage."""
-    from config import url_banner_por_defecto
-
-    url_storage = url_banner_por_defecto()
-    if not url_storage:
-        return
+    """Restaura el hero de compras aprobado si el valor está vacío o es el SVG de prueba."""
+    from config import DEFAULT_BANNER_URL
 
     cursor.execute(
         """
@@ -1193,11 +1189,12 @@ def _corregir_banner_principal_legacy(cursor):
         SET valor = %s
         WHERE clave = 'banner_principal'
           AND (
-            valor LIKE '%%pexels.com%%'
-            OR TRIM(COALESCE(valor, '')) = ''
+            TRIM(COALESCE(valor, '')) = ''
+            OR valor LIKE '%%/static/img/hero-compras.svg%%'
+            OR valor LIKE '%%banners/principal.webp%%'
           )
         """,
-        (url_storage,),
+        (DEFAULT_BANNER_URL,),
     )
 
 

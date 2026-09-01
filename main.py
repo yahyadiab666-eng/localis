@@ -1,3 +1,4 @@
+import logging
 import os
 import threading
 import time
@@ -7,6 +8,27 @@ from dotenv import load_dotenv
 # override=False: en Render las variables del panel ganan.
 # Un .env local (o vacio) no debe pisar SUPABASE_URL de produccion.
 load_dotenv(override=False)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(levelname)s] %(name)s: %(message)s',
+)
+_log = logging.getLogger('localis')
+
+
+def _auditar_variables_entorno():
+    """Registra presencia de secretos sin imprimir valores."""
+    for clave in ('DATABASE_URL', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'):
+        presente = bool((os.environ.get(clave) or '').strip())
+        if presente:
+            _log.info('%s=presente', clave)
+            print(f'[Localis Config] {clave}=presente', flush=True)
+        else:
+            _log.error('%s ausente o vacia', clave)
+            print(f'[Localis Config] ERROR {clave} ausente o vacia', flush=True)
+
+
+_auditar_variables_entorno()
 
 print(
     f"[Localis] Arranque PORT={os.environ.get('PORT', '10000')} "
@@ -54,6 +76,7 @@ import sqlite3
 import psycopg2
 from authlib.integrations.flask_client import OAuth
 from config import (
+    DEFAULT_BANNER_URL,
     MAX_UPLOAD_BYTES,
     WHATSAPP_SOPORTE,
     WHATSAPP_SOPORTE_URL,
@@ -96,8 +119,6 @@ from backend.auth import obtener_o_crear_usuario_google
 from backend.diagnostics import ejecutar_diagnostico_inicio, obtener_estado_sistema
 from backend.error_handlers import registrar_manejadores_errores
 from utils.images import (
-    HERO_LOCAL,
-    PLACEHOLDER_BANNER,
     PLACEHOLDER_PRODUCTO,
     enriquecer_comercio_imagenes,
     url_hero_inicio,
@@ -212,10 +233,19 @@ def _filtro_fecha_corta(valor):
 
 @app.template_filter('url_imagen_producto')
 def _filtro_url_imagen_producto(producto):
-    """Storage persistida o placeholder local. Sin red ni catálogo maestro."""
+    """Storage persistida o placeholder. Nunca None hacia Jinja2."""
     try:
-        return url_imagen_producto_segura(producto)
+        url = url_imagen_producto_segura(producto)
+        if url:
+            return url
+        logging.getLogger('localis.images').error(
+            'Filtro url_imagen_producto sin URL usable; placeholder.'
+        )
+        return PLACEHOLDER_PRODUCTO
     except Exception:
+        logging.getLogger('localis.images').error(
+            'Filtro url_imagen_producto fallo', exc_info=True
+        )
         traceback.print_exc()
         return PLACEHOLDER_PRODUCTO
 
@@ -224,8 +254,9 @@ def _filtro_url_imagen_producto(producto):
 def _injectar_placeholders_imagen():
     return {
         'placeholder_producto': PLACEHOLDER_PRODUCTO,
-        'placeholder_banner': PLACEHOLDER_BANNER,
-        'hero_local': HERO_LOCAL,
+        'placeholder_banner': DEFAULT_BANNER_URL,
+        'hero_local': DEFAULT_BANNER_URL,
+        'default_banner': DEFAULT_BANNER_URL,
     }
 
 
@@ -629,8 +660,12 @@ def index():
         whatsapp = configs['whatsapp_soporte']
     except Exception:
         traceback.print_exc()
+        logging.getLogger('localis.images').error(
+            'Fallo al resolver banner de inicio; se usa DEFAULT_BANNER_URL',
+            exc_info=True,
+        )
         tasa_actual = obtener_tasa_dolar() or 1.0
-        banner_url = HERO_LOCAL
+        banner_url = DEFAULT_BANNER_URL
         whatsapp = WHATSAPP_SOPORTE
 
     _debug_imagenes_antes_de_render(productos, 'index')
@@ -640,8 +675,8 @@ def index():
         tasa=tasa_actual,
         q=palabra_clave,
         categoria_actual=categoria,
-        banner_url=banner_url,
-        default_banner=banner_url,
+        banner_url=banner_url or DEFAULT_BANNER_URL,
+        default_banner=DEFAULT_BANNER_URL,
         whatsapp=whatsapp,
         whatsapp_url=WHATSAPP_SOPORTE_URL,
     )
@@ -1663,7 +1698,7 @@ def panel_admin():
     tickets = obtener_bandeja_tecnica(estado_filtro=estado_filtro)
     tasa_actual = obtener_tasa_dolar()
     comercios = obtener_todos_comercios_admin(busqueda=busqueda or None)
-    banner_url = url_hero_inicio(obtener_banner_principal())
+    banner_url = url_hero_inicio(obtener_banner_principal()) or DEFAULT_BANNER_URL
     whatsapp = obtener_config('whatsapp_soporte', WHATSAPP_SOPORTE)
 
     return render_template(

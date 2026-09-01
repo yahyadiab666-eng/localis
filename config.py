@@ -17,21 +17,17 @@ PAGO_MOVIL_DEFAULT = {
 # Tamaño máximo por petición multipart (imágenes, comprobantes, CSV/Excel).
 MAX_UPLOAD_BYTES = int(os.environ.get('MAX_UPLOAD_BYTES', str(8 * 1024 * 1024)))
 
-# Banner promocional: URL dinámica de Supabase Storage (no Pexels ni /static/).
+# Banner promocional aprobado (ilustración de compras / hero).
+DEFAULT_BANNER_URL = (
+    'https://images.pexels.com/photos/18618233/pexels-photo-18618233.jpeg'
+    '?auto=compress&cs=tinysrgb&w=1920'
+)
 RUTA_BANNER_STORAGE = 'banners/principal.webp'
 
 
 def url_banner_por_defecto():
-    """URL pública del banner en el bucket de Storage. Vacío si falta SUPABASE_URL."""
-    from backend.supabase_client import construir_url_publica_storage, SUPABASE_URL
-
-    if not SUPABASE_URL:
-        return ''
-    try:
-        return construir_url_publica_storage(RUTA_BANNER_STORAGE)
-    except Exception as error:
-        print(f'[Localis] banner Storage: {type(error).__name__}: {error}')
-        return ''
+    """Hero aprobado. No depende de Storage ni de valores nulos."""
+    return DEFAULT_BANNER_URL
 
 # Diagnóstico y alertas de errores críticos
 ERROR_REPORT_EMAIL = os.environ.get('ERROR_REPORT_EMAIL', 'ydiab.t@gmail.com')
