@@ -18,7 +18,7 @@ _log = logging.getLogger('localis')
 
 def _auditar_variables_entorno():
     """Registra presencia de secretos sin imprimir valores."""
-    for clave in ('DATABASE_URL', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'):
+    for clave in ('DATABASE_URL', 'SUPABASE_URL'):
         presente = bool((os.environ.get(clave) or '').strip())
         if presente:
             _log.info('%s=presente', clave)
@@ -26,6 +26,28 @@ def _auditar_variables_entorno():
         else:
             _log.error('%s ausente o vacia', clave)
             print(f'[Localis Config] ERROR {clave} ausente o vacia', flush=True)
+    canon = (os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or '').strip()
+    typo = (os.environ.get('SUPABASE_SERVICE_ROL_KEY') or '').strip()
+    secret = (os.environ.get('SUPABASE_SECRET_KEY') or '').strip()
+    if canon:
+        _log.info('SUPABASE_SERVICE_ROLE_KEY=presente')
+        print('[Localis Config] SUPABASE_SERVICE_ROLE_KEY=presente', flush=True)
+    elif typo or secret:
+        _log.warning(
+            'SUPABASE_SERVICE_ROLE_KEY ausente; hay alias/typo. Usa el nombre exacto.'
+        )
+        print(
+            '[Localis Config] ADVERTENCIA: usa SUPABASE_SERVICE_ROLE_KEY (con E en ROLE). '
+            'Mientras tanto el catalogo opera en modo hibrido.',
+            flush=True,
+        )
+    else:
+        _log.warning('SUPABASE_SERVICE_ROLE_KEY ausente: modo hibrido (fotos oficiales)')
+        print(
+            '[Localis Config] ADVERTENCIA SUPABASE_SERVICE_ROLE_KEY ausente: '
+            'modo hibrido, el catalogo no se bloquea.',
+            flush=True,
+        )
 
 
 _auditar_variables_entorno()
@@ -50,25 +72,18 @@ from backend.supabase_client import (
     SUPABASE_BUCKET_IMAGENES,
     obtener_cliente_storage,
     supabase,
-    supabase_api_habilitado,
     supabase_storage_habilitado,
 )
 from backend.supabase_storage import (
-    SupabaseUploadError,
-    subir_bytes_a_supabase,
-    subir_imagen_a_supabase,
+    intentar_subir_bytes,
+    intentar_subir_imagen,
 )
 if supabase_storage_habilitado():
     print('Supabase Storage configurado con SUPABASE_SERVICE_ROLE_KEY.')
-elif supabase_api_habilitado():
-    print(
-        'Aviso: hay cliente API (anon) pero las subidas exigen '
-        'SUPABASE_SERVICE_ROLE_KEY. Configura la llave service_role.'
-    )
 else:
     print(
-        'Aviso: Supabase Storage no disponible; las subidas fallaran con el '
-        'error real hasta configurar SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY.'
+        'Aviso: Storage en modo hibrido (sin SUPABASE_SERVICE_ROLE_KEY valida). '
+        'El catalogo usa fotos oficiales; las subidas al bucket se omiten.'
     )
 
 import sqlite3
@@ -128,6 +143,7 @@ from utils.images import (
 from backend.image_lookup import (
     imagen_url_para_guardar,
     obtener_imagen_url_producto,
+    persistir_imagen_producto_hibrida,
 )
 from backend.db import get_db_connection
 from database import init_db, normalize_database_url
@@ -160,8 +176,6 @@ from backend.subscriptions import (
 )
 from backend.utils import (
     formatear_fecha,
-    imagen_url_almacenada,
-    imagen_url_para_persistir,
     normalizar_codigo_barras,
     normalizar_telefono_whatsapp,
     parsear_precio_form,
@@ -440,13 +454,11 @@ def procesar_imagen_subida(
     max_dimension=800,
 ):
     """
-    Subida manual obligatoria a Supabase Storage.
-    Retorna URL publica canonica del bucket; lanza SupabaseUploadError si falla.
+    Intenta Storage; si falla no lanza. Retorna (url | None, aviso | None).
     """
     if not file_storage or not getattr(file_storage, 'filename', ''):
-        return None
-
-    return subir_imagen_a_supabase(
+        return None, None
+    return intentar_subir_imagen(
         file_storage,
         prefijo=prefijo,
         carpeta=carpeta,
@@ -455,7 +467,7 @@ def procesar_imagen_subida(
 
 
 def procesar_logo_comercio(file_storage, prefijo):
-    """Logo de comercio → bucket Supabase comercios/."""
+    """Logo de comercio → bucket Supabase comercios/ (hibrido)."""
     return procesar_imagen_subida(
         file_storage,
         prefijo=prefijo,
@@ -466,16 +478,14 @@ def procesar_logo_comercio(file_storage, prefijo):
 def procesar_imagen_para_producto(
     file_storage, codigo_barras, nombre, descripcion, comercio_id
 ):
-    """Subida manual de archivo al bucket Supabase productos/."""
-    if file_storage and getattr(file_storage, 'filename', ''):
-        url = procesar_imagen_subida(
-            file_storage,
-            prefijo=f'manual_{comercio_id}',
-            carpeta='productos',
-        )
-        if url:
-            return url
-    return None
+    """Archivo a Storage o cascada oficial. Retorna (url, aviso)."""
+    return persistir_imagen_producto_hibrida(
+        file_storage=file_storage,
+        codigo_barras=codigo_barras,
+        nombre=nombre,
+        descripcion=descripcion,
+        comercio_id=comercio_id,
+    )
 
 
 def _comercio_sesion_validado():
@@ -1049,13 +1059,11 @@ def crear_comercio():
 
         logo_url = None
         if logo_archivo and logo_archivo.filename:
-            try:
-                logo_url = procesar_logo_comercio(
-                    logo_archivo, prefijo=f'logo_nuevo_{usuario_id}'
-                )
-            except SupabaseUploadError as error:
-                flash(str(error), 'error')
-                return redirect(url_for('crear_comercio'))
+            logo_url, aviso_logo = procesar_logo_comercio(
+                logo_archivo, prefijo=f'logo_nuevo_{usuario_id}'
+            )
+            if aviso_logo:
+                flash(aviso_logo, 'info')
 
         exito, resultado = registrar_comercio_completo(
             usuario_id,
@@ -1108,13 +1116,11 @@ def editar_comercio():
 
         logo_url = None
         if logo_archivo and logo_archivo.filename:
-            try:
-                logo_url = procesar_logo_comercio(
-                    logo_archivo, prefijo=f'logo_{comercio["id"]}'
-                )
-            except SupabaseUploadError as error:
-                flash(str(error), 'error')
-                return redirect(url_for('editar_comercio'))
+            logo_url, aviso_logo = procesar_logo_comercio(
+                logo_archivo, prefijo=f'logo_{comercio["id"]}'
+            )
+            if aviso_logo:
+                flash(aviso_logo, 'info')
 
         if not nombre:
             flash('El nombre del comercio es obligatorio.', 'error')
@@ -1177,31 +1183,24 @@ def nuevo_producto():
             return redirect(destino)
 
         try:
-            imagen_subida = None
-            if imagen_archivo and getattr(imagen_archivo, 'filename', ''):
-                imagen_subida = procesar_imagen_para_producto(
-                    imagen_archivo,
-                    codigo_barras,
-                    nombre,
-                    descripcion,
-                    comercio_id=comercio['id'],
-                )
-                imagen_url = imagen_url_para_persistir(imagen_subida)
-                if not imagen_url:
-                    flash(
-                        'La subida a Supabase Storage no produjo una URL canonica valida. '
-                        'Revisa los logs del servidor ([Localis Storage]).',
-                        'error',
-                    )
-                    return redirect(url_for('nuevo_producto'))
-            else:
-                imagen_url = imagen_url_para_guardar(
-                    imagen_url_form,
-                    codigo_barras,
-                )
-        except SupabaseUploadError as error:
-            flash(str(error), 'error')
-            return redirect(url_for('nuevo_producto'))
+            imagen_url, aviso_img = persistir_imagen_producto_hibrida(
+                file_storage=imagen_archivo,
+                codigo_barras=codigo_barras,
+                nombre=nombre,
+                descripcion=descripcion,
+                comercio_id=comercio['id'],
+                imagen_url_form=imagen_url_form,
+            )
+            if aviso_img:
+                flash(aviso_img, 'info')
+        except Exception as error:
+            print(f'[Localis Imagen] hibrido alta producto: {error}')
+            traceback.print_exc()
+            imagen_url = imagen_url_para_guardar(
+                imagen_url_form,
+                codigo_barras,
+                nombre=nombre,
+            )
 
         try:
             with get_db_connection() as conn:
@@ -1264,35 +1263,22 @@ def editar_producto(producto_id):
             )
             incluir_imagen = False
             if hay_archivo:
-                try:
-                    imagen_url = procesar_imagen_para_producto(
-                        imagen_archivo,
-                        codigo_barras,
-                        nombre,
-                        descripcion,
-                        comercio_id=comercio_id,
-                    )
-                except SupabaseUploadError as error:
-                    flash(str(error), 'error')
-                    return redirect(
-                        url_for('editar_producto', producto_id=producto_id)
-                    )
-                imagen_persistida = imagen_url_para_persistir(imagen_url)
-                if not imagen_persistida:
-                    flash(
-                        'La subida a Supabase Storage no produjo una URL canonica valida. '
-                        'Revisa los logs del servidor ([Localis Storage]).',
-                        'error',
-                    )
-                    return redirect(
-                        url_for('editar_producto', producto_id=producto_id)
-                    )
-                imagen_url = imagen_persistida
-                incluir_imagen = True
-            else:
+                imagen_url, aviso_img = persistir_imagen_producto_hibrida(
+                    file_storage=imagen_archivo,
+                    codigo_barras=codigo_barras,
+                    nombre=nombre,
+                    descripcion=descripcion,
+                    comercio_id=comercio_id,
+                    imagen_url_form=imagen_url_form,
+                )
+                if aviso_img:
+                    flash(aviso_img, 'info')
+                incluir_imagen = bool(imagen_url)
+            elif imagen_url_form:
                 imagen_url = imagen_url_para_guardar(
                     imagen_url_form,
                     codigo_barras,
+                    nombre=nombre,
                 )
                 incluir_imagen = bool(imagen_url)
 
@@ -1497,33 +1483,29 @@ def api_crear_producto():
     if error_precio:
         return jsonify({'error': error_precio}), 400
 
+    aviso_img = None
+    imagen_url = None
+    aviso_img = None
+    imagen_url = None
     try:
-        if imagen_archivo and getattr(imagen_archivo, 'filename', ''):
-            imagen_url = imagen_url_para_persistir(
-                procesar_imagen_para_producto(
-                    imagen_archivo,
-                    codigo_barras,
-                    nombre,
-                    descripcion,
-                    comercio_id=tienda_id,
-                )
-            )
-            if not imagen_url:
-                return jsonify(
-                    {
-                        'error': (
-                            'La subida a Supabase Storage no produjo una URL canonica valida. '
-                            'Revisa los logs del servidor ([Localis Storage]).'
-                        )
-                    }
-                ), 400
-        else:
-            imagen_url = imagen_url_para_guardar(
-                imagen_url_form,
-                codigo_barras,
-            )
-    except SupabaseUploadError as error:
-        return jsonify({'error': str(error)}), 503
+        imagen_url, aviso_img = persistir_imagen_producto_hibrida(
+            file_storage=imagen_archivo,
+            codigo_barras=codigo_barras,
+            nombre=nombre,
+            descripcion=descripcion,
+            comercio_id=tienda_id,
+            imagen_url_form=imagen_url_form,
+        )
+        if aviso_img:
+            print(f'[Localis Imagen] api producto aviso: {aviso_img}')
+    except Exception as error:
+        print(f'[Localis Imagen] api producto hibrido: {error}')
+        traceback.print_exc()
+        imagen_url = imagen_url_para_guardar(
+            imagen_url_form,
+            codigo_barras,
+            nombre=nombre,
+        )
 
     try:
         with get_db_connection() as conexion:
@@ -1545,6 +1527,7 @@ def api_crear_producto():
                 'ok': True,
                 'mensaje': 'Producto agregado con éxito.',
                 'producto_id': producto_id,
+                **({'aviso': aviso_img} if aviso_img else {}),
             }
         ), 201
     except Exception as error:
@@ -1635,6 +1618,7 @@ def api_verificar_pago():
         ), 400
 
     referencia = ocr['referencia']
+    aviso_pago = None
     comprobante_url = None
 
     try:
@@ -1644,14 +1628,16 @@ def api_verificar_pago():
             max_dimension=1920,
         )
         payload, content_type, filename = comprimido
-        comprobante_url = subir_bytes_a_supabase(
+        comprobante_url, aviso_pago = intentar_subir_bytes(
             payload,
             filename=filename,
             content_type=content_type,
             carpeta='pagos',
         )
-    except (SupabaseUploadError, ImageProcessingError) as error:
-        return jsonify({'error': str(error)}), 503
+        if aviso_pago:
+            print(f'[Localis Storage] comprobante en modo hibrido: {aviso_pago}')
+    except ImageProcessingError as error:
+        return jsonify({'error': str(error)}), 400
 
     exito, mensaje, datos = activar_suscripcion_por_comprobante(
         comercio['id'],
@@ -1676,6 +1662,7 @@ def api_verificar_pago():
         'monto_bs': datos.get('monto_bs'),
         'tasa': datos.get('tasa'),
         'comprobante_url': comprobante_url,
+        **({'aviso': aviso_pago} if aviso_pago else {}),
     }
     return jsonify(respuesta), 200
 
@@ -1725,16 +1712,19 @@ def admin_banner():
     admin_id = session.get('usuario_id')
 
     if banner_archivo and banner_archivo.filename:
-        try:
-            banner_url = procesar_imagen_subida(
-                banner_archivo,
-                prefijo='banner_app',
-                carpeta='banners',
-                max_dimension=1920,
-            )
+        banner_url, aviso_banner = procesar_imagen_subida(
+            banner_archivo,
+            prefijo='banner_app',
+            carpeta='banners',
+            max_dimension=1920,
+        )
+        if aviso_banner:
+            flash(aviso_banner, 'info')
+            exito, mensaje = False, aviso_banner
+        elif banner_url:
             exito, mensaje = actualizar_banner_principal(admin_id, banner_url)
-        except SupabaseUploadError as error:
-            exito, mensaje = False, str(error)
+        else:
+            exito, mensaje = False, 'No se pudo procesar el banner.'
     else:
         exito, mensaje = False, 'Debes seleccionar una imagen.'
 

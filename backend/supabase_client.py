@@ -61,6 +61,34 @@ def _limpiar_valor_env(valor):
     return _limpiar_texto_env(valor)
 
 
+ENV_SERVICE_ROLE = 'SUPABASE_SERVICE_ROLE_KEY'
+_ALIAS_SERVICE_ROLE = (
+    'SUPABASE_SERVICE_ROLE_KEY',
+    'SUPABASE_SECRET_KEY',
+    'SUPABASE_SERVICE_ROL_KEY',
+)
+_SERVICE_ROLE_NOMBRE_TYPO = False
+_SERVICE_ROLE_NOMBRE_LEIDO = ENV_SERVICE_ROLE
+
+
+def _leer_clave_service_role_entorno():
+    """Lee la llave de servicio. Nombre canónico: SUPABASE_SERVICE_ROLE_KEY."""
+    global _SERVICE_ROLE_NOMBRE_TYPO, _SERVICE_ROLE_NOMBRE_LEIDO
+    for nombre in _ALIAS_SERVICE_ROLE:
+        valor = _limpiar_valor_env(os.getenv(nombre))
+        if not valor:
+            continue
+        _SERVICE_ROLE_NOMBRE_LEIDO = nombre
+        if nombre != ENV_SERVICE_ROLE:
+            _SERVICE_ROLE_NOMBRE_TYPO = True
+            print(
+                f'[Localis Supabase] ADVERTENCIA: se leyo {nombre}. '
+                f'Renombrala a {ENV_SERVICE_ROLE} en .env y en Render.'
+            )
+        return valor
+    return ''
+
+
 def _extraer_host_desde_url(url):
     """Host sin puerto (logs y comparación de URLs de Storage)."""
     if not url:
@@ -171,13 +199,14 @@ def _imprimir_estado_supabase():
             clave_msg = 'fallo al crear cliente service_role'
         print(
             f'{prefijo} Storage no disponible ({clave_msg}). '
-            'Las subidas fallaran con el error real de configuracion.'
+            'Modo hibrido: el catalogo usara fotos oficiales; las subidas a Storage se omiten.'
         )
         if _SERVICE_ROLE_RECHAZADA:
             print(
-                f'{prefijo} ERROR CRITICO: la variable SUPABASE_SERVICE_ROLE_KEY fue '
-                f'rechazada (jwt_role={_SERVICE_ROLE_ROL_CRUDO or "desconocido"}). '
-                'En Render reemplazala por Dashboard -> Settings -> API -> service_role.'
+                f'{prefijo} ADVERTENCIA: {ENV_SERVICE_ROLE} fue rechazada '
+                f'(jwt_role={_SERVICE_ROLE_ROL_CRUDO or "desconocido"}). '
+                f'En Render usa Dashboard -> Settings -> API -> service_role. '
+                f'Nombre exacto: {ENV_SERVICE_ROLE}.'
             )
     if supabase:
         print(f'{prefijo} Cliente API (anon/publishable) disponible para PostgREST.')
@@ -201,19 +230,7 @@ SUPABASE_URL_ERRORES = list(_URL_INFO.errores)
 SUPABASE_KEY = _limpiar_valor_env(os.getenv('SUPABASE_KEY')) or _limpiar_valor_env(
     os.getenv('SUPABASE_ANON_KEY')
 )
-SUPABASE_SERVICE_ROLE_KEY = _limpiar_valor_env(
-    os.getenv('SUPABASE_SERVICE_ROLE_KEY')
-) or _limpiar_valor_env(os.getenv('SUPABASE_SECRET_KEY'))
-_SERVICE_ROLE_NOMBRE_TYPO = False
-_typo_service_rol = _limpiar_valor_env(os.getenv('SUPABASE_SERVICE_ROL_KEY'))
-if not SUPABASE_SERVICE_ROLE_KEY and _typo_service_rol:
-    _SERVICE_ROLE_NOMBRE_TYPO = True
-    print(
-        '[Localis Supabase] ERROR CRITICO: la variable se llama SUPABASE_SERVICE_ROL_KEY '
-        '(falta la E de ROLE). Renombrala a SUPABASE_SERVICE_ROLE_KEY en .env y en Render. '
-        'Mientras tanto se usara ese valor.'
-    )
-    SUPABASE_SERVICE_ROLE_KEY = _typo_service_rol
+SUPABASE_SERVICE_ROLE_KEY = _leer_clave_service_role_entorno()
 SUPABASE_BUCKET_IMAGENES = _limpiar_valor_env(os.getenv('SUPABASE_BUCKET_IMAGENES')) or 'imagenes'
 
 _SERVICE_ROLE_RECHAZADA = False
@@ -222,25 +239,24 @@ _SERVICE_ROLE_ROL_CRUDO = _rol_claim_jwt(SUPABASE_SERVICE_ROLE_KEY)
 if SUPABASE_KEY and SUPABASE_SERVICE_ROLE_KEY and SUPABASE_KEY == SUPABASE_SERVICE_ROLE_KEY:
     if not clave_es_service_role(SUPABASE_SERVICE_ROLE_KEY):
         print(
-            '[Localis Supabase] ERROR CRITICO: SUPABASE_SERVICE_ROLE_KEY es identica a '
-            'SUPABASE_KEY (anon). En Render pegaste la llave publica en el campo de service_role. '
-            'Dashboard -> Settings -> API -> service_role (secret). Las subidas daran 403 RLS.'
+            f'[Localis Supabase] ADVERTENCIA: {ENV_SERVICE_ROLE} es identica a '
+            'SUPABASE_KEY (anon). Modo hibrido: el catalogo sigue con fotos oficiales; '
+            'no se sube al bucket. Dashboard -> Settings -> API -> service_role (secret).'
         )
         _SERVICE_ROLE_RECHAZADA = True
         SUPABASE_SERVICE_ROLE_KEY = ''
     else:
         print(
-            '[Localis Supabase] ADVERTENCIA: SUPABASE_KEY y SUPABASE_SERVICE_ROLE_KEY son '
+            f'[Localis Supabase] ADVERTENCIA: SUPABASE_KEY y {ENV_SERVICE_ROLE} son '
             'la misma llave service_role. Funciona para Storage; deja SUPABASE_KEY como anon.'
         )
 
 if SUPABASE_SERVICE_ROLE_KEY and not clave_es_service_role(SUPABASE_SERVICE_ROLE_KEY):
     rol_detectado = _SERVICE_ROLE_ROL_CRUDO or 'desconocido'
     print(
-        f'[Localis Supabase] ERROR CRITICO: SUPABASE_SERVICE_ROLE_KEY tiene jwt_role='
-        f'{rol_detectado!r}, se esperaba service_role. '
-        'Esa variable debe ser la llave secreta (JWT role=service_role o sb_secret_), '
-        'nunca la anon/publishable. Storage devolvera 403 (RLS) y imagen_url=None.'
+        f'[Localis Supabase] ADVERTENCIA: {ENV_SERVICE_ROLE} tiene jwt_role='
+        f'{rol_detectado!r}, se esperaba service_role. Modo hibrido activo: '
+        'el catalogo no se bloquea; las subidas a Storage se omiten hasta corregir la llave.'
     )
     _SERVICE_ROLE_RECHAZADA = True
     SUPABASE_SERVICE_ROLE_KEY = ''
@@ -282,6 +298,9 @@ def auditar_claves_supabase() -> dict:
         ),
         'claves_identicas': identicas,
         'nombre_variable_typo': typo_nombre,
+        'nombre_env_canonico': ENV_SERVICE_ROLE,
+        'nombre_env_leido': _SERVICE_ROLE_NOMBRE_LEIDO,
+        'modo_hibrido': not service_ok,
         'service_ok': service_ok,
         'service_rechazada_al_iniciar': _SERVICE_ROLE_RECHAZADA,
         'storage_cliente_ok': supabase_storage_admin is not None,

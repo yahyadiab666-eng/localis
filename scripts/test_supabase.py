@@ -46,7 +46,10 @@ def _imprimir_auditoria(informe: dict) -> None:
     print(f"  Service jwt_role:          {informe.get('service_jwt_role')}")
     print(f"  Claves identicas:          {informe.get('claves_identicas')}")
     print(f"  Typo ROL (falta E):        {informe.get('nombre_variable_typo')}")
+    print(f"  Nombre env leido:          {informe.get('nombre_env_leido')}")
+    print(f"  Nombre canonico:           {informe.get('nombre_env_canonico')}")
     print(f"  Service OK:                {informe.get('service_ok')}")
+    print(f"  Modo hibrido:              {informe.get('modo_hibrido')}")
     print(f"  Rechazada al iniciar:      {informe.get('service_rechazada_al_iniciar')}")
     print(f"  Cliente Storage OK:        {informe.get('storage_cliente_ok')}")
     print(f"  Bucket:                    {informe.get('bucket')}")
@@ -209,6 +212,52 @@ def _probar_head_imagenes() -> tuple[bool, str]:
     return True, f'{len(urls)} URL(s) responden HTTP < 400'
 
 
+def _probar_integridad_sin_urls_quemadas() -> tuple[bool, str]:
+    from backend.catalogo_maestro import IMAGENES_CATALOGO_SEMILLA
+
+    if IMAGENES_CATALOGO_SEMILLA:
+        claves = list(IMAGENES_CATALOGO_SEMILLA)[:5]
+        return False, f'IMAGENES_CATALOGO_SEMILLA no esta vacia: {claves}'
+    prohibido = 'openfoodfacts.org/images/products/'
+    toca = []
+    for rel in (
+        'backend/image_manager.py',
+        'backend/image_lookup.py',
+        'backend/catalogo_maestro.py',
+        'backend/stores.py',
+        'utils/images.py',
+        'main.py',
+    ):
+        ruta = RAIZ / rel
+        if not ruta.is_file():
+            continue
+        texto = ruta.read_text(encoding='utf-8')
+        if prohibido in texto:
+            toca.append(rel)
+    if toca:
+        return False, f'URL de producto OFF quemada en {toca}'
+    return True, 'semilla vacia y sin URLs de producto hardcodeadas'
+
+
+def _probar_hibrido_no_lanza() -> tuple[bool, str]:
+    from backend.image_lookup import persistir_imagen_producto_hibrida
+    from backend.supabase_storage import intentar_subir_imagen
+
+    try:
+        url_vacio, aviso_vacio = intentar_subir_imagen(None)
+        if url_vacio is not None or aviso_vacio is not None:
+            return False, 'intentar_subir_imagen(None) debio ser (None, None)'
+        url, aviso = persistir_imagen_producto_hibrida(
+            file_storage=None,
+            codigo_barras=None,
+            nombre=None,
+        )
+        del url, aviso
+        return True, 'intentar_subir / persistir hibrido no lanzan sin Storage'
+    except Exception as error:
+        return False, f'{type(error).__name__}: {error}'
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description='Auditoria local de Supabase para Localis')
     parser.add_argument(
@@ -241,20 +290,28 @@ def main() -> int:
 
     if not informe.get('service_ok'):
         rol = informe.get('service_jwt_role') or 'ausente'
-        fallos.append(
-            f'SUPABASE_SERVICE_ROLE_KEY no es service_role (jwt_role={rol}). '
-            'En Render: Dashboard -> Settings -> API -> copia service_role (secret), '
-            'no anon/publishable. Reinicia el servicio tras cambiar la variable.'
+        print(
+            f'\n=== Modo hibrido (Storage omitido) ===\n'
+            f'  jwt_role={rol} nombre_leido={informe.get("nombre_env_leido")} '
+            f'(canonico={informe.get("nombre_env_canonico")}). '
+            'El catalogo no se bloquea.'
         )
         if informe.get('nombre_variable_typo'):
-            fallos.append(
-                'La variable local/Render se llama SUPABASE_SERVICE_ROL_KEY (falta la E). '
-                'Renombrala a SUPABASE_SERVICE_ROLE_KEY.'
+            print(
+                '  ADVERTENCIA: renombra SUPABASE_SERVICE_ROL_KEY a SUPABASE_SERVICE_ROLE_KEY.'
             )
-        if informe.get('claves_identicas'):
-            fallos.append(
-                'SUPABASE_SERVICE_ROLE_KEY es identica a SUPABASE_KEY (anon pegada dos veces).'
-            )
+
+    print('\n=== Integridad (cero URLs quemadas) ===')
+    ok_int, det_int = _probar_integridad_sin_urls_quemadas()
+    print(f'  {det_int}')
+    if not ok_int:
+        fallos.append(f'Integridad: {det_int}')
+
+    print('\n=== Hibrido no interrumpe ===')
+    ok_hib, det_hib = _probar_hibrido_no_lanza()
+    print(f'  {det_hib}')
+    if not ok_hib:
+        fallos.append(f'Hibrido: {det_hib}')
 
     print('\n=== Bucket imagenes (GET) ===')
     if informe.get('service_ok'):
@@ -263,13 +320,13 @@ def main() -> int:
         if not ok_bucket:
             fallos.append(f'Listado bucket: {detalle_bucket}')
     else:
-        print('  omitido: no hay service_role valida (las subidas manuales seguiran en 403)')
+        print('  omitido: modo hibrido (sin service_role; catalogo oficial sigue)')
 
     print('\n=== Subida probe al bucket imagenes ===')
     if args.sin_subida:
         print('  omitida (--sin-subida)')
     elif not informe.get('service_ok'):
-        print('  omitida: no hay service_role valida')
+        print('  omitida: modo hibrido, sin service_role valida')
     else:
         ok_subida, detalle_subida = _probar_subida()
         print(f'  {detalle_subida}')
@@ -304,7 +361,7 @@ def main() -> int:
             print(f'  - {item}')
         return 1
 
-    print('RESULTADO: OK (catalogo con URLs operativas; Storage service_role listo si la llave es valida)')
+    print('RESULTADO: OK (catalogo dinamico; Storage hibrido no bloquea)')
     return 0
 
 

@@ -1,8 +1,8 @@
 """
-Subida de archivos a Supabase Storage (obligatorio en produccion).
+Subida de archivos a Supabase Storage (modo hibrido).
 
-- URLs externas / catalogo maestro -> texto https en PostgreSQL.
-- Archivos subidos -> Supabase Storage con SUPABASE_SERVICE_ROLE_KEY (nunca anon).
+- Con SUPABASE_SERVICE_ROLE_KEY valida: sube al bucket imagenes.
+- Sin llave o ante 403 RLS: no bloquea; el caller usa foto oficial / existente.
 """
 
 from urllib.parse import quote
@@ -32,6 +32,10 @@ from backend.supabase_client import (
 from backend.utils import url_imagen_subida_storage_valida
 
 LOG_PREFIX = '[Localis Storage]'
+AVISO_HIBRIDO_USUARIO = (
+    'La foto no se pudo guardar en Storage. El catalogo seguira con la imagen '
+    'oficial o la que ya tenia el producto. Revisa SUPABASE_SERVICE_ROLE_KEY.'
+)
 
 
 class SupabaseUploadError(Exception):
@@ -266,6 +270,69 @@ def _persistir_en_supabase(data, filename, content_type, carpeta, supabase_clien
 
 # Alias interno usado por scripts de prueba
 _persistir_con_respaldo = _persistir_en_supabase
+
+
+def intentar_subir_imagen(
+    file_storage,
+    supabase_client=None,
+    prefijo='img',
+    carpeta='comercios',
+    max_dimension=800,
+):
+    """
+    Subida hibrida: (url, None) si Storage responde; (None, aviso) si falta
+    service_role o hay 403. Nunca lanza hacia la ruta HTTP.
+    """
+    if not file_storage or not getattr(file_storage, 'filename', ''):
+        return None, None
+    try:
+        url = subir_imagen_con_respaldo(
+            file_storage,
+            supabase_client=supabase_client,
+            prefijo=prefijo,
+            carpeta=carpeta,
+            max_dimension=max_dimension,
+        )
+        return url, None
+    except SupabaseUploadError as error:
+        print(f'{LOG_PREFIX} modo hibrido, subida omitida: {error}')
+        return None, AVISO_HIBRIDO_USUARIO
+    except Exception as error:
+        print(
+            f'{LOG_PREFIX} modo hibrido, error inesperado: '
+            f'{type(error).__name__}: {error}'
+        )
+        return None, AVISO_HIBRIDO_USUARIO
+
+
+def intentar_subir_bytes(
+    data,
+    filename,
+    supabase_client=None,
+    content_type='image/webp',
+    carpeta='pagos',
+):
+    """Igual que intentar_subir_imagen para bytes (comprobantes). No lanza."""
+    if not data:
+        return None, AVISO_HIBRIDO_USUARIO
+    try:
+        url = subir_bytes_con_respaldo(
+            data,
+            filename=filename,
+            supabase_client=supabase_client,
+            content_type=content_type,
+            carpeta=carpeta,
+        )
+        return url, None
+    except SupabaseUploadError as error:
+        print(f'{LOG_PREFIX} modo hibrido, bytes omitidos: {error}')
+        return None, AVISO_HIBRIDO_USUARIO
+    except Exception as error:
+        print(
+            f'{LOG_PREFIX} modo hibrido, error inesperado bytes: '
+            f'{type(error).__name__}: {error}'
+        )
+        return None, AVISO_HIBRIDO_USUARIO
 
 
 def subir_imagen_con_respaldo(

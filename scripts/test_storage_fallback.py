@@ -11,7 +11,11 @@ if str(RAIZ) not in sys.path:
 
 def main():
     from backend.supabase_client import SUPABASE_URL, construir_url_publica_storage
-    from backend.supabase_storage import SupabaseUploadError, _persistir_con_respaldo
+    from backend.supabase_storage import (
+        SupabaseUploadError,
+        _persistir_con_respaldo,
+        intentar_subir_imagen,
+    )
     from backend.utils import imagen_url_almacenada, url_imagen_subida_storage_valida
 
     errores = []
@@ -56,6 +60,13 @@ def main():
     except Exception as error:
         errores.append(f'_persistir_con_respaldo sin Supabase: {type(error).__name__}: {error}')
 
+    try:
+        url_h, aviso_h = intentar_subir_imagen(None)
+        if url_h is not None or aviso_h is not None:
+            errores.append('intentar_subir_imagen(None) debe devolver (None, None)')
+    except Exception as error:
+        errores.append(f'modo hibrido lanzo: {type(error).__name__}: {error}')
+
     if errores:
         print('FALLO integridad storage:')
         for item in errores:
@@ -64,7 +75,7 @@ def main():
 
     print(
         'OK integridad storage: URL canonica valida, case-insensitive OK, '
-        'sin cliente lanza SupabaseUploadError.'
+        'bajo nivel lanza SupabaseUploadError, hibrido no interrumpe.'
     )
     return 0
 

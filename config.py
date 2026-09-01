@@ -101,12 +101,24 @@ def validar_config_arranque():
             advertencias.append(
                 'GOOGLE_CLIENT_ID no configurado: el inicio de sesión con Google no funcionará.'
             )
-        if not (os.environ.get('SUPABASE_URL') or '').strip() or not (
-            os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or ''
-        ).strip():
+        if not (os.environ.get('SUPABASE_URL') or '').strip():
             advertencias.append(
-                'SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY no configurados: las subidas a '
-                'Storage fallaran hasta definir la llave service_role en Render.'
+                'SUPABASE_URL no configurada: las subidas a Storage se omiten '
+                '(modo hibrido: el catalogo usa fotos oficiales).'
+            )
+        elif not (
+            (os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or '').strip()
+            or (os.environ.get('SUPABASE_SECRET_KEY') or '').strip()
+            or (os.environ.get('SUPABASE_SERVICE_ROL_KEY') or '').strip()
+        ):
+            advertencias.append(
+                'SUPABASE_SERVICE_ROLE_KEY no configurada: modo hibrido '
+                '(catalogo oficial sin subir al bucket). Nombre exacto con E en ROLE.'
+            )
+        elif not (os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or '').strip():
+            advertencias.append(
+                'Renombra la llave a SUPABASE_SERVICE_ROLE_KEY (nombre exacto). '
+                'El catalogo opera en modo hibrido hasta entonces.'
             )
         else:
             from backend.supabase_client import obtener_diagnostico_supabase
@@ -129,12 +141,14 @@ def validar_config_arranque():
             advertencias.append(
                 'LOCALIS_SECRET_KEY no definida: usando clave de desarrollo (no usar en producción).'
             )
-        if not (os.environ.get('SUPABASE_URL') or '').strip() or not (
-            os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or ''
-        ).strip():
+        if not (os.environ.get('SUPABASE_URL') or '').strip():
             advertencias.append(
-                'SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY no configurados: las subidas a '
-                'Storage fallaran; el catalogo maestro usara PostgreSQL (DATABASE_URL).'
+                'SUPABASE_URL no configurada: modo hibrido (fotos oficiales sin Storage).'
+            )
+        elif not (os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or '').strip():
+            advertencias.append(
+                'SUPABASE_SERVICE_ROLE_KEY no configurada (nombre exacto, con E en ROLE): '
+                'modo hibrido; el catalogo no se bloquea.'
             )
         else:
             from backend.supabase_client import obtener_diagnostico_supabase

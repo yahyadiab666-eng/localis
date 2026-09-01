@@ -82,18 +82,62 @@ def imagen_url_para_catalogo(imagen_url=None, codigo_barras=None):
         return '/static/img/placeholder-producto.svg'
 
 
-def imagen_url_para_guardar(imagen_manual=None, codigo_barras=None):
-    """
-    URL a persistir en productos.imagen_url (solo Storage).
-    """
+def imagen_url_para_guardar(imagen_manual=None, codigo_barras=None, nombre=None):
+    """URL a persistir: Storage, catálogo oficial o maestro. None si no hay foto."""
     try:
         persistida = imagen_url_para_persistir(imagen_manual)
         if persistida:
             return persistida
-        return _respaldo_en_cascada(codigo_barras)
+        return resolver_imagen_escritura(
+            imagen_manual=imagen_manual,
+            codigo_barras=codigo_barras,
+            nombre=nombre,
+            buscar_oficial=True,
+        ) or _respaldo_en_cascada(codigo_barras)
     except Exception as error:
         _registrar_error_imagen('imagen_url_para_guardar', error)
         return None
+
+
+def persistir_imagen_producto_hibrida(
+    file_storage=None,
+    codigo_barras=None,
+    nombre=None,
+    descripcion=None,
+    comercio_id=None,
+    imagen_url_form=None,
+    existente=None,
+):
+    """
+    Storage si hay service_role; si 403 o no hay llave, cascada oficial.
+    Retorna (url, aviso). Nunca lanza. No interrumpe el alta/edicion.
+    """
+    del descripcion
+    aviso = None
+    url_storage = None
+    if file_storage and getattr(file_storage, 'filename', ''):
+        try:
+            from backend.supabase_storage import intentar_subir_imagen
+
+            url_storage, aviso = intentar_subir_imagen(
+                file_storage,
+                prefijo=f'manual_{comercio_id or "prod"}',
+                carpeta='productos',
+            )
+        except Exception as error:
+            _registrar_error_imagen('hibrido subida producto', error)
+            from backend.supabase_storage import AVISO_HIBRIDO_USUARIO
+
+            aviso = AVISO_HIBRIDO_USUARIO
+    persistida = imagen_url_para_persistir(url_storage)
+    if persistida:
+        return persistida, aviso
+    respaldo = imagen_url_para_guardar(
+        imagen_url_form,
+        codigo_barras,
+        nombre=nombre,
+    ) or existente
+    return respaldo, aviso
 
 
 def url_imagen_con_respaldo(imagen_url=None, codigo_barras=None):
