@@ -49,19 +49,47 @@ def _respaldo_en_cascada(codigo_barras):
         return None
 
 
+def _categoria_de_comercio(comercio_id):
+    if not comercio_id:
+        return None
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT cat.nombre
+                FROM comercios c
+                LEFT JOIN categorias cat ON cat.id = c.categoria_id
+                WHERE c.id = ?
+                """,
+                (int(comercio_id),),
+            )
+            fila = cursor.fetchone()
+        if not fila:
+            return None
+        if isinstance(fila, dict):
+            return fila.get('nombre')
+        return fila[0]
+    except Exception as error:
+        _registrar_error_imagen('categoria comercio', error)
+        return None
+
+
 def _resolver_url_escritura(
     imagen_url=None,
     codigo_barras=None,
     mapa_maestro=None,
     nombre=None,
+    categoria=None,
 ):
-    """Resolución al crear/importar: manual Storage → catálogo maestro → OFF."""
+    """Resolución al crear/importar: manual Storage → catálogo maestro → cascada."""
     try:
         return resolver_imagen_escritura(
             imagen_manual=imagen_url,
             codigo_barras=codigo_barras,
             mapa_maestro=mapa_maestro,
             nombre=nombre,
+            categoria=categoria,
         )
     except Exception as error:
         _registrar_error_imagen('resolver escritura', error)
@@ -83,7 +111,9 @@ def imagen_url_para_catalogo(imagen_url=None, codigo_barras=None):
         return '/static/img/placeholder-producto.svg'
 
 
-def imagen_url_para_guardar(imagen_manual=None, codigo_barras=None, nombre=None):
+def imagen_url_para_guardar(
+    imagen_manual=None, codigo_barras=None, nombre=None, categoria=None
+):
     """URL a persistir: Storage, catálogo oficial o maestro. None si no hay foto."""
     try:
         persistida = imagen_url_para_persistir(imagen_manual)
@@ -93,6 +123,7 @@ def imagen_url_para_guardar(imagen_manual=None, codigo_barras=None, nombre=None)
             imagen_manual=imagen_manual,
             codigo_barras=codigo_barras,
             nombre=nombre,
+            categoria=categoria,
             buscar_oficial=True,
         ) or _respaldo_en_cascada(codigo_barras)
     except Exception as error:
@@ -142,6 +173,7 @@ def persistir_imagen_producto_hibrida(
         imagen_url_form,
         codigo_barras,
         nombre=nombre,
+        categoria=_categoria_de_comercio(comercio_id),
     ) or existente
     return respaldo, aviso
 
@@ -399,6 +431,7 @@ def _asociar_imagenes_inventario(comercio_id):
                 codigo_barras=prod.get('codigo_barras'),
                 mapa_maestro=mapa_maestro,
                 nombre=prod.get('nombre'),
+                categoria=_categoria_de_comercio(comercio_id),
                 buscar_oficial=True,
             )
             if not url_final:
@@ -464,8 +497,11 @@ def rellenar_imagenes_catalogo():
             cursor = conexion.cursor()
             cursor.execute(
                 """
-                SELECT id, nombre, codigo_barras, imagen_url
-                FROM productos
+                SELECT p.id, p.nombre, p.codigo_barras, p.imagen_url,
+                       cat.nombre AS categoria_nombre
+                FROM productos p
+                JOIN comercios c ON c.id = p.comercio_id
+                LEFT JOIN categorias cat ON cat.id = c.categoria_id
                 """
             )
             productos = [dict(fila) for fila in cursor.fetchall()]
@@ -504,6 +540,7 @@ def rellenar_imagenes_catalogo():
                 imagen_manual=prod.get('imagen_url'),
                 codigo_barras=prod.get('codigo_barras'),
                 nombre=prod.get('nombre'),
+                categoria=prod.get('categoria_nombre'),
                 buscar_oficial=True,
             )
             if not url_final:

@@ -2,10 +2,10 @@
 Gestión centralizada de imágenes para Localis.
 
 Flujo:
-1. Catálogo maestro Supabase (cache permanente por código de barras)
-2. Catálogos oficiales (OpenFoodFacts por EAN) con filtro de calidad
-3. Optimización wsrv.nl + persistencia automática en catálogo maestro
-4. None si no hay imagen apta (sin placeholder genérico)
+1. Catálogo maestro (cache por código de barras)
+2. Cascada multifuente según categoría (Food / Products / Beauty Facts, Wikimedia)
+3. Filtro de calidad visual (resolución, proporción, nitidez)
+4. Espejo a Storage si hay service_role; si no, URL oficial persistida
 """
 
 import socket
@@ -20,6 +20,22 @@ from backend.catalogo_maestro import (
     imagen_maestro_por_codigo,
     mapa_imagenes_maestro,
 )
+from backend.image_quality import (
+    MAX_BYTES_INSPECCION,
+    MIN_LADO_PX,
+    evaluar_imagen_bytes,
+    metadatos_pasan_umbral,
+    registrar_rechazo,
+)
+from backend.image_sources import (
+    FAMILIA_ALIMENTOS,
+    buscar_wikimedia,
+    clasificar_familia,
+    fuentes_para_familia,
+    hits_por_nombre,
+    producto_por_codigo,
+    usa_wikimedia,
+)
 from backend.utils import (
     imagen_url_almacenada,
     normalizar_codigo_barras,
@@ -29,17 +45,14 @@ from backend.utils import (
 )
 
 _USER_AGENT = 'LocalisApp/1.0 (Localis; contacto@localis.app)'
-_OFF_API = 'https://world.openfoodfacts.org/api/v2/product/{codigo}.json'
-_OFF_SEARCH = 'https://search.openfoodfacts.org/search'
-_WSRV_ANCHO = 300
-_WSRV_ALTO = 300
-_WSRV_FIT = 'cover'
+_WSRV_ANCHO = 400
+_WSRV_ALTO = 400
+_WSRV_FIT = 'contain'
 _WSRV_FORMATO = 'webp'
-_WSRV_CALIDAD = 80
+_WSRV_CALIDAD = 82
 _PAUSA_OFF_SEG = 0.12
 _OFF_TIMEOUT_SEG = 4
 _LOG_IMAGEN = '[Localis Imagen]'
-_MIN_LADO_PX = 200
 _STOP_NOMBRE = frozenset({
     'de', 'la', 'el', 'los', 'las', 'del', 'y', 'en', 'con',
     'kg', 'g', 'l', 'ml', 'un', 'una', 'refresco',
@@ -62,6 +75,11 @@ _HOSTS_OFICIALES = (
     'openfoodfacts.org',
     'static.openfoodfacts.org',
     'images.openfoodfacts.org',
+    'openproductsfacts.org',
+    'openbeautyfacts.org',
+    'openpetfoodfacts.org',
+    'upload.wikimedia.org',
+    'wikipedia.org',
 )
 
 _PATRONES_RECHAZO = (
@@ -105,8 +123,11 @@ def _http_get_imagen(url, headers=None):
         return None
 
 
+_CALIDAD_CACHE = {}
+
+
 def optimizar_url_wsrv(url_original):
-    """Proxy WebP vía wsrv.nl: 300×300, cover, q=80."""
+    """Proxy WebP vía wsrv.nl: 400×400 contain sobre fondo blanco."""
     if not url_original or not str(url_original).startswith('http'):
         return None
     if 'wsrv.nl' in str(url_original).lower():
@@ -120,7 +141,7 @@ def optimizar_url_wsrv(url_original):
     return (
         f'https://wsrv.nl/?url={url_enc}'
         f'&w={_WSRV_ANCHO}&h={_WSRV_ALTO}&fit={_WSRV_FIT}'
-        f'&output={_WSRV_FORMATO}&q={_WSRV_CALIDAD}'
+        f'&cbg=white&output={_WSRV_FORMATO}&q={_WSRV_CALIDAD}'
     )
 
 
@@ -134,23 +155,70 @@ def _url_manual_valida(imagen_manual):
 
 
 def _url_pasa_filtro_calidad(url, ancho=None, alto=None):
-    """Descarta miniaturas, SVG, placeholders y URLs sospechosas."""
+    """Descarta miniaturas, SVG, placeholders y URLs fuera de catálogos oficiales."""
     if not url or not str(url).startswith('https://'):
         return False
     lower = str(url).lower()
     if any(patron in lower for patron in _PATRONES_RECHAZO):
         return False
-    if ancho is not None and alto is not None:
-        try:
-            if int(ancho) < _MIN_LADO_PX or int(alto) < _MIN_LADO_PX:
-                return False
-        except (TypeError, ValueError):
-            pass
+    meta = metadatos_pasan_umbral(ancho, alto, min_lado=MIN_LADO_PX)
+    if meta is False:
+        return False
     return any(host in lower for host in _HOSTS_OFICIALES)
 
 
+def _inspeccionar_bytes_url(url):
+    """Descarga acotada y evalúa nitidez/resolución. None si no se pudo leer."""
+    cached = _CALIDAD_CACHE.get(url)
+    if cached is not None:
+        return cached
+    respuesta = _http_get_imagen(url)
+    if respuesta is None or respuesta.status_code != 200:
+        _CALIDAD_CACHE[url] = False
+        return False
+    data = respuesta.content or b''
+    if len(data) > MAX_BYTES_INSPECCION:
+        registrar_rechazo(url, 'descarga demasiado pesada')
+        _CALIDAD_CACHE[url] = False
+        return False
+    resultado = evaluar_imagen_bytes(data)
+    ok = bool(resultado.get('ok'))
+    if not ok:
+        registrar_rechazo(url, resultado.get('motivo'))
+    _CALIDAD_CACHE[url] = ok
+    if len(_CALIDAD_CACHE) > 256:
+        _CALIDAD_CACHE.clear()
+    return ok
+
+
+def _confirmar_url_catalogo(url, ancho=None, alto=None, inspeccionar=False):
+    """Heurística de URL + umbral de tamaño; Pillow si hace falta."""
+    if not _url_pasa_filtro_calidad(url, ancho, alto):
+        return None
+    meta = metadatos_pasan_umbral(ancho, alto)
+    if meta is False:
+        registrar_rechazo(url, f'metadatos {ancho}x{alto}')
+        return None
+    necesita_bytes = inspeccionar or meta is None
+    if 'wikimedia' in str(url).lower() or 'wikipedia' in str(url).lower():
+        necesita_bytes = True
+    if necesita_bytes and not _inspeccionar_bytes_url(url):
+        return None
+    return url_imagen_catalogo_valida(url) or url
+
+
+def _primera_url_producto_facts(producto, inspeccionar=False):
+    for url, ancho, alto in _candidatos_imagen_off(producto):
+        confirmada = _confirmar_url_catalogo(
+            url, ancho, alto, inspeccionar=inspeccionar
+        )
+        if confirmada:
+            return confirmada
+    return None
+
+
 def _candidatos_imagen_off(producto):
-    """Prioriza fotos frontales oficiales de empaque (OpenFoodFacts)."""
+    """Prioriza fotos frontales oficiales de empaque (Open Facts)."""
     if not producto:
         return []
 
@@ -182,28 +250,8 @@ def _candidatos_imagen_off(producto):
 
 
 def _buscar_openfoodfacts_por_codigo(codigo_barras):
-    """Consulta exclusiva por código EAN/UPC en OpenFoodFacts."""
-    try:
-        codigo = normalizar_codigo_barras(codigo_barras)
-        if not codigo or not codigo.isdigit() or len(codigo) < 8:
-            return None
-
-        respuesta = _http_get_imagen(_OFF_API.format(codigo=codigo))
-        if respuesta is None or respuesta.status_code != 200:
-            return None
-        datos = respuesta.json() or {}
-        if datos.get('status') != 1:
-            return None
-        producto = datos.get('product') or {}
-        if not producto.get('code') and not producto.get('id'):
-            return None
-
-        for url, ancho, alto in _candidatos_imagen_off(producto):
-            if _url_pasa_filtro_calidad(url, ancho, alto):
-                return url
-    except Exception as error:
-        _advertir_fallo_imagen('OpenFoodFacts', error)
-    return None
+    """Compat: código en Open Food Facts (primera fuente de alimentos)."""
+    return _buscar_codigo_en_fuentes(codigo_barras, FAMILIA_ALIMENTOS)
 
 
 def _slug_archivo(valor):
@@ -270,45 +318,89 @@ def _score_hit_nombre(tokens, hit):
     return 0
 
 
-def _url_imagen_hit_off(hit):
-    for campo in ('image_front_url', 'image_url'):
+def _url_imagen_hit_off(hit, inspeccionar=True):
+    for campo in ('image_front_url', 'image_url', 'image_small_url'):
         url = hit.get(campo)
-        if _url_pasa_filtro_calidad(url):
-            return url
-    return None
+        if campo == 'image_small_url':
+            continue
+        confirmada = _confirmar_url_catalogo(url, inspeccionar=inspeccionar)
+        if confirmada:
+            return confirmada
+    producto = hit.get('product') if isinstance(hit.get('product'), dict) else hit
+    return _primera_url_producto_facts(producto, inspeccionar=inspeccionar)
 
 
-def _buscar_openfoodfacts_por_nombre(nombre):
-    """Busca foto oficial por nombre comercial (search.openfoodfacts.org)."""
+def _mejor_hit_por_nombre(fuente, nombre):
     tokens = _tokens_nombre(nombre)
     if not tokens:
         return None
     consulta = ' '.join(tokens[:4])
     try:
-        respuesta = requests.get(
-            _OFF_SEARCH,
-            params={'q': consulta, 'page_size': 8},
-            headers={'User-Agent': _USER_AGENT},
-            timeout=_OFF_TIMEOUT_SEG,
-        )
-        if respuesta.status_code != 200:
-            return None
-        hits = (respuesta.json() or {}).get('hits') or []
+        hits = hits_por_nombre(fuente, consulta)
         mejor = None
         mejor_score = 0
         for hit in hits:
             score = _score_hit_nombre(tokens, hit)
             if score <= mejor_score:
                 continue
-            url = _url_imagen_hit_off(hit)
+            url = _url_imagen_hit_off(hit, inspeccionar=True)
             if not url:
                 continue
             mejor = url
             mejor_score = score
         return mejor
     except Exception as error:
-        _advertir_fallo_imagen(f'OFF nombre={nombre!r}', error)
+        _advertir_fallo_imagen(f'{fuente.get("id")} nombre={nombre!r}', error)
         return None
+
+
+def _buscar_openfoodfacts_por_nombre(nombre):
+    """Compat: búsqueda por nombre en Open Food Facts."""
+    fuentes = fuentes_para_familia(FAMILIA_ALIMENTOS)
+    if not fuentes:
+        return None
+    return _mejor_hit_por_nombre(fuentes[0], nombre)
+
+
+def _buscar_codigo_en_fuentes(codigo_barras, familia):
+    codigo = normalizar_codigo_barras(codigo_barras)
+    if not codigo or not codigo.isdigit() or len(codigo) < 8:
+        return None
+    for fuente in fuentes_para_familia(familia):
+        try:
+            producto = producto_por_codigo(fuente, codigo)
+            if not producto:
+                continue
+            url = _primera_url_producto_facts(producto, inspeccionar=False)
+            if url:
+                print(f'{_LOG_IMAGEN} codigo={codigo} fuente={fuente["id"]}')
+                return url
+        except Exception as error:
+            _advertir_fallo_imagen(f'{fuente["id"]} codigo', error)
+    return None
+
+
+def _buscar_nombre_en_fuentes(nombre, familia):
+    if not nombre:
+        return None
+    for fuente in fuentes_para_familia(familia):
+        url = _mejor_hit_por_nombre(fuente, nombre)
+        if url:
+            print(f'{_LOG_IMAGEN} nombre={nombre!r} fuente={fuente["id"]}')
+            return url
+    if usa_wikimedia(familia):
+        wiki = buscar_wikimedia(nombre)
+        if wiki:
+            url = _confirmar_url_catalogo(
+                wiki.get('url'),
+                wiki.get('ancho'),
+                wiki.get('alto'),
+                inspeccionar=True,
+            )
+            if url:
+                print(f'{_LOG_IMAGEN} nombre={nombre!r} fuente=wikimedia')
+                return url
+    return None
 
 
 def _espejar_en_storage(url, clave):
@@ -340,22 +432,23 @@ def espejar_url_oficial_en_storage(url, clave):
     return _espejar_en_storage(url, clave)
 
 
-def _descubrir_y_persistir_oficial(codigo_barras, nombre=None):
+def _descubrir_y_persistir_oficial(codigo_barras, nombre=None, categoria=None):
     """
-    Cascada: OpenFoodFacts por EAN, luego por nombre.
+    Cascada por familia: barcode en fuentes oficiales, luego nombre, luego Wikimedia.
     Espeja a Storage si hay service_role; si no, cachea la URL oficial.
     """
+    familia = clasificar_familia(nombre=nombre, categoria=categoria)
     url = None
     codigo = normalizar_codigo_barras(codigo_barras)
     if codigo:
-        url = _buscar_openfoodfacts_por_codigo(codigo)
+        url = _buscar_codigo_en_fuentes(codigo, familia)
     if not url and nombre:
-        url = _buscar_openfoodfacts_por_nombre(nombre)
+        url = _buscar_nombre_en_fuentes(nombre, familia)
     if not url and nombre:
         for token in _tokens_nombre(nombre):
             if token in _GENERIC_FOOD or len(token) < 4:
                 continue
-            url = _buscar_openfoodfacts_por_nombre(token)
+            url = _buscar_nombre_en_fuentes(token, familia)
             if url:
                 break
             if _PAUSA_OFF_SEG:
@@ -363,7 +456,7 @@ def _descubrir_y_persistir_oficial(codigo_barras, nombre=None):
     if not url:
         return None
     espejo = _espejar_en_storage(url, codigo or nombre)
-    final = url_imagen_catalogo_valida(espejo) or url_imagen_catalogo_valida(url)
+    final = url_imagen_catalogo_valida(espejo) or url_imagen_catalogo_valida(url) or url
     if final and codigo:
         try:
             guardar_imagen_maestro(codigo, final)
@@ -377,6 +470,7 @@ def resolver_imagen(
     imagen_manual=None,
     mapa_maestro=None,
     nombre=None,
+    categoria=None,
     *,
     para_escritura=False,
     buscar_oficial=True,
@@ -385,7 +479,7 @@ def resolver_imagen(
     Resuelve la imagen de un producto.
 
     para_escritura=True → None si no hay imagen (no persistir placeholder).
-    buscar_oficial=False → no consulta OpenFoodFacts (ruta crítica CSV).
+    buscar_oficial=False → no consulta APIs externas (ruta crítica CSV).
     """
     del para_escritura
     try:
@@ -408,7 +502,9 @@ def resolver_imagen(
         if not buscar_oficial:
             return None
 
-        url = _descubrir_y_persistir_oficial(codigo, nombre)
+        url = _descubrir_y_persistir_oficial(
+            codigo, nombre, categoria=categoria
+        )
         if url and codigo and mapa_maestro is not None:
             mapa_maestro[codigo] = url
         return url
@@ -422,6 +518,7 @@ def resolver_imagen_escritura(
     codigo_barras=None,
     mapa_maestro=None,
     nombre=None,
+    categoria=None,
     *,
     buscar_oficial=True,
 ):
@@ -432,6 +529,7 @@ def resolver_imagen_escritura(
             imagen_manual=imagen_manual,
             mapa_maestro=mapa_maestro,
             nombre=nombre,
+            categoria=categoria,
             para_escritura=True,
             buscar_oficial=buscar_oficial,
         )
@@ -527,4 +625,11 @@ def preparar_mapa_imagenes_importacion(productos, snapshot_imagenes=None):
 
     return completar_mapa_imagenes(
         codigos_a_resolver, mapa_maestro=mapa, buscar_oficial=False
+    )
+
+
+def descubrir_imagen_catalogo(nombre=None, categoria=None, codigo_barras=None):
+    """Punto de entrada de pruebas y alta: cascada multifuente + calidad."""
+    return _descubrir_y_persistir_oficial(
+        codigo_barras, nombre=nombre, categoria=categoria
     )

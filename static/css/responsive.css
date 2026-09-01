@@ -33,7 +33,7 @@ button.btn-touch {
   transform: scale(0.98);
 }
 
-/* Tarjetas de producto — contenedor fijo 1:1, sin desbordes ni estiramientos */
+/* Tarjetas de producto — cuadrado uniforme, foto contenida sobre fondo limpio */
 .localis-img-producto-wrap {
   width: 100%;
   height: 180px;
@@ -41,7 +41,7 @@ button.btn-touch {
   max-height: 180px;
   aspect-ratio: 1 / 1;
   overflow: hidden;
-  background: #f3f4f6;
+  background: #fffefb;
   flex-shrink: 0;
   position: relative;
 }
@@ -51,10 +51,12 @@ button.btn-touch {
   height: 100%;
   max-width: 100%;
   max-height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   object-position: center;
   display: block;
-  background: #f3f4f6;
+  padding: 0.5rem;
+  box-sizing: border-box;
+  background: #fffefb;
 }
 
 .card-producto-mobile {
@@ -66,14 +68,16 @@ button.btn-touch {
 .localis-img-producto-thumb {
   width: 40px;
   height: 40px;
-  object-fit: cover;
+  object-fit: contain;
   object-position: center;
   flex-shrink: 0;
-  background: #f3f4f6;
+  background: #fffefb;
+  padding: 2px;
+  box-sizing: border-box;
 }
 
 .localis-img-producto-wrap--vacio {
-  background: #f3f4f6;
+  background: #fffefb;
 }
 
 .localis-img-producto-wrap--vacio .localis-img-producto:not([src]) {
@@ -82,7 +86,7 @@ button.btn-touch {
 
 .localis-img-producto-thumb--vacio {
   display: inline-block;
-  background: #f3f4f6;
+  background: #fffefb;
 }
 
 img.localis-img-producto-thumb--vacio:not([src]) {

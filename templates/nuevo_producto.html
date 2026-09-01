@@ -132,7 +132,7 @@
               <div id="preview-imagen-actual" class="flex items-center gap-3 mb-2 p-2 bg-stone-50 border border-stone-200 rounded-xl">
                 <img src="{{ img_producto }}" alt="Imagen actual"
                      data-producto-id="{{ producto.id }}"
-                     class="localis-img-producto-thumb rounded-lg border border-stone-200 w-16 h-16 object-cover"
+                     class="localis-img-producto-thumb rounded-lg border border-stone-200 w-16 h-16 object-contain bg-white"
                      loading="lazy" decoding="async"
                      onerror="window.rescatarImagenProducto(this)">
                 <div class="text-xs text-stone-600">

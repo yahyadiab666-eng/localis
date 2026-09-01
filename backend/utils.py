@@ -54,6 +54,11 @@ _HOSTS_CATALOGO_OFICIAL = (
     'static.openfoodfacts.org',
     'world.openfoodfacts.org',
     'openfoodfacts.org',
+    'openproductsfacts.org',
+    'openbeautyfacts.org',
+    'openpetfoodfacts.org',
+    'upload.wikimedia.org',
+    'wikipedia.org',
 )
 
 
@@ -131,7 +136,15 @@ def url_imagen_catalogo_valida(valor):
         if any(bad in lower for bad in ('thumb', '_small', '/user/', 'avatar')):
             return None
         return texto
-    if 'wsrv.nl' in lower and 'openfoodfacts' in lower:
+    if 'wsrv.nl' in lower and any(
+        host in lower
+        for host in (
+            'openfoodfacts',
+            'openproductsfacts',
+            'openbeautyfacts',
+            'wikimedia',
+        )
+    ):
         return texto
     return None
 
