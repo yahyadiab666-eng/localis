@@ -39,9 +39,12 @@
     </div>
     <div class="absolute inset-0 bg-gradient-to-b from-black/60 via-black/40 to-black/70"></div>
 
-    <nav class="relative z-10 flex items-center justify-between px-6 py-5 max-w-6xl w-full mx-auto">
-      <a href="{{ url_for('index') }}" class="font-display text-white text-[28px] font-black tracking-tight">localis</a>
-      <a href="{{ url_for('login') }}" class="btn-touch px-4 py-2 rounded-full text-sm font-semibold transition hover:bg-amber-500" style="background: rgb(245, 158, 11); color: rgb(26, 26, 26);">Registrar comercio</a>
+    <nav class="relative z-10 flex items-center justify-between px-6 py-5 max-w-6xl w-full mx-auto gap-3">
+      <a href="{{ url_for('index') }}" class="font-display text-white text-[28px] font-black tracking-tight shrink-0">localis</a>
+      <div class="flex items-center gap-2 sm:gap-3 flex-wrap justify-end">
+        <a href="{{ url_for('como_funciona') }}" class="btn-touch px-3 py-2 rounded-full text-xs sm:text-sm font-semibold text-white/90 border border-white/25 hover:bg-white/10 transition">Cómo funciona</a>
+        <a href="{{ url_for('login') }}" class="btn-touch px-4 py-2 rounded-full text-sm font-semibold transition hover:bg-amber-500" style="background: rgb(245, 158, 11); color: rgb(26, 26, 26);">Registrar comercio</a>
+      </div>
     </nav>
 
     <div class="relative z-10 flex flex-col items-center justify-center text-center px-4 mb-16">
@@ -138,11 +141,14 @@
   </div>
 
   <footer class="w-full py-8 px-6 text-center" style="background: rgb(17, 17, 17);">
-    <p class="text-xs text-gray-400 mb-2">© 2026 Localis · Conectando comunidades con sus comercios.</p>
-    <a href="https://wa.me/584125970507" target="_blank" rel="noopener"
-       class="text-xs text-emerald-400 hover:text-emerald-300 inline-flex items-center gap-1">
-      Soporte técnico por WhatsApp
-    </a>
+    <p class="text-xs text-gray-400 mb-3">© 2026 Localis · Conectando comunidades con sus comercios.</p>
+    <div class="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-4 text-xs">
+      <a href="{{ url_for('como_funciona') }}" class="text-amber-400 hover:text-amber-300">Cómo funciona Localis</a>
+      <a href="{{ whatsapp_url }}" target="_blank" rel="noopener"
+         class="text-emerald-400 hover:text-emerald-300 inline-flex items-center gap-1">
+        Soporte técnico por WhatsApp
+      </a>
+    </div>
   </footer>
 
   <script>

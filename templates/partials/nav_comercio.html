@@ -1,4 +1,4 @@
-{# nav_activo: 'panel' | 'planes' | 'editar' #}
+{# nav_activo: 'panel' | 'planes' | 'editar' | 'ayuda' #}
 <header class="w-full bg-stone-900 border-b border-stone-800">
   <nav class="nav-comercio-top flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 max-w-6xl w-full mx-auto gap-3">
     <div class="flex items-center gap-2 sm:gap-3 min-w-0">
@@ -21,6 +21,11 @@
          class="btn-touch text-xs sm:text-sm font-medium px-2.5 py-1.5 rounded-full transition flex items-center gap-1 {% if nav_activo == 'editar' %}bg-white/10 text-white{% else %}text-stone-300 hover:text-white{% endif %}">
         <i data-lucide="settings" style="width:15px;height:15px;"></i>
         <span class="hidden sm:inline">Editar</span>
+      </a>
+      <a href="{{ url_for('como_funciona') }}"
+         class="btn-touch text-xs sm:text-sm font-medium px-2.5 py-1.5 rounded-full transition flex items-center gap-1 {% if nav_activo == 'ayuda' %}bg-emerald-500/20 text-emerald-300{% else %}text-stone-300 hover:text-white{% endif %}">
+        <i data-lucide="help-circle" style="width:15px;height:15px;"></i>
+        <span class="hidden sm:inline">Guía</span>
       </a>
       {% if comercio and comercio.id %}
       <a href="{{ url_for('tienda_publica', comercio_id=comercio.id) }}"

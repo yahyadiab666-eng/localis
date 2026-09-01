@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Localis - Cómo funciona</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}">
+  <style>
+    body { font-family: 'DM Sans', sans-serif; }
+    .font-display { font-family: 'Fraunces', serif; }
+  </style>
+</head>
+<body class="w-full min-h-screen flex flex-col guia-ayuda" style="background: rgb(254, 251, 246);">
+
+  {% if es_comerciante and comercio %}
+    {% include 'partials/nav_comercio.html' %}
+  {% else %}
+  <header class="w-full bg-stone-900 border-b border-stone-800">
+    <nav class="guia-ayuda-nav flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 max-w-6xl w-full mx-auto gap-3">
+      <a href="{{ url_for('index') }}" class="font-display text-white text-xl sm:text-[28px] font-black tracking-tight shrink-0">localis</a>
+      <div class="flex items-center gap-2 sm:gap-4 flex-wrap justify-end">
+        <a href="{{ url_for('index') }}" class="btn-touch text-xs sm:text-sm font-medium text-stone-300 hover:text-white px-2.5 py-1.5">Inicio</a>
+        <a href="{{ url_for('como_funciona') }}" class="btn-touch text-xs sm:text-sm font-medium bg-white/10 text-white px-2.5 py-1.5 rounded-full">Guía</a>
+        {% if session.get('usuario_id') %}
+        <a href="{{ url_for('panel_comercio') }}" class="btn-touch text-xs sm:text-sm font-semibold px-3 py-1.5 rounded-full" style="background: rgb(245, 158, 11); color: rgb(26, 26, 26);">Mi panel</a>
+        {% else %}
+        <a href="{{ url_for('login') }}" class="btn-touch text-xs sm:text-sm font-semibold px-3 py-1.5 rounded-full" style="background: rgb(245, 158, 11); color: rgb(26, 26, 26);">Registrar comercio</a>
+        {% endif %}
+      </div>
+    </nav>
+  </header>
+  {% endif %}
+
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-12 w-full flex-1 space-y-8 sm:space-y-10">
+
+    <header class="text-center sm:text-left space-y-3">
+      <p class="text-amber-600 text-xs font-bold uppercase tracking-wider">Centro de ayuda</p>
+      <h1 class="font-display text-3xl sm:text-4xl font-bold text-gray-900">Cómo funciona Localis</h1>
+      <p class="text-stone-600 text-sm sm:text-base max-w-2xl leading-relaxed mx-auto sm:mx-0">
+        Guía rápida para consumidores que buscan productos locales y para comercios que administran su tienda en línea.
+      </p>
+    </header>
+
+    <nav class="guia-ayuda-indice flex flex-wrap gap-2 sm:gap-3" aria-label="Secciones de la guía">
+      <a href="#usuarios" class="btn-touch inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold px-4 py-2 rounded-full bg-white border border-stone-200 text-stone-700 hover:border-amber-400 hover:text-amber-800 transition">
+        <i data-lucide="users" style="width:16px;height:16px;"></i> Para usuarios
+      </a>
+      <a href="#comercios" class="btn-touch inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold px-4 py-2 rounded-full bg-white border border-stone-200 text-stone-700 hover:border-amber-400 hover:text-amber-800 transition">
+        <i data-lucide="store" style="width:16px;height:16px;"></i> Para comercios
+      </a>
+      <a href="#soporte" class="btn-touch inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold px-4 py-2 rounded-full bg-white border border-stone-200 text-stone-700 hover:border-amber-400 hover:text-amber-800 transition">
+        <i data-lucide="life-buoy" style="width:16px;height:16px;"></i> Soporte
+      </a>
+    </nav>
+
+    <!-- Usuarios / Consumidores -->
+    <section id="usuarios" class="guia-ayuda-seccion bg-white rounded-2xl border border-stone-200/80 shadow-sm p-5 sm:p-8 space-y-5 scroll-mt-24">
+      <div class="flex items-start gap-4">
+        <div class="guia-ayuda-icono shrink-0 w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center">
+          <i data-lucide="search" style="width:24px;height:24px;"></i>
+        </div>
+        <div class="space-y-1 min-w-0">
+          <h2 class="font-display text-xl sm:text-2xl font-bold text-gray-900">Para usuarios (consumidores)</h2>
+          <p class="text-stone-500 text-sm">Encuentra comercios y productos cerca de ti en pocos pasos.</p>
+        </div>
+      </div>
+
+      <div class="guia-ayuda-pasos space-y-4">
+        <article class="guia-ayuda-paso rounded-xl border border-stone-100 bg-stone-50/80 p-4 sm:p-5">
+          <h3 class="font-bold text-gray-900 text-sm sm:text-base flex items-center gap-2">
+            <span class="guia-ayuda-numero">1</span>
+            Barra de búsqueda principal
+          </h3>
+          <p class="text-stone-600 text-sm mt-2 leading-relaxed">
+            En la página de inicio verás la <strong>barra de búsqueda</strong> principal, en la parte superior del sitio.
+            Escríbe el nombre de un comercio, un producto o una palabra clave y pulsa buscar para encontrar resultados con rapidez
+            entre todas las tiendas registradas en Localis.
+          </p>
+        </article>
+
+        <article class="guia-ayuda-paso rounded-xl border border-stone-100 bg-stone-50/80 p-4 sm:p-5">
+          <h3 class="font-bold text-gray-900 text-sm sm:text-base flex items-center gap-2">
+            <span class="guia-ayuda-numero">2</span>
+            Detalle del producto e ir a la tienda
+          </h3>
+          <p class="text-stone-600 text-sm mt-2 leading-relaxed">
+            Al presionar cualquier producto del catálogo se abrirá una <strong>ventana con la información detallada</strong>
+            del artículo: imagen, nombre, descripción, comercio y precio en USD y bolívares.
+            Desde esa vista también tendrás la <strong>opción de ir directamente a la tienda</strong> del comercio con el botón
+            <strong>«Ir a la Tienda»</strong>, para ver más productos del mismo negocio.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <!-- Comercios -->
+    <section id="comercios" class="guia-ayuda-seccion bg-white rounded-2xl border border-stone-200/80 shadow-sm p-5 sm:p-8 space-y-5 scroll-mt-24">
+      <div class="flex items-start gap-4">
+        <div class="guia-ayuda-icono shrink-0 w-12 h-12 rounded-2xl bg-stone-900 text-amber-400 flex items-center justify-center">
+          <i data-lucide="layout-dashboard" style="width:24px;height:24px;"></i>
+        </div>
+        <div class="space-y-1 min-w-0">
+          <h2 class="font-display text-xl sm:text-2xl font-bold text-gray-900">Para comercios (dueños de locales)</h2>
+          <p class="text-stone-500 text-sm">Administra tu tienda, tu plan y tu inventario desde el panel.</p>
+        </div>
+      </div>
+
+      <div class="space-y-3">
+        <h3 class="font-bold text-gray-900 text-sm sm:text-base">Botones principales del panel</h3>
+        <ul class="guia-ayuda-lista grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+          <li class="guia-ayuda-item rounded-xl border border-stone-100 p-4">
+            <span class="inline-flex items-center gap-2 font-bold text-gray-900">
+              <i data-lucide="layout-dashboard" class="text-amber-600" style="width:16px;height:16px;"></i> Panel
+            </span>
+            <p class="text-stone-600 mt-1.5 leading-relaxed">Vista general de tu comercio: perfil, inventario, importador CSV y accesos rápidos.</p>
+          </li>
+          <li class="guia-ayuda-item rounded-xl border border-stone-100 p-4">
+            <span class="inline-flex items-center gap-2 font-bold text-gray-900">
+              <i data-lucide="credit-card" class="text-amber-600" style="width:16px;height:16px;"></i> Planes
+            </span>
+            <p class="text-stone-600 mt-1.5 leading-relaxed">Consulta tu plan de pago, elige otro nivel, renueva la suscripción y verifica comprobantes de pago móvil.</p>
+          </li>
+          <li class="guia-ayuda-item rounded-xl border border-stone-100 p-4">
+            <span class="inline-flex items-center gap-2 font-bold text-gray-900">
+              <i data-lucide="settings" class="text-amber-600" style="width:16px;height:16px;"></i> Editar
+            </span>
+            <p class="text-stone-600 mt-1.5 leading-relaxed">Configuración general del comercio: nombre, logo, descripción, teléfono, dirección y enlace de Google Maps.</p>
+          </li>
+          <li class="guia-ayuda-item rounded-xl border border-stone-100 p-4">
+            <span class="inline-flex items-center gap-2 font-bold text-gray-900">
+              <i data-lucide="store" class="text-amber-600" style="width:16px;height:16px;"></i> Ver tienda
+            </span>
+            <p class="text-stone-600 mt-1.5 leading-relaxed">Abre la vitrina pública tal como la ven tus clientes en Localis.</p>
+          </li>
+          <li class="guia-ayuda-item rounded-xl border border-stone-100 p-4 sm:col-span-2">
+            <span class="inline-flex items-center gap-2 font-bold text-gray-900">
+              <i data-lucide="wallet" class="text-amber-600" style="width:16px;height:16px;"></i> Gestionar plan
+            </span>
+            <p class="text-stone-600 mt-1.5 leading-relaxed">Enlace dentro del perfil del comercio en el panel que lleva directamente a la sección de planes y pagos.</p>
+          </li>
+        </ul>
+      </div>
+
+      <div class="space-y-3 pt-2 border-t border-stone-100">
+        <h3 class="font-bold text-gray-900 text-sm sm:text-base">Dos formas de añadir productos</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <article class="guia-ayuda-paso rounded-xl border border-amber-200 bg-amber-50/50 p-4 sm:p-5">
+            <h4 class="font-bold text-amber-950 flex items-center gap-2 text-sm sm:text-base">
+              <i data-lucide="plus-circle" style="width:18px;height:18px;"></i> Forma manual
+            </h4>
+            <p class="text-stone-700 text-sm mt-2 leading-relaxed">
+              Usa el botón <strong>«Añadir producto»</strong> en el panel para cargar artículos <strong>uno por uno</strong>:
+              nombre, precio, descripción, imagen y código de barras si lo tienes.
+            </p>
+          </article>
+          <article class="guia-ayuda-paso rounded-xl border border-stone-200 bg-stone-50 p-4 sm:p-5">
+            <h4 class="font-bold text-gray-900 flex items-center gap-2 text-sm sm:text-base">
+              <i data-lucide="file-spreadsheet" style="width:18px;height:18px;"></i> Carga masiva (CSV)
+            </h4>
+            <p class="text-stone-600 text-sm mt-2 leading-relaxed">
+              En la sección <strong>Importador Inteligente</strong> sube un archivo <strong>CSV</strong> (o Excel)
+              con <strong>«Subir Archivo»</strong> para añadir muchos productos de una sola vez.
+              El sistema detecta las columnas automáticamente; necesitas al menos nombre y precio.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Soporte -->
+    <section id="soporte" class="guia-ayuda-seccion bg-gradient-to-br from-stone-900 to-stone-800 rounded-2xl p-5 sm:p-8 text-white space-y-4 scroll-mt-24">
+      <div class="flex items-center gap-3">
+        <i data-lucide="message-circle" class="text-emerald-400" style="width:28px;height:28px;"></i>
+        <h2 class="font-display text-xl sm:text-2xl font-bold">Soporte técnico</h2>
+      </div>
+      <p class="text-stone-300 text-sm leading-relaxed max-w-2xl">
+        Si tienes dudas sobre tu cuenta, tu plan o el uso de la plataforma, nuestro equipo puede ayudarte por WhatsApp.
+      </p>
+      <p class="text-amber-100 text-sm font-medium border-t border-white/10 pt-4">
+        Al final de la página hay la opción de soporte técnico.
+      </p>
+      <a href="{{ whatsapp_url }}" target="_blank" rel="noopener"
+         class="btn-touch inline-flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-stone-900 font-bold px-5 py-3 rounded-full text-sm transition">
+        <i data-lucide="phone" style="width:18px;height:18px;"></i>
+        Contactar soporte por WhatsApp
+      </a>
+    </section>
+
+  </main>
+
+  <footer class="w-full py-8 px-6 text-center guia-ayuda-footer" style="background: rgb(17, 17, 17);">
+    <p class="text-xs text-stone-500 mb-3">© 2026 Localis · Conectando comunidades con sus comercios.</p>
+    <a href="{{ whatsapp_url }}" target="_blank" rel="noopener"
+       class="btn-touch text-xs text-emerald-400 hover:text-emerald-300 inline-flex items-center gap-1.5">
+      <i data-lucide="message-circle" style="width:14px;height:14px;"></i>
+      Soporte técnico por WhatsApp
+    </a>
+  </footer>
+
+  <script>
+    lucide.createIcons();
+  </script>
+  <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
+</body>
+</html>
