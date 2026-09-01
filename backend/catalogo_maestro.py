@@ -13,7 +13,10 @@ from backend.supabase_client import (
     postgrest_http_habilitado,
     registrar_modo_catalogo_maestro,
 )
-from backend.utils import normalizar_codigo_barras, texto_campo_imagen
+from backend.utils import (
+    normalizar_codigo_barras,
+    url_imagen_subida_storage_valida,
+)
 
 TABLA_CATALOGO_MAESTRO = 'catalogo_maestro_imagenes'
 _LOTE_CONSULTA = 100
@@ -57,18 +60,16 @@ def _completar_con_semilla(mapa, codigos):
 
 
 def _url_maestro_valida(valor):
-    url = (texto_campo_imagen(valor, default=None) or '').strip()
-    if url and url.startswith('https://'):
-        return url
-    return None
+    """Solo URLs públicas del bucket Supabase Storage."""
+    return url_imagen_subida_storage_valida(valor)
 
 
-def _debug_imagen(mensaje, error=None):
-    """Solo con LOCALIS_IMAGEN_DEBUG=1; no satura la consola en producción."""
-    if os.getenv('LOCALIS_IMAGEN_DEBUG', '').strip().lower() not in ('1', 'true', 'yes'):
+def _error_imagen(mensaje, error=None):
+    """Siempre escribe el error real; no traga fallos de BD/red en silencio."""
+    if error is not None:
+        print(f'{_LOG} ERROR {mensaje}: {type(error).__name__}: {error}')
         return
-    detalle = f': {type(error).__name__}' if error is not None else ''
-    print(f'{_LOG} {mensaje}{detalle}')
+    print(f'{_LOG} ERROR {mensaje}')
 
 
 def _postgresql_directo_disponible() -> bool:
@@ -148,7 +149,7 @@ def _consultar_catalogo_supabase(codigo):
                 return url
             return None
         except Exception as error:
-            _debug_imagen(f'catalogo_maestro {nombre}', error)
+            _error_imagen(f'catalogo_maestro {nombre}', error)
             continue
     return None
 
@@ -179,18 +180,16 @@ def _resolver_en_cascada(codigo):
             if url:
                 return url
         except Exception as error:
-            _debug_imagen(nombre, error)
+            _error_imagen(nombre, error)
             continue
     return None
 
 
 def imagen_maestro_por_codigo(codigo_barras):
     """
-    URL de imagen por código de barras, en cascada:
-    1) catalogo_maestro_imagenes (Postgres / PostgREST)
-    2) IMAGENES_CATALOGO_SEMILLA en memoria (respaldo público, sin HTTP)
-    Error, timeout o vacío → siguiente fuente. Si todo falla, None.
-    Nunca propaga excepción (no rompe el render de Flask).
+    URL de imagen por código de barras:
+    1) catalogo_maestro_imagenes (solo URLs de Supabase Storage)
+    Error de BD/red se registra; vacío o fallo → None (la vista usa '').
     """
     try:
         codigo = normalizar_codigo_barras(codigo_barras)
@@ -200,10 +199,12 @@ def imagen_maestro_por_codigo(codigo_barras):
         if url:
             return url
         return _consultar_semilla_memoria(codigo)
-    except Exception:
+    except Exception as error:
+        _error_imagen(f'imagen_maestro_por_codigo({codigo_barras!r})', error)
         try:
             return _consultar_semilla_memoria(codigo_barras)
-        except Exception:
+        except Exception as error_semilla:
+            _error_imagen('semilla catalogo_maestro', error_semilla)
             return None
 
 
@@ -311,7 +312,7 @@ def _mapa_lote(lote):
         try:
             return consultar(lote) or {}
         except Exception as error:
-            _debug_imagen(f'lote {nombre}', error)
+            _error_imagen(f'lote {nombre}', error)
             continue
     return {}
 
@@ -335,22 +336,95 @@ def mapa_imagenes_maestro(codigos):
                 lote = normalizados[inicio : inicio + _LOTE_CONSULTA]
                 resultado.update(_mapa_lote(lote))
         except Exception as error:
-            _debug_imagen('lote catalogo_maestro', error)
+            _error_imagen('lote catalogo_maestro', error)
         return _completar_con_semilla(resultado, normalizados)
-    except Exception:
+    except Exception as error:
+        _error_imagen('mapa_imagenes_maestro', error)
         try:
             return _completar_con_semilla({}, codigos)
-        except Exception:
+        except Exception as error_semilla:
+            _error_imagen('completar semilla lote', error_semilla)
             return {}
 
 
+def purgar_urls_imagen_artificiales():
+    """
+    Quita de productos y catalogo_maestro URLs de prueba (OFF, wsrv, Pexels, /static/).
+    """
+    from backend.db import get_db_connection
+
+    sql_productos = """
+        UPDATE productos
+        SET imagen_url = NULL
+        WHERE imagen_url IS NOT NULL
+          AND (
+            LOWER(CAST(imagen_url AS TEXT)) LIKE '%openfoodfacts%'
+            OR LOWER(CAST(imagen_url AS TEXT)) LIKE '%wsrv.nl%'
+            OR LOWER(CAST(imagen_url AS TEXT)) LIKE '%pexels.com%'
+            OR CAST(imagen_url AS TEXT) LIKE '/static/%'
+          )
+    """
+    sql_maestro = f"""
+        DELETE FROM {TABLA_CATALOGO_MAESTRO}
+        WHERE LOWER(CAST(url_imagen AS TEXT)) LIKE '%openfoodfacts%'
+           OR LOWER(CAST(url_imagen AS TEXT)) LIKE '%wsrv.nl%'
+           OR LOWER(CAST(url_imagen AS TEXT)) LIKE '%pexels.com%'
+           OR CAST(url_imagen AS TEXT) LIKE '/static/%'
+    """
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(sql_productos)
+            n_prod = cursor.rowcount
+            cursor.execute(
+                """
+                UPDATE comercios
+                SET logo_url = NULL
+                WHERE logo_url IS NOT NULL
+                  AND (
+                    LOWER(CAST(logo_url AS TEXT)) LIKE '%openfoodfacts%'
+                    OR LOWER(CAST(logo_url AS TEXT)) LIKE '%wsrv.nl%'
+                    OR LOWER(CAST(logo_url AS TEXT)) LIKE '%pexels.com%'
+                    OR CAST(logo_url AS TEXT) LIKE '/static/%'
+                  )
+                """
+            )
+            cursor.execute(
+                """
+                UPDATE comercios
+                SET banner_url = NULL, imagen_portada = NULL
+                WHERE (
+                    banner_url IS NOT NULL
+                    AND (
+                      LOWER(CAST(banner_url AS TEXT)) LIKE '%openfoodfacts%'
+                      OR LOWER(CAST(banner_url AS TEXT)) LIKE '%wsrv.nl%'
+                      OR LOWER(CAST(banner_url AS TEXT)) LIKE '%pexels.com%'
+                      OR CAST(banner_url AS TEXT) LIKE '/static/%'
+                    )
+                  )
+                  OR (
+                    imagen_portada IS NOT NULL
+                    AND (
+                      LOWER(CAST(imagen_portada AS TEXT)) LIKE '%openfoodfacts%'
+                      OR LOWER(CAST(imagen_portada AS TEXT)) LIKE '%wsrv.nl%'
+                      OR LOWER(CAST(imagen_portada AS TEXT)) LIKE '%pexels.com%'
+                      OR CAST(imagen_portada AS TEXT) LIKE '/static/%'
+                    )
+                  )
+                """
+            )
+            cursor.execute(sql_maestro)
+            n_mae = cursor.rowcount
+        print(
+            f'{_LOG} purga URLs artificiales: productos={n_prod} '
+            f'catalogo_maestro={n_mae}'
+        )
+        return True
+    except Exception as error:
+        _error_imagen('purgar_urls_imagen_artificiales', error)
+        return False
+
+
 def sembrar_catalogo_maestro_imagenes():
-    """Upsert de URLs de prueba en catalogo_maestro_imagenes."""
-    guardados = 0
-    for codigo, url in IMAGENES_CATALOGO_SEMILLA.items():
-        if guardar_imagen_maestro(codigo, url):
-            guardados += 1
-        else:
-            print(f'{_LOG} no se pudo sembrar catalogo_maestro codigo={codigo!r}')
-    print(f'{_LOG} catalogo_maestro semilla: {guardados}/{len(IMAGENES_CATALOGO_SEMILLA)} URL(s)')
-    return guardados
+    """Ya no siembra URLs de prueba. Purga residuales OFF/wsrv/Pexels."""
+    return purgar_urls_imagen_artificiales()

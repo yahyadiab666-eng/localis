@@ -44,6 +44,13 @@ _MARCADORES_IMAGEN_GENERICA = (
     'no-image',
     'sin-imagen',
 )
+_MARCADORES_URL_ARTIFICIAL = (
+    'openfoodfacts.org',
+    'wsrv.nl',
+    'pexels.com',
+    '/static/uploads/',
+    '/static/images/',
+)
 
 
 def _bytes_a_texto(valor):
@@ -82,13 +89,21 @@ def es_imagen_generica(valor):
     return any(marca in lower for marca in _MARCADORES_IMAGEN_GENERICA)
 
 
+def es_url_imagen_artificial(valor):
+    """True si la URL es de prueba (OFF, wsrv, Pexels) o ruta local /static/."""
+    texto = (texto_campo_imagen(valor, default=None) or '').lower()
+    if not texto:
+        return False
+    return any(marca in texto for marca in _MARCADORES_URL_ARTIFICIAL)
+
+
 def url_imagen_externa_valida(valor):
     """
-    URL https de catálogo maestro, CSV u otro origen externo.
-    Se persiste como texto en PostgreSQL; no implica subida a Storage.
+    URL https genérica. No se usa en vistas: el catálogo solo muestra Storage.
+    Se rechazan OFF, wsrv, Pexels y /static/.
     """
     texto = texto_campo_imagen(valor, default=None)
-    if not texto or es_imagen_generica(texto):
+    if not texto or es_imagen_generica(texto) or es_url_imagen_artificial(texto):
         return None
     if texto.startswith('https://'):
         return texto
@@ -125,23 +140,21 @@ url_imagen_supabase_valida = url_imagen_subida_storage_valida
 
 
 def url_imagen_usable(valor):
-    """True si hay URL de Storage o https externa (no carpetas locales)."""
-    return bool(
-        url_imagen_subida_storage_valida(valor)
-        or url_imagen_externa_valida(valor)
-    )
+    """True si hay URL pública de Supabase Storage."""
+    return bool(url_imagen_subida_storage_valida(valor))
 
 
 def imagen_url_almacenada(valor):
     """
-    Valor persistible en PostgreSQL:
-    - enlace público de Supabase Storage, o
-    - URL https externa / catálogo maestro.
+    Valor persistible y mostrable: solo URL pública de Supabase Storage.
+    OFF, wsrv, Pexels y /static/ se descartan.
     """
-    return (
-        url_imagen_subida_storage_valida(valor)
-        or url_imagen_externa_valida(valor)
-    )
+    return url_imagen_subida_storage_valida(valor)
+
+
+def url_imagen_para_vista(valor):
+    """URL para <img src>. Siempre str: Storage o cadena vacía (nunca None)."""
+    return url_imagen_subida_storage_valida(valor) or ''
 
 
 def imagen_url_para_persistir(valor):

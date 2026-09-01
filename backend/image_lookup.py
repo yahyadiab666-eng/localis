@@ -6,10 +6,8 @@ import threading
 import time
 
 from backend.catalogo_maestro import (
-    IMAGENES_CATALOGO_SEMILLA,
     imagen_maestro_por_codigo,
     mapa_imagenes_maestro,
-    url_semilla_catalogo,
 )
 from backend.db import get_db_connection
 from backend.image_manager import (
@@ -18,11 +16,10 @@ from backend.image_manager import (
     resolver_imagen_escritura,
 )
 from backend.utils import (
-    es_imagen_generica,
     imagen_url_almacenada,
     imagen_url_para_persistir,
     normalizar_codigo_barras,
-    texto_campo_imagen,
+    url_imagen_para_vista,
 )
 
 EXPR_CODIGO_BARRAS = (
@@ -31,39 +28,30 @@ EXPR_CODIGO_BARRAS = (
     "'\\.0+$', '', 'g')"
 )
 _LOG_CSV = '[Localis CSV]'
+_LOG_IMAGEN = '[Localis Imagen]'
 _PRESUPUESTO_OFF_SEG = int(os.getenv('IMPORT_OFF_BUDGET_SEC', '90'))
 
 
+def _registrar_error_imagen(contexto, error):
+    print(f'{_LOG_IMAGEN} ERROR {contexto}: {type(error).__name__}: {error}')
+
+
 def _url_almacenada_o_none(valor):
-    """URL ya persistida en PostgreSQL (Supabase, local o https explícita)."""
+    """URL de Supabase Storage ya persistida, o None."""
     try:
         return imagen_url_almacenada(valor)
-    except Exception:
+    except Exception as error:
+        _registrar_error_imagen('url almacenada', error)
         return None
 
 
 def _respaldo_en_cascada(codigo_barras):
-    """
-    1) catalogo_maestro_imagenes (vía imagen_maestro_por_codigo)
-    2) IMAGENES_CATALOGO_SEMILLA en memoria
-    Cualquier fallo se traga; None si no hay URL.
-    """
+    """Catálogo maestro (Storage). Vacío si no hay foto en BD."""
     try:
-        url = imagen_maestro_por_codigo(codigo_barras)
-        if url:
-            return url
-    except Exception:
-        pass
-    try:
-        url = url_semilla_catalogo(codigo_barras)
-        if url:
-            return url
-        codigo = normalizar_codigo_barras(codigo_barras)
-        if codigo:
-            return IMAGENES_CATALOGO_SEMILLA.get(codigo)
-    except Exception:
-        pass
-    return None
+        return imagen_maestro_por_codigo(codigo_barras) or None
+    except Exception as error:
+        _registrar_error_imagen(f'catalogo_maestro codigo={codigo_barras!r}', error)
+        return None
 
 
 def _resolver_url_escritura(
@@ -71,64 +59,67 @@ def _resolver_url_escritura(
     codigo_barras=None,
     mapa_maestro=None,
 ):
-    """Resolución al crear/importar: manual → catálogo maestro → OpenFoodFacts."""
+    """Resolución al crear/importar: manual Storage → catálogo maestro."""
     try:
         return resolver_imagen_escritura(
             imagen_manual=imagen_url,
             codigo_barras=codigo_barras,
             mapa_maestro=mapa_maestro,
         )
-    except Exception:
+    except Exception as error:
+        _registrar_error_imagen('resolver escritura', error)
         return _respaldo_en_cascada(codigo_barras)
 
 
 def imagen_url_para_catalogo(imagen_url=None, codigo_barras=None):
-    """URL para catálogo: persistida → cascada maestro/semilla; None si no hay."""
+    """URL de catálogo: Storage persistida o maestro. Cadena vacía si no hay."""
     try:
         url = resolver_imagen_catalogo(
             imagen_url=imagen_url,
             codigo_barras=codigo_barras,
         )
         if url:
-            return url
-    except Exception:
-        pass
+            return url_imagen_para_vista(url)
+    except Exception as error:
+        _registrar_error_imagen('imagen_url_para_catalogo', error)
     try:
         directa = _url_almacenada_o_none(imagen_url)
         if directa:
             return directa
-        return _respaldo_en_cascada(codigo_barras)
-    except Exception:
-        return None
+        return url_imagen_para_vista(_respaldo_en_cascada(codigo_barras))
+    except Exception as error:
+        _registrar_error_imagen('imagen_url_para_catalogo respaldo', error)
+        return ''
 
 
 def imagen_url_para_guardar(imagen_manual=None, codigo_barras=None):
     """
-    URL a persistir en productos.imagen_url:
-    campo/archivo del formulario, o respaldo por código (maestro → semilla).
+    URL a persistir en productos.imagen_url (solo Storage).
     """
     try:
         persistida = imagen_url_para_persistir(imagen_manual)
         if persistida:
             return persistida
         return _respaldo_en_cascada(codigo_barras)
-    except Exception:
+    except Exception as error:
+        _registrar_error_imagen('imagen_url_para_guardar', error)
         return None
 
 
 def url_imagen_con_respaldo(imagen_url=None, codigo_barras=None):
-    """Vista Flask: URL del producto o cascada (Supabase → semilla). Nunca lanza."""
+    """Vista Flask: URL de Storage o ''. Nunca None ni URLs de prueba."""
     try:
         directa = _url_almacenada_o_none(imagen_url)
         if directa:
             return directa
-        return _respaldo_en_cascada(codigo_barras)
-    except Exception:
-        return None
+        return url_imagen_para_vista(_respaldo_en_cascada(codigo_barras))
+    except Exception as error:
+        _registrar_error_imagen('url_imagen_con_respaldo', error)
+        return ''
 
 
 def imagen_urls_para_catalogo(productos):
-    """Resuelve imágenes en lote (persistida → maestro/semilla). No rompe el render."""
+    """Resuelve imágenes en lote (Storage). Asigna '' si no hay foto."""
     if not productos:
         return productos
 
@@ -143,12 +134,14 @@ def imagen_urls_para_catalogo(productos):
                 if codigo and codigo not in vistos:
                     vistos.add(codigo)
                     codigos.append(codigo)
-            except Exception:
+            except Exception as error:
+                _registrar_error_imagen('lote codigo producto', error)
                 continue
 
         try:
             mapa = mapa_imagenes_maestro(codigos) if codigos else {}
-        except Exception:
+        except Exception as error:
+            _registrar_error_imagen('mapa_imagenes_maestro', error)
             mapa = {}
 
         for prod in productos:
@@ -159,14 +152,20 @@ def imagen_urls_para_catalogo(productos):
                     url = mapa.get(codigo) if codigo else None
                     if not url and codigo:
                         url = _respaldo_en_cascada(codigo)
-                prod['imagen_url'] = url or None
-            except Exception:
-                try:
-                    prod['imagen_url'] = prod.get('imagen_url') or None
-                except Exception:
-                    pass
+                prod['imagen_url'] = url_imagen_para_vista(url)
+            except Exception as error:
+                _registrar_error_imagen(
+                    f"lote producto id={prod.get('id')}", error
+                )
+                prod['imagen_url'] = url_imagen_para_vista(prod.get('imagen_url'))
         return productos
-    except Exception:
+    except Exception as error:
+        _registrar_error_imagen('imagen_urls_para_catalogo', error)
+        for prod in productos or []:
+            try:
+                prod['imagen_url'] = url_imagen_para_vista(prod.get('imagen_url'))
+            except Exception:
+                prod['imagen_url'] = ''
         return productos
 
 
@@ -190,7 +189,8 @@ def resolver_imagen_url_definitiva(
             codigo_barras=codigo_barras,
             mapa_maestro=mapa_maestro,
         )
-    except Exception:
+    except Exception as error:
+        _registrar_error_imagen('resolver_imagen_url_definitiva', error)
         return _respaldo_en_cascada(codigo_barras)
 
 
@@ -218,8 +218,9 @@ def obtener_imagen_url_producto(producto_id):
                 registro.get('imagen_url'),
                 codigo_barras=registro.get('codigo_barras'),
             )
-    except Exception:
-        return None
+    except Exception as error:
+        _registrar_error_imagen(f'obtener_imagen_url_producto({producto_id})', error)
+        return ''
 
 
 def resolver_imagen_producto(
@@ -252,7 +253,8 @@ def resolver_imagen_producto(
                 return url_bd
 
         return None
-    except Exception:
+    except Exception as error:
+        _registrar_error_imagen('resolver_imagen_producto', error)
         return None
 
 
@@ -279,7 +281,8 @@ def aplicar_respaldo_imagenes(productos, persistir=False):
                     [c for c in codigos if c],
                     buscar_oficial=False,
                 )
-            except Exception:
+            except Exception as error:
+                _registrar_error_imagen('completar_mapa_imagenes', error)
                 mapa_maestro = {}
 
             with get_db_connection() as conexion:
@@ -310,16 +313,13 @@ def aplicar_respaldo_imagenes(productos, persistir=False):
             return productos
 
         return imagen_urls_para_catalogo(productos)
-    except Exception:
+    except Exception as error:
+        _registrar_error_imagen('aplicar_respaldo_imagenes', error)
         return imagen_urls_para_catalogo(productos)
 
 
 def asociar_imagenes_inventario(comercio_id):
-    """
-    Completa imágenes faltantes tras el CSV (catálogo maestro + OpenFoodFacts).
-    Cada producto va en try/except propio; un fallo de red no corta el lote.
-    Pensado para correr en segundo plano, no dentro del request de importación.
-    """
+    """Completa imágenes faltantes tras el CSV (solo catálogo maestro / Storage)."""
     try:
         return _asociar_imagenes_inventario(comercio_id)
     except Exception as error:

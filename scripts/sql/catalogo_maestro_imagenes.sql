@@ -28,28 +28,8 @@ END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_catalogo_maestro_codigo
     ON catalogo_maestro_imagenes (codigo_barras);
 
--- Semilla de prueba: Harina PAN y Aceite Vatel (códigos de demo + EAN reales).
-INSERT INTO catalogo_maestro_imagenes (codigo_barras, url_imagen)
-VALUES
-    (
-        '7591001000011',
-        'https://wsrv.nl/?url=https%3A%2F%2Fimages.openfoodfacts.org%2Fimages%2Fproducts%2F759%2F100%2F200%2F0547%2Ffront_es.24.400.jpg&w=300&h=300&fit=cover&output=webp&q=80'
-    ),
-    (
-        '7591002000011',
-        'https://wsrv.nl/?url=https%3A%2F%2Fimages.openfoodfacts.org%2Fimages%2Fproducts%2F759%2F100%2F200%2F0547%2Ffront_es.24.400.jpg&w=300&h=300&fit=cover&output=webp&q=80'
-    ),
-    (
-        '7591002000547',
-        'https://wsrv.nl/?url=https%3A%2F%2Fimages.openfoodfacts.org%2Fimages%2Fproducts%2F759%2F100%2F200%2F0547%2Ffront_es.24.400.jpg&w=300&h=300&fit=cover&output=webp&q=80'
-    ),
-    (
-        '7591001000035',
-        'https://wsrv.nl/?url=https%3A%2F%2Fimages.openfoodfacts.org%2Fimages%2Fproducts%2F759%2F104%2F900%2F1903%2Ffront_es.3.400.jpg&w=300&h=300&fit=cover&output=webp&q=80'
-    ),
-    (
-        '7591049001903',
-        'https://wsrv.nl/?url=https%3A%2F%2Fimages.openfoodfacts.org%2Fimages%2Fproducts%2F759%2F104%2F900%2F1903%2Ffront_es.3.400.jpg&w=300&h=300&fit=cover&output=webp&q=80'
-    )
-ON CONFLICT (codigo_barras)
-DO UPDATE SET url_imagen = EXCLUDED.url_imagen;
+-- Quitar semillas de prueba (Open Food Facts / wsrv / Pexels).
+DELETE FROM catalogo_maestro_imagenes
+WHERE LOWER(CAST(url_imagen AS TEXT)) LIKE '%openfoodfacts%'
+   OR LOWER(CAST(url_imagen AS TEXT)) LIKE '%wsrv.nl%'
+   OR LOWER(CAST(url_imagen AS TEXT)) LIKE '%pexels.com%';

@@ -15,7 +15,6 @@ from urllib.parse import quote
 import requests
 
 from backend.catalogo_maestro import (
-    guardar_imagen_maestro,
     imagen_maestro_por_codigo,
     mapa_imagenes_maestro,
 )
@@ -113,13 +112,8 @@ def optimizar_url_wsrv(url_original):
 
 
 def _url_manual_valida(imagen_manual):
-    """URL ya en BD: Storage o https externa (no /static/ local)."""
-    manual = imagen_url_almacenada(imagen_manual)
-    if not manual:
-        return None
-    if url_imagen_subida_storage_valida(manual):
-        return manual
-    return optimizar_url_wsrv(manual) or manual
+    """Solo URL pública de Supabase Storage (no OFF, wsrv ni /static/)."""
+    return url_imagen_subida_storage_valida(imagen_manual)
 
 
 def _url_pasa_filtro_calidad(url, ancho=None, alto=None):
@@ -196,28 +190,9 @@ def _buscar_openfoodfacts_por_codigo(codigo_barras):
 
 
 def _descubrir_y_persistir_oficial(codigo_barras):
-    """
-    Busca en catálogo oficial, optimiza con wsrv.nl y guarda en catálogo maestro.
-    Retorna URL optimizada o None.
-    """
-    codigo = normalizar_codigo_barras(codigo_barras)
-    if not codigo:
-        return None
-
-    try:
-        url_origen = _buscar_openfoodfacts_por_codigo(codigo)
-        if not url_origen:
-            return None
-
-        url_final = optimizar_url_wsrv(url_origen)
-        if not url_final:
-            return None
-
-        guardar_imagen_maestro(codigo, url_final)
-        return url_final
-    except Exception as error:
-        _advertir_fallo_imagen(f'descubrir:{codigo}', error)
-        return None
+    """OFF/wsrv no se persisten: las vistas solo usan el bucket de Storage."""
+    del codigo_barras
+    return None
 
 
 def resolver_imagen(

@@ -25,8 +25,8 @@ from backend.db import DATABASE_URL, get_db_connection
 
 CODIGO = '7590000040110'
 URL_TEST = (
-    'https://wsrv.nl/?url=https%3A%2F%2Fimages.openfoodfacts.org%2Fimages%2Fproducts%2F'
-    '759%2F000%2F004%2F0110%2Ffront_es.400.jpg&w=300&h=300&fit=cover&output=webp&q=80'
+    'https://ejemplo.supabase.co/storage/v1/object/public/'
+    'imagenes/productos/test_catalogo.webp'
 )
 
 

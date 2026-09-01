@@ -565,7 +565,7 @@ def obtener_producto_publico(producto_id):
             d['imagen_url'] = imagen_url_para_catalogo(
                 d.get('imagen_url'),
                 codigo_barras=d.get('codigo_barras'),
-            )
+            ) or ''
             return d
     except Exception as e:
         print(f'Error al obtener producto público: {e}')
@@ -594,7 +594,7 @@ def obtener_producto_por_id(producto_id, comercio_id=None):
             producto['imagen_url'] = imagen_url_para_catalogo(
                 producto.get('imagen_url'),
                 codigo_barras=producto.get('codigo_barras'),
-            )
+            ) or ''
             return producto
     except Exception as e:
         print(f'Error al obtener producto: {e}')

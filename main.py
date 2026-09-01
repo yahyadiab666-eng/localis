@@ -203,7 +203,7 @@ def _debug_imagenes_antes_de_render(productos, origen):
             nombre = getattr(prod, 'nombre', None)
             codigo = getattr(prod, 'codigo_barras', None)
             url_bd = getattr(prod, 'imagen_url', None)
-        url = url_imagen_con_respaldo(url_bd, codigo_barras=codigo)
+        url = url_imagen_con_respaldo(url_bd, codigo_barras=codigo) or ''
         print(
             f'[Localis Imagen] nombre={nombre!r} codigo={codigo!r} url={url!r}'
         )
@@ -761,7 +761,7 @@ def _productos_desde_filas(productos_db, tasa_actual):
             'precio_usd': precio_usd,
             'precio_bs': round(precio_usd * tasa_actual, 2),
             'codigo_barras': '' if p['codigo_barras'] is None else p['codigo_barras'],
-            'imagen_url': p['imagen_url'],
+            'imagen_url': p['imagen_url'] or '',
         })
     imagen_urls_para_catalogo(productos)
     return productos
