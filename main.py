@@ -95,11 +95,12 @@ from backend.admin import (
 from backend.auth import obtener_o_crear_usuario_google
 from backend.diagnostics import ejecutar_diagnostico_inicio, obtener_estado_sistema
 from backend.error_handlers import registrar_manejadores_errores
-from backend.image_handler import (
+from utils.images import (
+    HERO_LOCAL,
     PLACEHOLDER_BANNER,
     PLACEHOLDER_PRODUCTO,
     enriquecer_comercio_imagenes,
-    url_banner_segura,
+    url_hero_inicio,
     url_imagen_producto_segura,
     url_storage_o_vacio,
 )
@@ -224,6 +225,7 @@ def _injectar_placeholders_imagen():
     return {
         'placeholder_producto': PLACEHOLDER_PRODUCTO,
         'placeholder_banner': PLACEHOLDER_BANNER,
+        'hero_local': HERO_LOCAL,
     }
 
 
@@ -262,6 +264,12 @@ def _inicializar_aplicacion():
         if db_url:
             print('Base de datos: PostgreSQL (DATABASE_URL).', flush=True)
         init_db()
+        try:
+            from backend.comercio_schema import invalidar_cache_columnas_comercios
+
+            invalidar_cache_columnas_comercios()
+        except Exception:
+            traceback.print_exc()
         ejecutar_diagnostico_inicio()
         verificar_vencimientos_comercios()
         print('[Localis] Inicialización completada.', flush=True)
@@ -617,12 +625,12 @@ def index():
             tasa_actual = float(configs['tasa_dolar'])
         except (TypeError, ValueError):
             tasa_actual = obtener_tasa_dolar() or 1.0
-        banner_url = url_banner_segura(configs.get('banner_principal'))
+        banner_url = url_hero_inicio(configs.get('banner_principal'))
         whatsapp = configs['whatsapp_soporte']
     except Exception:
         traceback.print_exc()
         tasa_actual = obtener_tasa_dolar() or 1.0
-        banner_url = PLACEHOLDER_BANNER
+        banner_url = HERO_LOCAL
         whatsapp = WHATSAPP_SOPORTE
 
     _debug_imagenes_antes_de_render(productos, 'index')
@@ -1655,7 +1663,7 @@ def panel_admin():
     tickets = obtener_bandeja_tecnica(estado_filtro=estado_filtro)
     tasa_actual = obtener_tasa_dolar()
     comercios = obtener_todos_comercios_admin(busqueda=busqueda or None)
-    banner_url = url_banner_segura(obtener_banner_principal())
+    banner_url = url_hero_inicio(obtener_banner_principal())
     whatsapp = obtener_config('whatsapp_soporte', WHATSAPP_SOPORTE)
 
     return render_template(

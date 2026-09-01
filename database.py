@@ -690,12 +690,65 @@ def _agregar_columna_si_falta(cursor, tabla, nombre, tipo_sql):
     )
 
 
+def _agregar_columna_citada_si_falta(cursor, tabla, nombre, tipo_sql):
+    """ADD COLUMN para identificadores con espacios/mayúsculas (esquema oficial)."""
+    _validar_identificador(tabla)
+    if tabla not in TABLAS_PERMITIDAS:
+        raise ValueError(f'Tabla no permitida: {tabla}')
+    ident = '"' + str(nombre).replace('"', '""') + '"'
+    _ejecutar_ddl_seguro(
+        cursor,
+        f'ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS {ident} {tipo_sql}',
+    )
+
+
 def _migrar_columnas(cursor):
     for tabla, columnas in COLUMNAS_ESQUEMA.items():
         if not _tabla_existe(cursor, tabla):
             continue
         for nombre, tipo_sql in columnas:
             _agregar_columna_si_falta(cursor, tabla, nombre, tipo_sql)
+    _asegurar_columnas_imagen_oficiales(cursor)
+
+
+def _asegurar_columnas_imagen_oficiales(cursor):
+    """Columnas oficiales de comercios en Supabase (nombres con espacios)."""
+    if not _tabla_existe(cursor, 'comercios'):
+        return
+    _agregar_columna_citada_si_falta(cursor, 'comercios', 'URL del banner', 'TEXT')
+    _agregar_columna_citada_si_falta(cursor, 'comercios', 'URL del logotipo', 'TEXT')
+    try:
+        cursor.execute('SAVEPOINT sync_img_oficial')
+        cursor.execute(
+            """
+            UPDATE comercios
+            SET "URL del banner" = COALESCE("URL del banner", banner_url, imagen_portada)
+            WHERE "URL del banner" IS NULL
+              AND COALESCE(banner_url, imagen_portada) IS NOT NULL
+            """
+        )
+        cursor.execute(
+            """
+            UPDATE comercios
+            SET "URL del logotipo" = COALESCE("URL del logotipo", logo_url)
+            WHERE "URL del logotipo" IS NULL AND logo_url IS NOT NULL
+            """
+        )
+        cursor.execute(
+            """
+            UPDATE comercios
+            SET banner_url = COALESCE(banner_url, "URL del banner", imagen_portada),
+                imagen_portada = COALESCE(imagen_portada, "URL del banner", banner_url),
+                logo_url = COALESCE(logo_url, "URL del logotipo")
+            """
+        )
+        cursor.execute('RELEASE SAVEPOINT sync_img_oficial')
+    except Exception as error:
+        try:
+            cursor.execute('ROLLBACK TO SAVEPOINT sync_img_oficial')
+        except Exception:
+            pass
+        print(f'[Localis Schema] Aviso al sincronizar columnas de imagen: {error}')
 
 
 def _restriccion_existe(cursor, nombre):
@@ -1140,8 +1193,7 @@ def _corregir_banner_principal_legacy(cursor):
         SET valor = %s
         WHERE clave = 'banner_principal'
           AND (
-            valor LIKE '/static/%%'
-            OR valor LIKE '%%pexels.com%%'
+            valor LIKE '%%pexels.com%%'
             OR TRIM(COALESCE(valor, '')) = ''
           )
         """,

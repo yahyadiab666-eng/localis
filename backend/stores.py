@@ -7,6 +7,11 @@ import psycopg2
 
 from backend.db import get_db_connection
 from backend.runtime_cache import get_or_load, invalidate
+from backend.comercio_schema import (
+    normalizar_fila_comercio,
+    normalizar_filas_comercio,
+    sql_set_imagenes,
+)
 from backend.image_lookup import programar_asociacion_imagenes_inventario
 from backend.utils import (
     EXPR_CODIGO_BARRAS,
@@ -202,13 +207,14 @@ def registrar_comercio_completo(
                 """
                 INSERT INTO comercios (
                     usuario_id, nombre, descripcion, telefono, direccion,
-                    logo_url, categoria_id, ciudad, zona, maps_url,
+                    categoria_id, ciudad, zona, maps_url,
                     ubicacion_maps_url, documento_identidad, plan_id, plan_tipo,
                     limite_productos, estado_pago, fecha_inicio_suscripcion,
                     fecha_vencimiento
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo',
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo',
                         CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '30 days')
+                RETURNING id
                 """,
                 (
                     usuario_id,
@@ -216,7 +222,6 @@ def registrar_comercio_completo(
                     descripcion,
                     telefono,
                     direccion,
-                    logo_url,
                     categoria_id,
                     ciudad,
                     zona,
@@ -228,6 +233,19 @@ def registrar_comercio_completo(
                     limite,
                 ),
             )
+            fila_id = cursor.fetchone()
+            if isinstance(fila_id, dict):
+                nuevo_id = fila_id.get('id')
+            else:
+                nuevo_id = fila_id[0] if fila_id else None
+            if logo_url and nuevo_id:
+                fragmentos, extra = sql_set_imagenes(cursor, logo_url=logo_url)
+                if fragmentos:
+                    extra.append(nuevo_id)
+                    cursor.execute(
+                        f"UPDATE comercios SET {', '.join(fragmentos)} WHERE id = ?",
+                        tuple(extra),
+                    )
 
             conexion.commit()
             return True, 'Comercio registrado con éxito.'
@@ -288,13 +306,14 @@ def actualizar_datos_comercio(
             ]
 
             if logo_url:
-                campos.append('logo_url = ?')
-                valores.append(logo_url)
+                extra, extra_vals = sql_set_imagenes(cursor, logo_url=logo_url)
+                campos.extend(extra)
+                valores.extend(extra_vals)
 
             if banner_url:
-                campos.append('banner_url = ?')
-                campos.append('imagen_portada = ?')
-                valores.extend([banner_url, banner_url])
+                extra, extra_vals = sql_set_imagenes(cursor, banner_url=banner_url)
+                campos.extend(extra)
+                valores.extend(extra_vals)
 
             valores.append(comercio_id)
             cursor.execute(
@@ -328,7 +347,7 @@ def obtener_comercio_por_id(comercio_id, solo_visible=True):
 
             cursor.execute(query, (comercio_id,))
             fila = cursor.fetchone()
-            return dict(fila) if fila else None
+            return normalizar_fila_comercio(dict(fila)) if fila else None
     except Exception as e:
         print(f'Error al obtener comercio: {e}')
         return None
@@ -348,7 +367,7 @@ def listar_comercios_por_usuario(usuario_id):
                 """,
                 (usuario_id,),
             )
-            return [dict(fila) for fila in cursor.fetchall()]
+            return normalizar_filas_comercio([dict(fila) for fila in cursor.fetchall()])
     except psycopg2.Error:
         raise
     except Exception as error:
@@ -389,7 +408,7 @@ def obtener_comercio_por_usuario(usuario_id, comercio_id=None):
                     (usuario_id,),
                 )
             fila = cursor.fetchone()
-            return dict(fila) if fila else None
+            return normalizar_fila_comercio(dict(fila)) if fila else None
     except psycopg2.Error:
         raise
     except Exception as error:
@@ -422,7 +441,7 @@ def buscar_y_filtrar_comercios(
                 parametros.append(categoria_id)
 
             cursor.execute(query, parametros)
-            return [dict(f) for f in cursor.fetchall()]
+            return normalizar_filas_comercio([dict(f) for f in cursor.fetchall()])
     except Exception as e:
         print(f'Error al filtrar comercios: {e}')
         return []
@@ -524,6 +543,7 @@ def buscar_y_filtrar_productos(
                     precio = 0.0
                 d['precio_usd'] = precio
                 d['precio_bs'] = round(precio * tasa, 2)
+                d['imagen_url'] = d.get('imagen_url')
                 productos.append(d)
 
             return productos
@@ -562,6 +582,7 @@ def obtener_producto_publico(producto_id):
                 precio = 0.0
             d['precio_usd'] = precio
             d['precio_bs'] = round(precio * tasa, 2)
+            d['imagen_url'] = d.get('imagen_url')
             return d
     except Exception as e:
         print(f'Error al obtener producto público: {e}')
@@ -587,6 +608,7 @@ def obtener_producto_por_id(producto_id, comercio_id=None):
             if not fila:
                 return None
             producto = dict(fila)
+            producto['imagen_url'] = producto.get('imagen_url')
             return producto
     except Exception as e:
         print(f'Error al obtener producto: {e}')

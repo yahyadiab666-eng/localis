@@ -117,7 +117,7 @@
             <aside class="card">
                 <h2>Banner sección destacada (barra naranja)</h2>
                 <p style="font-size: 0.85rem; color: #666; margin-bottom: 1rem;">Esta imagen aparece en la franja promocional naranja del inicio público. Se guarda en el servidor.</p>
-                <img src="{{ banner_url }}" alt="Banner actual" class="banner-preview" onerror="this.style.display='none'">
+                <img src="{{ banner_url }}" alt="Banner actual" class="banner-preview" onerror="this.onerror=null;this.src='{{ hero_local }}'">
                 <form action="{{ url_for('admin_banner') }}" method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="form-group">

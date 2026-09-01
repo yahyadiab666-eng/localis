@@ -71,7 +71,7 @@ def imagen_url_para_catalogo(imagen_url=None, codigo_barras=None):
     """
     del codigo_barras
     try:
-        from backend.image_handler import url_imagen_segura
+        from utils.images import url_imagen_segura
 
         return url_imagen_segura(imagen_url)
     except Exception as error:
@@ -97,7 +97,7 @@ def url_imagen_con_respaldo(imagen_url=None, codigo_barras=None):
     """Vista Flask: Storage persistida o placeholder local. Sin red ni maestro."""
     del codigo_barras
     try:
-        from backend.image_handler import url_imagen_segura
+        from utils.images import url_imagen_segura
 
         return url_imagen_segura(imagen_url)
     except Exception as error:

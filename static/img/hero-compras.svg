@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Compras locales">
+  <defs>
+    <linearGradient id="cielo" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1c1917"/>
+      <stop offset="55%" stop-color="#78350f"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#cielo)"/>
+  <ellipse cx="240" cy="980" rx="420" ry="90" fill="#111827" opacity="0.25"/>
+  <ellipse cx="1680" cy="1000" rx="380" ry="80" fill="#111827" opacity="0.2"/>
+  <!-- Puestos de mercado -->
+  <g transform="translate(180,430)">
+    <rect x="0" y="120" width="280" height="220" rx="8" fill="#fff7ed"/>
+    <polygon points="-20,120 140,20 300,120" fill="#ea580c"/>
+    <rect x="110" y="250" width="60" height="90" fill="#9a3412"/>
+    <rect x="30" y="150" width="70" height="50" rx="6" fill="#fde68a"/>
+    <rect x="120" y="155" width="70" height="50" rx="6" fill="#fdba74"/>
+    <rect x="210" y="150" width="50" height="50" rx="6" fill="#f59e0b"/>
+  </g>
+  <g transform="translate(780,400)">
+    <rect x="0" y="140" width="320" height="240" rx="8" fill="#fffbeb"/>
+    <polygon points="-24,140 160,10 344,140" fill="#b45309"/>
+    <rect x="130" y="280" width="70" height="100" fill="#7c2d12"/>
+    <circle cx="80" cy="200" r="28" fill="#f59e0b"/>
+    <circle cx="160" cy="210" r="24" fill="#fbbf24"/>
+    <circle cx="230" cy="198" r="26" fill="#d97706"/>
+    <rect x="40" y="250" width="90" height="36" rx="6" fill="#fed7aa"/>
+  </g>
+  <g transform="translate(1380,450)">
+    <rect x="0" y="110" width="260" height="210" rx="8" fill="#fff7ed"/>
+    <polygon points="-16,110 130,18 276,110" fill="#c2410c"/>
+    <rect x="100" y="230" width="56" height="90" fill="#9a3412"/>
+    <rect x="24" y="140" width="60" height="44" rx="6" fill="#fcd34d"/>
+    <rect x="100" y="148" width="60" height="44" rx="6" fill="#fb923c"/>
+    <rect x="176" y="140" width="60" height="44" rx="6" fill="#f59e0b"/>
+  </g>
+  <!-- Personas estilizadas -->
+  <g fill="#1c1917">
+    <circle cx="620" cy="640" r="22"/>
+    <rect x="598" y="668" width="44" height="70" rx="14" fill="#f59e0b"/>
+    <rect x="640" y="690" width="36" height="22" rx="6" fill="#fde68a"/>
+    <circle cx="1120" cy="650" r="22"/>
+    <rect x="1098" y="678" width="44" height="72" rx="14" fill="#fb923c"/>
+    <rect x="1060" y="700" width="38" height="24" rx="6" fill="#fff7ed"/>
+    <circle cx="1540" cy="660" r="20"/>
+    <rect x="1520" y="686" width="40" height="64" rx="12" fill="#fbbf24"/>
+  </g>
+</svg>

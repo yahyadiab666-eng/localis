@@ -413,6 +413,22 @@ def purgar_urls_imagen_artificiales():
                   )
                 """
             )
+            for col_sql in ('"URL del banner"', '"URL del logotipo"'):
+                try:
+                    cursor.execute(
+                        f"""
+                        UPDATE comercios
+                        SET {col_sql} = NULL
+                        WHERE {col_sql} IS NOT NULL
+                          AND (
+                            LOWER(CAST({col_sql} AS TEXT)) LIKE '%openfoodfacts%'
+                            OR LOWER(CAST({col_sql} AS TEXT)) LIKE '%wsrv.nl%'
+                            OR LOWER(CAST({col_sql} AS TEXT)) LIKE '%pexels.com%'
+                          )
+                        """
+                    )
+                except Exception as error_col:
+                    print(f'{_LOG} aviso purga {col_sql}: {error_col}')
             cursor.execute(sql_maestro)
             n_mae = cursor.rowcount
         print(
