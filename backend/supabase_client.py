@@ -99,10 +99,10 @@ def _imprimir_estado_supabase():
     """Log legible al arrancar; no imprime claves completas."""
     prefijo = '[Localis Supabase]'
 
-    if not SUPABASE_URL and not SUPABASE_KEY:
+    if not SUPABASE_URL and not SUPABASE_SERVICE_ROLE_KEY:
         print(
-            f'{prefijo} No configurado (SUPABASE_URL/SUPABASE_KEY ausentes). '
-            'Las subidas a Storage fallaran hasta configurar Supabase.'
+            f'{prefijo} No configurado (SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY ausentes). '
+            'Las subidas a Storage fallaran hasta configurar el service_role.'
         )
         return
 
@@ -126,20 +126,26 @@ def _imprimir_estado_supabase():
         f'SERVICE_ROLE={_mascara_secreto(SUPABASE_SERVICE_ROLE_KEY)}'
     )
 
-    if supabase:
-        rol_storage = 'service_role' if supabase_storage_admin else 'anon'
+    if supabase_storage_admin:
         print(
-            f'{prefijo} Cliente API inicializado (PostgREST + Storage). '
-            f'Storage uploads: cliente {rol_storage}.'
+            f'{prefijo} Cliente Storage inicializado con service_role '
+            f'(bucket={SUPABASE_BUCKET_IMAGENES}).'
         )
     else:
-        clave_msg = 'SUPABASE_KEY ausente' if not SUPABASE_KEY else 'fallo al crear cliente'
-        if not SUPABASE_URL_VALIDA:
+        if not SUPABASE_SERVICE_ROLE_KEY:
+            clave_msg = 'SUPABASE_SERVICE_ROLE_KEY ausente'
+        elif not SUPABASE_URL_VALIDA:
             clave_msg = 'SUPABASE_URL invalida'
+        else:
+            clave_msg = 'fallo al crear cliente service_role'
         print(
-            f'{prefijo} Cliente API no disponible ({clave_msg}). '
-            'Las subidas a Storage fallaran con SupabaseUploadError.'
+            f'{prefijo} Storage no disponible ({clave_msg}). '
+            'Las subidas fallaran con el error real de configuracion.'
         )
+    if supabase:
+        print(f'{prefijo} Cliente API (anon/publishable) disponible para PostgREST.')
+    elif SUPABASE_KEY:
+        print(f'{prefijo} Cliente API anon no se pudo crear; PostgREST HTTP deshabilitado.')
 
 
 _URL_RAW = leer_supabase_url_entorno()
@@ -233,14 +239,19 @@ _imprimir_estado_supabase()
 
 
 def supabase_api_habilitado():
-    """True si hay URL, clave y el cliente anon se creó correctamente."""
+    """True si hay URL y cliente anon (PostgREST). Storage exige service_role aparte."""
     return supabase is not None and bool(SUPABASE_URL)
+
+
+def supabase_storage_habilitado():
+    """True si hay cliente Storage con service_role (subidas)."""
+    return supabase_storage_admin is not None and bool(SUPABASE_URL)
 
 
 def obtener_diagnostico_supabase():
     """Estado de configuración y URL sanitizada."""
     return {
-        'ok': SUPABASE_URL_VALIDA and bool(SUPABASE_KEY),
+        'ok': SUPABASE_URL_VALIDA and bool(SUPABASE_SERVICE_ROLE_KEY),
         'url_sanitizada': SUPABASE_URL,
         'host': _extraer_host_desde_url(SUPABASE_URL),
         'raw_presente': bool(_limpiar_valor_env(os.getenv('SUPABASE_URL'))),
@@ -307,7 +318,8 @@ def construir_url_publica_storage(ruta: str, bucket: str | None = None) -> str:
     """
     if not SUPABASE_URL:
         raise RuntimeError(
-            'Supabase no está configurado. Define SUPABASE_URL y SUPABASE_KEY.'
+            'Supabase no está configurado. Define SUPABASE_URL y '
+            'SUPABASE_SERVICE_ROLE_KEY.'
         )
     bucket_nombre = (bucket or SUPABASE_BUCKET_IMAGENES).strip('/')
     partes = [p for p in ruta.replace('\\', '/').split('/') if p]
@@ -387,12 +399,10 @@ def storage_supabase_disponible():
 
 def obtener_cliente_storage():
     """
-    Cliente para subidas server-side en Storage.
-    Prefiere SUPABASE_SERVICE_ROLE_KEY (evita rechazos RLS con anon key).
+    Cliente para subidas server-side. Solo SUPABASE_SERVICE_ROLE_KEY
+    (bypasea RLS del bucket). Nunca usa la clave anon/pública.
     """
-    if supabase_storage_admin:
-        return supabase_storage_admin
-    return supabase
+    return supabase_storage_admin
 
 
 def storage_usa_service_role():

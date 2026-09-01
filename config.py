@@ -17,11 +17,21 @@ PAGO_MOVIL_DEFAULT = {
 # Tamaño máximo por petición multipart (imágenes, comprobantes, CSV/Excel).
 MAX_UPLOAD_BYTES = int(os.environ.get('MAX_UPLOAD_BYTES', str(8 * 1024 * 1024)))
 
-# Banner promocional por defecto (URL externa; no depende de /static/).
-DEFAULT_BANNER_URL = (
-    'https://images.pexels.com/photos/18618233/pexels-photo-18618233.jpeg'
-    '?auto=compress&cs=tinysrgb&w=1920'
-)
+# Banner promocional: URL dinámica de Supabase Storage (no Pexels ni /static/).
+RUTA_BANNER_STORAGE = 'banners/principal.webp'
+
+
+def url_banner_por_defecto():
+    """URL pública del banner en el bucket de Storage. Vacío si falta SUPABASE_URL."""
+    from backend.supabase_client import construir_url_publica_storage, SUPABASE_URL
+
+    if not SUPABASE_URL:
+        return ''
+    try:
+        return construir_url_publica_storage(RUTA_BANNER_STORAGE)
+    except Exception as error:
+        print(f'[Localis] banner Storage: {type(error).__name__}: {error}')
+        return ''
 
 # Diagnóstico y alertas de errores críticos
 ERROR_REPORT_EMAIL = os.environ.get('ERROR_REPORT_EMAIL', 'ydiab.t@gmail.com')
@@ -88,8 +98,6 @@ def validar_config_arranque():
 
     if not (os.environ.get('DATABASE_URL') or '').strip():
         errores.append('DATABASE_URL no configurada (PostgreSQL es obligatorio).')
-    if not (os.environ.get('DATABASE_KEY') or '').strip():
-        errores.append('DATABASE_KEY no configurada (PostgreSQL es obligatorio).')
 
     if es_entorno_produccion():
         obtener_secret_key()
@@ -98,11 +106,11 @@ def validar_config_arranque():
                 'GOOGLE_CLIENT_ID no configurado: el inicio de sesión con Google no funcionará.'
             )
         if not (os.environ.get('SUPABASE_URL') or '').strip() or not (
-            os.environ.get('SUPABASE_KEY') or ''
+            os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or ''
         ).strip():
             advertencias.append(
-                'SUPABASE_URL/SUPABASE_KEY no configurados: las subidas a Storage fallaran '
-                'con SupabaseUploadError hasta configurar Supabase en Render.'
+                'SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY no configurados: las subidas a '
+                'Storage fallaran hasta definir la llave service_role en Render.'
             )
         else:
             from backend.supabase_client import obtener_diagnostico_supabase
@@ -126,11 +134,11 @@ def validar_config_arranque():
                 'LOCALIS_SECRET_KEY no definida: usando clave de desarrollo (no usar en producción).'
             )
         if not (os.environ.get('SUPABASE_URL') or '').strip() or not (
-            os.environ.get('SUPABASE_KEY') or ''
+            os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or ''
         ).strip():
             advertencias.append(
-                'SUPABASE_URL/SUPABASE_KEY no configurados: las subidas a Storage fallaran '
-                'con SupabaseUploadError; el catalogo maestro usara PostgreSQL directo.'
+                'SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY no configurados: las subidas a '
+                'Storage fallaran; el catalogo maestro usara PostgreSQL (DATABASE_URL).'
             )
         else:
             from backend.supabase_client import obtener_diagnostico_supabase

@@ -17,23 +17,29 @@ else:
 
 from functools import wraps
 
-from backend.supabase_client import SUPABASE_BUCKET_IMAGENES, obtener_cliente_storage, supabase, supabase_api_habilitado
+from backend.supabase_client import (
+    SUPABASE_BUCKET_IMAGENES,
+    obtener_cliente_storage,
+    supabase,
+    supabase_api_habilitado,
+    supabase_storage_habilitado,
+)
 from backend.supabase_storage import (
     SupabaseUploadError,
     subir_bytes_a_supabase,
     subir_imagen_a_supabase,
 )
-if supabase_api_habilitado():
-    print('Supabase Storage configurado correctamente.')
-    if not obtener_cliente_storage():
-        print(
-            'Aviso: no hay cliente Storage para subidas; las subidas fallaran con '
-            'SupabaseUploadError. Configura SUPABASE_SERVICE_ROLE_KEY o SUPABASE_KEY.'
-        )
+if supabase_storage_habilitado():
+    print('Supabase Storage configurado con SUPABASE_SERVICE_ROLE_KEY.')
+elif supabase_api_habilitado():
+    print(
+        'Aviso: hay cliente API (anon) pero las subidas exigen '
+        'SUPABASE_SERVICE_ROLE_KEY. Configura la llave service_role.'
+    )
 else:
     print(
-        'Aviso: Supabase Storage no disponible; las subidas manuales fallaran con '
-        'SupabaseUploadError hasta configurar SUPABASE_URL y claves en el entorno.'
+        'Aviso: Supabase Storage no disponible; las subidas fallaran con el '
+        'error real hasta configurar SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY.'
     )
 
 import sqlite3
@@ -41,12 +47,12 @@ import sqlite3
 import psycopg2
 from authlib.integrations.flask_client import OAuth
 from config import (
-    DEFAULT_BANNER_URL,
     MAX_UPLOAD_BYTES,
     WHATSAPP_SOPORTE,
     WHATSAPP_SOPORTE_URL,
     aplicar_config_sesion_flask,
     obtener_secret_key,
+    url_banner_por_defecto,
     validar_config_arranque,
 )
 from flask import (
@@ -157,7 +163,7 @@ db = SQLAlchemy(app)
 app.secret_key = obtener_secret_key()
 aplicar_config_sesion_flask(app)
 
-app.config['SUPABASE_CLIENT'] = supabase
+app.config['SUPABASE_CLIENT'] = obtener_cliente_storage() or supabase
 app.config['SUPABASE_BUCKET_IMAGENES'] = SUPABASE_BUCKET_IMAGENES
 app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_BYTES
 
@@ -203,8 +209,6 @@ def _debug_imagenes_antes_de_render(productos, origen):
         )
     if len(lista) > 50:
         print(f'[Localis Imagen] ... {len(lista) - 50} producto(s) más')
-
-DEFAULT_BANNER = DEFAULT_BANNER_URL
 
 
 def _inicializar_aplicacion():
@@ -289,11 +293,11 @@ if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
 
 
 def _url_imagen_comercio_usable(valor):
-    """URL de logo/banner usable en plantillas; descarta /static/ inexistentes."""
-    url = imagen_url_almacenada(valor) or normalizar_url_imagen(valor)
+    """URL de logo/banner usable en plantillas (Storage o https; no /static/ local)."""
+    url = imagen_url_almacenada(valor)
     if not url:
         return None
-    if url.startswith('/static/') and not url_estatica_existe(url):
+    if url.startswith('/static/'):
         return None
     return url
 
@@ -547,16 +551,19 @@ def index():
 
     from backend.stores import obtener_configs
 
+    banner_fallback = url_banner_por_defecto()
     configs = obtener_configs({
         'tasa_dolar': '36.50',
         'whatsapp_soporte': WHATSAPP_SOPORTE,
-        'banner_principal': DEFAULT_BANNER,
+        'banner_principal': banner_fallback,
     })
     try:
         tasa_actual = float(configs['tasa_dolar'])
     except (TypeError, ValueError):
         tasa_actual = obtener_tasa_dolar() or 1.0
-    banner_url = url_banner_principal(configs['banner_principal'], default=DEFAULT_BANNER)
+    banner_url = url_banner_principal(
+        configs['banner_principal'], default=banner_fallback
+    )
     whatsapp = configs['whatsapp_soporte']
 
     _debug_imagenes_antes_de_render(productos, 'index')
@@ -567,7 +574,7 @@ def index():
         q=palabra_clave,
         categoria_actual=categoria,
         banner_url=banner_url,
-        default_banner=DEFAULT_BANNER,
+        default_banner=banner_url,
         whatsapp=whatsapp,
         whatsapp_url=WHATSAPP_SOPORTE_URL,
     )
@@ -1512,7 +1519,7 @@ def api_verificar_pago():
     if not archivo or not archivo.filename:
         return jsonify({'error': 'Debes adjuntar la captura del comprobante de pago.'}), 400
 
-    from backend.images import comprimir_bytes_a_bytes, leer_bytes_limitados
+    from backend.images import ImageProcessingError, comprimir_bytes_a_bytes, leer_bytes_limitados
 
     data_bytes, error_lectura = leer_bytes_limitados(archivo)
     if error_lectura:
@@ -1541,9 +1548,6 @@ def api_verificar_pago():
             prefijo=f'pago_{comercio["id"]}',
             max_dimension=1920,
         )
-        if not comprimido:
-            raise SupabaseUploadError('No se pudo procesar la imagen del comprobante.')
-
         payload, content_type, filename = comprimido
         comprobante_url = subir_bytes_a_supabase(
             payload,
@@ -1551,7 +1555,7 @@ def api_verificar_pago():
             content_type=content_type,
             carpeta='pagos',
         )
-    except SupabaseUploadError as error:
+    except (SupabaseUploadError, ImageProcessingError) as error:
         return jsonify({'error': str(error)}), 503
 
     exito, mensaje, datos = activar_suscripcion_por_comprobante(
@@ -1596,7 +1600,7 @@ def panel_admin():
     comercios = obtener_todos_comercios_admin(busqueda=busqueda or None)
     banner_url = url_banner_principal(
         obtener_banner_principal(),
-        default=DEFAULT_BANNER,
+        default=url_banner_por_defecto(),
     )
     whatsapp = obtener_config('whatsapp_soporte', WHATSAPP_SOPORTE)
 

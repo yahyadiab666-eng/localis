@@ -116,15 +116,8 @@ def url_imagen_subida_storage_valida(valor):
 
 
 def url_imagen_local_valida(valor):
-    """Ruta pública /static/uploads/... tras respaldo local en disco."""
-    texto = texto_campo_imagen(valor, default=None)
-    if not texto or es_imagen_generica(texto):
-        return None
-    if not texto.startswith('/static/uploads/'):
-        return None
-    if '..' in texto.replace('\\', '/'):
-        return None
-    return texto
+    """Legacy: ya no se usa para mostrar. Las vistas van a Supabase Storage."""
+    return None
 
 
 # Alias histórico
@@ -132,10 +125,9 @@ url_imagen_supabase_valida = url_imagen_subida_storage_valida
 
 
 def url_imagen_usable(valor):
-    """True si hay URL externa, Storage o respaldo local /static/uploads/."""
+    """True si hay URL de Storage o https externa (no carpetas locales)."""
     return bool(
         url_imagen_subida_storage_valida(valor)
-        or url_imagen_local_valida(valor)
         or url_imagen_externa_valida(valor)
     )
 
@@ -143,13 +135,11 @@ def url_imagen_usable(valor):
 def imagen_url_almacenada(valor):
     """
     Valor persistible en PostgreSQL:
-    - URL externa / catálogo maestro (texto https), o
     - enlace público de Supabase Storage, o
-    - ruta /static/uploads/... (respaldo local).
+    - URL https externa / catálogo maestro.
     """
     return (
         url_imagen_subida_storage_valida(valor)
-        or url_imagen_local_valida(valor)
         or url_imagen_externa_valida(valor)
     )
 
@@ -171,10 +161,8 @@ def imagen_url_para_actualizacion(nueva, existente):
 
 
 def es_url_subida_storage(valor):
-    """True si el valor es enlace público de Supabase Storage o respaldo local."""
-    return bool(
-        url_imagen_subida_storage_valida(valor) or url_imagen_local_valida(valor)
-    )
+    """True si el valor es enlace público de Supabase Storage."""
+    return bool(url_imagen_subida_storage_valida(valor))
 
 
 def es_url_externa_texto(valor):
@@ -194,24 +182,23 @@ def normalizar_url_imagen(valor, default=None):
 
 def url_banner_principal(valor, default=None):
     """
-    URL segura para banner promocional (https, Storage o respaldo local).
-    Evita rutas /static/... inexistentes en el despliegue.
+    URL del banner promocional desde configuracion_sistema o Supabase Storage.
+    Descarta /static/ local y URLs de prueba (Pexels).
     """
-    from config import DEFAULT_BANNER_URL
+    from config import url_banner_por_defecto
 
-    fallback = default or DEFAULT_BANNER_URL
+    fallback = default if default is not None else url_banner_por_defecto()
     texto = texto_campo_imagen(valor, default=None)
     if not texto:
         return fallback
 
+    lower = texto.lower()
+    if texto.startswith('/static/') or 'pexels.com' in lower:
+        return fallback
+
     almacenada = imagen_url_almacenada(texto)
     if almacenada:
-        if almacenada.startswith('/static/') and not url_estatica_existe(almacenada):
-            return fallback
         return almacenada
-
-    if texto.startswith('/static/'):
-        return fallback
     return fallback
 
 

@@ -136,11 +136,12 @@ def actualizar_tasa_dolar(admin_id, nueva_tasa):
 
 
 def obtener_banner_principal():
-    from config import DEFAULT_BANNER_URL
+    from config import url_banner_por_defecto
     from backend.stores import obtener_config
 
-    valor = obtener_config('banner_principal', DEFAULT_BANNER_URL)
-    return url_banner_principal(valor, default=DEFAULT_BANNER_URL)
+    fallback = url_banner_por_defecto()
+    valor = obtener_config('banner_principal', fallback)
+    return url_banner_principal(valor, default=fallback)
 
 
 def actualizar_banner_principal(admin_id, banner_url):

@@ -1,7 +1,6 @@
 """Reexporta la conexión PostgreSQL centralizada en database.py."""
 
 from database import (
-    DATABASE_KEY,
     DATABASE_URL,
     ROW_AS_DICT,
     SQL_FECHA_VENCIDA,
@@ -26,7 +25,6 @@ from database import (
 )
 
 __all__ = [
-    'DATABASE_KEY',
     'DATABASE_URL',
     'ROW_AS_DICT',
     'SQL_FECHA_VENCIDA',

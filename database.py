@@ -80,7 +80,6 @@ def normalize_database_url(url):
 
 
 DATABASE_URL = normalize_database_url(os.getenv('DATABASE_URL'))
-DATABASE_KEY = (os.getenv('DATABASE_KEY') or '').strip()
 
 _IDENTIFICADOR_SQL = re.compile(r'^[a-z_][a-z0-9_]*$')
 
@@ -280,12 +279,7 @@ def _require_database_url():
     if not DATABASE_URL:
         raise RuntimeError(
             'DATABASE_URL no está configurada. '
-            'Define la cadena de conexión PostgreSQL en tu entorno.'
-        )
-    if not DATABASE_KEY:
-        raise RuntimeError(
-            'DATABASE_KEY no está configurada. '
-            'Define la clave de acceso a la base de datos en tu entorno.'
+            'Define la cadena de conexión PostgreSQL completa en el entorno.'
         )
 
 
@@ -1107,17 +1101,19 @@ def _crear_indices(cursor):
 
 
 def _sembrar_configuracion(cursor):
-    from config import DEFAULT_BANNER_URL
+    from config import url_banner_por_defecto
 
     defaults = [
         ('tasa_dolar', '36.50'),
-        ('banner_principal', DEFAULT_BANNER_URL),
+        ('banner_principal', url_banner_por_defecto()),
         ('whatsapp_soporte', '584125970507'),
         ('pago_movil_banco', 'Banco Caribe'),
         ('pago_movil_cedula', '30209716'),
         ('pago_movil_telefono', '04127957989'),
     ]
     for clave, valor in defaults:
+        if clave == 'banner_principal' and not valor:
+            continue
         cursor.execute(
             """
             INSERT INTO configuracion_sistema (clave, valor)
@@ -1130,8 +1126,12 @@ def _sembrar_configuracion(cursor):
 
 
 def _corregir_banner_principal_legacy(cursor):
-    """Reemplaza rutas /static/images/... inexistentes por el banner HTTPS por defecto."""
-    from config import DEFAULT_BANNER_URL
+    """Sustituye banners de /static o URLs de prueba por la ruta de Supabase Storage."""
+    from config import url_banner_por_defecto
+
+    url_storage = url_banner_por_defecto()
+    if not url_storage:
+        return
 
     cursor.execute(
         """
@@ -1139,11 +1139,12 @@ def _corregir_banner_principal_legacy(cursor):
         SET valor = %s
         WHERE clave = 'banner_principal'
           AND (
-            valor LIKE '/static/images/%%'
+            valor LIKE '/static/%%'
+            OR valor LIKE '%%pexels.com%%'
             OR TRIM(COALESCE(valor, '')) = ''
           )
         """,
-        (DEFAULT_BANNER_URL,),
+        (url_storage,),
     )
 
 

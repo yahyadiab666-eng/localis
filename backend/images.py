@@ -16,6 +16,10 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp'}
 DEFAULT_WORKERS = 8
 
 
+class ImageProcessingError(Exception):
+    """Fallo al leer o comprimir una imagen subida (mensaje para el usuario/logs)."""
+
+
 def archivo_imagen_valido(filename):
     if not filename or '.' not in filename:
         return False
@@ -114,7 +118,7 @@ def comprimir_pil_a_bytes(
     quality=QUALITY,
     formato='WEBP',
 ):
-    """Comprime un objeto PIL y retorna (bytes, content_type, filename) o None."""
+    """Comprime un objeto PIL y retorna (bytes, content_type, filename)."""
     try:
         img = _preparar_imagen(img)
         img.thumbnail((max_dimension, max_dimension))
@@ -131,9 +135,12 @@ def comprimir_pil_a_bytes(
             content_type = 'image/jpeg'
 
         return buffer.getvalue(), content_type, filename
-    except Exception as e:
-        print(f'Error al comprimir imagen a bytes: {e}')
-        return None
+    except ImageProcessingError:
+        raise
+    except Exception as error:
+        raise ImageProcessingError(
+            f'No se pudo comprimir la imagen ({type(error).__name__}): {error}'
+        ) from error
 
 
 def comprimir_bytes_a_bytes(
@@ -143,17 +150,20 @@ def comprimir_bytes_a_bytes(
     quality=QUALITY,
     formato='WEBP',
 ):
-    """Comprime bytes de imagen y retorna (bytes, content_type, filename) o None."""
+    """Comprime bytes de imagen y retorna (bytes, content_type, filename)."""
     if not data_bytes:
-        return None
+        raise ImageProcessingError('No hay datos de imagen para comprimir.')
     try:
         img = Image.open(io.BytesIO(data_bytes))
         return comprimir_pil_a_bytes(
             img, prefijo=prefijo, max_dimension=max_dimension, quality=quality, formato=formato
         )
-    except Exception as e:
-        print(f'Error al comprimir bytes de imagen: {e}')
-        return None
+    except ImageProcessingError:
+        raise
+    except Exception as error:
+        raise ImageProcessingError(
+            f'No se pudo abrir la imagen ({type(error).__name__}): {error}'
+        ) from error
 
 
 def comprimir_file_storage_a_bytes(
@@ -163,18 +173,14 @@ def comprimir_file_storage_a_bytes(
     quality=QUALITY,
     formato='WEBP',
 ):
-    """Comprime un archivo subido y retorna (bytes, content_type, filename) o None."""
+    """Comprime un archivo subido y retorna (bytes, content_type, filename)."""
     error = validar_archivo_subida(file_storage)
     if error:
-        print(f'Archivo rechazado: {error}')
-        return None
-
-    if not file_storage or not getattr(file_storage, 'filename', ''):
-        return None
+        raise ImageProcessingError(error)
 
     nombre_original = secure_filename(file_storage.filename)
     if not nombre_original:
-        return None
+        raise ImageProcessingError('El archivo no tiene un nombre válido.')
 
     try:
         file_storage.stream.seek(0)
@@ -183,9 +189,12 @@ def comprimir_file_storage_a_bytes(
         return comprimir_pil_a_bytes(
             img, prefijo_base, max_dimension, quality, formato
         )
-    except Exception as e:
-        print(f'Error al comprimir archivo a bytes: {e}')
-        return None
+    except ImageProcessingError:
+        raise
+    except Exception as error:
+        raise ImageProcessingError(
+            f'No se pudo procesar el archivo ({type(error).__name__}): {error}'
+        ) from error
 
 
 def procesar_tarea_imagen(tarea):

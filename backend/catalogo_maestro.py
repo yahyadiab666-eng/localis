@@ -1,7 +1,6 @@
 """Catálogo maestro de imágenes: PostgreSQL directo (preferido) + PostgREST httpx opcional."""
 
 import os
-from urllib.parse import quote
 
 from backend.db import DATABASE_URL, using_postgres
 from backend.postgrest_http import (
@@ -35,29 +34,9 @@ _URL_NO_VACIA = (
 )
 
 
-def _url_wsrv_oficial(url_origen):
-    return (
-        'https://wsrv.nl/?url='
-        + quote(url_origen, safe='')
-        + '&w=300&h=300&fit=cover&output=webp&q=80'
-    )
-
-
-# Activo en memoria: no depende de Supabase ni de catalogo_maestro_imagenes.
-_URL_HARINA_PAN = _url_wsrv_oficial(
-    'https://images.openfoodfacts.org/images/products/759/100/200/0547/front_es.24.400.jpg'
-)
-_URL_ACEITE_VATEL = _url_wsrv_oficial(
-    'https://images.openfoodfacts.org/images/products/759/104/900/1903/front_es.3.400.jpg'
-)
-
-IMAGENES_CATALOGO_SEMILLA = {
-    '7591001000011': _URL_HARINA_PAN,  # Harina PAN (código de prueba)
-    '7591002000011': _URL_HARINA_PAN,  # Polar Harina PAN
-    '7591002000547': _URL_HARINA_PAN,  # Harina PAN 1 kg (OFF)
-    '7591001000035': _URL_ACEITE_VATEL,  # Aceite Vatel (código de prueba)
-    '7591049001903': _URL_ACEITE_VATEL,  # Aceite Vatel 1 L (OFF)
-}
+# Respaldo en memoria: vacío a propósito (sin URLs de prueba hardcodeadas).
+# Las fotos salen de catalogo_maestro_imagenes o de Supabase Storage.
+IMAGENES_CATALOGO_SEMILLA = {}
 
 
 def _url_semilla_por_codigo(codigo):

@@ -113,13 +113,11 @@ def optimizar_url_wsrv(url_original):
 
 
 def _url_manual_valida(imagen_manual):
-    """URL ya en BD: Storage, respaldo local /static/uploads/ o https externa."""
-    from backend.utils import url_imagen_local_valida
-
+    """URL ya en BD: Storage o https externa (no /static/ local)."""
     manual = imagen_url_almacenada(imagen_manual)
     if not manual:
         return None
-    if url_imagen_subida_storage_valida(manual) or url_imagen_local_valida(manual):
+    if url_imagen_subida_storage_valida(manual):
         return manual
     return optimizar_url_wsrv(manual) or manual
 

@@ -5,10 +5,14 @@ Subida de archivos a Supabase Storage (obligatorio en produccion).
 - Archivos subidos -> Supabase Storage; si falla, SupabaseUploadError explicito (sin disco local).
 """
 
-from backend.images import comprimir_file_storage_a_bytes, validar_archivo_subida
+from backend.images import (
+    ImageProcessingError,
+    comprimir_file_storage_a_bytes,
+    validar_archivo_subida,
+)
 from backend.supabase_client import (
     SUPABASE_BUCKET_IMAGENES,
-    SUPABASE_KEY,
+    SUPABASE_SERVICE_ROLE_KEY,
     SUPABASE_URL,
     SUPABASE_URL_VALIDA,
     construir_url_publica_storage,
@@ -42,15 +46,21 @@ def _mensaje_cliente_no_configurado() -> str:
             'Supabase Storage no disponible: SUPABASE_URL ausente o invalida. '
             'Define https://TU_REF.supabase.co en el entorno (Render).'
         )
-    if not storage_usa_service_role() and not SUPABASE_KEY:
+    if not SUPABASE_SERVICE_ROLE_KEY:
         return (
-            'Supabase Storage no disponible: configura SUPABASE_SERVICE_ROLE_KEY '
-            '(recomendado para subidas server-side) o SUPABASE_KEY en el entorno.'
+            'Supabase Storage no disponible: falta SUPABASE_SERVICE_ROLE_KEY. '
+            'En el backend las subidas usan solo la llave service_role '
+            '(Dashboard -> Settings -> API -> service_role), no la clave anon/publica.'
+        )
+    if not storage_usa_service_role():
+        return (
+            'Supabase Storage no disponible: no se pudo crear el cliente con '
+            'SUPABASE_SERVICE_ROLE_KEY. Revisa que la llave sea la service_role '
+            f'completa y los logs de arranque ({LOG_PREFIX}).'
         )
     return (
-        'Supabase Storage no disponible: no se pudo crear el cliente SDK. '
-        'Revisa SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY y los logs de arranque '
-        '([Localis Supabase]).'
+        'Supabase Storage no disponible: no hay cliente service_role. '
+        f'Revisa SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY y {LOG_PREFIX}.'
     )
 
 
@@ -79,18 +89,11 @@ def _mensaje_error_storage(error):
             mensaje = str(getattr(error, 'message', None) or error.args[0] or error)
 
             if status == 403:
-                if storage_usa_service_role():
-                    return (
-                        f'Supabase Storage rechazo la subida (HTTP 403) en el bucket '
-                        f'"{SUPABASE_BUCKET_IMAGENES}". Revisa politicas RLS/politicas '
-                        f'del bucket en Supabase Dashboard -> Storage.'
-                        f' Detalle: {mensaje}'
-                    )
                 return (
-                    f'Supabase Storage rechazo la subida por permisos (HTTP 403 / RLS). '
-                    f'Configura SUPABASE_SERVICE_ROLE_KEY en Render (Settings -> API -> '
-                    f'service_role) o anade una politica INSERT en el bucket '
-                    f'"{SUPABASE_BUCKET_IMAGENES}". Detalle: {mensaje}'
+                    f'Supabase Storage rechazo la subida (HTTP 403) en el bucket '
+                    f'"{SUPABASE_BUCKET_IMAGENES}". El backend usa service_role; '
+                    f'revisa que SUPABASE_SERVICE_ROLE_KEY sea la llave de administracion '
+                    f'y que el bucket exista. Detalle: {mensaje}'
                 )
             if status == 413:
                 return 'La imagen supera el tamano permitido por Supabase Storage (HTTP 413).'
@@ -128,7 +131,10 @@ def _registrar_exito_supabase(ruta_storage, url_publica):
 
 
 def _resolver_cliente_storage(supabase_client):
-    return supabase_client or obtener_cliente_storage()
+    """Solo service_role. Un cliente inyectado (tests) se acepta; si no, el admin."""
+    if supabase_client is not None:
+        return supabase_client
+    return obtener_cliente_storage()
 
 
 def _url_publica_tras_subida(ruta_storage):
@@ -206,11 +212,12 @@ def subir_imagen_con_respaldo(
     if error_validacion:
         raise SupabaseUploadError(error_validacion)
 
-    comprimido = comprimir_file_storage_a_bytes(
-        file_storage, prefijo=prefijo, max_dimension=max_dimension
-    )
-    if not comprimido:
-        raise SupabaseUploadError('No se pudo comprimir la imagen subida.')
+    try:
+        comprimido = comprimir_file_storage_a_bytes(
+            file_storage, prefijo=prefijo, max_dimension=max_dimension
+        )
+    except ImageProcessingError as error:
+        raise SupabaseUploadError(str(error)) from error
 
     data, content_type, filename = comprimido
     return _persistir_en_supabase(
