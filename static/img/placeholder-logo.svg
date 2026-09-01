@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="Comercio">
+  <rect width="200" height="200" rx="24" fill="#fffbeb"/>
+  <rect x="48" y="78" width="104" height="72" rx="8" fill="#f59e0b"/>
+  <path d="M40 86 L100 46 L160 86" fill="none" stroke="#b45309" stroke-width="10" stroke-linejoin="round"/>
+  <rect x="88" y="108" width="24" height="42" fill="#fffbeb"/>
+</svg>

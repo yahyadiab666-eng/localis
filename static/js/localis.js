@@ -7,14 +7,21 @@
 
   const ALERTA_DURACION_MS = 4000;
 
+  window.PLACEHOLDER_PRODUCTO = '/static/img/placeholder-producto.svg';
+
   window.urlImagenRespaldoProducto = function urlImagenRespaldoProducto(productoId) {
-    if (!productoId) return '';
+    if (!productoId) return window.PLACEHOLDER_PRODUCTO;
     return '/imagen-producto?producto_id=' + encodeURIComponent(productoId);
   };
 
   window.rescatarImagenProducto = function rescatarImagenProducto(img) {
     if (!img) return;
     img.onerror = null;
+    var fallback = window.PLACEHOLDER_PRODUCTO;
+    if (img.getAttribute('src') !== fallback) {
+      img.src = fallback;
+      return;
+    }
     img.removeAttribute('src');
     var wrap = img.closest('.localis-img-producto-wrap');
     if (wrap) {

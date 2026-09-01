@@ -229,6 +229,14 @@ def url_estatica_existe(ruta_relativa):
     return os.path.isfile(destino)
 
 
+# Misma normalización SQL que en lecturas de inventario (Excel / CSV / PostgreSQL).
+EXPR_CODIGO_BARRAS = (
+    "regexp_replace("
+    "regexp_replace(TRIM(BOTH FROM CAST(codigo_barras AS TEXT)), '\\s+', '', 'g'), "
+    "'\\.0+$', '', 'g')"
+)
+
+
 def normalizar_codigo_barras(valor):
     """Normaliza EAN/SKU desde CSV/Excel/PostgreSQL (espacios, .0, notación científica)."""
     if valor is None or isinstance(valor, bool):

@@ -7,26 +7,19 @@ import time
 
 from backend.catalogo_maestro import (
     imagen_maestro_por_codigo,
-    mapa_imagenes_maestro,
 )
 from backend.db import get_db_connection
 from backend.image_manager import (
     completar_mapa_imagenes,
-    resolver_imagen_catalogo,
     resolver_imagen_escritura,
 )
 from backend.utils import (
+    EXPR_CODIGO_BARRAS,
     imagen_url_almacenada,
     imagen_url_para_persistir,
     normalizar_codigo_barras,
-    url_imagen_para_vista,
 )
 
-EXPR_CODIGO_BARRAS = (
-    "regexp_replace("
-    "regexp_replace(TRIM(BOTH FROM CAST(codigo_barras AS TEXT)), '\\s+', '', 'g'), "
-    "'\\.0+$', '', 'g')"
-)
 _LOG_CSV = '[Localis CSV]'
 _LOG_IMAGEN = '[Localis Imagen]'
 _PRESUPUESTO_OFF_SEG = int(os.getenv('IMPORT_OFF_BUDGET_SEC', '90'))
@@ -72,24 +65,18 @@ def _resolver_url_escritura(
 
 
 def imagen_url_para_catalogo(imagen_url=None, codigo_barras=None):
-    """URL de catálogo: Storage persistida o maestro. Cadena vacía si no hay."""
+    """
+    Lectura de catálogo: solo la URL ya persistida (Storage) o placeholder local.
+    No consulta catálogo maestro ni red. codigo_barras se ignora en vistas.
+    """
+    del codigo_barras
     try:
-        url = resolver_imagen_catalogo(
-            imagen_url=imagen_url,
-            codigo_barras=codigo_barras,
-        )
-        if url:
-            return url_imagen_para_vista(url)
+        from backend.image_handler import url_imagen_segura
+
+        return url_imagen_segura(imagen_url)
     except Exception as error:
         _registrar_error_imagen('imagen_url_para_catalogo', error)
-    try:
-        directa = _url_almacenada_o_none(imagen_url)
-        if directa:
-            return directa
-        return url_imagen_para_vista(_respaldo_en_cascada(codigo_barras))
-    except Exception as error:
-        _registrar_error_imagen('imagen_url_para_catalogo respaldo', error)
-        return ''
+        return '/static/img/placeholder-producto.svg'
 
 
 def imagen_url_para_guardar(imagen_manual=None, codigo_barras=None):
@@ -107,65 +94,36 @@ def imagen_url_para_guardar(imagen_manual=None, codigo_barras=None):
 
 
 def url_imagen_con_respaldo(imagen_url=None, codigo_barras=None):
-    """Vista Flask: URL de Storage o ''. Nunca None ni URLs de prueba."""
+    """Vista Flask: Storage persistida o placeholder local. Sin red ni maestro."""
+    del codigo_barras
     try:
-        directa = _url_almacenada_o_none(imagen_url)
-        if directa:
-            return directa
-        return url_imagen_para_vista(_respaldo_en_cascada(codigo_barras))
+        from backend.image_handler import url_imagen_segura
+
+        return url_imagen_segura(imagen_url)
     except Exception as error:
         _registrar_error_imagen('url_imagen_con_respaldo', error)
-        return ''
+        return '/static/img/placeholder-producto.svg'
 
 
 def imagen_urls_para_catalogo(productos):
-    """Resuelve imágenes en lote (Storage). Asigna '' si no hay foto."""
+    """
+    No enriquece con catálogo maestro (eso bloquearía el listado).
+    Deja las URLs persistidas; la vista aplica placeholder si faltan.
+    """
     if not productos:
         return productos
-
     try:
-        codigos = []
-        vistos = set()
         for prod in productos:
             try:
-                if _url_almacenada_o_none(prod.get('imagen_url')):
-                    continue
-                codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
-                if codigo and codigo not in vistos:
-                    vistos.add(codigo)
-                    codigos.append(codigo)
-            except Exception as error:
-                _registrar_error_imagen('lote codigo producto', error)
-                continue
-
-        try:
-            mapa = mapa_imagenes_maestro(codigos) if codigos else {}
-        except Exception as error:
-            _registrar_error_imagen('mapa_imagenes_maestro', error)
-            mapa = {}
-
-        for prod in productos:
-            try:
-                url = _url_almacenada_o_none(prod.get('imagen_url'))
-                if not url:
-                    codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
-                    url = mapa.get(codigo) if codigo else None
-                    if not url and codigo:
-                        url = _respaldo_en_cascada(codigo)
-                prod['imagen_url'] = url_imagen_para_vista(url)
+                directa = _url_almacenada_o_none(prod.get('imagen_url'))
+                prod['imagen_url'] = directa or (prod.get('imagen_url') or '')
             except Exception as error:
                 _registrar_error_imagen(
                     f"lote producto id={prod.get('id')}", error
                 )
-                prod['imagen_url'] = url_imagen_para_vista(prod.get('imagen_url'))
         return productos
     except Exception as error:
         _registrar_error_imagen('imagen_urls_para_catalogo', error)
-        for prod in productos or []:
-            try:
-                prod['imagen_url'] = url_imagen_para_vista(prod.get('imagen_url'))
-            except Exception:
-                prod['imagen_url'] = ''
         return productos
 
 
@@ -214,10 +172,7 @@ def obtener_imagen_url_producto(producto_id):
             if not fila:
                 return None
             registro = dict(fila)
-            return imagen_url_para_catalogo(
-                registro.get('imagen_url'),
-                codigo_barras=registro.get('codigo_barras'),
-            )
+            return _url_almacenada_o_none(registro.get('imagen_url')) or ''
     except Exception as error:
         _registrar_error_imagen(f'obtener_imagen_url_producto({producto_id})', error)
         return ''

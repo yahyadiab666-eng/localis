@@ -59,7 +59,6 @@ from config import (
     WHATSAPP_SOPORTE_URL,
     aplicar_config_sesion_flask,
     obtener_secret_key,
-    url_banner_por_defecto,
     validar_config_arranque,
 )
 from flask import (
@@ -96,12 +95,17 @@ from backend.admin import (
 from backend.auth import obtener_o_crear_usuario_google
 from backend.diagnostics import ejecutar_diagnostico_inicio, obtener_estado_sistema
 from backend.error_handlers import registrar_manejadores_errores
+from backend.image_handler import (
+    PLACEHOLDER_BANNER,
+    PLACEHOLDER_PRODUCTO,
+    enriquecer_comercio_imagenes,
+    url_banner_segura,
+    url_imagen_producto_segura,
+    url_storage_o_vacio,
+)
 from backend.image_lookup import (
-    imagen_url_para_catalogo,
     imagen_url_para_guardar,
-    imagen_urls_para_catalogo,
     obtener_imagen_url_producto,
-    url_imagen_con_respaldo,
 )
 from backend.db import get_db_connection
 from database import init_db, normalize_database_url
@@ -143,7 +147,6 @@ from backend.utils import (
     parsear_visible_form,
     url_estatica_existe,
     url_maps_comercio,
-    url_banner_principal,
     url_whatsapp_comercio,
     normalizar_url_imagen,
 )
@@ -208,37 +211,45 @@ def _filtro_fecha_corta(valor):
 
 @app.template_filter('url_imagen_producto')
 def _filtro_url_imagen_producto(producto):
-    """imagen_url del producto o respaldo por código en catalogo_maestro_imagenes."""
-    if not producto:
-        return ''
-    if hasattr(producto, 'get'):
-        url = producto.get('imagen_url')
-        codigo = producto.get('codigo_barras')
-    else:
-        url = getattr(producto, 'imagen_url', None)
-        codigo = getattr(producto, 'codigo_barras', None)
-    return url_imagen_con_respaldo(url, codigo_barras=codigo) or ''
+    """Storage persistida o placeholder local. Sin red ni catálogo maestro."""
+    try:
+        return url_imagen_producto_segura(producto)
+    except Exception:
+        traceback.print_exc()
+        return PLACEHOLDER_PRODUCTO
+
+
+@app.context_processor
+def _injectar_placeholders_imagen():
+    return {
+        'placeholder_producto': PLACEHOLDER_PRODUCTO,
+        'placeholder_banner': PLACEHOLDER_BANNER,
+    }
 
 
 def _debug_imagenes_antes_de_render(productos, origen):
-    """Print de control: nombre, código de barras y URL que verá la plantilla."""
-    lista = list(productos or [])
-    print(f'[Localis Imagen] render origen={origen} productos={len(lista)}')
-    for prod in lista[:50]:
-        if hasattr(prod, 'get'):
-            nombre = prod.get('nombre')
-            codigo = prod.get('codigo_barras')
-            url_bd = prod.get('imagen_url')
-        else:
-            nombre = getattr(prod, 'nombre', None)
-            codigo = getattr(prod, 'codigo_barras', None)
-            url_bd = getattr(prod, 'imagen_url', None)
-        url = url_imagen_con_respaldo(url_bd, codigo_barras=codigo) or ''
-        print(
-            f'[Localis Imagen] nombre={nombre!r} codigo={codigo!r} url={url!r}'
-        )
-    if len(lista) > 50:
-        print(f'[Localis Imagen] ... {len(lista) - 50} producto(s) más')
+    """Print de control: URL persistida vs URL que verá la plantilla (sin I/O)."""
+    try:
+        lista = list(productos or [])
+        print(f'[Localis Imagen] render origen={origen} productos={len(lista)}')
+        for prod in lista[:50]:
+            if hasattr(prod, 'get'):
+                nombre = prod.get('nombre')
+                codigo = prod.get('codigo_barras')
+                url_bd = prod.get('imagen_url')
+            else:
+                nombre = getattr(prod, 'nombre', None)
+                codigo = getattr(prod, 'codigo_barras', None)
+                url_bd = getattr(prod, 'imagen_url', None)
+            url = url_imagen_producto_segura(prod)
+            print(
+                f'[Localis Imagen] nombre={nombre!r} codigo={codigo!r} '
+                f'url_bd={url_bd!r} vista={url!r}'
+            )
+        if len(lista) > 50:
+            print(f'[Localis Imagen] ... {len(lista) - 50} producto(s) más')
+    except Exception:
+        traceback.print_exc()
 
 
 def _inicializar_aplicacion():
@@ -335,34 +346,37 @@ if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
 
 
 def _url_imagen_comercio_usable(valor):
-    """URL de logo/banner usable en plantillas (Storage o https; no /static/ local)."""
-    url = imagen_url_almacenada(valor)
-    if not url:
+    """Logo/banner de tienda: Storage persistida o None (icono/degradado en plantilla)."""
+    try:
+        return url_storage_o_vacio(valor) or None
+    except Exception:
+        traceback.print_exc()
         return None
-    if url.startswith('/static/'):
-        return None
-    return url
 
 
 def _normalizar_imagenes_comercio(comercio):
-    """Normaliza logo, banner y fechas para plantillas (PostgreSQL datetime)."""
+    """Normaliza logo, banner y fechas para plantillas. Las imágenes no bloquean."""
     if not comercio:
         return comercio
-    comercio = dict(comercio)
+    try:
+        comercio = enriquecer_comercio_imagenes(comercio)
+    except Exception:
+        traceback.print_exc()
+        comercio = dict(comercio)
+        comercio.setdefault('logo_completo', None)
+        comercio.setdefault('banner_completo', None)
+        comercio.setdefault('tiene_banner', False)
 
-    comercio['logo_completo'] = _url_imagen_comercio_usable(comercio.get('logo_url'))
-
-    banner = comercio.get('banner_url') or comercio.get('imagen_portada')
-    comercio['banner_completo'] = _url_imagen_comercio_usable(banner)
-
-    comercio['tiene_banner'] = bool(comercio.get('banner_completo'))
     for campo in (
         'fecha_vencimiento',
         'fecha_registro',
         'fecha_inicio_suscripcion',
     ):
         if comercio.get(campo) is not None:
-            comercio[campo] = formatear_fecha(comercio[campo])
+            try:
+                comercio[campo] = formatear_fecha(comercio[campo])
+            except Exception:
+                pass
 
     visible = comercio.get('visible', 1)
     if isinstance(visible, bool):
@@ -593,20 +607,23 @@ def index():
 
     from backend.stores import obtener_configs
 
-    banner_fallback = url_banner_por_defecto()
-    configs = obtener_configs({
-        'tasa_dolar': '36.50',
-        'whatsapp_soporte': WHATSAPP_SOPORTE,
-        'banner_principal': banner_fallback,
-    })
     try:
-        tasa_actual = float(configs['tasa_dolar'])
-    except (TypeError, ValueError):
+        configs = obtener_configs({
+            'tasa_dolar': '36.50',
+            'whatsapp_soporte': WHATSAPP_SOPORTE,
+            'banner_principal': '',
+        })
+        try:
+            tasa_actual = float(configs['tasa_dolar'])
+        except (TypeError, ValueError):
+            tasa_actual = obtener_tasa_dolar() or 1.0
+        banner_url = url_banner_segura(configs.get('banner_principal'))
+        whatsapp = configs['whatsapp_soporte']
+    except Exception:
+        traceback.print_exc()
         tasa_actual = obtener_tasa_dolar() or 1.0
-    banner_url = url_banner_principal(
-        configs['banner_principal'], default=banner_fallback
-    )
-    whatsapp = configs['whatsapp_soporte']
+        banner_url = PLACEHOLDER_BANNER
+        whatsapp = WHATSAPP_SOPORTE
 
     _debug_imagenes_antes_de_render(productos, 'index')
     return render_template(
@@ -652,6 +669,11 @@ def api_producto(producto_id):
     producto = obtener_producto_publico(producto_id)
     if not producto:
         return jsonify({'error': 'Producto no encontrado'}), 404
+    try:
+        producto['imagen_url'] = url_imagen_producto_segura(producto)
+    except Exception:
+        traceback.print_exc()
+        producto['imagen_url'] = PLACEHOLDER_PRODUCTO
     return jsonify(producto)
 
 
@@ -664,7 +686,7 @@ def imagen_producto_respaldo():
     url = obtener_imagen_url_producto(producto_id)
     if url:
         return redirect(url)
-    return ('', 404)
+    return redirect(PLACEHOLDER_PRODUCTO)
 
 
 @app.route('/tienda/<int:comercio_id>')
@@ -805,7 +827,6 @@ def _productos_desde_filas(productos_db, tasa_actual):
             'codigo_barras': '' if p['codigo_barras'] is None else p['codigo_barras'],
             'imagen_url': p['imagen_url'] or '',
         })
-    imagen_urls_para_catalogo(productos)
     return productos
 
 
@@ -1270,12 +1291,6 @@ def editar_producto(producto_id):
         return redirect(url_for('panel_comercio'))
 
     producto = dict(producto_row)
-    if not imagen_url_almacenada(producto.get('imagen_url')):
-        respaldo = url_imagen_con_respaldo(
-            None, codigo_barras=producto.get('codigo_barras')
-        )
-        if respaldo:
-            producto['imagen_url'] = respaldo
     _debug_imagenes_antes_de_render([producto], 'editar_producto')
     return render_template('nuevo_producto.html', producto=producto)
 
@@ -1640,10 +1655,7 @@ def panel_admin():
     tickets = obtener_bandeja_tecnica(estado_filtro=estado_filtro)
     tasa_actual = obtener_tasa_dolar()
     comercios = obtener_todos_comercios_admin(busqueda=busqueda or None)
-    banner_url = url_banner_principal(
-        obtener_banner_principal(),
-        default=url_banner_por_defecto(),
-    )
+    banner_url = url_banner_segura(obtener_banner_principal())
     whatsapp = obtener_config('whatsapp_soporte', WHATSAPP_SOPORTE)
 
     return render_template(

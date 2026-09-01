@@ -7,13 +7,13 @@ import psycopg2
 
 from backend.db import get_db_connection
 from backend.runtime_cache import get_or_load, invalidate
-from backend.image_lookup import (
+from backend.image_lookup import programar_asociacion_imagenes_inventario
+from backend.utils import (
     EXPR_CODIGO_BARRAS,
-    imagen_url_para_catalogo,
-    imagen_urls_para_catalogo,
-    programar_asociacion_imagenes_inventario,
+    imagen_url_para_persistir,
+    normalizar_codigo_barras,
+    validar_ubicacion_comercio,
 )
-from backend.utils import imagen_url_para_persistir, normalizar_codigo_barras, validar_ubicacion_comercio
 from backend.inventory_import import (
     LOG_PREFIX as CSV_LOG,
     cargar_archivo_inventario,
@@ -526,7 +526,7 @@ def buscar_y_filtrar_productos(
                 d['precio_bs'] = round(precio * tasa, 2)
                 productos.append(d)
 
-            return imagen_urls_para_catalogo(productos)
+            return productos
     except Exception as e:
         import traceback
 
@@ -562,10 +562,6 @@ def obtener_producto_publico(producto_id):
                 precio = 0.0
             d['precio_usd'] = precio
             d['precio_bs'] = round(precio * tasa, 2)
-            d['imagen_url'] = imagen_url_para_catalogo(
-                d.get('imagen_url'),
-                codigo_barras=d.get('codigo_barras'),
-            ) or ''
             return d
     except Exception as e:
         print(f'Error al obtener producto público: {e}')
@@ -591,10 +587,6 @@ def obtener_producto_por_id(producto_id, comercio_id=None):
             if not fila:
                 return None
             producto = dict(fila)
-            producto['imagen_url'] = imagen_url_para_catalogo(
-                producto.get('imagen_url'),
-                codigo_barras=producto.get('codigo_barras'),
-            ) or ''
             return producto
     except Exception as e:
         print(f'Error al obtener producto: {e}')

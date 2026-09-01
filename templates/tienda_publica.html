@@ -31,7 +31,7 @@
     <div class="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden">
       <div class="tienda-banner-box h-32 md:h-40 overflow-hidden" role="img" aria-label="{% if comercio.tiene_banner %}Banner de la tienda{% else %}Banner predeterminado{% endif %}">
         {% if comercio.banner_completo %}
-          <img src="{{ comercio.banner_completo }}" alt="" class="w-full h-full object-cover">
+          <img src="{{ comercio.banner_completo }}" alt="" class="w-full h-full object-cover" loading="lazy" decoding="async" onerror="this.onerror=null;this.style.display='none'">
         {% else %}
           <div class="w-full h-full" style="background: linear-gradient(135deg, #f59e0b 0%, #ea580c 100%);"></div>
         {% endif %}
@@ -40,7 +40,7 @@
         <div class="flex flex-col md:flex-row gap-4 items-start md:items-end">
           <div class="w-24 h-24 rounded-2xl bg-white border-4 border-white shadow-lg overflow-hidden flex items-center justify-center">
             {% if comercio.logo_completo %}
-              <img src="{{ comercio.logo_completo }}" alt="{{ comercio.nombre }}" class="w-full h-full object-cover">
+              <img src="{{ comercio.logo_completo }}" alt="{{ comercio.nombre }}" class="w-full h-full object-cover" loading="lazy" decoding="async" onerror="this.onerror=null;this.style.display='none'">
             {% else %}
               <i data-lucide="store" class="text-amber-600" style="width:36px;height:36px;"></i>
             {% endif %}
@@ -107,11 +107,11 @@
         {% for producto in productos %}
           <div class="card-hover card-producto-mobile rounded-xl overflow-hidden bg-white shadow border border-stone-100 flex flex-col h-full">
             {% set img_producto = producto|url_imagen_producto %}
-            <div class="localis-img-producto-wrap{% if not img_producto %} localis-img-producto-wrap--vacio{% endif %}">
-              <img{% if img_producto %} src="{{ img_producto }}"{% endif %}
+            <div class="localis-img-producto-wrap">
+              <img src="{{ img_producto }}"
                    alt="{{ producto.nombre }}"
                    data-producto-id="{{ producto.id }}"
-                   class="localis-img-producto" loading="lazy" referrerpolicy="no-referrer"
+                   class="localis-img-producto" loading="lazy" decoding="async" referrerpolicy="no-referrer"
                    onerror="window.rescatarImagenProducto(this)">
             </div>
             <div class="p-3 flex-grow flex flex-col justify-between">

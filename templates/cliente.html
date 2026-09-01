@@ -35,7 +35,7 @@
 
   <header class="hero-header relative w-full overflow-hidden flex flex-col justify-between" style="height: 70vh;">
     <div class="absolute inset-0 w-full h-full">
-      <img class="w-full h-full object-cover" src="{{ banner_url or default_banner }}" alt="Localis" onerror="this.style.display='none'">
+      <img class="w-full h-full object-cover" src="{{ banner_url or placeholder_banner }}" alt="Localis" loading="eager" decoding="async" onerror="this.onerror=null;this.src='{{ placeholder_banner }}'">
     </div>
     <div class="absolute inset-0 bg-gradient-to-b from-black/60 via-black/40 to-black/70"></div>
 
@@ -63,7 +63,7 @@
 
   <section class="max-w-6xl mx-auto px-6 my-8">
     <div class="banner-destacado banner-destacado-bg rounded-2xl overflow-hidden shadow-lg relative flex flex-col md:flex-row items-center p-8 text-white gap-6 min-h-[160px]"
-         style="background-image: linear-gradient(135deg, rgba(217, 119, 6, 0.88), rgba(245, 158, 11, 0.82)), url('{{ banner_url }}');">
+         style="background-image: linear-gradient(135deg, rgba(217, 119, 6, 0.88), rgba(245, 158, 11, 0.82)), url('{{ banner_url or placeholder_banner }}');">
       <div class="flex-1 space-y-3 text-center md:text-left relative z-10">
         <span class="bg-white/20 text-white text-[11px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">Destacado</span>
         <h4 class="font-display text-2xl md:text-3xl font-bold">Apoya lo local, vive mejor</h4>
@@ -87,9 +87,9 @@
                  onclick="abrirModalProducto({{ producto.id }})"
                  onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();abrirModalProducto({{ producto.id }});}">
               {% set img_producto = producto|url_imagen_producto %}
-              <div class="localis-img-producto-wrap{% if not img_producto %} localis-img-producto-wrap--vacio{% endif %}">
-                <img{% if img_producto %} src="{{ img_producto }}"{% endif %}
-                     alt="{{ producto.nombre }}" loading="lazy" referrerpolicy="no-referrer"
+              <div class="localis-img-producto-wrap">
+                <img src="{{ img_producto }}"
+                     alt="{{ producto.nombre }}" loading="lazy" decoding="async" referrerpolicy="no-referrer"
                      data-producto-id="{{ producto.id }}"
                      class="localis-img-producto"
                      onerror="window.rescatarImagenProducto(this)">
@@ -159,9 +159,9 @@
         const res = await fetch(`/api/producto/${id}`);
         if (!res.ok) return;
         const p = await res.json();
-        const imgUrl = p.imagen_url || '';
+        const imgUrl = p.imagen_url || '{{ placeholder_producto }}';
 
-        document.getElementById('modal-imagen').style.backgroundImage = imgUrl ? `url('${imgUrl}')` : 'none';
+        document.getElementById('modal-imagen').style.backgroundImage = `url('${imgUrl}')`;
         document.getElementById('modal-comercio').textContent = p.comercio_nombre || '';
         document.getElementById('modal-nombre').textContent = p.nombre || '';
         document.getElementById('modal-descripcion').textContent = p.descripcion || 'Sin descripción.';
