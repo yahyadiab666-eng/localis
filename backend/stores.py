@@ -453,35 +453,11 @@ def buscar_y_filtrar_comercios(
 # ==========================================
 
 
-def _expr_codigo_alias(alias):
-    """Misma normalización que EXPR_CODIGO_BARRAS, calificada por tabla."""
-    col = f'{alias}.codigo_barras'
-    return (
-        "regexp_replace("
-        f"regexp_replace(TRIM(BOTH FROM CAST({col} AS TEXT)), '\\s+', '', 'g'), "
-        "'\\.0+$', '', 'g')"
-    )
-
-
-_SQL_IMAGEN_URL = f"""
-            COALESCE(
-                NULLIF(TRIM(BOTH FROM CAST(p.imagen_url AS TEXT)), ''),
-                (
-                    SELECT NULLIF(TRIM(BOTH FROM CAST(m.url_imagen AS TEXT)), '')
-                    FROM catalogo_maestro_imagenes m
-                    WHERE {_expr_codigo_alias('m')} = {_expr_codigo_alias('p')}
-                      AND m.url_imagen IS NOT NULL
-                      AND TRIM(BOTH FROM CAST(m.url_imagen AS TEXT)) <> ''
-                      AND LOWER(TRIM(BOTH FROM CAST(m.url_imagen AS TEXT)))
-                          NOT IN ('none', 'null', 'nan', 'n/a', '-')
-                    LIMIT 1
-                )
-            ) AS imagen_url
-"""
+_SQL_IMAGEN_URL = 'p.imagen_url AS imagen_url'
 
 
 def _aplicar_url_imagen_producto(fila):
-    """Garantiza imagen_url como URL pública de Storage o None (sin placeholder)."""
+    """Convierte ruta/URL de Storage; deja None si no hay foto usable."""
     from utils.images import url_publica_producto_desde_bd
 
     crudo = fila.get('imagen_url')
@@ -492,10 +468,48 @@ def _aplicar_url_imagen_producto(fila):
     return fila
 
 
+def _completar_imagenes_productos(productos):
+    """
+    Rellena imagen_url desde el catálogo maestro en una consulta aparte
+    (no comparte transacción con el JOIN comercios/productos).
+    """
+    if not productos:
+        return productos
+    for fila in productos:
+        _aplicar_url_imagen_producto(fila)
+
+    faltantes = []
+    for fila in productos:
+        if fila.get('imagen_url'):
+            continue
+        codigo = normalizar_codigo_barras(fila.get('codigo_barras'))
+        if codigo:
+            faltantes.append((fila, codigo))
+    if not faltantes:
+        return productos
+
+    try:
+        from backend.catalogo_maestro import mapa_imagenes_maestro
+
+        mapa = mapa_imagenes_maestro([codigo for _, codigo in faltantes]) or {}
+    except Exception as error:
+        print(f'[Localis Imagen] Lote maestro omitido: {type(error).__name__}: {error}')
+        traceback.print_exc()
+        return productos
+
+    from utils.images import url_publica_producto_desde_bd
+
+    for fila, codigo in faltantes:
+        url = url_publica_producto_desde_bd(mapa.get(codigo))
+        if url:
+            fila['imagen_url'] = url
+    return productos
+
+
 def _base_query_productos_publicos(con_maestro=True):
-    imagen = _SQL_IMAGEN_URL if con_maestro else 'p.imagen_url AS imagen_url'
+    del con_maestro
     # Padre (comercios) primero, luego productos: mismo orden de bloqueo que
-    # las escrituras con FK y menos deadlocks con el importador.
+    # las escrituras con FK. El maestro NO entra en este SELECT.
     return f"""
         SELECT
             p.id,
@@ -504,7 +518,7 @@ def _base_query_productos_publicos(con_maestro=True):
             p.descripcion,
             p.precio_usd,
             p.codigo_barras,
-            {imagen},
+            {_SQL_IMAGEN_URL},
             c.nombre AS comercio_nombre,
             c.telefono AS comercio_telefono,
             c.id AS comercio_id,
@@ -596,12 +610,14 @@ def buscar_y_filtrar_productos(
     ultimo_error = None
     for intento in range(_MAX_REINTENTOS_LISTADO):
         try:
-            return _buscar_y_filtrar_productos_once(
-                palabra_clave=palabra_clave,
-                categoria_nombre=categoria_nombre,
-                comercio_id=comercio_id,
-                limit=limit,
-                orden_aleatorio=orden_aleatorio,
+            return _completar_imagenes_productos(
+                _buscar_y_filtrar_productos_once(
+                    palabra_clave=palabra_clave,
+                    categoria_nombre=categoria_nombre,
+                    comercio_id=comercio_id,
+                    limit=limit,
+                    orden_aleatorio=orden_aleatorio,
+                )
             )
         except Exception as e:
             ultimo_error = e
@@ -681,7 +697,6 @@ def _buscar_y_filtrar_productos_once(
                 precio = 0.0
             d['precio_usd'] = precio
             d['precio_bs'] = round(precio * tasa, 2)
-            _aplicar_url_imagen_producto(d)
             productos.append(d)
 
         return productos
@@ -723,8 +738,8 @@ def obtener_producto_publico(producto_id):
                 precio = 0.0
             d['precio_usd'] = precio
             d['precio_bs'] = round(precio * tasa, 2)
-            _aplicar_url_imagen_producto(d)
-            return d
+        _completar_imagenes_productos([d])
+        return d
     except Exception as e:
         print(f'Error al obtener producto público: {e}')
         return None
@@ -772,8 +787,8 @@ def obtener_producto_por_id(producto_id, comercio_id=None):
             if not fila:
                 return None
             producto = dict(fila)
-            _aplicar_url_imagen_producto(producto)
-            return producto
+        _completar_imagenes_productos([producto])
+        return producto
     except Exception as e:
         print(f'Error al obtener producto: {e}')
         return None
@@ -802,9 +817,9 @@ def obtener_productos_comercio(comercio_id):
             productos = []
             for fila in cursor.fetchall():
                 d = dict(fila) if not isinstance(fila, dict) else fila
-                _aplicar_url_imagen_producto(d)
                 productos.append(d)
-            return productos
+        _completar_imagenes_productos(productos)
+        return productos
     except Exception as e:
         print(f'Error al listar productos del comercio: {e}')
         traceback.print_exc()

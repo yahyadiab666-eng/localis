@@ -10,8 +10,8 @@ import unicodedata
 import openpyxl
 
 from config import MAX_UPLOAD_BYTES
-from backend.image_lookup import EXPR_CODIGO_BARRAS
 from backend.utils import (
+    EXPR_CODIGO_BARRAS,
     imagen_url_almacenada,
     imagen_url_para_persistir,
     normalizar_codigo_barras,

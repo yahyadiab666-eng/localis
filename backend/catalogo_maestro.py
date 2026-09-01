@@ -29,12 +29,8 @@ _EXPR_CODIGO = (
     "regexp_replace(TRIM(BOTH FROM CAST(codigo_barras AS TEXT)), '\\s+', '', 'g'), "
     "'\\.0+$', '', 'g')"
 )
-_URL_NO_VACIA = (
-    "url_imagen IS NOT NULL "
-    "AND TRIM(BOTH FROM CAST(url_imagen AS TEXT)) <> '' "
-    "AND LOWER(TRIM(BOTH FROM CAST(url_imagen AS TEXT))) "
-    "NOT IN ('none', 'null', 'nan', 'n/a', '-')"
-)
+_CANDIDATOS_COL_URL = ('url_imagen', 'imagen_url', 'url')
+_COL_URL_CACHE = None
 
 
 # Respaldo en memoria: vacío a propósito (sin URLs de prueba hardcodeadas).
@@ -94,6 +90,52 @@ def _catalogo_disponible():
     return _postgresql_directo_disponible() or _postgrest_disponible()
 
 
+def _sql_url_no_vacia(col):
+    return (
+        f"{col} IS NOT NULL "
+        f"AND TRIM(BOTH FROM CAST({col} AS TEXT)) <> '' "
+        f"AND LOWER(TRIM(BOTH FROM CAST({col} AS TEXT))) "
+        "NOT IN ('none', 'null', 'nan', 'n/a', '-')"
+    )
+
+
+def _columna_url_maestro(cursor=None):
+    """Columna real de la URL (url_imagen o imagen_url). Nunca usa updated_at."""
+    global _COL_URL_CACHE
+    if _COL_URL_CACHE:
+        return _COL_URL_CACHE
+    nombres = set()
+    try:
+        if cursor is None:
+            from backend.db import get_db_connection
+
+            with get_db_connection() as conexion:
+                return _columna_url_maestro(conexion.cursor())
+        cursor.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = ?
+            """,
+            (TABLA_CATALOGO_MAESTRO,),
+        )
+        for fila in cursor.fetchall():
+            if isinstance(fila, dict):
+                nombres.add(str(fila.get('column_name') or next(iter(fila.values()))))
+            else:
+                nombres.add(str(fila[0]))
+    except Exception as error:
+        _error_imagen('columnas catalogo_maestro', error)
+        _COL_URL_CACHE = 'url_imagen'
+        return _COL_URL_CACHE
+    for cand in _CANDIDATOS_COL_URL:
+        if cand in nombres:
+            _COL_URL_CACHE = cand
+            return cand
+    _COL_URL_CACHE = 'url_imagen'
+    return _COL_URL_CACHE
+
+
 def _aplicar_timeout_lectura(cursor):
     if _TIMEOUT_LECTURA_MS <= 0:
         return
@@ -109,12 +151,13 @@ def _imagen_maestro_por_codigo_postgres(codigo):
     with get_db_connection() as conexion:
         cursor = conexion.cursor()
         _aplicar_timeout_lectura(cursor)
+        col = _columna_url_maestro(cursor)
         cursor.execute(
             f"""
-            SELECT url_imagen
+            SELECT {col} AS url_imagen
             FROM {TABLA_CATALOGO_MAESTRO}
             WHERE {_EXPR_CODIGO} = ?
-              AND {_URL_NO_VACIA}
+              AND {_sql_url_no_vacia(col)}
             LIMIT 1
             """,
             (codigo,),
@@ -268,12 +311,13 @@ def _mapa_imagenes_maestro_postgres(lote):
     with get_db_connection() as conexion:
         cursor = conexion.cursor()
         _aplicar_timeout_lectura(cursor)
+        col = _columna_url_maestro(cursor)
         cursor.execute(
             f"""
-            SELECT codigo_barras, url_imagen
+            SELECT codigo_barras, {col} AS url_imagen
             FROM {TABLA_CATALOGO_MAESTRO}
             WHERE {_EXPR_CODIGO} IN ({placeholders})
-              AND {_URL_NO_VACIA}
+              AND {_sql_url_no_vacia(col)}
             """,
             lote,
         )

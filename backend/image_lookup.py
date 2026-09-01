@@ -14,7 +14,6 @@ from backend.image_manager import (
     resolver_imagen_escritura,
 )
 from backend.utils import (
-    EXPR_CODIGO_BARRAS,
     imagen_url_almacenada,
     imagen_url_para_persistir,
     normalizar_codigo_barras,
@@ -165,22 +164,8 @@ def obtener_imagen_url_producto(producto_id):
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
             cursor.execute(
-                f"""
-                SELECT COALESCE(
-                    NULLIF(TRIM(BOTH FROM CAST(p.imagen_url AS TEXT)), ''),
-                    (
-                        SELECT NULLIF(TRIM(BOTH FROM CAST(m.url_imagen AS TEXT)), '')
-                        FROM catalogo_maestro_imagenes m
-                        WHERE {EXPR_CODIGO_BARRAS.replace('codigo_barras', 'm.codigo_barras')}
-                            = {EXPR_CODIGO_BARRAS.replace('codigo_barras', 'p.codigo_barras')}
-                          AND m.url_imagen IS NOT NULL
-                          AND TRIM(BOTH FROM CAST(m.url_imagen AS TEXT)) <> ''
-                        LIMIT 1
-                    )
-                ) AS imagen_url,
-                       p.codigo_barras
-                FROM productos p
-                WHERE p.id = ?
+                """
+                SELECT imagen_url, codigo_barras FROM productos WHERE id = ?
                 """,
                 (int(producto_id),),
             )
@@ -188,10 +173,14 @@ def obtener_imagen_url_producto(producto_id):
             if not fila:
                 return None
             registro = dict(fila)
-            from utils.images import url_publica_producto_desde_bd
+        from utils.images import url_publica_producto_desde_bd
 
-            url = url_publica_producto_desde_bd(registro.get('imagen_url'))
-            return _url_almacenada_o_none(url) or ''
+        url = url_publica_producto_desde_bd(registro.get('imagen_url'))
+        if url:
+            return _url_almacenada_o_none(url) or url
+        codigo = registro.get('codigo_barras')
+        maestro = _respaldo_en_cascada(codigo)
+        return _url_almacenada_o_none(maestro) or url_publica_producto_desde_bd(maestro) or ''
     except Exception as error:
         _registrar_error_imagen(f'obtener_imagen_url_producto({producto_id})', error)
         return ''
