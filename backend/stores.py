@@ -463,25 +463,21 @@ def _expr_codigo_alias(alias):
     )
 
 
-_SQL_IMAGEN_URL = """
+_SQL_IMAGEN_URL = f"""
             COALESCE(
                 NULLIF(TRIM(BOTH FROM CAST(p.imagen_url AS TEXT)), ''),
-                NULLIF(TRIM(BOTH FROM CAST(m.url_imagen AS TEXT)), '')
+                (
+                    SELECT NULLIF(TRIM(BOTH FROM CAST(m.url_imagen AS TEXT)), '')
+                    FROM catalogo_maestro_imagenes m
+                    WHERE {_expr_codigo_alias('m')} = {_expr_codigo_alias('p')}
+                      AND m.url_imagen IS NOT NULL
+                      AND TRIM(BOTH FROM CAST(m.url_imagen AS TEXT)) <> ''
+                      AND LOWER(TRIM(BOTH FROM CAST(m.url_imagen AS TEXT)))
+                          NOT IN ('none', 'null', 'nan', 'n/a', '-')
+                    LIMIT 1
+                )
             ) AS imagen_url
 """
-
-_SQL_JOIN_MAESTRO = (
-    'LEFT JOIN LATERAL ('
-    ' SELECT m1.url_imagen'
-    ' FROM catalogo_maestro_imagenes m1'
-    f" WHERE {_expr_codigo_alias('m1')} = {_expr_codigo_alias('p')}"
-    ' AND m1.url_imagen IS NOT NULL'
-    " AND TRIM(BOTH FROM CAST(m1.url_imagen AS TEXT)) <> ''"
-    " AND LOWER(TRIM(BOTH FROM CAST(m1.url_imagen AS TEXT)))"
-    " NOT IN ('none', 'null', 'nan', 'n/a', '-')"
-    ' LIMIT 1'
-    ') m ON TRUE'
-)
 
 
 def _aplicar_url_imagen_producto(fila):
@@ -498,7 +494,6 @@ def _aplicar_url_imagen_producto(fila):
 
 def _base_query_productos_publicos(con_maestro=True):
     imagen = _SQL_IMAGEN_URL if con_maestro else 'p.imagen_url AS imagen_url'
-    join_maestro = _SQL_JOIN_MAESTRO if con_maestro else ''
     # Padre (comercios) primero, luego productos: mismo orden de bloqueo que
     # las escrituras con FK y menos deadlocks con el importador.
     return f"""
@@ -508,7 +503,6 @@ def _base_query_productos_publicos(con_maestro=True):
             p.nombre,
             p.descripcion,
             p.precio_usd,
-            p.stock,
             p.codigo_barras,
             {imagen},
             c.nombre AS comercio_nombre,
@@ -517,7 +511,6 @@ def _base_query_productos_publicos(con_maestro=True):
             cat.nombre AS categoria_nombre
         FROM comercios c
         JOIN productos p ON p.comercio_id = c.id
-        {join_maestro}
         LEFT JOIN categorias cat ON c.categoria_id = cat.id
         WHERE 1=1
     """ + _FILTRO_COMERCIO_PUBLICO
@@ -559,8 +552,7 @@ def _ejecutar_listado_productos(cursor, conexion, query, parametros):
             conexion.rollback()
         except Exception:
             pass
-        query_simple = query.replace(_SQL_JOIN_MAESTRO, ' ')
-        query_simple = query_simple.replace(_SQL_IMAGEN_URL, 'p.imagen_url AS imagen_url')
+        query_simple = query.replace(_SQL_IMAGEN_URL, 'p.imagen_url AS imagen_url')
         cursor.execute(query_simple, parametros)
         return cursor.fetchall()
 
@@ -709,7 +701,6 @@ def obtener_producto_publico(producto_id):
                     p.nombre,
                     p.descripcion,
                     p.precio_usd,
-                    p.stock,
                     p.codigo_barras,
                     {_SQL_IMAGEN_URL},
                     c.nombre AS comercio_nombre,
@@ -717,7 +708,6 @@ def obtener_producto_publico(producto_id):
                     c.telefono AS comercio_telefono
                 FROM comercios c
                 JOIN productos p ON p.comercio_id = c.id
-                {_SQL_JOIN_MAESTRO}
                 WHERE p.id = ? AND COALESCE(c.visible, 1) = 1
                   AND LOWER(TRIM(c.estado_pago)) IN ('activo', 'gratis')
                 """,
@@ -754,11 +744,9 @@ def obtener_producto_por_id(producto_id, comercio_id=None):
                         p.nombre,
                         p.descripcion,
                         p.precio_usd,
-                        p.stock,
                         p.codigo_barras,
                         {_SQL_IMAGEN_URL}
                     FROM productos p
-                    {_SQL_JOIN_MAESTRO}
                     WHERE p.id = ? AND p.comercio_id = ?
                     """,
                     (producto_id, comercio_id),
@@ -772,11 +760,9 @@ def obtener_producto_por_id(producto_id, comercio_id=None):
                         p.nombre,
                         p.descripcion,
                         p.precio_usd,
-                        p.stock,
                         p.codigo_barras,
                         {_SQL_IMAGEN_URL}
                     FROM productos p
-                    {_SQL_JOIN_MAESTRO}
                     WHERE p.id = ?
                     """,
                     (producto_id,),
@@ -808,7 +794,6 @@ def obtener_productos_comercio(comercio_id):
                     p.codigo_barras,
                     {_SQL_IMAGEN_URL}
                 FROM productos p
-                {_SQL_JOIN_MAESTRO}
                 WHERE p.comercio_id = ?
                 ORDER BY p.id DESC
                 """,

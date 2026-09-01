@@ -168,19 +168,18 @@ def obtener_imagen_url_producto(producto_id):
                 f"""
                 SELECT COALESCE(
                     NULLIF(TRIM(BOTH FROM CAST(p.imagen_url AS TEXT)), ''),
-                    NULLIF(TRIM(BOTH FROM CAST(m.url_imagen AS TEXT)), '')
+                    (
+                        SELECT NULLIF(TRIM(BOTH FROM CAST(m.url_imagen AS TEXT)), '')
+                        FROM catalogo_maestro_imagenes m
+                        WHERE {EXPR_CODIGO_BARRAS.replace('codigo_barras', 'm.codigo_barras')}
+                            = {EXPR_CODIGO_BARRAS.replace('codigo_barras', 'p.codigo_barras')}
+                          AND m.url_imagen IS NOT NULL
+                          AND TRIM(BOTH FROM CAST(m.url_imagen AS TEXT)) <> ''
+                        LIMIT 1
+                    )
                 ) AS imagen_url,
                        p.codigo_barras
                 FROM productos p
-                LEFT JOIN LATERAL (
-                    SELECT m1.url_imagen
-                    FROM catalogo_maestro_imagenes m1
-                    WHERE {EXPR_CODIGO_BARRAS.replace('codigo_barras', 'm1.codigo_barras')}
-                        = {EXPR_CODIGO_BARRAS.replace('codigo_barras', 'p.codigo_barras')}
-                      AND m1.url_imagen IS NOT NULL
-                      AND TRIM(BOTH FROM CAST(m1.url_imagen AS TEXT)) <> ''
-                    LIMIT 1
-                ) m ON TRUE
                 WHERE p.id = ?
                 """,
                 (int(producto_id),),
