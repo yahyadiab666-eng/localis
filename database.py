@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import traceback
 from datetime import date, datetime, time as time_of_day
 from decimal import Decimal
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -1153,9 +1154,9 @@ def init_db():
     Inicializa o actualiza la base PostgreSQL sin destruir datos.
     Crea tablas faltantes, añade columnas ausentes y asegura FKs e índices.
     """
-    _require_database_url()
-
     try:
+        _require_database_url()
+
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
 
@@ -1177,7 +1178,8 @@ def init_db():
         sembrar_catalogo_maestro_imagenes()
         return True
     except Exception as error:
-        print(f'Error en init_db(): {error}')
+        print(f'Error en init_db(): {error}', flush=True)
+        traceback.print_exc()
         return False
 
 

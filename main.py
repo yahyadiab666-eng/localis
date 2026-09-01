@@ -1,4 +1,5 @@
 import os
+import threading
 import time
 import traceback
 from dotenv import load_dotenv
@@ -6,6 +7,12 @@ from dotenv import load_dotenv
 # override=False: en Render las variables del panel ganan.
 # Un .env local (o vacio) no debe pisar SUPABASE_URL de produccion.
 load_dotenv(override=False)
+
+print(
+    f"[Localis] Arranque PORT={os.environ.get('PORT', '10000')} "
+    '(Gunicorn debe escuchar en 0.0.0.0:$PORT).',
+    flush=True,
+)
 
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '').strip()
 GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '').strip()
@@ -99,7 +106,16 @@ from backend.image_lookup import (
 from backend.db import get_db_connection
 from database import init_db, normalize_database_url
 from backend.plans import PLANES, MENSAJE_LIMITE_PRODUCTOS, es_limite_ilimitado, obtener_beneficios_plan
-from backend.payment_ocr import validar_comprobante_pago_movil
+try:
+    from backend.payment_ocr import validar_comprobante_pago_movil
+except Exception:
+    print('[Localis] No se pudo importar OCR de comprobantes (no bloquea el arranque):', flush=True)
+    traceback.print_exc()
+
+    def validar_comprobante_pago_movil(*_args, **_kwargs):
+        return False, 'OCR de comprobantes no disponible en este worker.'
+
+
 from backend.subscriptions import (
     activar_suscripcion_por_comprobante,
     calcular_cotizacion_cambio_plan,
@@ -152,23 +168,37 @@ from backend.stores import (
     registrar_comercio_completo,
 )
 
+print('[Localis] Creando aplicación Flask...', flush=True)
+
 app = Flask(__name__)
+db_url = ''
+db = None
+csrf = None
 
-# Asegurar limpieza directa en el entorno de Flask
-db_url = normalize_database_url(os.environ.get('DATABASE_URL', ''))
-app.config['SQLALCHEMY_DATABASE_URI'] = db_url or 'postgresql://localhost/localis'
-
-db = SQLAlchemy(app)
-
-app.secret_key = obtener_secret_key()
-aplicar_config_sesion_flask(app)
-
-app.config['SUPABASE_CLIENT'] = obtener_cliente_storage() or supabase
-app.config['SUPABASE_BUCKET_IMAGENES'] = SUPABASE_BUCKET_IMAGENES
-app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_BYTES
-
-csrf = CSRFProtect(app)
-registrar_manejadores_errores(app)
+try:
+    db_url = normalize_database_url(os.environ.get('DATABASE_URL', ''))
+    app.config['SQLALCHEMY_DATABASE_URI'] = db_url or 'postgresql://localhost/localis'
+    db = SQLAlchemy(app)
+    try:
+        app.secret_key = obtener_secret_key()
+    except Exception:
+        print('[Localis] LOCALIS_SECRET_KEY no disponible; el worker sigue vivo con clave de respaldo.', flush=True)
+        traceback.print_exc()
+        app.secret_key = (
+            (os.environ.get('LOCALIS_SECRET_KEY') or '').strip()
+            or 'localis-arranque-sin-secret'
+        )
+    aplicar_config_sesion_flask(app)
+    app.config['SUPABASE_CLIENT'] = obtener_cliente_storage() or supabase
+    app.config['SUPABASE_BUCKET_IMAGENES'] = SUPABASE_BUCKET_IMAGENES
+    app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_BYTES
+    csrf = CSRFProtect(app)
+    registrar_manejadores_errores(app)
+except Exception:
+    print('[Localis] Error al configurar Flask (el proceso no se detiene para que Gunicorn enlace el puerto):', flush=True)
+    traceback.print_exc()
+    if not app.secret_key:
+        app.secret_key = 'localis-arranque-degradado'
 
 
 @app.template_filter('fecha_corta')
@@ -212,27 +242,39 @@ def _debug_imagenes_antes_de_render(productos, origen):
 
 
 def _inicializar_aplicacion():
-    """Migraciones, validación de entorno, diagnóstico PostgreSQL y vencimientos."""
+    """Migraciones y diagnóstico fuera del hilo que importa el WSGI (Gunicorn ya puede bind)."""
+    print('[Localis] Inicialización en segundo plano...', flush=True)
     try:
         advertencias = validar_config_arranque()
         for aviso in advertencias:
-            print(f'[Localis Config] {aviso}')
+            print(f'[Localis Config] {aviso}', flush=True)
         if db_url:
-            print('Base de datos: PostgreSQL (DATABASE_URL).')
+            print('Base de datos: PostgreSQL (DATABASE_URL).', flush=True)
         init_db()
         ejecutar_diagnostico_inicio()
         verificar_vencimientos_comercios()
-    except RuntimeError as error:
-        print(f'Error crítico de configuración: {error}')
-        raise
+        print('[Localis] Inicialización completada.', flush=True)
     except Exception as error:
-        print(f'Error al inicializar la aplicación: {error}')
-        from backend.diagnostics import reportar_error_critico
+        print(f'[Localis] Error al inicializar la aplicación: {error}', flush=True)
+        traceback.print_exc()
+        try:
+            from backend.diagnostics import reportar_error_critico_async
 
-        reportar_error_critico(error, request=None)
+            reportar_error_critico_async(error, request=None)
+        except Exception:
+            traceback.print_exc()
 
 
-_inicializar_aplicacion()
+_hilo_init = threading.Thread(
+    target=_inicializar_aplicacion,
+    name='localis-init',
+    daemon=True,
+)
+_hilo_init.start()
+print(
+    '[Localis] Worker listo para aceptar tráfico; DB/diagnóstico/service_role no bloquean el bind.',
+    flush=True,
+)
 
 _ultima_verificacion_vencimientos_global = 0.0
 _INTERVALO_VENCIMIENTOS_SEG = 300
@@ -1733,7 +1775,7 @@ def api_confirmar_pago():
     return jsonify({'ok': exito, 'mensaje': mensaje}), 200 if exito else 400
 
 
-port = int(os.environ.get('PORT', 5000))
+port = int(os.environ.get('PORT', 10000))
 
 if __name__ == '__main__':
     inicializar_base_de_datos()

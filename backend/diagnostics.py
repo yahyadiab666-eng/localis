@@ -32,6 +32,12 @@ def _diagnostico_supabase_red(*, forzar: bool = False):
     global _cache_diagnostico_supabase
     if _cache_diagnostico_supabase is not None and not forzar:
         return _cache_diagnostico_supabase
+    if not forzar and _cache_diagnostico_supabase is None:
+        return {
+            'ok': True,
+            'omitido': True,
+            'motivo': 'pendiente (el diagnóstico de red corre en segundo plano al arrancar)',
+        }
 
     try:
         from backend.supabase_connectivity import (
