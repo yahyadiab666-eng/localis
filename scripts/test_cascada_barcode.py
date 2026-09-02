@@ -75,7 +75,7 @@ def _probar_orden_mocks(errores):
         llamadas.append(('codigo', codigo, familia))
         return URL_CODIGO
 
-    def fake_nombre(nombre, familia, descripcion=None):
+    def fake_nombre(nombre, familia, descripcion=None, **_kwargs):
         llamadas.append(('nombre', nombre, descripcion))
         return URL_NOMBRE
 

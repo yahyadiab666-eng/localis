@@ -172,7 +172,7 @@ def url_imagen_segura(valor, placeholder=PLACEHOLDER_PRODUCTO, permitir_estatico
         if url:
             return url
         if not _texto_url(valor):
-            logger.warning('Imagen vacia o None; se usa placeholder %s', placeholder)
+            logger.debug('Imagen vacia o None; se usa placeholder %s', placeholder)
         else:
             logger.error('Imagen no usable (%r); se usa placeholder %s', valor, placeholder)
     except Exception as error:
@@ -196,7 +196,7 @@ def imagen_fail_safe(placeholder=PLACEHOLDER_PRODUCTO, permitir_estatico=False, 
                 if url:
                     return url
                 if resultado in (None, ''):
-                    logger.warning(
+                    logger.debug(
                         'Resolver %s sin URL; placeholder=%s',
                         getattr(funcion, '__name__', funcion),
                         placeholder,
@@ -225,11 +225,26 @@ def imagen_fail_safe(placeholder=PLACEHOLDER_PRODUCTO, permitir_estatico=False, 
 
 @imagen_fail_safe(placeholder=PLACEHOLDER_PRODUCTO)
 def url_imagen_producto(producto=None, imagen_url=None, codigo_barras=None):
-    """URL pública de Storage ya resuelta en el SELECT. No dispara red."""
-    del codigo_barras
-    if imagen_url is None and producto is not None:
-        imagen_url = valor_campo(producto, *CANDIDATOS_IMAGEN_PRODUCTO)
-    return url_publica_producto_desde_bd(imagen_url)
+    """URL persistida o catálogo maestro por EAN. Sin OpenFoodFacts."""
+    if producto is not None:
+        if imagen_url is None:
+            imagen_url = valor_campo(producto, *CANDIDATOS_IMAGEN_PRODUCTO)
+        if not codigo_barras:
+            codigo_barras = valor_campo(producto, 'codigo_barras')
+    directa = url_publica_producto_desde_bd(imagen_url)
+    if directa:
+        return directa
+    try:
+        from backend.image_manager import resolver_imagen_catalogo
+
+        maestro = resolver_imagen_catalogo(
+            imagen_url=imagen_url,
+            codigo_barras=codigo_barras,
+        )
+    except Exception as error:
+        logger.error('url_imagen_producto maestro: %s', error, exc_info=True)
+        maestro = None
+    return url_publica_producto_desde_bd(maestro)
 
 
 url_imagen_producto_segura = url_imagen_producto

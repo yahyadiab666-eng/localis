@@ -70,6 +70,8 @@ def main() -> int:
     from backend.image_quality import evaluar_imagen_bytes
     from backend.image_sources import (
         FAMILIA_ALIMENTOS,
+        FAMILIA_HOGAR,
+        FAMILIA_ROPA,
         FAMILIA_TECNOLOGIA,
         clasificar_familia,
     )
@@ -91,6 +93,17 @@ def main() -> int:
     _ok(
         clasificar_familia(nombre='Mouse Logitech inalambrico') == FAMILIA_TECNOLOGIA,
         'Logitech por nombre = tecnologia',
+        errores,
+    )
+    _ok(
+        clasificar_familia(nombre='Martillo de uña', categoria='Ferretería')
+        == FAMILIA_HOGAR,
+        'Martillo / Ferreteria = familia hogar',
+        errores,
+    )
+    _ok(
+        clasificar_familia(nombre='Camisa polo', categoria='Ropa') == FAMILIA_ROPA,
+        'Camisa / Ropa = familia ropa',
         errores,
     )
 
@@ -116,8 +129,12 @@ def main() -> int:
     )
     _ok(bool(persistible), 'comida devolvio URL persistible de catalogo', errores)
     _ok(
-        bool(url_comida) and str(url_comida).startswith('https://'),
-        'comida es HTTPS operativa',
+        bool(url_comida)
+        and (
+            str(url_comida).startswith('https://')
+            or str(url_comida).startswith('/static/uploads/')
+        ),
+        'comida es URL operativa',
         errores,
     )
 
@@ -135,8 +152,12 @@ def main() -> int:
     )
     _ok(bool(persistible_tech), 'electronica devolvio URL persistible', errores)
     _ok(
-        bool(url_tech) and str(url_tech).startswith('https://'),
-        'electronica es HTTPS operativa',
+        bool(url_tech)
+        and (
+            str(url_tech).startswith('https://')
+            or str(url_tech).startswith('/static/uploads/')
+        ),
+        'electronica es URL operativa',
         errores,
     )
     if url_tech and url_comida:
@@ -145,6 +166,36 @@ def main() -> int:
             'comida y electronica no reutilizan la misma foto',
             errores,
         )
+
+    print('\n=== Cascada general sin EAN ===')
+    t0 = time.perf_counter()
+    url_ferre = descubrir_imagen_catalogo(
+        nombre='Martillo', categoria='Ferretería'
+    )
+    ms_ferre = (time.perf_counter() - t0) * 1000
+    print(f'  url_ferre={url_ferre!r} ({ms_ferre:.0f} ms)')
+    persistible_ferre = imagen_url_almacenada(url_ferre) or url_imagen_catalogo_valida(
+        url_ferre
+    )
+    _ok(bool(persistible_ferre), 'ferreteria sin EAN devolvio URL persistible', errores)
+    _ok(
+        bool(url_ferre)
+        and (
+            str(url_ferre).startswith('https://')
+            or str(url_ferre).startswith('/static/uploads/')
+        ),
+        'ferreteria es URL operativa',
+        errores,
+    )
+
+    t0 = time.perf_counter()
+    url_ropa = descubrir_imagen_catalogo(nombre='Camisa polo', categoria='Ropa')
+    ms_ropa = (time.perf_counter() - t0) * 1000
+    print(f'  url_ropa={url_ropa!r} ({ms_ropa:.0f} ms)')
+    persistible_ropa = imagen_url_almacenada(url_ropa) or url_imagen_catalogo_valida(
+        url_ropa
+    )
+    _ok(bool(persistible_ropa), 'ropa sin EAN devolvio URL persistible', errores)
 
     print('\n=== Subida manual hibrida ===')
     from werkzeug.datastructures import FileStorage

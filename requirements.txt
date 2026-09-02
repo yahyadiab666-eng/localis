@@ -12,6 +12,8 @@ rapidocr-onnxruntime
 opencv-python-headless
 Pillow
 numpy
+onnxruntime
+rembg
 openpyxl
 requests
 Werkzeug

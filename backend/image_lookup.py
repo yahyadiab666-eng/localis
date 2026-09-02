@@ -92,6 +92,7 @@ def _resolver_url_escritura(
             nombre=nombre,
             categoria=categoria,
             descripcion=descripcion,
+            buscar_oficial=False,
         )
     except Exception as error:
         _registrar_error_imagen('resolver escritura', error)
@@ -100,14 +101,16 @@ def _resolver_url_escritura(
 
 def imagen_url_para_catalogo(imagen_url=None, codigo_barras=None):
     """
-    Lectura de catálogo: solo la URL ya persistida (Storage) o placeholder local.
-    No consulta catálogo maestro ni red. codigo_barras se ignora en vistas.
+    Lectura de catálogo: URL persistida o maestro por EAN.
+    Sin OpenFoodFacts. codigo_barras se usa si imagen_url está vacía.
     """
-    del codigo_barras
     try:
-        from utils.images import url_imagen_segura
+        from utils.images import url_imagen_producto
 
-        return url_imagen_segura(imagen_url)
+        return url_imagen_producto(
+            imagen_url=imagen_url,
+            codigo_barras=codigo_barras,
+        )
     except Exception as error:
         _registrar_error_imagen('imagen_url_para_catalogo', error)
         return '/static/img/placeholder-producto.svg'
@@ -131,7 +134,7 @@ def imagen_url_para_guardar(
             nombre=nombre,
             categoria=categoria,
             descripcion=descripcion,
-            buscar_oficial=True,
+            buscar_oficial=False,
         ) or _respaldo_en_cascada(codigo_barras)
     except Exception as error:
         _registrar_error_imagen('imagen_url_para_guardar', error)
@@ -187,12 +190,14 @@ def persistir_imagen_producto_hibrida(
 
 
 def url_imagen_con_respaldo(imagen_url=None, codigo_barras=None):
-    """Vista Flask: Storage persistida o placeholder local. Sin red ni maestro."""
-    del codigo_barras
+    """Vista Flask: URL persistida o maestro por EAN. Sin OpenFoodFacts."""
     try:
-        from utils.images import url_imagen_segura
+        from utils.images import url_imagen_producto
 
-        return url_imagen_segura(imagen_url)
+        return url_imagen_producto(
+            imagen_url=imagen_url,
+            codigo_barras=codigo_barras,
+        )
     except Exception as error:
         _registrar_error_imagen('url_imagen_con_respaldo', error)
         return '/static/img/placeholder-producto.svg'
@@ -200,20 +205,66 @@ def url_imagen_con_respaldo(imagen_url=None, codigo_barras=None):
 
 def imagen_urls_para_catalogo(productos):
     """
-    No enriquece con catálogo maestro (eso bloquearía el listado).
-    Deja las URLs persistidas; la vista aplica placeholder si faltan.
+    Lectura de catálogo: URL persistida o catálogo maestro por EAN (lote, sin red).
+    No consulta OpenFoodFacts: eso sigue en el hilo de relleno.
     """
     if not productos:
         return productos
     try:
+        from backend.image_manager import completar_mapa_imagenes
+
+        faltantes = []
+        vistos = set()
         for prod in productos:
             try:
                 directa = _url_almacenada_o_none(prod.get('imagen_url'))
-                prod['imagen_url'] = directa or (prod.get('imagen_url') or '')
+                if directa:
+                    prod['imagen_url'] = directa
+                    continue
+                codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
+                if codigo and codigo not in vistos:
+                    vistos.add(codigo)
+                    faltantes.append(codigo)
             except Exception as error:
                 _registrar_error_imagen(
                     f"lote producto id={prod.get('id')}", error
                 )
+        mapa = {}
+        if faltantes:
+            try:
+                mapa = completar_mapa_imagenes(faltantes, buscar_oficial=False) or {}
+            except Exception as error:
+                _registrar_error_imagen('lote maestro catalogo', error)
+                mapa = {}
+
+        persistir = []
+        for prod in productos:
+            if _url_almacenada_o_none(prod.get('imagen_url')):
+                continue
+            codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
+            url_mae = mapa.get(codigo) if codigo else None
+            if not url_mae:
+                continue
+            prod['imagen_url'] = url_mae
+            producto_id = prod.get('id')
+            if producto_id:
+                persistir.append((url_mae, int(producto_id)))
+
+        if persistir:
+            try:
+                with get_db_connection() as conexion:
+                    cursor = conexion.cursor()
+                    cursor.executemany(
+                        """
+                        UPDATE productos SET imagen_url = ?
+                        WHERE id = ?
+                          AND (imagen_url IS NULL OR TRIM(CAST(imagen_url AS TEXT)) = '')
+                        """,
+                        persistir,
+                    )
+                    conexion.commit()
+            except Exception as error:
+                _registrar_error_imagen('persistir maestro catalogo', error)
         return productos
     except Exception as error:
         _registrar_error_imagen('imagen_urls_para_catalogo', error)
@@ -446,6 +497,7 @@ def _asociar_imagenes_inventario(comercio_id):
                 descripcion=prod.get('descripcion'),
                 categoria=_categoria_de_comercio(comercio_id),
                 buscar_oficial=True,
+                reproceso_maestro=False,
             )
             if not url_final:
                 continue
@@ -556,6 +608,7 @@ def rellenar_imagenes_catalogo():
                 descripcion=prod.get('descripcion'),
                 categoria=prod.get('categoria_nombre'),
                 buscar_oficial=True,
+                reproceso_maestro=False,
             )
             if not url_final:
                 continue
@@ -639,6 +692,7 @@ def programar_descubrimiento_producto(producto_id, categoria=None):
                 buscar_oficial=True,
             )
             if not url_final:
+                print(f'{_LOG_IMAGEN} descubrimiento producto={producto_id} sin foto')
                 return
             with get_db_connection() as conexion:
                 cursor = conexion.cursor()

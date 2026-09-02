@@ -13,7 +13,10 @@ from backend.comercio_schema import (
     normalizar_filas_comercio,
     sql_set_imagenes,
 )
-from backend.image_lookup import programar_asociacion_imagenes_inventario
+from backend.image_lookup import (
+    imagen_urls_para_catalogo,
+    programar_asociacion_imagenes_inventario,
+)
 from backend.utils import (
     EXPR_CODIGO_BARRAS,
     imagen_url_para_persistir,
@@ -469,9 +472,10 @@ def _aplicar_url_imagen_producto(fila):
 
 
 def _completar_imagenes_productos(productos):
-    """Normaliza URLs ya persistidas. No consulta APIs ni el maestro (eso va en segundo plano)."""
+    """URL persistida o catálogo maestro por EAN. Sin OpenFoodFacts en el request."""
     if not productos:
         return productos
+    imagen_urls_para_catalogo(productos)
     for fila in productos:
         _aplicar_url_imagen_producto(fila)
     return productos

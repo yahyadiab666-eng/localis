@@ -117,10 +117,9 @@ def _encajar_en_lienzo(img, lado, fondo=FONDO_LIENZO):
     img = _preparar_imagen(img)
     copia = img.copy()
     copia.thumbnail((lado, lado))
-    lado_final = max(copia.width, copia.height) or lado
-    lienzo = Image.new('RGB', (lado_final, lado_final), fondo)
-    x = (lado_final - copia.width) // 2
-    y = (lado_final - copia.height) // 2
+    lienzo = Image.new('RGB', (lado, lado), fondo)
+    x = (lado - copia.width) // 2
+    y = (lado - copia.height) // 2
     lienzo.paste(copia, (x, y))
     return lienzo
 
