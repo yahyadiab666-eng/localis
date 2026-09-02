@@ -23,6 +23,22 @@ from backend.supabase_connectivity import (
     sanitizar_url_supabase,
 )
 
+
+def _asegurar_dotenv_local() -> None:
+    """Carga .env sin pisar variables ya definidas (Render gana)."""
+    try:
+        from pathlib import Path
+
+        from dotenv import load_dotenv
+
+        raiz = Path(__file__).resolve().parents[1]
+        load_dotenv(raiz / '.env', override=False)
+    except Exception:
+        return
+
+
+_asegurar_dotenv_local()
+
 _STORAGE_PUBLIC_PREFIX = '/storage/v1/object/public/'
 _SUBASE_TYPO_RE = re.compile(r'/subase/', re.IGNORECASE)
 SUPABASE_HTTP_TIMEOUT = 10.0
@@ -69,23 +85,47 @@ _ALIAS_SERVICE_ROLE = (
 )
 _SERVICE_ROLE_NOMBRE_TYPO = False
 _SERVICE_ROLE_NOMBRE_LEIDO = ENV_SERVICE_ROLE
+_SERVICE_ROLE_IGNORADAS: list[tuple[str, str]] = []
+
+
+def _etiqueta_rol_clave(token: str) -> str:
+    if token.startswith('sb_secret_'):
+        return 'sb_secret'
+    if token.startswith('sb_publishable_'):
+        return 'sb_publishable'
+    if token.startswith('sb_anon_'):
+        return 'sb_anon'
+    return _rol_claim_jwt(token) or 'desconocido'
 
 
 def _leer_clave_service_role_entorno():
-    """Lee la llave de servicio. Nombre canónico: SUPABASE_SERVICE_ROLE_KEY."""
-    global _SERVICE_ROLE_NOMBRE_TYPO, _SERVICE_ROLE_NOMBRE_LEIDO
+    """Lee solo una llave service_role/sb_secret_. Ignora anon/publishable aunque el nombre parezca de servicio."""
+    global _SERVICE_ROLE_NOMBRE_TYPO, _SERVICE_ROLE_NOMBRE_LEIDO, _SERVICE_ROLE_IGNORADAS
+    _SERVICE_ROLE_IGNORADAS = []
     for nombre in _ALIAS_SERVICE_ROLE:
         valor = _limpiar_valor_env(os.getenv(nombre))
         if not valor:
             continue
-        _SERVICE_ROLE_NOMBRE_LEIDO = nombre
+        if clave_es_service_role(valor):
+            _SERVICE_ROLE_NOMBRE_LEIDO = nombre
+            if nombre != ENV_SERVICE_ROLE:
+                _SERVICE_ROLE_NOMBRE_TYPO = True
+                os.environ[ENV_SERVICE_ROLE] = valor
+                print(
+                    f'[Localis Supabase] ADVERTENCIA: se leyo {nombre} (service_role valida). '
+                    f'Renombrala a {ENV_SERVICE_ROLE} en .env y en Render.'
+                )
+            return valor
+        rol = _etiqueta_rol_clave(valor)
+        _SERVICE_ROLE_IGNORADAS.append((nombre, rol))
+        print(
+            f'[Localis Supabase] ADVERTENCIA: {nombre} ignorada '
+            f'(jwt_role={rol!r}). No es service_role ni sb_secret_. '
+            f'El backend no usara esta llave para Storage.'
+        )
         if nombre != ENV_SERVICE_ROLE:
             _SERVICE_ROLE_NOMBRE_TYPO = True
-            print(
-                f'[Localis Supabase] ADVERTENCIA: se leyo {nombre}. '
-                f'Renombrala a {ENV_SERVICE_ROLE} en .env y en Render.'
-            )
-        return valor
+            _SERVICE_ROLE_NOMBRE_LEIDO = nombre
     return ''
 
 
@@ -233,8 +273,10 @@ SUPABASE_KEY = _limpiar_valor_env(os.getenv('SUPABASE_KEY')) or _limpiar_valor_e
 SUPABASE_SERVICE_ROLE_KEY = _leer_clave_service_role_entorno()
 SUPABASE_BUCKET_IMAGENES = _limpiar_valor_env(os.getenv('SUPABASE_BUCKET_IMAGENES')) or 'imagenes'
 
-_SERVICE_ROLE_RECHAZADA = False
+_SERVICE_ROLE_RECHAZADA = bool(_SERVICE_ROLE_IGNORADAS)
 _SERVICE_ROLE_ROL_CRUDO = _rol_claim_jwt(SUPABASE_SERVICE_ROLE_KEY)
+if not _SERVICE_ROLE_ROL_CRUDO and _SERVICE_ROLE_IGNORADAS:
+    _SERVICE_ROLE_ROL_CRUDO = _SERVICE_ROLE_IGNORADAS[0][1]
 
 if SUPABASE_KEY and SUPABASE_SERVICE_ROLE_KEY and SUPABASE_KEY == SUPABASE_SERVICE_ROLE_KEY:
     if not clave_es_service_role(SUPABASE_SERVICE_ROLE_KEY):
@@ -283,8 +325,8 @@ def auditar_claves_supabase() -> dict:
     typo_nombre = bool(
         _limpiar_valor_env(os.getenv('SUPABASE_SERVICE_ROL_KEY'))
     ) and not _limpiar_valor_env(os.getenv('SUPABASE_SERVICE_ROLE_KEY'))
-    rol_service = _rol_claim_jwt(cruda_service)
-    rol_anon = _rol_claim_jwt(cruda_anon)
+    rol_service = _etiqueta_rol_clave(cruda_service) if cruda_service else None
+    rol_anon = _etiqueta_rol_clave(cruda_anon) if cruda_anon else None
     identicas = bool(cruda_service and cruda_anon and cruda_service == cruda_anon)
     rol_es_service = clave_es_service_role(cruda_service)
     service_ok = rol_es_service and not (identicas and rol_service == 'anon')
@@ -293,13 +335,12 @@ def auditar_claves_supabase() -> dict:
         'anon_presente': bool(cruda_anon),
         'anon_jwt_role': rol_anon,
         'service_presente': bool(cruda_service),
-        'service_jwt_role': rol_service or (
-            'sb_secret' if (cruda_service or '').startswith('sb_secret_') else None
-        ),
+        'service_jwt_role': rol_service,
         'claves_identicas': identicas,
         'nombre_variable_typo': typo_nombre,
         'nombre_env_canonico': ENV_SERVICE_ROLE,
         'nombre_env_leido': _SERVICE_ROLE_NOMBRE_LEIDO,
+        'claves_service_ignoradas': list(_SERVICE_ROLE_IGNORADAS),
         'modo_hibrido': not service_ok,
         'service_ok': service_ok,
         'service_rechazada_al_iniciar': _SERVICE_ROLE_RECHAZADA,

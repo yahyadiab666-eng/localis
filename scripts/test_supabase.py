@@ -38,12 +38,20 @@ def _cargar_entorno() -> None:
 
 
 def _imprimir_auditoria(informe: dict) -> None:
+    print('=== JWT en memoria (sin secretos) ===')
+    print(f"  Anon jwt_role:             {informe.get('anon_jwt_role')!r}")
+    print(f"  Service jwt_role:          {informe.get('service_jwt_role')!r}")
+    print(
+        f"  Esperado:                 'service_role' o 'sb_secret' "
+        f"| detectado: {informe.get('service_jwt_role')!r}"
+    )
+    ignoradas = informe.get('claves_service_ignoradas') or []
+    if ignoradas:
+        print(f'  Ignoradas (no admin):      {ignoradas}')
     print('=== Auditoria de llaves (sin secretos) ===')
     print(f"  SUPABASE_URL presente:     {informe.get('supabase_url_presente')}")
     print(f"  Anon presente:             {informe.get('anon_presente')}")
-    print(f"  Anon jwt_role:             {informe.get('anon_jwt_role')}")
     print(f"  Service presente:          {informe.get('service_presente')}")
-    print(f"  Service jwt_role:          {informe.get('service_jwt_role')}")
     print(f"  Claves identicas:          {informe.get('claves_identicas')}")
     print(f"  Typo ROL (falta E):        {informe.get('nombre_variable_typo')}")
     print(f"  Nombre env leido:          {informe.get('nombre_env_leido')}")
@@ -291,15 +299,25 @@ def main() -> int:
     if not informe.get('service_ok'):
         rol = informe.get('service_jwt_role') or 'ausente'
         print(
-            f'\n=== Modo hibrido (Storage omitido) ===\n'
+            f'\n=== Storage sin service_role ===\n'
             f'  jwt_role={rol} nombre_leido={informe.get("nombre_env_leido")} '
-            f'(canonico={informe.get("nombre_env_canonico")}). '
-            'El catalogo no se bloquea.'
+            f'(canonico={informe.get("nombre_env_canonico")}).'
         )
         if informe.get('nombre_variable_typo'):
             print(
                 '  ADVERTENCIA: renombra SUPABASE_SERVICE_ROL_KEY a SUPABASE_SERVICE_ROLE_KEY.'
             )
+        if rol == 'anon':
+            print(
+                '  ERROR EXACTO: la variable de servicio contiene un JWT role=anon '
+                '(llave publica). Storage devolvera 403 RLS si se usa. '
+                'Pega Dashboard -> Settings -> API -> service_role (secret) '
+                'o una sb_secret_ en SUPABASE_SERVICE_ROLE_KEY.'
+            )
+        fallos.append(
+            f'SERVICE_ROLE invalida: jwt_role={rol} '
+            f'nombre={informe.get("nombre_env_leido")}'
+        )
 
     print('\n=== Integridad (cero URLs quemadas) ===')
     ok_int, det_int = _probar_integridad_sin_urls_quemadas()
