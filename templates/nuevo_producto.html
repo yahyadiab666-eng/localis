@@ -130,11 +130,13 @@
 
             {% if producto %}
               <div id="preview-imagen-actual" class="flex items-center gap-3 mb-2 p-2 bg-stone-50 border border-stone-200 rounded-xl">
-                <img src="{{ img_producto }}" alt="Imagen actual"
-                     data-producto-id="{{ producto.id }}"
-                     class="localis-img-producto-thumb rounded-lg border border-stone-200 w-16 h-16 object-contain bg-white"
-                     loading="lazy" decoding="async"
-                     onerror="window.rescatarImagenProducto(this)">
+                <div class="localis-img-producto-thumb-wrap localis-img-producto-thumb-wrap--xl">
+                  <img src="{{ img_producto }}" alt="Imagen actual"
+                       data-producto-id="{{ producto.id }}"
+                       class="localis-img-producto-thumb"
+                       loading="lazy" decoding="async"
+                       onerror="window.rescatarImagenProducto(this)">
+                </div>
                 <div class="text-xs text-stone-600">
                   <p class="font-medium">{% if img_propia %}Imagen actual vinculada{% else %}Sin foto propia todavía{% endif %}</p>
                   <p class="text-[10px] text-stone-400">Sube un archivo nuevo para reemplazarla. Se comprime al instante.</p>
@@ -142,7 +144,9 @@
               </div>
             {% else %}
               <div id="preview-imagen-nueva" class="hidden flex items-center gap-3 mb-2 p-2 bg-stone-50 border border-stone-200 rounded-xl">
-                <img id="preview-imagen-nueva-src" alt="Vista previa" class="rounded-lg border border-stone-200 w-16 h-16 object-cover">
+                <div class="localis-img-producto-thumb-wrap localis-img-producto-thumb-wrap--xl">
+                  <img id="preview-imagen-nueva-src" alt="Vista previa" class="localis-img-producto-thumb">
+                </div>
                 <p class="text-xs text-stone-600 font-medium">Vista previa de la foto que vas a publicar</p>
               </div>
             {% endif %}

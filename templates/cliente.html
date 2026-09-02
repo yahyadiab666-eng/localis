@@ -123,7 +123,10 @@
       <button onclick="cerrarModal()" class="absolute top-3 right-3 z-10 bg-black/40 text-white rounded-full p-1.5 hover:bg-black/60">
         <i data-lucide="x" style="width:20px;height:20px;"></i>
       </button>
-      <div id="modal-imagen" class="h-56 bg-gray-100 bg-cover bg-center"></div>
+      <div class="localis-img-producto-wrap localis-img-producto-wrap--modal">
+        <img id="modal-imagen" class="localis-img-producto" alt="" src=""
+             decoding="async" referrerpolicy="no-referrer">
+      </div>
       <div class="p-6 space-y-3">
         <p id="modal-comercio" class="text-amber-600 text-xs font-bold uppercase tracking-wider"></p>
         <h3 id="modal-nombre" class="font-display text-2xl font-bold text-gray-900"></h3>
@@ -164,7 +167,13 @@
           ? p.imagen_url
           : '{{ placeholder_producto }}';
 
-        document.getElementById('modal-imagen').style.backgroundImage = `url('${imgUrl}')`;
+        const modalImg = document.getElementById('modal-imagen');
+        modalImg.onerror = function () {
+          this.onerror = null;
+          this.src = '{{ placeholder_producto }}';
+        };
+        modalImg.alt = p.nombre || '';
+        modalImg.src = imgUrl;
         document.getElementById('modal-comercio').textContent = p.comercio_nombre || '';
         document.getElementById('modal-nombre').textContent = p.nombre || '';
         document.getElementById('modal-descripcion').textContent = p.descripcion || 'Sin descripción.';

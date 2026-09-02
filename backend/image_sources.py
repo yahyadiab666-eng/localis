@@ -168,6 +168,17 @@ def fuentes_para_familia(familia):
     return [_FUENTE_POR_ID[i] for i in ids if i in _FUENTE_POR_ID]
 
 
+def fuentes_para_codigo(familia=None):
+    """
+    El código de barras es único: primero las fuentes de la familia,
+    después el resto de catálogos oficiales.
+    """
+    preferidas = fuentes_para_familia(familia or FAMILIA_OTRO)
+    vistos = {fuente['id'] for fuente in preferidas}
+    resto = [fuente for fuente in _FUENTES if fuente['id'] not in vistos]
+    return list(preferidas) + resto
+
+
 def usa_wikimedia(familia):
     return familia in {FAMILIA_TECNOLOGIA, FAMILIA_HOGAR, FAMILIA_OTRO}
 

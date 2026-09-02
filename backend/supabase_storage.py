@@ -310,7 +310,10 @@ def intentar_subir_imagen(
         if error_validacion:
             return None, error_validacion
         comprimido = comprimir_file_storage_a_bytes(
-            file_storage, prefijo=prefijo, max_dimension=max_dimension
+            file_storage,
+            prefijo=prefijo,
+            max_dimension=max_dimension,
+            lienzo_cuadrado=(carpeta == 'productos'),
         )
     except ImageProcessingError as error:
         print(f'{LOG_PREFIX} compresion omitida: {error}')
@@ -323,6 +326,13 @@ def intentar_subir_imagen(
         return None, AVISO_HIBRIDO_USUARIO
 
     data, content_type, filename = comprimido
+    url_local = None
+    if carpeta == 'productos':
+        url_local = _guardar_respaldo_local(data, filename, carpeta)
+        if url_local:
+            # El producto nace con foto visible. Storage se sincroniza
+            # en segundo plano tras el INSERT (programar_sincronizacion_storage).
+            return url_local, None
     try:
         url = _persistir_en_supabase(
             data,
@@ -331,10 +341,12 @@ def intentar_subir_imagen(
             carpeta,
             supabase_client=supabase_client,
         )
-        return url, None
+        return url or url_local, None
     except SupabaseUploadError as error:
-        url_local = _guardar_respaldo_local(data, filename, carpeta)
         print(f'{LOG_PREFIX} modo hibrido, subida omitida: {error}')
+        if url_local:
+            return url_local, None
+        url_local = _guardar_respaldo_local(data, filename, carpeta)
         if url_local:
             return url_local, None
         return None, AVISO_HIBRIDO_USUARIO
@@ -343,6 +355,8 @@ def intentar_subir_imagen(
             f'{LOG_PREFIX} modo hibrido, error inesperado: '
             f'{type(error).__name__}: {error}'
         )
+        if url_local:
+            return url_local, None
         url_local = _guardar_respaldo_local(data, filename, carpeta)
         if url_local:
             return url_local, None
@@ -450,7 +464,10 @@ def subir_imagen_con_respaldo(
 
     try:
         comprimido = comprimir_file_storage_a_bytes(
-            file_storage, prefijo=prefijo, max_dimension=max_dimension
+            file_storage,
+            prefijo=prefijo,
+            max_dimension=max_dimension,
+            lienzo_cuadrado=(carpeta == 'productos'),
         )
     except ImageProcessingError as error:
         raise SupabaseUploadError(str(error)) from error

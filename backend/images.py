@@ -13,7 +13,8 @@ from config import MAX_UPLOAD_BYTES
 MAX_DIMENSION = 800
 QUALITY = 78
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp'}
-DEFAULT_WORKERS = 8
+FONDO_LIENZO = (255, 254, 251)  # #fffefb, mismo tono que las tarjetas
+DEFAULT_WORKERS = 4
 
 
 class ImageProcessingError(Exception):
@@ -111,17 +112,34 @@ def _nombre_archivo_seguro(prefijo, extension='webp'):
     return f'{prefijo_limpio}_{token}.{extension}'
 
 
+def _encajar_en_lienzo(img, lado, fondo=FONDO_LIENZO):
+    """Centra la foto en un cuadrado de fondo limpio (sin estirar)."""
+    img = _preparar_imagen(img)
+    copia = img.copy()
+    copia.thumbnail((lado, lado))
+    lado_final = max(copia.width, copia.height) or lado
+    lienzo = Image.new('RGB', (lado_final, lado_final), fondo)
+    x = (lado_final - copia.width) // 2
+    y = (lado_final - copia.height) // 2
+    lienzo.paste(copia, (x, y))
+    return lienzo
+
+
 def comprimir_pil_a_bytes(
     img,
     prefijo='img',
     max_dimension=MAX_DIMENSION,
     quality=QUALITY,
     formato='WEBP',
+    lienzo_cuadrado=False,
 ):
     """Comprime un objeto PIL y retorna (bytes, content_type, filename)."""
     try:
-        img = _preparar_imagen(img)
-        img.thumbnail((max_dimension, max_dimension))
+        if lienzo_cuadrado:
+            img = _encajar_en_lienzo(img, max_dimension)
+        else:
+            img = _preparar_imagen(img)
+            img.thumbnail((max_dimension, max_dimension))
 
         extension = 'webp' if formato.upper() == 'WEBP' else 'jpg'
         filename = _nombre_archivo_seguro(prefijo, extension)
@@ -149,6 +167,7 @@ def comprimir_bytes_a_bytes(
     max_dimension=MAX_DIMENSION,
     quality=QUALITY,
     formato='WEBP',
+    lienzo_cuadrado=False,
 ):
     """Comprime bytes de imagen y retorna (bytes, content_type, filename)."""
     if not data_bytes:
@@ -157,7 +176,12 @@ def comprimir_bytes_a_bytes(
         img = Image.open(io.BytesIO(data_bytes))
         img.load()
         return comprimir_pil_a_bytes(
-            img, prefijo=prefijo, max_dimension=max_dimension, quality=quality, formato=formato
+            img,
+            prefijo=prefijo,
+            max_dimension=max_dimension,
+            quality=quality,
+            formato=formato,
+            lienzo_cuadrado=lienzo_cuadrado,
         )
     except ImageProcessingError:
         raise
@@ -173,6 +197,7 @@ def comprimir_file_storage_a_bytes(
     max_dimension=MAX_DIMENSION,
     quality=QUALITY,
     formato='WEBP',
+    lienzo_cuadrado=False,
 ):
     """Comprime un archivo subido y retorna (bytes, content_type, filename)."""
     error = validar_archivo_subida(file_storage)
@@ -193,6 +218,7 @@ def comprimir_file_storage_a_bytes(
         max_dimension=max_dimension,
         quality=quality,
         formato=formato,
+        lienzo_cuadrado=lienzo_cuadrado,
     )
 
 

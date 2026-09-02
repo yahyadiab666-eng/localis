@@ -469,71 +469,11 @@ def _aplicar_url_imagen_producto(fila):
 
 
 def _completar_imagenes_productos(productos):
-    """
-    Rellena imagen_url desde el catálogo maestro en una consulta aparte
-    (no comparte transacción con el JOIN comercios/productos) y persiste
-    las URLs encontradas para que url_bd deje de ser None.
-    """
+    """Normaliza URLs ya persistidas. No consulta APIs ni el maestro (eso va en segundo plano)."""
     if not productos:
         return productos
     for fila in productos:
         _aplicar_url_imagen_producto(fila)
-
-    faltantes = []
-    for fila in productos:
-        if fila.get('imagen_url'):
-            continue
-        faltantes.append(fila)
-    if not faltantes:
-        return productos
-
-    try:
-        from backend.catalogo_maestro import mapa_imagenes_maestro
-
-        codigos = [
-            normalizar_codigo_barras(fila.get('codigo_barras'))
-            for fila in faltantes
-        ]
-        mapa = mapa_imagenes_maestro([c for c in codigos if c]) or {}
-    except Exception as error:
-        print(f'[Localis Imagen] Lote maestro omitido: {type(error).__name__}: {error}')
-        traceback.print_exc()
-        mapa = {}
-
-    from backend.utils import url_imagen_catalogo_valida
-    from utils.images import url_publica_producto_desde_bd
-
-    persistir = []
-    for fila in faltantes:
-        codigo = normalizar_codigo_barras(fila.get('codigo_barras'))
-        url = url_publica_producto_desde_bd(mapa.get(codigo)) if codigo else ''
-        if not url:
-            url = url_imagen_catalogo_valida(mapa.get(codigo)) if codigo else None
-        if url:
-            fila['imagen_url'] = url
-            producto_id = fila.get('id')
-            if producto_id:
-                persistir.append((url, int(producto_id)))
-
-    if persistir:
-        try:
-            with get_db_connection() as conexion:
-                cursor = conexion.cursor()
-                cursor.executemany(
-                    """
-                    UPDATE productos SET imagen_url = ?
-                    WHERE id = ?
-                      AND (imagen_url IS NULL OR TRIM(CAST(imagen_url AS TEXT)) = '')
-                    """,
-                    persistir,
-                )
-                conexion.commit()
-        except Exception as error:
-            print(
-                f'[Localis Imagen] No se persistieron URLs de maestro: '
-                f'{type(error).__name__}: {error}'
-            )
-            traceback.print_exc()
     return productos
 
 
@@ -826,7 +766,7 @@ def obtener_producto_por_id(producto_id, comercio_id=None):
 
 
 def obtener_productos_comercio(comercio_id):
-    """Inventario del panel comerciante: imagen_url explícita + catálogo maestro."""
+    """Inventario del panel comerciante: URLs ya persistidas, sin red."""
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()

@@ -31,6 +31,7 @@ from backend.image_sources import (
     FAMILIA_ALIMENTOS,
     buscar_wikimedia,
     clasificar_familia,
+    fuentes_para_codigo,
     fuentes_para_familia,
     hits_por_nombre,
     producto_por_codigo,
@@ -56,10 +57,6 @@ _LOG_IMAGEN = '[Localis Imagen]'
 _STOP_NOMBRE = frozenset({
     'de', 'la', 'el', 'los', 'las', 'del', 'y', 'en', 'con',
     'kg', 'g', 'l', 'ml', 'un', 'una', 'refresco',
-})
-_GENERIC_FOOD = frozenset({
-    'harina', 'arroz', 'aceite', 'cafe', 'pasta', 'spaghetti', 'leche',
-    'atun', 'mantequilla', 'panela', 'refresco', 'pan',
 })
 _ERRORES_RED_IMAGEN = (
     requests.Timeout,
@@ -290,7 +287,11 @@ def _texto_hit(valor):
     return str(valor)
 
 
-def _score_hit_nombre(tokens, hit):
+def _score_hit_nombre(tokens, hit, tokens_desc=None):
+    """
+    Evita falsos positivos: si el nombre tiene 2+ tokens, exige 2 coincidencias.
+    La descripción solo suma puntos; no relaja el umbral del nombre.
+    """
     if not tokens:
         return 0
     nombre = ' '.join(
@@ -301,6 +302,7 @@ def _score_hit_nombre(tokens, hit):
                 _texto_hit(hit.get('product_name_es')),
                 _texto_hit(hit.get('product_name_en')),
                 _texto_hit(hit.get('brands')),
+                _texto_hit(hit.get('generic_name')),
             ),
         )
     ).lower()
@@ -311,11 +313,12 @@ def _score_hit_nombre(tokens, hit):
     aciertos = sum(1 for tok in tokens if tok in nombre_norm)
     if aciertos == 0:
         return 0
-    if len(tokens) == 1:
-        return aciertos * 2
-    if aciertos >= 2 or (aciertos == 1 and len(tokens[0]) >= 5):
-        return aciertos
-    return 0
+    if len(tokens) >= 2 and aciertos < 2:
+        return 0
+    bonus = 0
+    if tokens_desc:
+        bonus = sum(1 for tok in tokens_desc if tok in nombre_norm)
+    return aciertos * 2 + bonus
 
 
 def _url_imagen_hit_off(hit, inspeccionar=True):
@@ -330,17 +333,40 @@ def _url_imagen_hit_off(hit, inspeccionar=True):
     return _primera_url_producto_facts(producto, inspeccionar=inspeccionar)
 
 
-def _mejor_hit_por_nombre(fuente, nombre):
+def _texto_respaldo_nombre(nombre, descripcion=None):
+    """Consulta de respaldo: nombre + descripción (sin placeholders vacíos)."""
+    nombre_limpio = ' '.join(str(nombre or '').split()).strip()
+    desc = ' '.join(str(descripcion or '').split()).strip()
+    desc_low = desc.lower().rstrip('.')
+    if desc_low in {
+        '',
+        'none',
+        'null',
+        'sin descripcion',
+        'sin descripción',
+        'sin descripcion disponible',
+        'sin descripción disponible',
+    }:
+        desc = ''
+    if nombre_limpio and desc:
+        return f'{nombre_limpio} {desc}'
+    return nombre_limpio or desc
+
+
+def _mejor_hit_por_nombre(fuente, nombre, descripcion=None):
     tokens = _tokens_nombre(nombre)
+    tokens_desc = _tokens_nombre(descripcion) if descripcion else []
     if not tokens:
         return None
     consulta = ' '.join(tokens[:4])
+    if tokens_desc:
+        consulta = f'{consulta} {" ".join(tokens_desc[:3])}'.strip()
     try:
         hits = hits_por_nombre(fuente, consulta)
         mejor = None
         mejor_score = 0
         for hit in hits:
-            score = _score_hit_nombre(tokens, hit)
+            score = _score_hit_nombre(tokens, hit, tokens_desc=tokens_desc)
             if score <= mejor_score:
                 continue
             url = _url_imagen_hit_off(hit, inspeccionar=True)
@@ -366,7 +392,7 @@ def _buscar_codigo_en_fuentes(codigo_barras, familia):
     codigo = normalizar_codigo_barras(codigo_barras)
     if not codigo or not codigo.isdigit() or len(codigo) < 8:
         return None
-    for fuente in fuentes_para_familia(familia):
+    for fuente in fuentes_para_codigo(familia):
         try:
             producto = producto_por_codigo(fuente, codigo)
             if not producto:
@@ -380,16 +406,20 @@ def _buscar_codigo_en_fuentes(codigo_barras, familia):
     return None
 
 
-def _buscar_nombre_en_fuentes(nombre, familia):
-    if not nombre:
+def _buscar_nombre_en_fuentes(nombre, familia, descripcion=None):
+    consulta = _texto_respaldo_nombre(nombre, descripcion)
+    if not consulta:
         return None
     for fuente in fuentes_para_familia(familia):
-        url = _mejor_hit_por_nombre(fuente, nombre)
+        url = _mejor_hit_por_nombre(fuente, nombre or consulta, descripcion=descripcion)
         if url:
-            print(f'{_LOG_IMAGEN} nombre={nombre!r} fuente={fuente["id"]}')
+            print(
+                f'{_LOG_IMAGEN} respaldo nombre={nombre!r} '
+                f'desc={bool(descripcion)} fuente={fuente["id"]}'
+            )
             return url
     if usa_wikimedia(familia):
-        wiki = buscar_wikimedia(nombre)
+        wiki = buscar_wikimedia(consulta)
         if wiki:
             url = _confirmar_url_catalogo(
                 wiki.get('url'),
@@ -398,7 +428,7 @@ def _buscar_nombre_en_fuentes(nombre, familia):
                 inspeccionar=True,
             )
             if url:
-                print(f'{_LOG_IMAGEN} nombre={nombre!r} fuente=wikimedia')
+                print(f'{_LOG_IMAGEN} respaldo nombre={nombre!r} fuente=wikimedia')
                 return url
     return None
 
@@ -432,27 +462,29 @@ def espejar_url_oficial_en_storage(url, clave):
     return _espejar_en_storage(url, clave)
 
 
-def _descubrir_y_persistir_oficial(codigo_barras, nombre=None, categoria=None):
+def _descubrir_y_persistir_oficial(
+    codigo_barras, nombre=None, categoria=None, descripcion=None
+):
     """
-    Cascada por familia: barcode en fuentes oficiales, luego nombre, luego Wikimedia.
-    Espeja a Storage si hay service_role; si no, cachea la URL oficial.
+    Cascada estricta:
+    1) Código de barras en todos los catálogos oficiales.
+    2) Solo si el código falta o no arroja foto: nombre + descripción.
+    Nunca busca por tokens sueltos (evita falsos positivos).
     """
     familia = clasificar_familia(nombre=nombre, categoria=categoria)
     url = None
     codigo = normalizar_codigo_barras(codigo_barras)
     if codigo:
         url = _buscar_codigo_en_fuentes(codigo, familia)
-    if not url and nombre:
-        url = _buscar_nombre_en_fuentes(nombre, familia)
-    if not url and nombre:
-        for token in _tokens_nombre(nombre):
-            if token in _GENERIC_FOOD or len(token) < 4:
-                continue
-            url = _buscar_nombre_en_fuentes(token, familia)
-            if url:
-                break
-            if _PAUSA_OFF_SEG:
-                time.sleep(_PAUSA_OFF_SEG)
+        if url:
+            print(f'{_LOG_IMAGEN} prioridad=codigo codigo={codigo}')
+    if not url:
+        url = _buscar_nombre_en_fuentes(nombre, familia, descripcion=descripcion)
+        if url:
+            print(
+                f'{_LOG_IMAGEN} prioridad=respaldo_nombre '
+                f'codigo={codigo or "-"} nombre={nombre!r}'
+            )
     if not url:
         return None
     espejo = _espejar_en_storage(url, codigo or nombre)
@@ -471,6 +503,7 @@ def resolver_imagen(
     mapa_maestro=None,
     nombre=None,
     categoria=None,
+    descripcion=None,
     *,
     para_escritura=False,
     buscar_oficial=True,
@@ -503,7 +536,7 @@ def resolver_imagen(
             return None
 
         url = _descubrir_y_persistir_oficial(
-            codigo, nombre, categoria=categoria
+            codigo, nombre, categoria=categoria, descripcion=descripcion
         )
         if url and codigo and mapa_maestro is not None:
             mapa_maestro[codigo] = url
@@ -519,6 +552,7 @@ def resolver_imagen_escritura(
     mapa_maestro=None,
     nombre=None,
     categoria=None,
+    descripcion=None,
     *,
     buscar_oficial=True,
 ):
@@ -530,6 +564,7 @@ def resolver_imagen_escritura(
             mapa_maestro=mapa_maestro,
             nombre=nombre,
             categoria=categoria,
+            descripcion=descripcion,
             para_escritura=True,
             buscar_oficial=buscar_oficial,
         )
@@ -628,8 +663,13 @@ def preparar_mapa_imagenes_importacion(productos, snapshot_imagenes=None):
     )
 
 
-def descubrir_imagen_catalogo(nombre=None, categoria=None, codigo_barras=None):
-    """Punto de entrada de pruebas y alta: cascada multifuente + calidad."""
+def descubrir_imagen_catalogo(
+    nombre=None, categoria=None, codigo_barras=None, descripcion=None
+):
+    """Punto de entrada de pruebas y alta: cascada barcode → nombre+descripcion."""
     return _descubrir_y_persistir_oficial(
-        codigo_barras, nombre=nombre, categoria=categoria
+        codigo_barras,
+        nombre=nombre,
+        categoria=categoria,
+        descripcion=descripcion,
     )

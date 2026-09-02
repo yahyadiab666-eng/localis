@@ -81,6 +81,7 @@ def _resolver_url_escritura(
     mapa_maestro=None,
     nombre=None,
     categoria=None,
+    descripcion=None,
 ):
     """Resolución al crear/importar: manual Storage → catálogo maestro → cascada."""
     try:
@@ -90,6 +91,7 @@ def _resolver_url_escritura(
             mapa_maestro=mapa_maestro,
             nombre=nombre,
             categoria=categoria,
+            descripcion=descripcion,
         )
     except Exception as error:
         _registrar_error_imagen('resolver escritura', error)
@@ -112,7 +114,11 @@ def imagen_url_para_catalogo(imagen_url=None, codigo_barras=None):
 
 
 def imagen_url_para_guardar(
-    imagen_manual=None, codigo_barras=None, nombre=None, categoria=None
+    imagen_manual=None,
+    codigo_barras=None,
+    nombre=None,
+    categoria=None,
+    descripcion=None,
 ):
     """URL a persistir: Storage, catálogo oficial o maestro. None si no hay foto."""
     try:
@@ -124,6 +130,7 @@ def imagen_url_para_guardar(
             codigo_barras=codigo_barras,
             nombre=nombre,
             categoria=categoria,
+            descripcion=descripcion,
             buscar_oficial=True,
         ) or _respaldo_en_cascada(codigo_barras)
     except Exception as error:
@@ -141,8 +148,9 @@ def persistir_imagen_producto_hibrida(
     existente=None,
 ):
     """
-    Foto del comerciante: comprime, intenta Storage y, si falla, guarda local.
-    Sin archivo: cascada oficial (maestro / OpenFoodFacts). Nunca lanza.
+    Foto del comerciante: comprime y deja URL mostrable de inmediato
+    (disco local; Storage se sincroniza en segundo plano si hay service_role).
+    Sin archivo: URL del formulario o maestro en BD. Sin OpenFoodFacts en el request.
     """
     del descripcion
     aviso = None
@@ -169,13 +177,13 @@ def persistir_imagen_producto_hibrida(
         respaldo = imagen_url_para_persistir(imagen_url_form) or existente
         return respaldo, aviso
 
-    respaldo = imagen_url_para_guardar(
-        imagen_url_form,
-        codigo_barras,
-        nombre=nombre,
-        categoria=_categoria_de_comercio(comercio_id),
-    ) or existente
-    return respaldo, aviso
+    persistida_form = imagen_url_para_persistir(imagen_url_form)
+    if persistida_form:
+        return persistida_form, aviso
+    if existente:
+        return existente, aviso
+    maestro = _respaldo_en_cascada(codigo_barras)
+    return maestro, aviso
 
 
 def url_imagen_con_respaldo(imagen_url=None, codigo_barras=None):
@@ -231,6 +239,7 @@ def resolver_imagen_url_definitiva(
             codigo_barras=codigo_barras,
             mapa_maestro=mapa_maestro,
             nombre=nombre,
+            descripcion=descripcion,
         )
     except Exception as error:
         _registrar_error_imagen('resolver_imagen_url_definitiva', error)
@@ -282,13 +291,15 @@ def resolver_imagen_producto(
     excluir_url=None,
     persistir=False,
 ):
-    del buscar_web, nombre, descripcion
+    del buscar_web
 
     try:
         if persistir:
             url = resolver_imagen_url_definitiva(
                 imagen_url,
                 codigo_barras,
+                nombre=nombre,
+                descripcion=descripcion,
             )
             return url if url and url != excluir_url else None
 
@@ -346,6 +357,7 @@ def aplicar_respaldo_imagenes(productos, persistir=False):
                         codigo_barras=prod.get('codigo_barras'),
                         mapa_maestro=mapa_maestro,
                         nombre=prod.get('nombre'),
+                        descripcion=prod.get('descripcion'),
                         buscar_oficial=False,
                     )
                     if not url_final:
@@ -383,7 +395,7 @@ def _asociar_imagenes_inventario(comercio_id):
             cursor = conexion.cursor()
             cursor.execute(
                 """
-                SELECT id, codigo_barras, imagen_url, nombre
+                SELECT id, codigo_barras, imagen_url, nombre, descripcion
                 FROM productos
                 WHERE comercio_id = ?
                 """,
@@ -431,6 +443,7 @@ def _asociar_imagenes_inventario(comercio_id):
                 codigo_barras=prod.get('codigo_barras'),
                 mapa_maestro=mapa_maestro,
                 nombre=prod.get('nombre'),
+                descripcion=prod.get('descripcion'),
                 categoria=_categoria_de_comercio(comercio_id),
                 buscar_oficial=True,
             )
@@ -497,7 +510,7 @@ def rellenar_imagenes_catalogo():
             cursor = conexion.cursor()
             cursor.execute(
                 """
-                SELECT p.id, p.nombre, p.codigo_barras, p.imagen_url,
+                SELECT p.id, p.nombre, p.descripcion, p.codigo_barras, p.imagen_url,
                        cat.nombre AS categoria_nombre
                 FROM productos p
                 JOIN comercios c ON c.id = p.comercio_id
@@ -540,6 +553,7 @@ def rellenar_imagenes_catalogo():
                 imagen_manual=prod.get('imagen_url'),
                 codigo_barras=prod.get('codigo_barras'),
                 nombre=prod.get('nombre'),
+                descripcion=prod.get('descripcion'),
                 categoria=prod.get('categoria_nombre'),
                 buscar_oficial=True,
             )
@@ -588,3 +602,63 @@ def programar_relleno_imagenes_catalogo():
     )
     hilo.start()
     return hilo
+
+
+def programar_descubrimiento_producto(producto_id, categoria=None):
+    """Busca foto oficial de un producto recien creado, sin bloquear el alta."""
+    if not producto_id:
+        return
+
+    def _trabajo():
+        try:
+            with get_db_connection(row_factory=sqlite3.Row) as conexion:
+                cursor = conexion.cursor()
+                cursor.execute(
+                    """
+                    SELECT p.id, p.nombre, p.descripcion, p.codigo_barras, p.imagen_url,
+                           cat.nombre AS categoria_nombre
+                    FROM productos p
+                    JOIN comercios c ON c.id = p.comercio_id
+                    LEFT JOIN categorias cat ON cat.id = c.categoria_id
+                    WHERE p.id = ?
+                    """,
+                    (int(producto_id),),
+                )
+                prod = cursor.fetchone()
+            if not prod:
+                return
+            prod = dict(prod)
+            if imagen_url_almacenada(prod.get('imagen_url')):
+                return
+            url_final = resolver_imagen_escritura(
+                imagen_manual=prod.get('imagen_url'),
+                codigo_barras=prod.get('codigo_barras'),
+                nombre=prod.get('nombre'),
+                descripcion=prod.get('descripcion'),
+                categoria=categoria or prod.get('categoria_nombre'),
+                buscar_oficial=True,
+            )
+            if not url_final:
+                return
+            with get_db_connection() as conexion:
+                cursor = conexion.cursor()
+                cursor.execute(
+                    """
+                    UPDATE productos SET imagen_url = ?
+                    WHERE id = ?
+                      AND (imagen_url IS NULL OR TRIM(CAST(imagen_url AS TEXT)) = '')
+                    """,
+                    (url_final, int(producto_id)),
+                )
+                conexion.commit()
+            print(f'{_LOG_IMAGEN} descubrimiento producto={producto_id} ok')
+        except Exception as error:
+            _registrar_error_imagen(
+                f'descubrimiento producto={producto_id}', error
+            )
+
+    threading.Thread(
+        target=_trabajo,
+        name=f'localis-foto-{producto_id}',
+        daemon=True,
+    ).start()

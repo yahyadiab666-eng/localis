@@ -144,9 +144,9 @@ from utils.images import (
     url_storage_o_vacio,
 )
 from backend.image_lookup import (
-    imagen_url_para_guardar,
     obtener_imagen_url_producto,
     persistir_imagen_producto_hibrida,
+    programar_descubrimiento_producto,
 )
 from backend.db import get_db_connection
 from database import init_db, normalize_database_url
@@ -179,6 +179,7 @@ from backend.subscriptions import (
 )
 from backend.utils import (
     formatear_fecha,
+    imagen_url_para_persistir,
     normalizar_codigo_barras,
     normalizar_telefono_whatsapp,
     parsear_precio_form,
@@ -282,6 +283,13 @@ def _injectar_placeholders_imagen():
 
 def _debug_imagenes_antes_de_render(productos, origen):
     """Print de control: URL persistida vs URL que verá la plantilla (sin I/O)."""
+    if os.getenv('LOCALIS_DEBUG_IMAGENES', '').strip().lower() not in (
+        '1',
+        'true',
+        'yes',
+        'on',
+    ):
+        return
     try:
         lista = list(productos or [])
         print(f'[Localis Imagen] render origen={origen} productos={len(lista)}')
@@ -495,12 +503,18 @@ def procesar_imagen_para_producto(
 
 def _sincronizar_foto_local_si_aplica(producto_id, imagen_url, carpeta='productos'):
     """Si la foto quedó en disco, intenta copiarla al bucket sin bloquear la respuesta."""
-    if not producto_id or not imagen_url:
+    if not producto_id:
+        return
+    if imagen_url:
+        try:
+            programar_sincronizacion_storage(producto_id, imagen_url, carpeta=carpeta)
+        except Exception as error:
+            print(f'[Localis Imagen] sync diferida no programada: {error}')
         return
     try:
-        programar_sincronizacion_storage(producto_id, imagen_url, carpeta=carpeta)
+        programar_descubrimiento_producto(producto_id)
     except Exception as error:
-        print(f'[Localis Imagen] sync diferida no programada: {error}')
+        print(f'[Localis Imagen] descubrimiento no programado: {error}')
 
 
 def _comercio_sesion_validado():
@@ -980,11 +994,12 @@ def panel_comercio():
         raise
     except Exception as error:
         print(f'Error al cargar panel de comercio: {error}')
+        traceback.print_exc()
         flash(
             'No se pudo cargar el panel del comercio. Intenta de nuevo en unos segundos.',
             'error',
         )
-        return redirect(url_for('panel_comercio'))
+        return redirect(url_for('index'))
 
 
 @app.route('/comercio/planes')
@@ -1211,11 +1226,7 @@ def nuevo_producto():
         except Exception as error:
             print(f'[Localis Imagen] hibrido alta producto: {error}')
             traceback.print_exc()
-            imagen_url = imagen_url_para_guardar(
-                imagen_url_form,
-                codigo_barras,
-                nombre=nombre,
-            )
+            imagen_url = imagen_url_para_persistir(imagen_url_form)
 
         try:
             with get_db_connection() as conn:
@@ -1294,11 +1305,7 @@ def editar_producto(producto_id):
                     flash(aviso_img, 'info')
                 incluir_imagen = bool(imagen_url)
             elif imagen_url_form:
-                imagen_url = imagen_url_para_guardar(
-                    imagen_url_form,
-                    codigo_barras,
-                    nombre=nombre,
-                )
+                imagen_url = imagen_url_para_persistir(imagen_url_form)
                 incluir_imagen = bool(imagen_url)
 
             exito, mensaje = actualizar_producto(
@@ -1506,8 +1513,6 @@ def api_crear_producto():
 
     aviso_img = None
     imagen_url = None
-    aviso_img = None
-    imagen_url = None
     try:
         imagen_url, aviso_img = persistir_imagen_producto_hibrida(
             file_storage=imagen_archivo,
@@ -1522,11 +1527,7 @@ def api_crear_producto():
     except Exception as error:
         print(f'[Localis Imagen] api producto hibrido: {error}')
         traceback.print_exc()
-        imagen_url = imagen_url_para_guardar(
-            imagen_url_form,
-            codigo_barras,
-            nombre=nombre,
-        )
+        imagen_url = imagen_url_para_persistir(imagen_url_form)
 
     def _insertar(conexion):
         cursor = conexion.cursor()

@@ -13,6 +13,7 @@ Casos:
 from __future__ import annotations
 
 import io
+import re
 import sys
 import time
 from pathlib import Path
@@ -174,7 +175,15 @@ def main() -> int:
     print('\n=== Presentacion catalogo ===')
     css = (RAIZ / 'static' / 'css' / 'responsive.css').read_text(encoding='utf-8')
     _ok('object-fit: contain' in css, 'tarjetas usan object-fit: contain', errores)
+    _ok('aspect-ratio: 1 / 1' in css, 'contenedor de foto es cuadrado 1:1', errores)
     _ok('#fffefb' in css, 'fondo limpio en contenedor de foto', errores)
+    wraps = re.findall(r'\.localis-img-producto-wrap[^{]*\{([^}]+)\}', css, flags=re.S)
+    alturas_fijas = [
+        match.group(0)
+        for cuerpo in wraps
+        for match in re.finditer(r'(?<![a-z-])height:\s*\d+px', cuerpo)
+    ]
+    _ok(not alturas_fijas, 'wraps sin height fijo en px', errores)
 
     print('\n=== RESULTADO ===')
     if errores:

@@ -163,6 +163,12 @@
           </button>
         </form>
       </div>
+      <div class="aviso-csv-imagenes" role="note">
+        <i data-lucide="info" class="aviso-csv-imagenes-icono" aria-hidden="true"></i>
+        <p>
+          <strong>Nota:</strong> La asociación automática de imágenes puede contener errores o no ser exacta. Puedes editar o subir la imagen manualmente si lo prefieres.
+        </p>
+      </div>
     </section>
 
     <!-- Productos -->
@@ -212,12 +218,14 @@
                   <td class="py-4 px-4 sm:px-6 font-semibold text-gray-900">
                     <div class="flex items-center gap-3 min-w-0">
                       {% set img_producto = producto|url_imagen_producto %}
-                      <img src="{{ img_producto or placeholder_producto }}"
-                           alt=""
-                           data-producto-id="{{ producto.id }}"
-                           class="localis-img-producto-thumb rounded-lg border border-stone-200"
-                           loading="lazy" decoding="async"
-                           onerror="window.rescatarImagenProducto(this)">
+                      <div class="localis-img-producto-thumb-wrap">
+                        <img src="{{ img_producto or placeholder_producto }}"
+                             alt=""
+                             data-producto-id="{{ producto.id }}"
+                             class="localis-img-producto-thumb"
+                             loading="lazy" decoding="async"
+                             onerror="window.rescatarImagenProducto(this)">
+                      </div>
                       <span class="truncate">{{ producto.nombre }}</span>
                     </div>
                   </td>
@@ -279,12 +287,14 @@
                  data-producto-busqueda="{{ producto.nombre }} {{ producto.descripcion }} {{ producto.codigo_barras }}">
           <div class="flex gap-3">
             {% set img_producto = producto|url_imagen_producto %}
-            <img src="{{ img_producto or placeholder_producto }}"
-                 alt=""
-                 data-producto-id="{{ producto.id }}"
-                 class="localis-img-producto-thumb w-14 h-14 rounded-xl border border-stone-200"
-                 loading="lazy" decoding="async"
-                 onerror="window.rescatarImagenProducto(this)">
+            <div class="localis-img-producto-thumb-wrap localis-img-producto-thumb-wrap--lg">
+              <img src="{{ img_producto or placeholder_producto }}"
+                   alt=""
+                   data-producto-id="{{ producto.id }}"
+                   class="localis-img-producto-thumb"
+                   loading="lazy" decoding="async"
+                   onerror="window.rescatarImagenProducto(this)">
+            </div>
             <div class="flex-1 min-w-0">
               <h4 class="font-bold text-gray-900 text-sm truncate">{{ producto.nombre }}</h4>
               <p class="text-stone-500 text-xs mt-0.5 line-clamp-2">{{ producto.descripcion or 'Sin descripción' }}</p>
