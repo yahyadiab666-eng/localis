@@ -33,28 +33,30 @@ button.btn-touch {
   transform: scale(0.98);
 }
 
-/* Tarjetas de producto — cuadrado real 1:1, foto contenida sobre fondo limpio */
+/* Tarjetas de producto — franja de foto de altura fija, sin estirar la card */
 .localis-img-producto-wrap {
   width: 100%;
-  aspect-ratio: 1 / 1;
-  height: auto;
-  min-height: 0;
-  max-height: none;
+  height: 180px;
+  min-height: 180px;
+  max-height: 180px;
   overflow: hidden;
   background: #fffefb;
   flex-shrink: 0;
   position: relative;
 }
 
+.localis-img-producto-wrap img,
 .localis-img-producto {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+  max-width: 100%;
+  max-height: 100%;
   object-fit: contain;
   object-position: center;
   display: block;
-  padding: 0.6rem;
+  padding: 0.4rem;
   box-sizing: border-box;
   background: #fffefb;
 }
@@ -104,19 +106,23 @@ button.btn-touch {
 }
 
 .localis-img-producto-wrap--modal {
-  aspect-ratio: 4 / 3;
   width: 100%;
-  height: auto;
+  height: 220px;
+  min-height: 220px;
+  max-height: 220px;
   background: #fffefb;
   border-bottom: 1px solid #f5f5f4;
 }
 
 .localis-img-producto-wrap--vacio {
-  background: #fffefb;
+  height: 180px;
+  min-height: 180px;
+  max-height: 180px;
+  background: #fffefb url('/static/img/placeholder-producto.svg') center / contain no-repeat;
 }
 
 .localis-img-producto-wrap--vacio .localis-img-producto:not([src]) {
-  visibility: hidden;
+  opacity: 0;
 }
 
 .localis-img-producto-thumb--vacio {

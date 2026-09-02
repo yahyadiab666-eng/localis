@@ -88,9 +88,10 @@
                  onclick="abrirModalProducto({{ producto.id }})"
                  onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();abrirModalProducto({{ producto.id }});}">
               {% set img_producto = producto|url_imagen_producto %}
-              <div class="localis-img-producto-wrap">
+              <div class="localis-img-producto-wrap{% if not img_producto %} localis-img-producto-wrap--vacio{% endif %}">
                 <img src="{{ img_producto or placeholder_producto }}"
-                     alt="{{ producto.nombre }}" loading="lazy" decoding="async" referrerpolicy="no-referrer"
+                     alt="{{ producto.nombre }}" width="400" height="180"
+                     loading="lazy" decoding="async" referrerpolicy="no-referrer"
                      data-producto-id="{{ producto.id }}"
                      class="localis-img-producto"
                      onerror="window.rescatarImagenProducto(this)">

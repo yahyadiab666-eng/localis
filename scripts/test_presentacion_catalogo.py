@@ -3,7 +3,7 @@
 Valida presentacion uniforme del catalogo y subida manual hibrida.
 
 Comprueba:
-  1. CSS: cuadrado 1:1, object-fit contain, fondo limpio, sin altura fija en wraps.
+  1. CSS: altura fija 180px, object-fit contain, fondo limpio.
   2. Plantillas: tarjetas con wrap, modal con <img> (no bg-cover).
   3. Compresion: JPEG apaisado -> WebP cuadrado sin estirar.
   4. Subida manual: URL persistible inmediata (local o Storage).
@@ -81,10 +81,10 @@ def _probar_css(errores):
     print('\n=== CSS tarjetas ===')
     css = (RAIZ / 'static' / 'css' / 'responsive.css').read_text(encoding='utf-8')
     _ok('object-fit: contain' in css, 'object-fit: contain', errores)
-    _ok('aspect-ratio: 1 / 1' in css, 'aspect-ratio 1:1 en el wrap', errores)
+    _ok('height: 180px' in css, 'altura fija 180px en el wrap', errores)
     _ok('#fffefb' in css, 'fondo #fffefb', errores)
     malas = _alturas_fijas_wrap(css)
-    _ok(not malas, f'sin height px en wraps {malas or ""}'.strip(), errores)
+    _ok(bool(malas), f'wraps con height px {malas or ""}'.strip(), errores)
     _ok(
         'bg-cover' not in (RAIZ / 'templates' / 'cliente.html').read_text(encoding='utf-8'),
         'modal del catalogo ya no usa bg-cover',

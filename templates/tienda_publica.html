@@ -107,9 +107,9 @@
         {% for producto in productos %}
           <div class="card-hover card-producto-mobile rounded-xl overflow-hidden bg-white shadow border border-stone-100 flex flex-col h-full">
             {% set img_producto = producto|url_imagen_producto %}
-            <div class="localis-img-producto-wrap">
+            <div class="localis-img-producto-wrap{% if not img_producto %} localis-img-producto-wrap--vacio{% endif %}">
               <img src="{{ img_producto or placeholder_producto }}"
-                   alt="{{ producto.nombre }}"
+                   alt="{{ producto.nombre }}" width="400" height="180"
                    data-producto-id="{{ producto.id }}"
                    class="localis-img-producto" loading="lazy" decoding="async" referrerpolicy="no-referrer"
                    onerror="window.rescatarImagenProducto(this)">
