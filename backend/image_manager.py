@@ -757,7 +757,6 @@ def resolver_imagen_catalogo(
         if url and not (
             url_imagen_subida_storage_valida(url)
             or url_imagen_local_valida(url)
-            or url_imagen_catalogo_valida(url)
         ):
             return None
         return url or None
