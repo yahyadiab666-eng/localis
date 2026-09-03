@@ -12,16 +12,16 @@ import io
 
 from PIL import Image, ImageFilter, ImageStat
 
-MIN_LADO_PX = 240
+MIN_LADO_PX = 260
 MAX_LADO_PX = 4000
-MIN_ASPECTO = 0.38
-MAX_ASPECTO = 2.65
-MIN_NITIDEZ = 7.5
+MIN_ASPECTO = 0.50
+MAX_ASPECTO = 1.75
+MIN_NITIDEZ = 8.0
 MAX_BYTES_INSPECCION = 2 * 1024 * 1024
 _LOG = '[Localis Calidad]'
 
 
-def evaluar_imagen_bytes(data, min_lado=MIN_LADO_PX):
+def evaluar_imagen_bytes(data, min_lado=MIN_LADO_PX, exigir_fondo_ficha=False):
     """
     Inspecciona bytes con Pillow.
     Retorna dict: ok, motivo, ancho, alto, nitidez.
@@ -52,6 +52,8 @@ def evaluar_imagen_bytes(data, min_lado=MIN_LADO_PX):
         return _fallo(
             f'imagen borrosa (nitidez={nitidez:.1f})', ancho, alto, nitidez
         )
+    if exigir_fondo_ficha and not _fondo_parece_ficha(img):
+        return _fallo('no parece ficha de producto (fondo de escena)', ancho, alto, nitidez)
     return {
         'ok': True,
         'motivo': None,
@@ -76,6 +78,30 @@ def metadatos_pasan_umbral(ancho=None, alto=None, min_lado=MIN_LADO_PX):
     if aspecto < MIN_ASPECTO or aspecto > MAX_ASPECTO:
         return False
     return True
+
+
+def _fondo_parece_ficha(img):
+    """True si al menos dos esquinas son claras (empaque de catálogo, no foto de calle)."""
+    try:
+        rgb = img.convert('RGB')
+        ancho, alto = rgb.size
+        if ancho < 40 or alto < 40:
+            return False
+        pad = max(8, min(ancho, alto) // 25)
+        cajas = (
+            (0, 0, pad, pad),
+            (ancho - pad, 0, ancho, pad),
+            (0, alto - pad, pad, alto),
+            (ancho - pad, alto - pad, ancho, alto),
+        )
+        claros = 0
+        for caja in cajas:
+            media = sum(ImageStat.Stat(rgb.crop(caja)).mean) / 3.0
+            if media >= 188:
+                claros += 1
+        return claros >= 2
+    except Exception:
+        return False
 
 
 def _nitidez_bordes(img):

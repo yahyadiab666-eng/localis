@@ -3,9 +3,9 @@ Gestión centralizada de imágenes para Localis.
 
 Flujo:
 1. Catálogo maestro (cache por código de barras)
-2. Cascada multifuente (EAN, luego nombre+categoría)
+2. Cascada oficial Open Facts (EAN, luego nombre+marca precisos)
 3. Estudio IA en segundo plano (rembg + lienzo #fffefb) al espejar
-4. Storage o disco local; si falla, URL oficial original
+4. Storage o disco local; si no hay ficha limpia, None (placeholder)
 """
 
 from __future__ import annotations
@@ -33,9 +33,6 @@ from backend.image_quality import (
 )
 from backend.image_sources import (
     FAMILIA_ALIMENTOS,
-    buscar_commons,
-    buscar_openverse,
-    buscar_wikimedia,
     clasificar_familia,
     fuentes_para_codigo,
     fuentes_para_familia,
@@ -66,16 +63,20 @@ _STOP_NOMBRE = frozenset({
 })
 _RE_PREFIJO_QA = re.compile(r'__localis[\w-]*__', re.IGNORECASE)
 _TOKENS_RUIDO = frozenset({'localis', 'qa', 'img', 'viva', 'test', 'prueba'})
-_ALIAS_LIBRE = {
-    'martillo': ('Hammer', 'Claw hammer'),
-    'camisa': ('Polo shirt', 'Shirt'),
-    'polo': ('Polo shirt',),
-    'iphone': ('iPhone',),
-    'harina': ('Harina PAN', 'Cornmeal'),
-    'nutella': ('Nutella',),
-    'destornillador': ('Screwdriver',),
-    'taladro': ('Drill',),
-}
+_TOKENS_NOMBRE_GENERICO = frozenset({
+    'martillo', 'destornillador', 'taladro', 'tornillo', 'clavo', 'llave',
+    'camisa', 'polo', 'pantalon', 'zapato', 'zapatos', 'ropa', 'camiseta',
+    'vaso', 'cinta', 'herramienta', 'acero', 'algodon', 'smartphone',
+    'celular', 'articulo', 'producto', 'leche', 'agua', 'arroz', 'aceite',
+    'cafe', 'pasta', 'pan', 'sal', 'azucar', 'jugo', 'galleta', 'queso',
+    'shampoo', 'jabon', 'crema', 'perfume',
+})
+_TOKENS_MARCA = frozenset({
+    'iphone', 'samsung', 'xiaomi', 'huawei', 'logitech', 'apple', 'sony',
+    'nutella', 'pepsi', 'heinz', 'kellogg', 'mavesa', 'polar', 'nestle',
+    'cocacola', 'coca',
+})
+_MIN_SCORE_NOMBRE = 5
 _ERRORES_RED_IMAGEN = (
     requests.Timeout,
     requests.ConnectionError,
@@ -93,18 +94,6 @@ _HOSTS_OFICIALES = (
     'openproductsfacts.org',
     'openbeautyfacts.org',
     'openpetfoodfacts.org',
-    'upload.wikimedia.org',
-    'wikipedia.org',
-    'wikimedia.org',
-    'staticflickr.com',
-    'flickr.com',
-    'openverse.org',
-    'unsplash.com',
-    'images.unsplash.com',
-    'pxhere.com',
-    'rawpixel.com',
-    'nappy.co',
-    'stocksnap.io',
 )
 
 _PATRONES_RECHAZO = (
@@ -120,6 +109,16 @@ _PATRONES_RECHAZO = (
     'no_image',
     '.svg',
     'emoji',
+    'instagram',
+    'facebook',
+    'twitter',
+    'tiktok',
+    'pinterest',
+    'flickr',
+    'unsplash',
+    'wikimedia',
+    'wikipedia',
+    'openverse',
 )
 
 
@@ -190,13 +189,12 @@ def _url_manual_valida(imagen_manual):
     )
 
 
-def _url_pasa_filtro_calidad(url, ancho=None, alto=None, permitir_libre=False):
-    """Descarta placeholders y URLs fuera de catálogos oficiales/libres."""
+def _url_pasa_filtro_calidad(url, ancho=None, alto=None):
+    """Descarta placeholders y URLs fuera de catálogos Open Facts."""
     if not url or not str(url).startswith('https://'):
         return False
     lower = str(url).lower()
-    es_oficial = any(host in lower for host in _HOSTS_OFICIALES)
-    if not es_oficial and not permitir_libre:
+    if not any(host in lower for host in _HOSTS_OFICIALES):
         return False
     if any(patron in lower for patron in _PATRONES_RECHAZO):
         return False
@@ -206,9 +204,10 @@ def _url_pasa_filtro_calidad(url, ancho=None, alto=None, permitir_libre=False):
     return True
 
 
-def _inspeccionar_bytes_url(url):
+def _inspeccionar_bytes_url(url, fondo_ficha=False):
     """Descarga acotada y evalúa nitidez/resolución. None si no se pudo leer."""
-    cached = _CALIDAD_CACHE.get(url)
+    clave = (url, bool(fondo_ficha))
+    cached = _CALIDAD_CACHE.get(clave)
     if cached is not None:
         return cached
     respuesta = _http_get_imagen(url)
@@ -217,59 +216,48 @@ def _inspeccionar_bytes_url(url):
     if respuesta.status_code != 200:
         if respuesta.status_code >= 500 or respuesta.status_code == 429:
             return False
-        _CALIDAD_CACHE[url] = False
+        _CALIDAD_CACHE[clave] = False
         return False
     data = respuesta.content or b''
     if len(data) > MAX_BYTES_INSPECCION:
         registrar_rechazo(url, 'descarga demasiado pesada')
-        _CALIDAD_CACHE[url] = False
+        _CALIDAD_CACHE[clave] = False
         return False
-    resultado = evaluar_imagen_bytes(data)
+    resultado = evaluar_imagen_bytes(data, exigir_fondo_ficha=fondo_ficha)
     ok = bool(resultado.get('ok'))
     if not ok:
         registrar_rechazo(url, resultado.get('motivo'))
-    _CALIDAD_CACHE[url] = ok
+    _CALIDAD_CACHE[clave] = ok
     if len(_CALIDAD_CACHE) > 256:
         _CALIDAD_CACHE.clear()
     return ok
 
 
-def _confirmar_url_catalogo(url, ancho=None, alto=None, inspeccionar=False, permitir_libre=False):
+def _confirmar_url_catalogo(
+    url, ancho=None, alto=None, inspeccionar=False, fondo_ficha=False
+):
     """Heurística de URL + umbral de tamaño; Pillow si hace falta."""
     if not url:
         return None
     url = str(url).strip()
     if url.startswith('http://'):
         url = 'https://' + url[7:]
-    try:
-        from urllib.parse import urlsplit, urlunsplit
-
-        partes = urlsplit(url)
-        host = (partes.netloc or '').lower()
-        if 'wikimedia.org' in host or 'wikipedia.org' in host:
-            url = urlunsplit((partes.scheme, partes.netloc, partes.path, '', ''))
-    except Exception:
-        pass
-    if not _url_pasa_filtro_calidad(
-        url, ancho, alto, permitir_libre=permitir_libre
-    ):
+    if not _url_pasa_filtro_calidad(url, ancho, alto):
         return None
     meta = metadatos_pasan_umbral(ancho, alto)
     if meta is False:
         registrar_rechazo(url, f'metadatos {ancho}x{alto}')
         return None
-    necesita_bytes = inspeccionar or meta is None
-    if necesita_bytes and not _inspeccionar_bytes_url(url):
-        if meta is True:
-            return url_imagen_catalogo_valida(url) or url
+    necesita_bytes = inspeccionar or fondo_ficha or meta is None
+    if necesita_bytes and not _inspeccionar_bytes_url(url, fondo_ficha=fondo_ficha):
         return None
-    return url_imagen_catalogo_valida(url) or url
+    return url_imagen_catalogo_valida(url)
 
 
-def _primera_url_producto_facts(producto, inspeccionar=False):
+def _primera_url_producto_facts(producto, inspeccionar=False, fondo_ficha=False):
     for url, ancho, alto in _candidatos_imagen_off(producto):
         confirmada = _confirmar_url_catalogo(
-            url, ancho, alto, inspeccionar=inspeccionar
+            url, ancho, alto, inspeccionar=inspeccionar, fondo_ficha=fondo_ficha
         )
         if confirmada:
             return confirmada
@@ -356,8 +344,8 @@ def _texto_hit(valor):
 
 def _score_hit_nombre(tokens, hit, tokens_desc=None):
     """
-    Evita falsos positivos: si el nombre tiene 2+ tokens, exige 2 coincidencias
-    o una similitud alta (SequenceMatcher) sobre el nombre/marca del hit.
+    Evita falsos positivos: si el nombre tiene 2+ tokens fuertes, exige
+    al menos dos coincidencias en el nombre/marca del hit oficial.
     """
     if not tokens:
         return 0
@@ -394,7 +382,9 @@ def _score_hit_nombre(tokens, hit, tokens_desc=None):
     ratio = SequenceMatcher(None, ' '.join(tokens), nombre_norm).ratio()
     fuertes = [tok for tok in tokens if len(tok) >= 4] or list(tokens)
     aciertos_fuertes = sum(1 for tok in fuertes if tok in nombre_norm)
-    if len(fuertes) >= 2 and aciertos_fuertes < 2 and ratio < 0.68:
+    if len(fuertes) >= 2 and aciertos_fuertes < 2:
+        return 0
+    if len(fuertes) >= 2 and aciertos_fuertes < len(fuertes) and ratio < 0.82:
         return 0
     bonus = 0
     if tokens_desc:
@@ -402,36 +392,20 @@ def _score_hit_nombre(tokens, hit, tokens_desc=None):
     return aciertos * 2 + bonus + int(ratio * 4)
 
 
-def _url_imagen_hit_off(hit, inspeccionar=True):
-    for campo in ('image_front_url', 'image_url', 'image_small_url'):
+def _url_imagen_hit_off(hit, inspeccionar=True, fondo_ficha=False):
+    for campo in ('image_front_url', 'image_url'):
         url = hit.get(campo)
-        if campo == 'image_small_url':
+        if campo == 'image_url' and hit.get('image_front_url'):
             continue
-        confirmada = _confirmar_url_catalogo(url, inspeccionar=inspeccionar)
+        confirmada = _confirmar_url_catalogo(
+            url, inspeccionar=inspeccionar, fondo_ficha=fondo_ficha
+        )
         if confirmada:
             return confirmada
     producto = hit.get('product') if isinstance(hit.get('product'), dict) else hit
-    return _primera_url_producto_facts(producto, inspeccionar=inspeccionar)
-
-
-def _texto_respaldo_nombre(nombre, descripcion=None, categoria=None):
-    """Consulta de respaldo: nombre limpio + descripción + categoría."""
-    nombre_limpio = _nombre_consulta(nombre)
-    desc = ' '.join(str(descripcion or '').split()).strip()
-    desc_low = desc.lower().rstrip('.')
-    if desc_low in {
-        '',
-        'none',
-        'null',
-        'sin descripcion',
-        'sin descripción',
-        'sin descripcion disponible',
-        'sin descripción disponible',
-    }:
-        desc = ''
-    cat = ' '.join(str(categoria or '').split()).strip()
-    partes = [p for p in (nombre_limpio, desc, cat) if p]
-    return ' '.join(partes)
+    return _primera_url_producto_facts(
+        producto, inspeccionar=inspeccionar, fondo_ficha=fondo_ficha
+    )
 
 
 def _nombre_consulta(nombre):
@@ -439,68 +413,46 @@ def _nombre_consulta(nombre):
     return ' '.join(texto.split()).strip()
 
 
-def _consultas_libres(nombre):
+def _consulta_nombre_permitida(tokens, familia=None):
     """
-    Consultas cortas para Commons/Wikipedia/Openverse.
-    Solo el nombre (sin categoría): "Martillo Ferretería" no existe en Wikipedia.
+    Solo nombre+marca precisos. Un genérico suelto (martillo, camisa, leche)
+    no consulta APIs: esa búsqueda trae fotos de calle.
     """
-    tokens = _tokens_nombre(_nombre_consulta(nombre))
-    vistas = []
-
-    def _agregar(consulta):
-        q = ' '.join(str(consulta or '').split()).strip()
-        if len(q) < 3:
-            return
-        clave = q.lower()
-        if clave in {item.lower() for item in vistas}:
-            return
-        vistas.append(q)
-
-    if tokens:
-        _agregar(' '.join(tokens[:4]))
-        _agregar(tokens[0])
-        if tokens[0] == 'iphone':
-            _agregar('iPhone')
-        for tok in tokens[:3]:
-            for alias in _ALIAS_LIBRE.get(tok, ()):
-                _agregar(alias)
-    return vistas
+    del familia
+    if not tokens:
+        return False
+    if any(tok in _TOKENS_MARCA for tok in tokens):
+        return True
+    distintivos = [tok for tok in tokens if tok not in _TOKENS_NOMBRE_GENERICO]
+    return len(tokens) >= 2 and bool(distintivos)
 
 
-def _mejor_hit_por_nombre(fuente, nombre, descripcion=None, categoria=None):
+def _mejor_hit_por_nombre(fuente, nombre, descripcion=None, categoria=None, familia=None):
+    del categoria
     tokens = _tokens_nombre(_nombre_consulta(nombre))
     tokens_desc = _tokens_nombre(descripcion) if descripcion else []
-    if not tokens:
+    if not _consulta_nombre_permitida(tokens, familia):
         return None
-    consultas = [' '.join(tokens[:4])]
-    if tokens_desc:
-        consultas.append(f'{consultas[0]} {" ".join(tokens_desc[:3])}'.strip())
-    cat_tok = _tokens_nombre(categoria) if categoria else []
-    if cat_tok:
-        consultas.append(f'{consultas[0]} {cat_tok[0]}'.strip())
-    vistas = []
-    for consulta in consultas:
-        if not consulta or consulta in vistas:
-            continue
-        vistas.append(consulta)
-        try:
-            hits = hits_por_nombre(fuente, consulta)
-            mejor = None
-            mejor_score = 0
-            for hit in hits:
-                score = _score_hit_nombre(tokens, hit, tokens_desc=tokens_desc)
-                if score <= mejor_score:
-                    continue
-                url = _url_imagen_hit_off(hit, inspeccionar=False)
-                if not url:
-                    continue
-                mejor = url
-                mejor_score = score
-            if mejor:
-                return mejor
-        except Exception as error:
-            _advertir_fallo_imagen(f'{fuente.get("id")} nombre={nombre!r}', error)
-    return None
+    consulta = ' '.join(tokens[:4])
+    if not consulta:
+        return None
+    try:
+        hits = hits_por_nombre(fuente, consulta)
+        mejor = None
+        mejor_score = 0
+        for hit in hits:
+            score = _score_hit_nombre(tokens, hit, tokens_desc=tokens_desc)
+            if score < _MIN_SCORE_NOMBRE or score <= mejor_score:
+                continue
+            url = _url_imagen_hit_off(hit, inspeccionar=True, fondo_ficha=False)
+            if not url:
+                continue
+            mejor = url
+            mejor_score = score
+        return mejor
+    except Exception as error:
+        _advertir_fallo_imagen(f'{fuente.get("id")} nombre={nombre!r}', error)
+        return None
 
 
 def _buscar_openfoodfacts_por_nombre(nombre):
@@ -508,7 +460,7 @@ def _buscar_openfoodfacts_por_nombre(nombre):
     fuentes = fuentes_para_familia(FAMILIA_ALIMENTOS)
     if not fuentes:
         return None
-    return _mejor_hit_por_nombre(fuentes[0], nombre)
+    return _mejor_hit_por_nombre(fuentes[0], nombre, familia=FAMILIA_ALIMENTOS)
 
 
 def _buscar_codigo_en_fuentes(codigo_barras, familia):
@@ -529,96 +481,16 @@ def _buscar_codigo_en_fuentes(codigo_barras, familia):
     return None
 
 
-def _meta_libre_a_hit(meta):
-    tags = meta.get('tags') or []
-    if isinstance(tags, list):
-        tag_txt = ' '.join(
-            item.get('name') if isinstance(item, dict) else str(item)
-            for item in tags
-            if item
-        )
-    else:
-        tag_txt = str(tags)
-    return {
-        'product_name': meta.get('titulo') or '',
-        'brands': '',
-        'generic_name': tag_txt,
-    }
-
-
-def _meta_libre_coincide(nombre, meta):
-    tokens = _tokens_nombre(nombre)
-    if not tokens or not meta:
-        return False
-    score = _score_hit_nombre(tokens, _meta_libre_a_hit(meta))
-    if score > 0:
-        return True
-    titulo = ''.join(
-        ch for ch in unicodedata.normalize(
-            'NFKD', str(meta.get('titulo') or '').lower()
-        )
-        if not unicodedata.combining(ch)
-    )
-    return any(tok in titulo for tok in tokens)
-
-
-def _confirmar_meta_libre(meta, nombre, etiqueta):
-    if not meta or not _meta_libre_coincide(nombre, meta):
-        return None
-    tiene_medida = meta.get('ancho') and meta.get('alto')
-    url = _confirmar_url_catalogo(
-        meta.get('url'),
-        meta.get('ancho'),
-        meta.get('alto'),
-        inspeccionar=not tiene_medida,
-        permitir_libre=(etiqueta == 'openverse'),
-    )
-    if url:
-        print(f'{_LOG_IMAGEN} respaldo nombre={nombre!r} fuente={etiqueta}')
-    return url
-
-
-def _buscar_en_fuentes_libres(consulta, nombre_score):
-    """Commons → Wikipedia → Openverse para una consulta concreta."""
-    url = _confirmar_meta_libre(
-        buscar_commons(consulta), nombre_score, 'commons'
-    )
-    if url:
-        return url
-    wiki = buscar_wikimedia(consulta)
-    if wiki:
-        url = _confirmar_meta_libre(wiki, nombre_score, 'wikimedia')
-        if url:
-            return url
-        titulo = ''.join(
-            ch
-            for ch in unicodedata.normalize(
-                'NFKD', str(wiki.get('titulo') or '').lower()
-            )
-            if not unicodedata.combining(ch)
-        )
-        nucleo = _tokens_nombre(nombre_score)
-        consulta_toks = _tokens_nombre(consulta)
-        if (nucleo and nucleo[0] in titulo) or (
-            consulta_toks and consulta_toks[0] in titulo
-        ):
-            url = _confirmar_url_catalogo(
-                wiki.get('url'),
-                wiki.get('ancho'),
-                wiki.get('alto'),
-                inspeccionar=False,
-            )
-            if url:
-                print(f'{_LOG_IMAGEN} respaldo nombre={nombre_score!r} fuente=wikimedia')
-                return url
-    return _confirmar_meta_libre(
-        buscar_openverse(consulta), nombre_score, 'openverse'
-    )
-
-
 def _buscar_nombre_en_fuentes(nombre, familia, descripcion=None, categoria=None):
     nombre_limpio = _nombre_consulta(nombre)
     if not nombre_limpio:
+        return None
+    tokens = _tokens_nombre(nombre_limpio)
+    if not _consulta_nombre_permitida(tokens, familia):
+        print(
+            f'{_LOG_IMAGEN} nombre={nombre_limpio!r} omitido: '
+            'consulta generica sin ficha oficial'
+        )
         return None
     for fuente in fuentes_para_familia(familia):
         url = _mejor_hit_por_nombre(
@@ -626,16 +498,13 @@ def _buscar_nombre_en_fuentes(nombre, familia, descripcion=None, categoria=None)
             nombre_limpio,
             descripcion=descripcion,
             categoria=categoria,
+            familia=familia,
         )
         if url:
             print(
                 f'{_LOG_IMAGEN} respaldo nombre={nombre_limpio!r} '
-                f'desc={bool(descripcion)} fuente={fuente["id"]}'
+                f'fuente={fuente["id"]}'
             )
-            return url
-    for consulta in _consultas_libres(nombre_limpio):
-        url = _buscar_en_fuentes_libres(consulta, consulta)
-        if url:
             return url
     return None
 
@@ -708,9 +577,9 @@ def _descubrir_y_persistir_oficial(
 ):
     """
     Cascada:
-    1) Código de barras en catálogos oficiales.
-    2) Si falta o falla: nombre + marca + categoría.
-    El estudio IA corre aquí (hilo daemon), no en HTTP.
+    1) Código de barras en catálogos oficiales Open Facts.
+    2) Si falta o falla: nombre + marca precisos, con filtro de ficha.
+    Sin match limpio: None (placeholder). El estudio IA corre en el daemon.
     """
     try:
         familia = clasificar_familia(nombre=nombre, categoria=categoria)
@@ -730,17 +599,17 @@ def _descubrir_y_persistir_oficial(
                     f'codigo={codigo or "-"} nombre={nombre!r}'
                 )
         if not url:
+            print(
+                f'{_LOG_IMAGEN} sin ficha oficial '
+                f'codigo={codigo or "-"} nombre={nombre!r}; placeholder'
+            )
             return None
         try:
             espejo = _espejar_en_storage(url, codigo or nombre)
         except Exception as error:
             _advertir_fallo_imagen('espejo estudio', error)
             espejo = None
-        final = (
-            imagen_url_almacenada(espejo)
-            or url_imagen_catalogo_valida(url)
-            or url
-        )
+        final = imagen_url_almacenada(espejo) or url_imagen_catalogo_valida(url)
         if final and codigo:
             try:
                 guardar_imagen_maestro(codigo, final)
@@ -784,11 +653,18 @@ def resolver_imagen(
                 url = mapa_maestro.get(codigo)
             if not url:
                 url = imagen_maestro_por_codigo(codigo)
+            if url and not (
+                url_imagen_subida_storage_valida(url)
+                or url_imagen_local_valida(url)
+                or url_imagen_catalogo_valida(url)
+            ):
+                url = None
             if url:
                 if (
                     buscar_oficial
                     and reproceso_maestro
                     and not url_imagen_local_valida(url)
+                    and not url_imagen_subida_storage_valida(url)
                 ):
                     try:
                         espejo = _espejar_en_storage(url, codigo or nombre)
@@ -864,9 +740,16 @@ def resolver_imagen_catalogo(
             return None
 
         if mapa_maestro is not None:
-            return mapa_maestro.get(codigo)
-
-        return imagen_maestro_por_codigo(codigo) or None
+            url = mapa_maestro.get(codigo)
+        else:
+            url = imagen_maestro_por_codigo(codigo)
+        if url and not (
+            url_imagen_subida_storage_valida(url)
+            or url_imagen_local_valida(url)
+            or url_imagen_catalogo_valida(url)
+        ):
+            return None
+        return url or None
     except Exception as error:
         _advertir_fallo_imagen('resolver_imagen_catalogo', error)
         return None
@@ -893,6 +776,9 @@ def completar_mapa_imagenes(codigos, mapa_maestro=None, buscar_oficial=True):
                 mapa.update(mapa_imagenes_maestro(faltantes))
             except Exception as error:
                 _advertir_fallo_imagen('catalogo_maestro', error)
+            for codigo, url in list(mapa.items()):
+                if url and not imagen_url_almacenada(url):
+                    mapa.pop(codigo, None)
             faltantes = [c for c in faltantes if c not in mapa]
 
         if not buscar_oficial:

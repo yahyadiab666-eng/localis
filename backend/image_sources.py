@@ -1,18 +1,17 @@
 """
 Fuentes oficiales de fotos de producto, ordenadas por familia.
 
+Solo catálogos estructurados Open Facts (EAN y ficha de producto):
 Alimentos → Open Food Facts
 Tecnología / hogar / ferretería / ropa → Open Products Facts
 Belleza → Open Beauty Facts
-Si el código no aparece o no hay EAN: nombre + categoría en todos los
-catálogos abiertos, Wikimedia Commons y Openverse (imágenes libres).
+No se usan Wikimedia, Openverse, Flickr ni bancos de fotos de calle.
 """
 
 from __future__ import annotations
 
 import time
 import unicodedata
-from urllib.parse import quote
 
 import requests
 
@@ -198,12 +197,6 @@ def fuentes_para_codigo(familia=None):
     return list(preferidas) + resto
 
 
-def usa_wikimedia(familia):
-    """Commons/Wikipedia como último recurso para cualquier catálogo general."""
-    del familia
-    return True
-
-
 def _http_json(url, params=None):
     """GET JSON con un reintento ante timeout/5xx. Nunca lanza."""
     ultimo = None
@@ -267,7 +260,7 @@ def producto_por_codigo(fuente, codigo):
     return producto
 
 
-def hits_por_nombre(fuente, consulta, page_size=8):
+def hits_por_nombre(fuente, consulta, page_size=5):
     if not consulta:
         return []
     if fuente['search_tipo'] == 'off_es':
@@ -287,161 +280,3 @@ def hits_por_nombre(fuente, consulta, page_size=8):
         },
     )
     return _lista_hits(datos)
-
-
-def buscar_wikimedia(nombre):
-    """Miniatura oficial de Wikipedia (producto/marca). None si no hay foto usable."""
-    titulo = ' '.join(str(nombre or '').split()[:6]).strip()
-    if len(titulo) < 3:
-        return None
-    for lang in ('es', 'en'):
-        url = (
-            f'https://{lang}.wikipedia.org/api/rest_v1/page/summary/'
-            f'{quote(titulo, safe="")}'
-        )
-        datos = _http_json(url)
-        if not datos or datos.get('type') == 'disambiguation':
-            continue
-        orig = datos.get('originalimage') or {}
-        thumb = datos.get('thumbnail') or {}
-        candidatos = []
-        try:
-            ancho_orig = int(orig.get('width') or 0)
-        except (TypeError, ValueError):
-            ancho_orig = 0
-        if orig.get('source') and (ancho_orig == 0 or ancho_orig <= 1600):
-            candidatos.append(orig)
-        elif thumb.get('source'):
-            candidatos.append(thumb)
-        elif orig.get('source'):
-            candidatos.append(orig)
-        for meta in candidatos:
-            src = meta.get('source')
-            if not src or not str(src).startswith('https://'):
-                continue
-            return {
-                'url': src,
-                'ancho': meta.get('width'),
-                'alto': meta.get('height'),
-                'fuente': 'wikimedia',
-                'titulo': datos.get('title') or titulo,
-            }
-    return None
-
-
-def buscar_commons(consulta):
-    """Wikimedia Commons: fotos libres por nombre de producto/herramienta."""
-    q = ' '.join(str(consulta or '').split()[:6]).strip()
-    if len(q) < 3:
-        return None
-    datos = _http_json(
-        'https://commons.wikimedia.org/w/api.php',
-        {
-            'action': 'query',
-            'generator': 'search',
-            'gsrsearch': q,
-            'gsrnamespace': 6,
-            'gsrlimit': 8,
-            'prop': 'imageinfo',
-            'iiprop': 'url|size|mime',
-            'iiurlwidth': 800,
-            'format': 'json',
-        },
-    )
-    paginas = ((datos or {}).get('query') or {}).get('pages') or {}
-    if not isinstance(paginas, dict):
-        return None
-    for pagina in paginas.values():
-        infos = pagina.get('imageinfo') or []
-        if not infos:
-            continue
-        info = infos[0] if isinstance(infos[0], dict) else {}
-        mime = str(info.get('mime') or '').lower()
-        if mime and not mime.startswith('image/'):
-            continue
-        src = info.get('url') or info.get('thumburl')
-        if not src or not str(src).startswith('https://'):
-            continue
-        if 'upload.wikimedia.org' not in str(src).lower():
-            continue
-        return {
-            'url': src,
-            'ancho': info.get('thumbwidth') or info.get('width'),
-            'alto': info.get('thumbheight') or info.get('height'),
-            'fuente': 'commons',
-            'titulo': pagina.get('title') or q,
-        }
-    return None
-
-
-_HOSTS_IMAGEN_LIBRE = (
-    'upload.wikimedia.org',
-    'wikipedia.org',
-    'wikimedia.org',
-    'staticflickr.com',
-    'flickr.com',
-    'openverse.org',
-    'unsplash.com',
-    'images.unsplash.com',
-    'pxhere.com',
-    'rawpixel.com',
-    'nappy.co',
-    'stocksnap.io',
-)
-
-
-def _url_libre_usable(src):
-    if not src or not str(src).startswith('https://'):
-        return False
-    lower = str(src).lower()
-    if 'placeholder' in lower or '.svg' in lower:
-        return False
-    return any(host in lower for host in _HOSTS_IMAGEN_LIBRE)
-
-
-def buscar_openverse(consulta):
-    """Catálogo abierto de imágenes libres (comercio general, CC)."""
-    q = ' '.join(str(consulta or '').split()[:6]).strip()
-    if len(q) < 3:
-        return None
-    datos = _http_json(
-        'https://api.openverse.org/v1/images/',
-        {
-            'q': q,
-            'page_size': 8,
-            'mature': 'false',
-        },
-    )
-    resultados = _lista_hits(datos)
-    preferidas = []
-    respaldo = []
-    for item in resultados:
-        if not isinstance(item, dict):
-            continue
-        src = item.get('url') or item.get('thumbnail')
-        if not src or not str(src).startswith('https://'):
-            continue
-        if 'placeholder' in str(src).lower() or str(src).lower().endswith('.svg'):
-            continue
-        try:
-            ancho = int(item.get('width') or 0)
-            alto = int(item.get('height') or 0)
-        except (TypeError, ValueError):
-            ancho, alto = 0, 0
-        meta = {
-            'url': src,
-            'ancho': ancho or None,
-            'alto': alto or None,
-            'fuente': 'openverse',
-            'titulo': item.get('title') or q,
-            'tags': item.get('tags') or [],
-        }
-        if _url_libre_usable(src) and 'thumbnail' not in str(src).lower():
-            preferidas.append(meta)
-        else:
-            respaldo.append(meta)
-    if preferidas:
-        return preferidas[0]
-    if respaldo:
-        return respaldo[0]
-    return None

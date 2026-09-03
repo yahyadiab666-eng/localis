@@ -57,18 +57,6 @@ _HOSTS_CATALOGO_OFICIAL = (
     'openproductsfacts.org',
     'openbeautyfacts.org',
     'openpetfoodfacts.org',
-    'upload.wikimedia.org',
-    'wikipedia.org',
-    'wikimedia.org',
-    'staticflickr.com',
-    'flickr.com',
-    'openverse.org',
-    'unsplash.com',
-    'images.unsplash.com',
-    'pxhere.com',
-    'rawpixel.com',
-    'nappy.co',
-    'stocksnap.io',
 )
 
 
@@ -145,7 +133,7 @@ def url_imagen_catalogo_valida(valor):
     if any(host in lower for host in _HOSTS_CATALOGO_OFICIAL):
         if any(bad in lower for bad in ('/user/', 'avatar', 'no-image', 'placeholder')):
             return None
-        if '_small' in lower and 'wikimedia' not in lower and 'flickr' not in lower:
+        if '_small' in lower:
             return None
         return texto
     if 'wsrv.nl' in lower and any(
@@ -154,9 +142,7 @@ def url_imagen_catalogo_valida(valor):
             'openfoodfacts',
             'openproductsfacts',
             'openbeautyfacts',
-            'wikimedia',
-            'flickr',
-            'openverse',
+            'openpetfoodfacts',
         )
     ):
         return texto

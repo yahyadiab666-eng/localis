@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Auditoría viva de imágenes: alta de productos de varios rubros,
-descubrimiento en segundo plano, estudio IA y cero placeholders.
+Auditoría viva de imágenes: alta de productos de varios rubros.
+Fichas oficiales se procesan en segundo plano; sin match limpio, placeholder.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ CASOS = (
         'categoria': 'Alimentos',
         'descripcion': 'crema de avellanas',
         'rubro': 'alimentos',
+        'espera': 'oficial',
     },
     {
         'nombre': 'Harina PAN 1kg',
@@ -35,6 +36,7 @@ CASOS = (
         'categoria': 'Alimentos',
         'descripcion': 'harina de maiz precocida',
         'rubro': 'alimentos',
+        'espera': 'oficial',
     },
     {
         'nombre': 'Martillo de uña',
@@ -42,6 +44,7 @@ CASOS = (
         'categoria': 'Ferretería',
         'descripcion': 'herramienta de acero',
         'rubro': 'ferreteria',
+        'espera': 'placeholder',
     },
     {
         'nombre': 'Camisa polo',
@@ -49,6 +52,7 @@ CASOS = (
         'categoria': 'Ropa',
         'descripcion': 'polo de algodon',
         'rubro': 'ropa',
+        'espera': 'placeholder',
     },
     {
         'nombre': 'iPhone',
@@ -56,6 +60,7 @@ CASOS = (
         'categoria': 'Tecnología',
         'descripcion': 'smartphone',
         'rubro': 'tecnologia',
+        'espera': 'oficial_o_placeholder',
     },
 )
 
@@ -204,6 +209,33 @@ def _es_placeholder(url):
     return (not texto) or PLACEHOLDER in texto or 'placeholder' in texto
 
 
+def _host_prohibido(url):
+    texto = str(url or '').lower()
+    return any(
+        marca in texto
+        for marca in (
+            'wikimedia',
+            'wikipedia',
+            'openverse',
+            'flickr',
+            'unsplash',
+            'instagram',
+            'facebook',
+        )
+    )
+
+
+def _esperar_sin_url(producto_id, timeout=12):
+    t0 = time.monotonic()
+    ultima = _url_bd(producto_id)
+    while time.monotonic() - t0 < timeout:
+        ultima = _url_bd(producto_id)
+        if ultima:
+            return ultima
+        time.sleep(0.6)
+    return ultima
+
+
 def _descargar_bytes(url):
     if str(url).startswith('/static/'):
         ruta = RAIZ / str(url).lstrip('/').replace('/', '\\')
@@ -270,13 +302,20 @@ def _probar_http_no_bloquea(errores, producto_id, categoria):
     )
 
 
-def _probar_vista(errores, producto_id, url):
+def _probar_vista(errores, producto_id, url, espera_placeholder=False):
     from utils.images import PLACEHOLDER_PRODUCTO, url_imagen_producto
 
     vista = url_imagen_producto(
         {'id': producto_id, 'imagen_url': url, 'codigo_barras': None}
     )
     _ok(bool(vista), f'filtro vista tiene URL ({vista})', errores)
+    if espera_placeholder:
+        _ok(
+            vista == PLACEHOLDER_PRODUCTO or PLACEHOLDER in str(vista),
+            'sin ficha oficial usa placeholder Localis',
+            errores,
+        )
+        return
     _ok(
         vista != PLACEHOLDER_PRODUCTO and PLACEHOLDER not in str(vista),
         'HTML no usa placeholder gris',
@@ -306,14 +345,32 @@ def main() -> int:
             producto_id = _insertar_producto(comercio_id, caso)
             _ok(_url_bd(producto_id) in (None, ''), 'nace sin imagen_url', errores)
             _probar_http_no_bloquea(errores, producto_id, caso['categoria'])
+            espera = caso['espera']
+            if espera == 'placeholder':
+                url = _esperar_sin_url(producto_id)
+                print(f'  url={url!r}')
+                _ok(not url, f'{caso["rubro"]} no persiste foto inventada', errores)
+                _ok(not _host_prohibido(url), f'{caso["rubro"]} sin host abierto', errores)
+                _probar_vista(errores, producto_id, url, espera_placeholder=True)
+                continue
+
             url = _esperar_url(producto_id)
-            if not imagen_url_almacenada(url):
+            if not imagen_url_almacenada(url) and espera == 'oficial':
                 print('  reintento worker...')
                 programar_descubrimiento_producto(
                     producto_id, categoria=caso['categoria']
                 )
                 url = _esperar_url(producto_id, timeout=90)
             print(f'  url={url!r}')
+            _ok(not _host_prohibido(url), f'{caso["rubro"]} sin wiki/redes/calle', errores)
+            if not url:
+                _ok(
+                    espera == 'oficial_o_placeholder',
+                    f'{caso["rubro"]} sin ficha oficial: placeholder',
+                    errores,
+                )
+                _probar_vista(errores, producto_id, url, espera_placeholder=True)
+                continue
             _ok(bool(imagen_url_almacenada(url)), f'{caso["rubro"]} URL persistible', errores)
             _ok(not _es_placeholder(url), f'{caso["rubro"]} no es placeholder', errores)
             _probar_vista(errores, producto_id, url)
@@ -341,7 +398,10 @@ def main() -> int:
         for item in errores:
             print(f'  - {item}')
         return 1
-    print('OK auditoria viva: rubros con foto, worker no bloquea HTTP, cero placeholders.')
+    print(
+        'OK auditoria viva: fichas oficiales persistidas, genericos con '
+        'placeholder Localis, worker no bloquea HTTP.'
+    )
     return 0
 
 

@@ -191,6 +191,15 @@ def _probar_ean_en_vivo(errores):
     )
 
 
+def _probar_generico_sin_foto(errores):
+    print('\n=== Genericos no inventan foto ===')
+    from backend.image_manager import descubrir_imagen_catalogo
+
+    url = descubrir_imagen_catalogo(nombre='Martillo', categoria='Ferretería')
+    print(f'  url_martillo={url!r}')
+    _ok(url is None, 'Martillo generico no persiste foto de calle', errores)
+
+
 def _probar_aviso_csv(errores):
     print('\n=== Aviso CSV en UI ===')
     html = (RAIZ / 'templates' / 'comercio.html').read_text(encoding='utf-8')
@@ -241,6 +250,7 @@ def main() -> int:
     _probar_score(errores)
     _probar_orden_mocks(errores)
     _probar_ean_en_vivo(errores)
+    _probar_generico_sin_foto(errores)
     _probar_aviso_csv(errores)
     _probar_subida_manual(errores)
 

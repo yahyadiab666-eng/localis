@@ -41,9 +41,9 @@ def _url_almacenada_o_none(valor):
 
 
 def _respaldo_en_cascada(codigo_barras):
-    """Catálogo maestro (Storage). Vacío si no hay foto en BD."""
+    """Catálogo maestro persistible (Storage/oficial). Vacío si no hay ficha limpia."""
     try:
-        return imagen_maestro_por_codigo(codigo_barras) or None
+        return imagen_url_almacenada(imagen_maestro_por_codigo(codigo_barras))
     except Exception as error:
         _registrar_error_imagen(f'catalogo_maestro codigo={codigo_barras!r}', error)
         return None
