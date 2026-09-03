@@ -323,6 +323,10 @@ def _inicializar_aplicacion():
         if db_url:
             print('Base de datos: PostgreSQL (DATABASE_URL).', flush=True)
         init_db()
+        print(
+            '[Localis] Catálogo maestro: sin relleno ni sincronización al arrancar.',
+            flush=True,
+        )
         try:
             from backend.comercio_schema import invalidar_cache_columnas_comercios
 

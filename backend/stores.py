@@ -481,10 +481,17 @@ def _completar_imagenes_productos(productos):
     return productos
 
 
-def _base_query_productos_publicos(con_maestro=True):
+def _base_query_productos_publicos(con_maestro=True, con_categoria=False):
     del con_maestro
     # Padre (comercios) primero, luego productos: mismo orden de bloqueo que
-    # las escrituras con FK. El maestro NO entra en este SELECT.
+    # las escrituras con FK. categorias solo se une si hay filtro por nombre:
+    # el JOIN extra era el AccessShareLock que chocaba con DDL de init_db.
+    if con_categoria:
+        cat_select = 'cat.nombre AS categoria_nombre'
+        cat_join = 'LEFT JOIN categorias cat ON c.categoria_id = cat.id'
+    else:
+        cat_select = 'NULL::text AS categoria_nombre'
+        cat_join = ''
     return f"""
         SELECT
             p.id,
@@ -497,10 +504,10 @@ def _base_query_productos_publicos(con_maestro=True):
             c.nombre AS comercio_nombre,
             c.telefono AS comercio_telefono,
             c.id AS comercio_id,
-            cat.nombre AS categoria_nombre
+            {cat_select}
         FROM comercios c
         JOIN productos p ON p.comercio_id = c.id
-        LEFT JOIN categorias cat ON c.categoria_id = cat.id
+        {cat_join}
         WHERE 1=1
     """ + _FILTRO_COMERCIO_PUBLICO
 
@@ -620,7 +627,8 @@ def _buscar_y_filtrar_productos_once(
     orden_aleatorio=False,
 ):
     tasa = obtener_tasa_dolar() or 1.0
-    with get_db_connection(row_factory=sqlite3.Row) as conexion:
+    con_categoria = bool(categoria_nombre)
+    with get_db_connection(row_factory=sqlite3.Row, read_only=True) as conexion:
         cursor = conexion.cursor()
 
         parametros = []
@@ -629,7 +637,6 @@ def _buscar_y_filtrar_productos_once(
                 SELECT p.id
                 FROM comercios c
                 JOIN productos p ON p.comercio_id = c.id
-                LEFT JOIN categorias cat ON c.categoria_id = cat.id
                 WHERE 1=1
             """ + _FILTRO_COMERCIO_PUBLICO
             query_ids, params_ids = _aplicar_filtros_productos(
@@ -649,11 +656,11 @@ def _buscar_y_filtrar_productos_once(
                 return []
             ids = random.sample(ids, min(int(limit), len(ids)))
             placeholders = ', '.join('?' for _ in ids)
-            query = _base_query_productos_publicos()
+            query = _base_query_productos_publicos(con_categoria=con_categoria)
             query += f' AND p.id IN ({placeholders})'
             filas = _ejecutar_listado_productos(cursor, conexion, query, ids)
         else:
-            query = _base_query_productos_publicos()
+            query = _base_query_productos_publicos(con_categoria=con_categoria)
             query, parametros = _aplicar_filtros_productos(
                 query, parametros, palabra_clave, categoria_nombre, comercio_id
             )
@@ -681,7 +688,7 @@ def obtener_producto_publico(producto_id):
     """Producto con datos de tienda para modal/vista pública."""
     try:
         tasa = obtener_tasa_dolar() or 1.0
-        with get_db_connection(row_factory=sqlite3.Row) as conexion:
+        with get_db_connection(row_factory=sqlite3.Row, read_only=True) as conexion:
             cursor = conexion.cursor()
             cursor.execute(
                 f"""

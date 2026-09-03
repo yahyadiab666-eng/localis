@@ -485,18 +485,22 @@ def purgar_urls_imagen_artificiales():
         return False
 
 
-def sembrar_catalogo_maestro_imagenes():
-    """Políticas Storage + relleno de fotos faltantes en segundo plano."""
+def sembrar_catalogo_maestro_imagenes(*, rellenar=False):
+    """
+    Políticas de Storage. El relleno masivo NO corre al arrancar Gunicorn.
+    Pasa rellenar=True solo desde un script manual o test explícito.
+    """
     try:
         from backend.supabase_storage import asegurar_politicas_bucket_imagenes
 
         asegurar_politicas_bucket_imagenes()
     except Exception as error:
         _error_imagen('politicas storage', error)
-    try:
-        from backend.image_lookup import programar_relleno_imagenes_catalogo
+    if rellenar:
+        try:
+            from backend.image_lookup import rellenar_imagenes_catalogo
 
-        programar_relleno_imagenes_catalogo()
-    except Exception as error:
-        _error_imagen('relleno catalogo', error)
+            rellenar_imagenes_catalogo()
+        except Exception as error:
+            _error_imagen('relleno catalogo', error)
     return True

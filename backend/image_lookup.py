@@ -536,18 +536,16 @@ def programar_asociacion_imagenes_inventario(comercio_id):
 def rellenar_imagenes_catalogo():
     """
     Rellena productos.imagen_url vacías: maestro → EAN → nombre (OFF).
-    Devuelve cuántas filas se actualizaron. Pensado para tests e init.
+    Solo para tests o scripts manuales. No se invoca al arrancar la app.
     """
     try:
-        with get_db_connection(row_factory=sqlite3.Row) as conexion:
+        with get_db_connection(row_factory=sqlite3.Row, read_only=True) as conexion:
             cursor = conexion.cursor()
             cursor.execute(
                 """
-                SELECT p.id, p.nombre, p.descripcion, p.codigo_barras, p.imagen_url,
-                       cat.nombre AS categoria_nombre
+                SELECT p.id, p.nombre, p.descripcion, p.codigo_barras, p.imagen_url
                 FROM productos p
                 JOIN comercios c ON c.id = p.comercio_id
-                LEFT JOIN categorias cat ON cat.id = c.categoria_id
                 """
             )
             productos = [dict(fila) for fila in cursor.fetchall()]
@@ -587,7 +585,7 @@ def rellenar_imagenes_catalogo():
                 codigo_barras=prod.get('codigo_barras'),
                 nombre=prod.get('nombre'),
                 descripcion=prod.get('descripcion'),
-                categoria=prod.get('categoria_nombre'),
+                categoria=None,
                 buscar_oficial=True,
                 reproceso_maestro=False,
             )
@@ -620,22 +618,15 @@ def rellenar_imagenes_catalogo():
 
 
 def programar_relleno_imagenes_catalogo():
-    """Rellena fotos faltantes sin bloquear el arranque HTTP."""
-    def _trabajo():
-        try:
-            print(f'{_LOG_IMAGEN} relleno catalogo inicio')
-            n = rellenar_imagenes_catalogo()
-            print(f'{_LOG_IMAGEN} relleno catalogo fin actualizados={n}')
-        except Exception as error:
-            _registrar_error_imagen('relleno catalogo hilo', error)
-
-    hilo = threading.Thread(
-        target=_trabajo,
-        name='localis-relleno-imagenes',
-        daemon=True,
+    """
+    Desactivado a propósito. El hilo de arranque saturaba Postgres
+    (SELECT masivo + UPDATE) y provocaba deadlocks con el listado público.
+    """
+    print(
+        f'{_LOG_IMAGEN} relleno catalogo inicio desactivado '
+        '(no se programa hilo al arrancar)'
     )
-    hilo.start()
-    return hilo
+    return None
 
 
 def programar_descubrimiento_producto(producto_id, categoria=None):

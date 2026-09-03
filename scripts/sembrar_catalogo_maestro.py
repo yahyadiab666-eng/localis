@@ -1,4 +1,4 @@
-"""Upsert de URLs de prueba en catalogo_maestro_imagenes y verificación de lectura."""
+"""Políticas Storage del catálogo maestro. No rellena productos al arrancar."""
 import os
 import sys
 
@@ -15,8 +15,8 @@ from backend.catalogo_maestro import (
 
 
 def main():
-    print('Purgando URLs artificiales del catálogo maestro...')
-    sembrar_catalogo_maestro_imagenes()
+    print('Asegurando políticas Storage (sin relleno masivo de productos)...')
+    sembrar_catalogo_maestro_imagenes(rellenar=False)
     for codigo in ('7591001000011', '7591001000035'):
         url = imagen_maestro_por_codigo(codigo)
         print(f'leer {codigo}:', repr(url or ''))

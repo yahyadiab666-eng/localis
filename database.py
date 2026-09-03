@@ -9,7 +9,7 @@ from uuid import UUID
 
 import psycopg2
 from psycopg2 import OperationalError, pool
-from psycopg2.extensions import TRANSACTION_STATUS_INERROR
+from psycopg2.extensions import TRANSACTION_STATUS_IDLE, TRANSACTION_STATUS_INERROR
 from psycopg2.extras import RealDictCursor
 from psycopg2.pool import PoolError
 
@@ -30,6 +30,13 @@ DB_POOL_MAX = int(os.getenv('DB_POOL_MAX', '20'))
 DB_STATEMENT_TIMEOUT_MS = int(os.getenv('DB_STATEMENT_TIMEOUT_MS', '120000'))
 DB_RETRY_ATTEMPTS = int(os.getenv('DB_RETRY_ATTEMPTS', '3'))
 DB_RETRY_BASE_DELAY = float(os.getenv('DB_RETRY_BASE_DELAY', '0.08'))
+DB_READ_LOCK_TIMEOUT = os.getenv('DB_READ_LOCK_TIMEOUT', '3s').strip() or '3s'
+# Advisory lock de sesión: un solo worker Gunicorn corre migraciones.
+_INIT_DB_LOCK_KEY = 87261033
+_RE_NOMBRE_INDICE = re.compile(
+    r'CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+([a-zA-Z_][a-zA-Z0-9_]*)',
+    re.IGNORECASE,
+)
 
 _connection_pool = None
 
@@ -479,11 +486,37 @@ def _obtener_pool():
     return _connection_pool
 
 
-def _preparar_conexion_pg(pg_conn):
-    pg_conn.autocommit = False
-    if DB_STATEMENT_TIMEOUT_MS > 0:
+def _preparar_conexion_pg(pg_conn, read_only=False):
+    """Resetea la sesión del pool. Las lecturas no deben heredar locks de escritura."""
+    try:
+        if pg_conn.get_transaction_status() != TRANSACTION_STATUS_IDLE:
+            pg_conn.rollback()
+    except Exception:
+        pass
+
+    pg_conn.autocommit = True
+    try:
         with pg_conn.cursor() as cur:
-            cur.execute('SET statement_timeout = %s', (DB_STATEMENT_TIMEOUT_MS,))
+            timeout_ms = str(DB_STATEMENT_TIMEOUT_MS if DB_STATEMENT_TIMEOUT_MS > 0 else 0)
+            cur.execute(
+                "SELECT set_config('statement_timeout', %s, false)",
+                (timeout_ms,),
+            )
+            if read_only:
+                cur.execute(
+                    "SELECT set_config('default_transaction_read_only', 'on', false)"
+                )
+                cur.execute(
+                    "SELECT set_config('lock_timeout', %s, false)",
+                    (DB_READ_LOCK_TIMEOUT,),
+                )
+            else:
+                cur.execute(
+                    "SELECT set_config('default_transaction_read_only', 'off', false)"
+                )
+                cur.execute("SELECT set_config('lock_timeout', '0', false)")
+    finally:
+        pg_conn.autocommit = False
 
 
 def es_error_bd_transitorio(exc):
@@ -505,10 +538,12 @@ def es_error_bd_transitorio(exc):
     )
 
 
-def get_db_connection(row_factory=None):
+def get_db_connection(row_factory=None, read_only=False):
     """
     Conexión del pool PostgreSQL. row_factory truthy (p. ej. sqlite3.Row o ROW_AS_DICT)
     devuelve filas como diccionarios planos con tipos ya normalizados.
+    read_only=True marca la transacción de solo lectura y aplica lock_timeout
+    corto para no competir con DDL (AccessExclusiveLock) hasta deadlock.
     """
     _require_database_url()
     try:
@@ -518,7 +553,7 @@ def get_db_connection(row_factory=None):
             'No hay conexiones de base de datos disponibles en este momento. '
             'Intenta de nuevo en unos segundos.'
         ) from exc
-    _preparar_conexion_pg(pg_conn)
+    _preparar_conexion_pg(pg_conn, read_only=read_only)
     usar_dict = row_factory is not None
     return _PgConnection(pg_conn, dict_rows=usar_dict, from_pool=True)
 
@@ -667,6 +702,58 @@ def _tabla_existe(cursor, tabla):
     return cursor.fetchone() is not None
 
 
+def _columna_existe(cursor, tabla, nombre):
+    cursor.execute(
+        """
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = %s
+          AND column_name = %s
+        LIMIT 1
+        """,
+        (tabla, nombre),
+    )
+    return cursor.fetchone() is not None
+
+
+def _indice_existe(cursor, nombre):
+    cursor.execute(
+        """
+        SELECT 1
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public'
+          AND c.relkind = 'i'
+          AND c.relname = %s
+        LIMIT 1
+        """,
+        (nombre,),
+    )
+    return cursor.fetchone() is not None
+
+
+def _vista_existe(cursor, nombre):
+    cursor.execute(
+        """
+        SELECT 1
+        FROM information_schema.views
+        WHERE table_schema = 'public' AND table_name = %s
+        LIMIT 1
+        """,
+        (nombre,),
+    )
+    return cursor.fetchone() is not None
+
+
+def _ejecutar_indice_si_falta(cursor, ddl):
+    """No corre CREATE INDEX si ya existe: IF NOT EXISTS igual toma ShareLock."""
+    match = _RE_NOMBRE_INDICE.search(ddl)
+    if match and _indice_existe(cursor, match.group(1)):
+        return False
+    return _ejecutar_ddl_seguro(cursor, ddl)
+
+
 def _ejecutar_ddl_seguro(cursor, sql):
     """Ejecuta DDL con savepoint para no abortar init_db si el objeto ya existe."""
     cursor.execute('SAVEPOINT ddl_seguro')
@@ -685,6 +772,8 @@ def _agregar_columna_si_falta(cursor, tabla, nombre, tipo_sql):
     _validar_identificador(nombre)
     if tabla not in TABLAS_PERMITIDAS:
         raise ValueError(f'Tabla no permitida: {tabla}')
+    if _columna_existe(cursor, tabla, nombre):
+        return
     cursor.execute(
         f'ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS {nombre} {tipo_sql}'
     )
@@ -695,6 +784,8 @@ def _agregar_columna_citada_si_falta(cursor, tabla, nombre, tipo_sql):
     _validar_identificador(tabla)
     if tabla not in TABLAS_PERMITIDAS:
         raise ValueError(f'Tabla no permitida: {tabla}')
+    if _columna_existe(cursor, tabla, nombre):
+        return
     ident = '"' + str(nombre).replace('"', '""') + '"'
     _ejecutar_ddl_seguro(
         cursor,
@@ -990,20 +1081,26 @@ def _crear_tabla_solicitudes_pago(cursor):
 
 
 def _crear_tablas(cursor):
-    """Crea todas las tablas de la aplicación. El orden respeta las FKs."""
-    _crear_tabla_usuarios(cursor)
-    _crear_tabla_categorias(cursor)
-    _crear_tabla_planes(cursor)
-    _crear_tabla_comercios(cursor)
-    _crear_tabla_sucursales(cursor)
-    _crear_tabla_productos(cursor)
-    _crear_tabla_catalogo_maestro_imagenes(cursor)
-    _crear_tabla_soporte_y_reportes(cursor)
-    _crear_tabla_configuracion_sistema(cursor)
-    _crear_tabla_logs_auditoria(cursor)
-    _crear_tabla_intentos_login(cursor)
-    _crear_tabla_pagos(cursor)
-    _crear_tabla_solicitudes_pago(cursor)
+    """Crea tablas faltantes. No reejecuta CREATE TABLE si ya existen (AccessExclusiveLock)."""
+    pares = (
+        ('usuarios', _crear_tabla_usuarios),
+        ('categorias', _crear_tabla_categorias),
+        ('planes', _crear_tabla_planes),
+        ('comercios', _crear_tabla_comercios),
+        ('sucursales', _crear_tabla_sucursales),
+        ('productos', _crear_tabla_productos),
+        ('catalogo_maestro_imagenes', _crear_tabla_catalogo_maestro_imagenes),
+        ('soporte_y_reportes', _crear_tabla_soporte_y_reportes),
+        ('configuracion_sistema', _crear_tabla_configuracion_sistema),
+        ('logs_auditoria', _crear_tabla_logs_auditoria),
+        ('intentos_login', _crear_tabla_intentos_login),
+        ('pagos', _crear_tabla_pagos),
+        ('solicitudes_pago', _crear_tabla_solicitudes_pago),
+    )
+    for nombre, fn in pares:
+        if _tabla_existe(cursor, nombre):
+            continue
+        fn(cursor)
 
 
 def _asegurar_indices_unicos(cursor):
@@ -1014,7 +1111,7 @@ def _asegurar_indices_unicos(cursor):
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_catalogo_maestro_codigo ON catalogo_maestro_imagenes(codigo_barras)',
     ]
     for ddl in indices:
-        _ejecutar_ddl_seguro(cursor, ddl)
+        _ejecutar_indice_si_falta(cursor, ddl)
 
 
 def _sembrar_categorias(cursor):
@@ -1052,6 +1149,8 @@ def _sembrar_planes(cursor):
 
 def _crear_vista_tiendas(cursor):
     if not _tabla_existe(cursor, 'comercios'):
+        return
+    if _vista_existe(cursor, 'tiendas'):
         return
     cursor.execute(
         """
@@ -1151,7 +1250,7 @@ def _crear_indices(cursor):
         'CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_estado ON solicitudes_pago(estado)',
     ]
     for ddl in indices:
-        _ejecutar_ddl_seguro(cursor, ddl)
+        _ejecutar_indice_si_falta(cursor, ddl)
 
 
 def _sembrar_configuracion(cursor):
@@ -1198,33 +1297,79 @@ def _corregir_banner_principal_legacy(cursor):
     )
 
 
+def _bool_sql(fila):
+    if fila is None:
+        return False
+    if isinstance(fila, dict):
+        return bool(next(iter(fila.values()), False))
+    return bool(fila[0])
+
+
+def _liberar_lock_init_db(cursor, conexion):
+    try:
+        cursor.execute('SELECT pg_advisory_unlock(%s)', (_INIT_DB_LOCK_KEY,))
+        conexion.commit()
+    except Exception:
+        try:
+            conexion.rollback()
+            cursor.execute('SELECT pg_advisory_unlock(%s)', (_INIT_DB_LOCK_KEY,))
+            conexion.commit()
+        except Exception as error_unlock:
+            print(
+                f'[Localis] aviso al liberar lock init_db: {error_unlock}',
+                flush=True,
+            )
+
+
 def init_db():
     """
     Inicializa o actualiza la base PostgreSQL sin destruir datos.
     Crea tablas faltantes, añade columnas ausentes y asegura FKs e índices.
+    No siembra ni rellena el catálogo maestro: eso saturaba Postgres al arrancar.
     """
     try:
         _require_database_url()
 
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
+            cursor.execute('SELECT pg_try_advisory_lock(%s)', (_INIT_DB_LOCK_KEY,))
+            if not _bool_sql(cursor.fetchone()):
+                print(
+                    '[Localis] init_db omitido: otro proceso ya migra el esquema.',
+                    flush=True,
+                )
+                return True
 
-            _crear_tablas(cursor)
-            _migrar_columnas(cursor)
-            _asegurar_indices_unicos(cursor)
-            _sembrar_categorias(cursor)
-            _sembrar_planes(cursor)
-            _backfill_comercios(cursor)
-            _asignar_plan_id_existentes(cursor)
-            _asegurar_claves_foraneas(cursor)
-            _crear_vista_tiendas(cursor)
-            _sembrar_configuracion(cursor)
-            _crear_indices(cursor)
+            try:
+                _crear_tablas(cursor)
+                _migrar_columnas(cursor)
+                conexion.commit()
 
-            conexion.commit()
-        from backend.catalogo_maestro import sembrar_catalogo_maestro_imagenes
+                _asegurar_indices_unicos(cursor)
+                _sembrar_categorias(cursor)
+                _sembrar_planes(cursor)
+                _backfill_comercios(cursor)
+                _asignar_plan_id_existentes(cursor)
+                conexion.commit()
 
-        sembrar_catalogo_maestro_imagenes()
+                _asegurar_claves_foraneas(cursor)
+                _crear_vista_tiendas(cursor)
+                _sembrar_configuracion(cursor)
+                _crear_indices(cursor)
+                conexion.commit()
+            except Exception:
+                try:
+                    conexion.rollback()
+                except Exception:
+                    pass
+                raise
+            finally:
+                _liberar_lock_init_db(cursor, conexion)
+
+        print(
+            '[Localis] init_db: sin relleno automático del catálogo maestro.',
+            flush=True,
+        )
         return True
     except Exception as error:
         print(f'Error en init_db(): {error}', flush=True)

@@ -174,12 +174,34 @@ def _probar_alta_sin_archivo(errores):
 def _probar_sql_listado(errores):
     print('\n=== SQL listado ===')
     stores = (RAIZ / 'backend' / 'stores.py').read_text(encoding='utf-8')
+    bloque_listado = stores.split('def _base_query_productos_publicos')[1].split('def ')[0]
     _ok(
-        'catalogo_maestro_imagenes' not in stores.split('def _base_query_productos_publicos')[1].split('def ')[0],
+        'catalogo_maestro_imagenes' not in bloque_listado,
         'SELECT publico sin JOIN a catalogo_maestro',
         errores,
     )
     _ok('p.imagen_url AS imagen_url' in stores, 'listado lee p.imagen_url', errores)
+    _ok(
+        'con_categoria' in bloque_listado,
+        'JOIN categorias solo cuando hay filtro',
+        errores,
+    )
+
+    print('\n=== Arranque sin relleno de catálogo ===')
+    init_src = (RAIZ / 'database.py').read_text(encoding='utf-8')
+    cuerpo_init = init_src.split('def init_db(')[1].split("if __name__")[0]
+    _ok(
+        'sembrar_catalogo_maestro' not in cuerpo_init,
+        'init_db no siembra/rellena catálogo maestro',
+        errores,
+    )
+    lookup_src = (RAIZ / 'backend' / 'image_lookup.py').read_text(encoding='utf-8')
+    cuerpo_relleno = lookup_src.split('def programar_relleno_imagenes_catalogo')[1].split('def ')[0]
+    _ok(
+        'localis-relleno-imagenes' not in cuerpo_relleno,
+        'programar_relleno no lanza hilo de arranque',
+        errores,
+    )
 
 
 def _probar_catalogo_http(errores):
