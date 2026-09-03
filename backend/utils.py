@@ -186,8 +186,8 @@ def url_imagen_usable(valor):
 
 
 def imagen_url_almacenada(valor):
-    """Valor persistible: Storage, catálogo oficial u upload local del comerciante."""
-    return url_imagen_catalogo_valida(valor) or url_imagen_local_valida(valor)
+    """Valor persistible: solo Storage o upload local (nunca URL remota OFF/API)."""
+    return url_imagen_subida_storage_valida(valor) or url_imagen_local_valida(valor)
 
 
 def url_imagen_para_vista(valor):

@@ -206,7 +206,7 @@ def url_imagen_con_respaldo(imagen_url=None, codigo_barras=None):
 def imagen_urls_para_catalogo(productos):
     """
     Lectura de catálogo: URL persistida o catálogo maestro por EAN (lote, sin red).
-    No consulta OpenFoodFacts: eso sigue en el hilo de relleno.
+    Solo enriquece la respuesta en memoria; no escribe en PostgreSQL.
     """
     if not productos:
         return productos
@@ -237,34 +237,15 @@ def imagen_urls_para_catalogo(productos):
                 _registrar_error_imagen('lote maestro catalogo', error)
                 mapa = {}
 
-        persistir = []
+        # Solo enriquecer la respuesta en memoria. No UPDATE en lectura:
+        # el write-on-read reinyectaba URLs históricas del maestro.
         for prod in productos:
             if _url_almacenada_o_none(prod.get('imagen_url')):
                 continue
             codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
             url_mae = mapa.get(codigo) if codigo else None
-            if not url_mae:
-                continue
-            prod['imagen_url'] = url_mae
-            producto_id = prod.get('id')
-            if producto_id:
-                persistir.append((url_mae, int(producto_id)))
-
-        if persistir:
-            try:
-                with get_db_connection() as conexion:
-                    cursor = conexion.cursor()
-                    cursor.executemany(
-                        """
-                        UPDATE productos SET imagen_url = ?
-                        WHERE id = ?
-                          AND (imagen_url IS NULL OR TRIM(CAST(imagen_url AS TEXT)) = '')
-                        """,
-                        persistir,
-                    )
-                    conexion.commit()
-            except Exception as error:
-                _registrar_error_imagen('persistir maestro catalogo', error)
+            if url_mae:
+                prod['imagen_url'] = url_mae
         return productos
     except Exception as error:
         _registrar_error_imagen('imagen_urls_para_catalogo', error)

@@ -85,8 +85,7 @@ def es_placeholder_local(valor):
 def url_publica_producto_desde_bd(valor):
     """
     Convierte el valor persistido en URL para <img src>.
-    Acepta Storage público, ruta del bucket o foto oficial del catálogo.
-    Vacío si no hay imagen usable.
+    Solo Storage público o upload local. URLs remotas OFF/API → vacío (placeholder).
     """
     try:
         texto = _texto_url(valor)
@@ -95,13 +94,11 @@ def url_publica_producto_desde_bd(valor):
         texto = texto.replace('/subase/', '/storage/').replace('/Subase/', '/storage/')
         if es_url_storage_publica(texto):
             return texto
-        from backend.utils import url_imagen_catalogo_valida
+        from backend.utils import url_imagen_local_valida, url_imagen_subida_storage_valida
 
-        catalogo = url_imagen_catalogo_valida(texto)
-        if catalogo:
-            return catalogo
-        from backend.utils import url_imagen_local_valida
-
+        storage = url_imagen_subida_storage_valida(texto)
+        if storage:
+            return storage
         local = url_imagen_local_valida(texto)
         if local:
             return local
@@ -138,7 +135,7 @@ def url_storage_o_vacio(valor):
 
 
 def url_mostrable(valor, permitir_estatico=False, permitir_hero=False):
-    """URL lista para <img src>, o ''. Nunca lanza."""
+    """URL lista para <img src>, o ''. Nunca lanza. Productos: solo Storage/local."""
     try:
         texto = _texto_url(valor)
         if not texto:
@@ -146,13 +143,11 @@ def url_mostrable(valor, permitir_estatico=False, permitir_hero=False):
         texto = texto.replace('/subase/', '/storage/').replace('/Subase/', '/storage/')
         if es_url_storage_publica(texto):
             return texto
-        from backend.utils import url_imagen_catalogo_valida
+        from backend.utils import url_imagen_local_valida, url_imagen_subida_storage_valida
 
-        catalogo = url_imagen_catalogo_valida(texto)
-        if catalogo:
-            return catalogo
-        from backend.utils import url_imagen_local_valida
-
+        storage = url_imagen_subida_storage_valida(texto)
+        if storage:
+            return storage
         local = url_imagen_local_valida(texto)
         if local:
             return local

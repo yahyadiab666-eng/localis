@@ -181,10 +181,9 @@ def optimizar_url_wsrv(url_original):
 
 
 def _url_manual_valida(imagen_manual):
-    """URL de Storage, catálogo oficial o foto local subida por el comerciante."""
+    """URL de Storage o foto local subida por el comerciante. Sin OFF cruda."""
     return (
-        url_imagen_catalogo_valida(imagen_manual)
-        or url_imagen_subida_storage_valida(imagen_manual)
+        url_imagen_subida_storage_valida(imagen_manual)
         or url_imagen_local_valida(imagen_manual)
     )
 
@@ -472,7 +471,7 @@ def _buscar_codigo_en_fuentes(codigo_barras, familia):
             producto = producto_por_codigo(fuente, codigo)
             if not producto:
                 continue
-            url = _primera_url_producto_facts(producto, inspeccionar=False)
+            url = _primera_url_producto_facts(producto, inspeccionar=True)
             if url:
                 print(f'{_LOG_IMAGEN} codigo={codigo} fuente={fuente["id"]}')
                 return url
@@ -609,8 +608,18 @@ def _descubrir_y_persistir_oficial(
         except Exception as error:
             _advertir_fallo_imagen('espejo estudio', error)
             espejo = None
-        final = imagen_url_almacenada(espejo) or url_imagen_catalogo_valida(url)
-        if final and codigo:
+        # Solo Storage o /static/uploads/. Nunca persistir URL remota OFF/API.
+        final = (
+            url_imagen_subida_storage_valida(espejo)
+            or url_imagen_local_valida(espejo)
+        )
+        if not final:
+            print(
+                f'{_LOG_IMAGEN} espejo fallido; no se persiste URL externa '
+                f'codigo={codigo or "-"} nombre={nombre!r}; placeholder'
+            )
+            return None
+        if codigo:
             try:
                 guardar_imagen_maestro(codigo, final)
             except Exception as error:
@@ -656,7 +665,6 @@ def resolver_imagen(
             if url and not (
                 url_imagen_subida_storage_valida(url)
                 or url_imagen_local_valida(url)
-                or url_imagen_catalogo_valida(url)
             ):
                 url = None
             if url:
@@ -668,7 +676,10 @@ def resolver_imagen(
                 ):
                     try:
                         espejo = _espejar_en_storage(url, codigo or nombre)
-                        nuevo = imagen_url_almacenada(espejo)
+                        nuevo = (
+                            url_imagen_subida_storage_valida(espejo)
+                            or url_imagen_local_valida(espejo)
+                        )
                         if nuevo:
                             url = nuevo
                             try:
@@ -777,7 +788,10 @@ def completar_mapa_imagenes(codigos, mapa_maestro=None, buscar_oficial=True):
             except Exception as error:
                 _advertir_fallo_imagen('catalogo_maestro', error)
             for codigo, url in list(mapa.items()):
-                if url and not imagen_url_almacenada(url):
+                if url and not (
+                    url_imagen_subida_storage_valida(url)
+                    or url_imagen_local_valida(url)
+                ):
                     mapa.pop(codigo, None)
             faltantes = [c for c in faltantes if c not in mapa]
 

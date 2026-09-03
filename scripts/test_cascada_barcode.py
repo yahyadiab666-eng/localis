@@ -69,6 +69,10 @@ def _probar_orden_mocks(errores):
     print('\n=== Orden de cascada (mocks) ===')
     from backend.image_manager import _descubrir_y_persistir_oficial
 
+    URL_STORAGE = (
+        'https://wesnnnvoavprgqcczzsg.supabase.co/storage/v1/object/public/'
+        'imagenes/productos/cat_mock.webp'
+    )
     llamadas = []
 
     def fake_codigo(codigo, familia):
@@ -84,7 +88,7 @@ def _probar_orden_mocks(errores):
     ), patch(
         'backend.image_manager._buscar_nombre_en_fuentes', side_effect=fake_nombre
     ), patch(
-        'backend.image_manager._espejar_en_storage', return_value=None
+        'backend.image_manager._espejar_en_storage', return_value=URL_STORAGE
     ), patch(
         'backend.image_manager.guardar_imagen_maestro', return_value=None
     ):
@@ -97,7 +101,7 @@ def _probar_orden_mocks(errores):
 
     tipos = [item[0] for item in llamadas]
     print(f'  llamadas={llamadas}')
-    _ok(url == URL_CODIGO, 'con EAN se usa la foto del codigo', errores)
+    _ok(url == URL_STORAGE, 'con EAN se espeja a Storage (no OFF cruda)', errores)
     _ok(tipos[:1] == ['codigo'], 'el primer intento es por codigo de barras', errores)
     _ok('nombre' not in tipos, 'con EAN exitoso NO se busca por nombre', errores)
 
@@ -113,7 +117,7 @@ def _probar_orden_mocks(errores):
     ), patch(
         'backend.image_manager._buscar_nombre_en_fuentes', side_effect=fake_nombre
     ), patch(
-        'backend.image_manager._espejar_en_storage', return_value=None
+        'backend.image_manager._espejar_en_storage', return_value=URL_STORAGE
     ), patch(
         'backend.image_manager.guardar_imagen_maestro', return_value=None
     ):
@@ -127,7 +131,7 @@ def _probar_orden_mocks(errores):
     tipos = [item[0] for item in llamadas]
     print(f'  llamadas_respaldo={llamadas}')
     _ok(tipos == ['codigo', 'nombre'], 'si el EAN falla, luego nombre+descripcion', errores)
-    _ok(url_respaldo == URL_NOMBRE, 'respaldo por nombre solo despues del EAN', errores)
+    _ok(url_respaldo == URL_STORAGE, 'respaldo por nombre se espeja a Storage', errores)
     _ok(
         llamadas[1][2] == 'harina de maiz precocida',
         'el respaldo recibe la descripcion',
@@ -146,7 +150,7 @@ def _probar_orden_mocks(errores):
     ), patch(
         'backend.image_manager._buscar_nombre_en_fuentes', side_effect=fake_nombre
     ), patch(
-        'backend.image_manager._espejar_en_storage', return_value=None
+        'backend.image_manager._espejar_en_storage', return_value=URL_STORAGE
     ):
         url_solo_nombre = _descubrir_y_persistir_oficial(
             None,
@@ -155,10 +159,30 @@ def _probar_orden_mocks(errores):
             categoria='Alimentos',
         )
 
-    _ok(url_solo_nombre == URL_NOMBRE, 'sin EAN usa nombre+descripcion', errores)
+    _ok(url_solo_nombre == URL_STORAGE, 'sin EAN espeja nombre a Storage', errores)
     _ok(
         llamadas and llamadas[0][0] == 'nombre',
         'sin EAN el primer (y unico) paso es nombre',
+        errores,
+    )
+
+    with patch(
+        'backend.image_manager._buscar_codigo_en_fuentes', side_effect=fake_codigo
+    ), patch(
+        'backend.image_manager._buscar_nombre_en_fuentes', side_effect=fake_nombre
+    ), patch(
+        'backend.image_manager._espejar_en_storage', return_value=None
+    ), patch(
+        'backend.image_manager.guardar_imagen_maestro', return_value=None
+    ):
+        url_sin_espejo = _descubrir_y_persistir_oficial(
+            EAN_NUTELLA,
+            nombre='Nutella',
+            categoria='Alimentos',
+        )
+    _ok(
+        url_sin_espejo is None,
+        'si el espejo falla NO se persiste URL OFF cruda',
         errores,
     )
 
@@ -166,7 +190,7 @@ def _probar_orden_mocks(errores):
 def _probar_ean_en_vivo(errores):
     print('\n=== EAN en vivo vs nombre tramposo ===')
     from backend.image_manager import descubrir_imagen_catalogo
-    from backend.utils import url_imagen_catalogo_valida
+    from backend.utils import imagen_url_almacenada
 
     url = descubrir_imagen_catalogo(
         codigo_barras=EAN_NUTELLA,
@@ -175,13 +199,16 @@ def _probar_ean_en_vivo(errores):
         categoria='Alimentos',
     )
     print(f'  url_ean={url!r}')
-    _ok(bool(url_imagen_catalogo_valida(url)), 'EAN Nutella devolvio URL oficial', errores)
+    _ok(bool(imagen_url_almacenada(url)), 'EAN Nutella devolvio URL Storage/local', errores)
     texto = str(url or '').lower()
     _ok(
-        '3017620422003' in texto.replace('/', '')
-        or '301/762/042/2003' in texto
-        or 'nutella' in texto,
-        'la URL corresponde al EAN, no al nombre tramposo',
+        'storage/v1/object/public' in texto or '/static/uploads/' in texto,
+        'la URL persistida es Storage o upload local (no OFF cruda)',
+        errores,
+    )
+    _ok(
+        'openfoodfacts.org' not in texto,
+        'no se persistio host Open Food Facts crudo',
         errores,
     )
     _ok(
@@ -261,8 +288,8 @@ def main() -> int:
             print(f'  - {item}')
         return 1
     print(
-        'OK cascada: EAN primero, nombre+descripcion solo de respaldo, '
-        'sin falso positivo Underwood, aviso CSV visible, subida manual intacta.'
+        'OK cascada: EAN primero, espejo Storage obligatorio, '
+        'sin OFF cruda, sin falso positivo Underwood, aviso CSV, subida manual.'
     )
     return 0
 

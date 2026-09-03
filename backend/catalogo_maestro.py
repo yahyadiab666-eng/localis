@@ -15,7 +15,8 @@ from backend.supabase_client import (
 )
 from backend.utils import (
     normalizar_codigo_barras,
-    url_imagen_catalogo_valida,
+    url_imagen_local_valida,
+    url_imagen_subida_storage_valida,
 )
 
 TABLA_CATALOGO_MAESTRO = 'catalogo_maestro_imagenes'
@@ -56,8 +57,8 @@ def _completar_con_semilla(mapa, codigos):
 
 
 def _url_maestro_valida(valor):
-    """URLs públicas de Storage o fotos oficiales del catálogo (OpenFoodFacts)."""
-    return url_imagen_catalogo_valida(valor)
+    """Solo Storage o upload local. Nunca URLs remotas OFF/API."""
+    return url_imagen_subida_storage_valida(valor) or url_imagen_local_valida(valor)
 
 
 def _error_imagen(mensaje, error=None):
@@ -231,7 +232,7 @@ def _resolver_en_cascada(codigo):
 def imagen_maestro_por_codigo(codigo_barras):
     """
     URL de imagen por código de barras:
-    1) catalogo_maestro_imagenes (Storage o catálogo oficial)
+    1) catalogo_maestro_imagenes (solo Storage o /static/uploads/)
     Error de BD/red se registra; vacío o fallo → None (la vista usa placeholder).
     """
     try:

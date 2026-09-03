@@ -76,9 +76,9 @@ def _jpeg_calle():
 
 
 def _url_oficial_o_almacenada(url):
-    from backend.utils import imagen_url_almacenada, url_imagen_catalogo_valida
+    from backend.utils import imagen_url_almacenada
 
-    return bool(imagen_url_almacenada(url) or url_imagen_catalogo_valida(url))
+    return bool(imagen_url_almacenada(url))
 
 
 def _host_prohibido(url):
