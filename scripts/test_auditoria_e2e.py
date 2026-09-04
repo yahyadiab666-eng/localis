@@ -632,37 +632,24 @@ def _probar_pagos_ocr(cliente, usuario_id, comercio_id, errores):
 
 def _probar_cascada_y_manual(errores):
     print('\n=== Cascada y subida manual (unidad) ===')
-    from backend.image_manager import _descubrir_y_persistir_oficial
     from backend.image_lookup import persistir_imagen_producto_hibrida
     from backend.utils import imagen_url_almacenada
+    from services.smart_image_pipeline import resolver_imagen_automatica
     from unittest.mock import patch
 
-    llamadas = []
-
-    def fake_codigo(codigo, familia):
-        llamadas.append('codigo')
-        return 'https://images.openfoodfacts.org/images/products/x.jpg'
-
-    def fake_nombre(*_a, **_k):
-        llamadas.append('nombre')
-        return 'https://images.openfoodfacts.org/images/products/y.jpg'
-
     with patch(
-        'backend.image_manager._buscar_codigo_en_fuentes', side_effect=fake_codigo
+        'services.smart_image_pipeline.hay_proveedor_pagado', return_value=True
     ), patch(
-        'backend.image_manager._buscar_nombre_en_fuentes', side_effect=fake_nombre
-    ), patch(
-        'backend.image_manager._espejar_en_storage', return_value=None
-    ), patch(
-        'backend.image_manager.guardar_imagen_maestro', return_value=None
+        'services.smart_image_pipeline.buscar_por_ean',
+        return_value='https://cdn.upcitemdb.com/image/ean.jpg',
     ):
-        url = _descubrir_y_persistir_oficial(
-            '3017620422003',
+        resultado = resolver_imagen_automatica(
+            codigo_barras='3017620422003',
             nombre='Diablitos Underwood',
             descripcion='pate',
         )
-    _ok(llamadas == ['codigo'], f'cascada EAN-first llamadas={llamadas}', errores)
-    _ok('products/x.jpg' in str(url), 'usa URL del codigo', errores)
+    _ok(resultado.fuente == 'barcode_api', f'EAN-first fuente={resultado.fuente}', errores)
+    _ok('ean.jpg' in str(resultado.url), 'usa URL del codigo', errores)
 
     archivo_url, aviso = persistir_imagen_producto_hibrida(
         file_storage=__import__('werkzeug.datastructures', fromlist=['FileStorage']).FileStorage(

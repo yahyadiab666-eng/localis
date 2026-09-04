@@ -7,8 +7,21 @@
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}?v=catalogo-img">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}">
+  <script>
+    window.PLACEHOLDER_PRODUCTO = {{ placeholder_producto|tojson }};
+    window.rescatarImagenProducto = function (img) {
+      if (!img) return;
+      img.onerror = null;
+      var fallback = window.PLACEHOLDER_PRODUCTO || '/static/img/placeholder-producto.svg';
+      var wrap = img.closest && img.closest('.localis-img-producto-wrap');
+      if (img.getAttribute('src') !== fallback) {
+        img.src = fallback;
+        if (wrap) wrap.classList.add('localis-img-producto-wrap--vacio');
+      }
+    };
+  </script>
   <style>
     body { font-family: 'DM Sans', sans-serif; }
     .font-display { font-family: 'Fraunces', serif; }
@@ -18,6 +31,19 @@
       background-size: cover;
       background-position: center;
       background-repeat: no-repeat;
+    }
+    .localis-img-producto-wrap {
+      height: 180px !important;
+      min-height: 180px !important;
+      max-height: 180px !important;
+      aspect-ratio: unset !important;
+    }
+    .localis-img-producto-wrap img,
+    .localis-img-producto {
+      position: absolute !important;
+      width: 100% !important;
+      height: 100% !important;
+      object-fit: contain !important;
     }
   </style>
 </head>
@@ -88,7 +114,8 @@
                  onclick="abrirModalProducto({{ producto.id }})"
                  onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();abrirModalProducto({{ producto.id }});}">
               {% set img_producto = producto|url_imagen_producto %}
-              <div class="localis-img-producto-wrap{% if not img_producto %} localis-img-producto-wrap--vacio{% endif %}">
+              {% set es_placeholder = (not img_producto) or (img_producto == placeholder_producto) %}
+              <div class="localis-img-producto-wrap{% if es_placeholder %} localis-img-producto-wrap--vacio{% endif %}">
                 <img src="{{ img_producto or placeholder_producto }}"
                      alt="{{ producto.nombre }}" width="400" height="180"
                      loading="lazy" decoding="async" referrerpolicy="no-referrer"
@@ -124,8 +151,8 @@
       <button onclick="cerrarModal()" class="absolute top-3 right-3 z-10 bg-black/40 text-white rounded-full p-1.5 hover:bg-black/60">
         <i data-lucide="x" style="width:20px;height:20px;"></i>
       </button>
-      <div class="localis-img-producto-wrap localis-img-producto-wrap--modal">
-        <img id="modal-imagen" class="localis-img-producto" alt="" src=""
+      <div class="localis-img-producto-wrap localis-img-producto-wrap--modal localis-img-producto-wrap--vacio" id="modal-imagen-wrap">
+        <img id="modal-imagen" class="localis-img-producto" alt="" src="{{ placeholder_producto }}"
              decoding="async" referrerpolicy="no-referrer">
       </div>
       <div class="p-6 space-y-3">
@@ -164,12 +191,23 @@
         const res = await fetch(`/api/producto/${id}`);
         if (!res.ok) return;
         const p = await res.json();
-        const imgUrl = (p && p.imagen_url && String(p.imagen_url) !== 'None' && String(p.imagen_url) !== 'null')
-          ? p.imagen_url
-          : '{{ placeholder_producto }}';
+        const cruda = (p && p.imagen_url) ? String(p.imagen_url) : '';
+        const esLimpia = cruda.indexOf('/storage/v1/object/public/') !== -1
+          || cruda.indexOf('/static/uploads/') === 0
+          || cruda.indexOf('/static/img/placeholder-') === 0;
+        const imgUrl = esLimpia ? cruda : '{{ placeholder_producto }}';
 
         const modalImg = document.getElementById('modal-imagen');
+        const wrap = document.getElementById('modal-imagen-wrap');
+        const esPh = imgUrl.indexOf('placeholder-producto') !== -1;
+        if (wrap) {
+          wrap.classList.toggle('localis-img-producto-wrap--vacio', esPh);
+        }
         modalImg.onerror = function () {
+          if (window.rescatarImagenProducto) {
+            window.rescatarImagenProducto(this);
+            return;
+          }
           this.onerror = null;
           this.src = '{{ placeholder_producto }}';
         };
@@ -191,6 +229,10 @@
 
     function cerrarModal() {
       document.getElementById('modal-producto').classList.remove('activo');
+      var img = document.getElementById('modal-imagen');
+      var wrap = document.getElementById('modal-imagen-wrap');
+      if (img) img.src = '{{ placeholder_producto }}';
+      if (wrap) wrap.classList.add('localis-img-producto-wrap--vacio');
     }
 
     document.addEventListener('keydown', (e) => {

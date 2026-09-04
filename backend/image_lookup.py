@@ -1,109 +1,60 @@
-"""Imágenes: catálogo maestro + image_manager en escritura; lectura instantánea."""
+"""
+Imágenes de producto: subida manual (Storage/local) y pipeline automático diferido.
+
+- Foto del comerciante: cero llamadas a APIs de pago.
+- Sin foto: hilo daemon consulta el pipeline (EAN → nombre) y persiste la URL
+  oficial de la API, o un placeholder. El request HTTP no espera esa red.
+"""
+
+from __future__ import annotations
 
 import os
 import sqlite3
 import threading
 import time
 
-from backend.catalogo_maestro import (
-    imagen_maestro_por_codigo,
-)
 from backend.db import get_db_connection
-from backend.image_manager import (
-    completar_mapa_imagenes,
-    espejar_url_oficial_en_storage,
-    resolver_imagen_escritura,
-)
 from backend.utils import (
     imagen_url_almacenada,
     imagen_url_para_persistir,
     normalizar_codigo_barras,
+    url_imagen_api_oficial_valida,
     url_imagen_local_valida,
     url_imagen_subida_storage_valida,
+)
+from services.smart_image_pipeline import (
+    PLACEHOLDER_PRODUCTO,
+    resolver_imagen_automatica,
+    url_catalogo_api_valida,
 )
 
 _LOG_CSV = '[Localis CSV]'
 _LOG_IMAGEN = '[Localis Imagen]'
-_PRESUPUESTO_OFF_SEG = int(os.getenv('IMPORT_OFF_BUDGET_SEC', '90'))
+_PRESUPUESTO_API_SEG = int(os.getenv('IMPORT_API_IMAGEN_BUDGET_SEC', '60'))
+_MAX_CSV_API = int(os.getenv('LOCALIS_CSV_API_MAX', '25'))
+_descubrimiento_en_vuelo = set()
+_descubrimiento_lock = threading.Lock()
 
 
 def _registrar_error_imagen(contexto, error):
     print(f'{_LOG_IMAGEN} ERROR {contexto}: {type(error).__name__}: {error}')
 
 
-def _url_almacenada_o_none(valor):
-    """URL de Supabase Storage ya persistida, o None."""
-    try:
-        return imagen_url_almacenada(valor)
-    except Exception as error:
-        _registrar_error_imagen('url almacenada', error)
-        return None
+def es_imagen_manual(valor):
+    return bool(
+        url_imagen_subida_storage_valida(valor) or url_imagen_local_valida(valor)
+    )
 
 
-def _respaldo_en_cascada(codigo_barras):
-    """Catálogo maestro persistible (Storage/oficial). Vacío si no hay ficha limpia."""
-    try:
-        return imagen_url_almacenada(imagen_maestro_por_codigo(codigo_barras))
-    except Exception as error:
-        _registrar_error_imagen(f'catalogo_maestro codigo={codigo_barras!r}', error)
-        return None
-
-
-def _categoria_de_comercio(comercio_id):
-    if not comercio_id:
-        return None
-    try:
-        with get_db_connection() as conexion:
-            cursor = conexion.cursor()
-            cursor.execute(
-                """
-                SELECT cat.nombre
-                FROM comercios c
-                LEFT JOIN categorias cat ON cat.id = c.categoria_id
-                WHERE c.id = ?
-                """,
-                (int(comercio_id),),
-            )
-            fila = cursor.fetchone()
-        if not fila:
-            return None
-        if isinstance(fila, dict):
-            return fila.get('nombre')
-        return fila[0]
-    except Exception as error:
-        _registrar_error_imagen('categoria comercio', error)
-        return None
-
-
-def _resolver_url_escritura(
-    imagen_url=None,
-    codigo_barras=None,
-    mapa_maestro=None,
-    nombre=None,
-    categoria=None,
-    descripcion=None,
-):
-    """Resolución al crear/importar: manual Storage → catálogo maestro → cascada."""
-    try:
-        return resolver_imagen_escritura(
-            imagen_manual=imagen_url,
-            codigo_barras=codigo_barras,
-            mapa_maestro=mapa_maestro,
-            nombre=nombre,
-            categoria=categoria,
-            descripcion=descripcion,
-            buscar_oficial=False,
-        )
-    except Exception as error:
-        _registrar_error_imagen('resolver escritura', error)
-        return _respaldo_en_cascada(codigo_barras)
+def _url_mostrable_persistida(valor):
+    return (
+        imagen_url_almacenada(valor)
+        or url_imagen_api_oficial_valida(valor)
+        or url_catalogo_api_valida(valor)
+    )
 
 
 def imagen_url_para_catalogo(imagen_url=None, codigo_barras=None):
-    """
-    Lectura de catálogo: URL persistida o maestro por EAN.
-    Sin OpenFoodFacts. codigo_barras se usa si imagen_url está vacía.
-    """
     try:
         from utils.images import url_imagen_producto
 
@@ -113,7 +64,7 @@ def imagen_url_para_catalogo(imagen_url=None, codigo_barras=None):
         )
     except Exception as error:
         _registrar_error_imagen('imagen_url_para_catalogo', error)
-        return '/static/img/placeholder-producto.svg'
+        return PLACEHOLDER_PRODUCTO
 
 
 def imagen_url_para_guardar(
@@ -123,19 +74,10 @@ def imagen_url_para_guardar(
     categoria=None,
     descripcion=None,
 ):
-    """URL a persistir: Storage, catálogo oficial o maestro. None si no hay foto."""
+    """Solo foto manual. El automático corre diferido, no en el INSERT."""
+    del codigo_barras, nombre, categoria, descripcion
     try:
-        persistida = imagen_url_para_persistir(imagen_manual)
-        if persistida:
-            return persistida
-        return resolver_imagen_escritura(
-            imagen_manual=imagen_manual,
-            codigo_barras=codigo_barras,
-            nombre=nombre,
-            categoria=categoria,
-            descripcion=descripcion,
-            buscar_oficial=False,
-        ) or _respaldo_en_cascada(codigo_barras)
+        return imagen_url_para_persistir(imagen_manual)
     except Exception as error:
         _registrar_error_imagen('imagen_url_para_guardar', error)
         return None
@@ -151,11 +93,10 @@ def persistir_imagen_producto_hibrida(
     existente=None,
 ):
     """
-    Foto del comerciante: comprime y deja URL mostrable de inmediato
-    (disco local; Storage se sincroniza en segundo plano si hay service_role).
-    Sin archivo: URL del formulario o maestro en BD. Sin OpenFoodFacts en el request.
+    Foto del dispositivo → Storage o /static/uploads. Costo de API = 0.
+    Sin archivo: conserva Storage/local existente. No consulta APIs.
     """
-    del descripcion
+    del codigo_barras, nombre, descripcion
     aviso = None
     hubo_archivo = bool(file_storage and getattr(file_storage, 'filename', ''))
     if hubo_archivo:
@@ -177,20 +118,20 @@ def persistir_imagen_producto_hibrida(
         persistida = imagen_url_para_persistir(url_subida)
         if persistida:
             return persistida, aviso
-        respaldo = imagen_url_para_persistir(imagen_url_form) or existente
+        respaldo = imagen_url_para_persistir(imagen_url_form) or (
+            imagen_url_para_persistir(existente)
+        )
         return respaldo, aviso
 
     persistida_form = imagen_url_para_persistir(imagen_url_form)
     if persistida_form:
         return persistida_form, aviso
-    if existente:
-        return existente, aviso
-    maestro = _respaldo_en_cascada(codigo_barras)
-    return maestro, aviso
+    if es_imagen_manual(existente):
+        return imagen_url_para_persistir(existente), aviso
+    return None, aviso
 
 
 def url_imagen_con_respaldo(imagen_url=None, codigo_barras=None):
-    """Vista Flask: URL persistida o maestro por EAN. Sin OpenFoodFacts."""
     try:
         from utils.images import url_imagen_producto
 
@@ -200,52 +141,18 @@ def url_imagen_con_respaldo(imagen_url=None, codigo_barras=None):
         )
     except Exception as error:
         _registrar_error_imagen('url_imagen_con_respaldo', error)
-        return '/static/img/placeholder-producto.svg'
+        return PLACEHOLDER_PRODUCTO
 
 
 def imagen_urls_para_catalogo(productos):
-    """
-    Lectura de catálogo: URL persistida o catálogo maestro por EAN (lote, sin red).
-    Solo enriquece la respuesta en memoria; no escribe en PostgreSQL.
-    """
+    """Lectura: no llama APIs. Enriquece en memoria con la URL persistida."""
     if not productos:
         return productos
     try:
-        from backend.image_manager import completar_mapa_imagenes
-
-        faltantes = []
-        vistos = set()
         for prod in productos:
-            try:
-                directa = _url_almacenada_o_none(prod.get('imagen_url'))
-                if directa:
-                    prod['imagen_url'] = directa
-                    continue
-                codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
-                if codigo and codigo not in vistos:
-                    vistos.add(codigo)
-                    faltantes.append(codigo)
-            except Exception as error:
-                _registrar_error_imagen(
-                    f"lote producto id={prod.get('id')}", error
-                )
-        mapa = {}
-        if faltantes:
-            try:
-                mapa = completar_mapa_imagenes(faltantes, buscar_oficial=False) or {}
-            except Exception as error:
-                _registrar_error_imagen('lote maestro catalogo', error)
-                mapa = {}
-
-        # Solo enriquecer la respuesta en memoria. No UPDATE en lectura:
-        # el write-on-read reinyectaba URLs históricas del maestro.
-        for prod in productos:
-            if _url_almacenada_o_none(prod.get('imagen_url')):
-                continue
-            codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
-            url_mae = mapa.get(codigo) if codigo else None
-            if url_mae:
-                prod['imagen_url'] = url_mae
+            mostrable = _url_mostrable_persistida(prod.get('imagen_url'))
+            if mostrable:
+                prod['imagen_url'] = mostrable
         return productos
     except Exception as error:
         _registrar_error_imagen('imagen_urls_para_catalogo', error)
@@ -261,39 +168,25 @@ def resolver_imagen_url_definitiva(
     mapa_nombres=None,
     mapa_maestro=None,
 ):
-    """
-    Alta manual e importación CSV.
-    Persiste URL del catálogo maestro; NULL si no hay imagen.
-    """
-    try:
-        return _resolver_url_escritura(
-            imagen_url=imagen_url,
-            codigo_barras=codigo_barras,
-            mapa_maestro=mapa_maestro,
-            nombre=nombre,
-            descripcion=descripcion,
-        )
-    except Exception as error:
-        _registrar_error_imagen('resolver_imagen_url_definitiva', error)
-        return _respaldo_en_cascada(codigo_barras)
+    del codigo_barras, nombre, descripcion, mapa_codigos, mapa_nombres, mapa_maestro
+    return imagen_url_para_persistir(imagen_url)
 
 
-def normalizar_imagen_registro(imagen_url=None, codigo_barras=None, nombre=None, descripcion=None):
+def normalizar_imagen_registro(
+    imagen_url=None, codigo_barras=None, nombre=None, descripcion=None
+):
     del nombre, descripcion
     return imagen_url_para_catalogo(imagen_url=imagen_url, codigo_barras=codigo_barras)
 
 
 def obtener_imagen_url_producto(producto_id):
-    """Endpoint de respaldo: lee producto en BD y resuelve imagen sin APIs externas."""
     if not producto_id:
         return None
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
             cursor.execute(
-                """
-                SELECT imagen_url, codigo_barras FROM productos WHERE id = ?
-                """,
+                'SELECT imagen_url, codigo_barras FROM productos WHERE id = ?',
                 (int(producto_id),),
             )
             fila = cursor.fetchone()
@@ -302,15 +195,13 @@ def obtener_imagen_url_producto(producto_id):
             registro = dict(fila)
         from utils.images import url_publica_producto_desde_bd
 
-        url = url_publica_producto_desde_bd(registro.get('imagen_url'))
-        if url:
-            return _url_almacenada_o_none(url) or url
-        codigo = registro.get('codigo_barras')
-        maestro = _respaldo_en_cascada(codigo)
-        return _url_almacenada_o_none(maestro) or url_publica_producto_desde_bd(maestro) or ''
+        return (
+            url_publica_producto_desde_bd(registro.get('imagen_url'))
+            or PLACEHOLDER_PRODUCTO
+        )
     except Exception as error:
         _registrar_error_imagen(f'obtener_imagen_url_producto({producto_id})', error)
-        return ''
+        return PLACEHOLDER_PRODUCTO
 
 
 def resolver_imagen_producto(
@@ -323,105 +214,68 @@ def resolver_imagen_producto(
     excluir_url=None,
     persistir=False,
 ):
-    del buscar_web
-
+    del buscar_web, persistir, nombre, descripcion
     try:
-        if persistir:
-            url = resolver_imagen_url_definitiva(
-                imagen_url,
-                codigo_barras,
-                nombre=nombre,
-                descripcion=descripcion,
-            )
-            return url if url and url != excluir_url else None
-
         url = imagen_url_para_catalogo(imagen_url, codigo_barras=codigo_barras)
         if url and url != excluir_url:
             return url
-
         if producto_id:
             url_bd = obtener_imagen_url_producto(producto_id)
             if url_bd and url_bd != excluir_url:
                 return url_bd
-
         return None
     except Exception as error:
         _registrar_error_imagen('resolver_imagen_producto', error)
         return None
 
 
-def aplicar_respaldo_imagenes(productos, persistir=False):
-    """
-    persistir=False (catálogo): PostgreSQL → catálogo maestro (sin placeholder).
-    persistir=True (post-import): guarda URLs del catálogo maestro en PostgreSQL.
-    """
-    if not productos:
-        return productos
+def preparar_mapa_imagenes_importacion(productos, snapshot_imagenes=None):
+    """CSV: solo fotos ya persistidas (manual/Storage). Sin APIs de pago."""
+    mapa = dict(snapshot_imagenes or {})
+    for prod in productos or []:
+        persistida = imagen_url_para_persistir(prod.get('imagen_url'))
+        codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
+        if persistida and codigo and codigo not in mapa:
+            mapa[codigo] = persistida
+    return mapa
 
+
+def _persistir_resultado_pipeline(producto_id, resultado):
+    if not producto_id or not resultado or not resultado.url:
+        return False
     try:
-        if persistir:
-            pendientes = [
-                p for p in productos
-                if not _url_almacenada_o_none(p.get('imagen_url'))
-            ]
-            codigos = [
-                normalizar_codigo_barras(p.get('codigo_barras'))
-                for p in pendientes
-            ]
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
             try:
-                mapa_maestro = completar_mapa_imagenes(
-                    [c for c in codigos if c],
-                    buscar_oficial=False,
+                cursor.execute(
+                    """
+                    UPDATE productos
+                    SET imagen_url = ?, imagen_fuente = ?
+                    WHERE id = ?
+                      AND (imagen_url IS NULL OR TRIM(CAST(imagen_url AS TEXT)) = '')
+                    """,
+                    (resultado.url, resultado.fuente, int(producto_id)),
                 )
-            except Exception as error:
-                _registrar_error_imagen('completar_mapa_imagenes', error)
-                mapa_maestro = {}
-
-            with get_db_connection() as conexion:
-                cursor = conexion.cursor()
-                actualizaciones = []
-                for prod in pendientes:
-                    producto_id = prod.get('id')
-                    if not producto_id:
-                        continue
-                    url_final = resolver_imagen_escritura(
-                        imagen_manual=prod.get('imagen_url'),
-                        codigo_barras=prod.get('codigo_barras'),
-                        mapa_maestro=mapa_maestro,
-                        nombre=prod.get('nombre'),
-                        descripcion=prod.get('descripcion'),
-                        buscar_oficial=False,
-                    )
-                    if not url_final:
-                        url_final = _respaldo_en_cascada(prod.get('codigo_barras'))
-                    if not url_final:
-                        continue
-                    actualizaciones.append((url_final, int(producto_id)))
-                    prod['imagen_url'] = url_final
-                if actualizaciones:
-                    cursor.executemany(
-                        'UPDATE productos SET imagen_url = ? WHERE id = ?',
-                        actualizaciones,
-                    )
-                conexion.commit()
-            return productos
-
-        return imagen_urls_para_catalogo(productos)
+            except Exception:
+                conexion.rollback()
+                cursor.execute(
+                    """
+                    UPDATE productos
+                    SET imagen_url = ?
+                    WHERE id = ?
+                      AND (imagen_url IS NULL OR TRIM(CAST(imagen_url AS TEXT)) = '')
+                    """,
+                    (resultado.url, int(producto_id)),
+                )
+            conexion.commit()
+        return True
     except Exception as error:
-        _registrar_error_imagen('aplicar_respaldo_imagenes', error)
-        return imagen_urls_para_catalogo(productos)
+        _registrar_error_imagen(f'persistir pipeline id={producto_id}', error)
+        return False
 
 
 def asociar_imagenes_inventario(comercio_id):
-    """Completa imágenes faltantes tras el CSV (solo catálogo maestro / Storage)."""
-    try:
-        return _asociar_imagenes_inventario(comercio_id)
-    except Exception as error:
-        print(f'{_LOG_CSV} aviso asociar_imagenes: {type(error).__name__}')
-        return 0
-
-
-def _asociar_imagenes_inventario(comercio_id):
+    """Tras CSV: rellena huecos con el pipeline de pago (tope de tiempo y de filas)."""
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
@@ -440,93 +294,56 @@ def _asociar_imagenes_inventario(comercio_id):
 
     pendientes = [
         p for p in productos
-        if not _url_almacenada_o_none(p.get('imagen_url'))
+        if not (p.get('imagen_url') or '').strip()
     ]
     if not pendientes:
         return 0
 
-    try:
-        mapa_maestro = completar_mapa_imagenes(
-            [
-                normalizar_codigo_barras(p.get('codigo_barras'))
-                for p in pendientes
-            ],
-            buscar_oficial=False,
-        )
-    except Exception as error:
-        print(f'{_LOG_CSV} Error al leer catálogo maestro de imágenes: {error}')
-        mapa_maestro = {}
-
     inicio = time.monotonic()
-    actualizaciones = []
-    for prod in pendientes:
-        producto_id = prod.get('id')
-        if not producto_id:
-            continue
-        if time.monotonic() - inicio > _PRESUPUESTO_OFF_SEG:
+    actualizados = 0
+    for prod in pendientes[:_MAX_CSV_API]:
+        if time.monotonic() - inicio > _PRESUPUESTO_API_SEG:
             print(
-                f'{_LOG_CSV} presupuesto OFF agotado comercio={comercio_id} '
-                f'actualizados={len(actualizaciones)} pendientes={len(pendientes)}'
+                f'{_LOG_CSV} presupuesto API agotado comercio={comercio_id} '
+                f'actualizados={actualizados}'
             )
             break
+        if (prod.get('imagen_url') or '').strip():
+            continue
         try:
-            url_final = resolver_imagen_escritura(
-                imagen_manual=prod.get('imagen_url'),
+            resultado = resolver_imagen_automatica(
                 codigo_barras=prod.get('codigo_barras'),
-                mapa_maestro=mapa_maestro,
                 nombre=prod.get('nombre'),
                 descripcion=prod.get('descripcion'),
-                categoria=_categoria_de_comercio(comercio_id),
-                buscar_oficial=True,
-                reproceso_maestro=False,
             )
-            if not url_final:
-                continue
-            actualizaciones.append((url_final, int(producto_id)))
-            prod['imagen_url'] = url_final
+            if _persistir_resultado_pipeline(prod.get('id'), resultado):
+                actualizados += 1
         except Exception as error:
             print(
-                f'{_LOG_CSV} aviso imagen producto={producto_id}: '
+                f'{_LOG_CSV} aviso imagen producto={prod.get("id")}: '
                 f'{type(error).__name__}'
             )
-            continue
-
-    if not actualizaciones:
-        return 0
-
-    try:
-        with get_db_connection() as conexion:
-            cursor = conexion.cursor()
-            cursor.executemany(
-                'UPDATE productos SET imagen_url = ? WHERE id = ?',
-                actualizaciones,
-            )
-            conexion.commit()
-    except Exception as error:
-        print(f'{_LOG_CSV} Error al persistir imágenes post-importación: {error}')
-        return 0
-    return len(actualizaciones)
+    return actualizados
 
 
 def programar_asociacion_imagenes_inventario(comercio_id):
-    """Lanza la búsqueda de fotos oficiales en un hilo daemon (no bloquea HTTP)."""
     def _trabajo():
         try:
-            print(f'{_LOG_CSV} OFF diferido inicio comercio={comercio_id}')
+            print(f'{_LOG_CSV} pipeline diferido inicio comercio={comercio_id}')
             actualizados = asociar_imagenes_inventario(comercio_id)
             print(
-                f'{_LOG_CSV} OFF diferido fin comercio={comercio_id} '
+                f'{_LOG_CSV} pipeline diferido fin comercio={comercio_id} '
                 f'actualizados={actualizados}'
             )
         except Exception as error:
             print(
-                f'{_LOG_CSV} aviso OFF diferido comercio={comercio_id}: '
+                f'{_LOG_CSV} aviso pipeline diferido comercio={comercio_id}: '
                 f'{type(error).__name__}'
             )
 
     hilo = threading.Thread(
         target=_trabajo,
-        name=f'localis-csv-off-{comercio_id}',
+        name=f'localis-csv-img-{comercio_id}',
         daemon=True,
     )
     hilo.start()
@@ -534,105 +351,31 @@ def programar_asociacion_imagenes_inventario(comercio_id):
 
 
 def rellenar_imagenes_catalogo():
-    """
-    Rellena productos.imagen_url vacías: maestro → EAN → nombre (OFF).
-    Solo para tests o scripts manuales. No se invoca al arrancar la app.
-    """
-    try:
-        with get_db_connection(row_factory=sqlite3.Row, read_only=True) as conexion:
-            cursor = conexion.cursor()
-            cursor.execute(
-                """
-                SELECT p.id, p.nombre, p.descripcion, p.codigo_barras, p.imagen_url
-                FROM productos p
-                JOIN comercios c ON c.id = p.comercio_id
-                """
-            )
-            productos = [dict(fila) for fila in cursor.fetchall()]
-    except Exception as error:
-        _registrar_error_imagen('rellenar_imagenes_catalogo leer', error)
-        return 0
-
-    pendientes = []
-    for prod in productos:
-        if url_imagen_subida_storage_valida(prod.get('imagen_url')):
-            continue
-        if url_imagen_local_valida(prod.get('imagen_url')):
-            continue
-        pendientes.append(prod)
-    if not pendientes:
-        return 0
-
-    actualizaciones = []
-    for prod in pendientes:
-        producto_id = prod.get('id')
-        if not producto_id:
-            continue
-        try:
-            actual = imagen_url_almacenada(prod.get('imagen_url'))
-            if actual and not url_imagen_subida_storage_valida(actual):
-                espejo = espejar_url_oficial_en_storage(
-                    actual, prod.get('codigo_barras') or prod.get('nombre')
-                )
-                if espejo:
-                    actualizaciones.append((espejo, int(producto_id)))
-                    prod['imagen_url'] = espejo
-                    time.sleep(0.15)
-                    continue
-                continue
-            url_final = resolver_imagen_escritura(
-                imagen_manual=prod.get('imagen_url'),
-                codigo_barras=prod.get('codigo_barras'),
-                nombre=prod.get('nombre'),
-                descripcion=prod.get('descripcion'),
-                categoria=None,
-                buscar_oficial=True,
-                reproceso_maestro=False,
-            )
-            if not url_final:
-                continue
-            actualizaciones.append((url_final, int(producto_id)))
-            prod['imagen_url'] = url_final
-            time.sleep(0.15)
-        except Exception as error:
-            _registrar_error_imagen(
-                f"relleno id={producto_id}", error
-            )
-
-    if not actualizaciones:
-        return 0
-
-    try:
-        with get_db_connection() as conexion:
-            cursor = conexion.cursor()
-            cursor.executemany(
-                'UPDATE productos SET imagen_url = ? WHERE id = ?',
-                actualizaciones,
-            )
-            conexion.commit()
-    except Exception as error:
-        _registrar_error_imagen('rellenar_imagenes_catalogo persistir', error)
-        return 0
-    print(f'{_LOG_IMAGEN} relleno catalogo actualizados={len(actualizaciones)}')
-    return len(actualizaciones)
+    """No-op: el relleno masivo no corre en Gunicorn. Usar alta/edición o CSV."""
+    print(f'{_LOG_IMAGEN} relleno masivo desactivado (pago por consumo)')
+    return 0
 
 
 def programar_relleno_imagenes_catalogo():
-    """
-    Desactivado a propósito. El hilo de arranque saturaba Postgres
-    (SELECT masivo + UPDATE) y provocaba deadlocks con el listado público.
-    """
-    print(
-        f'{_LOG_IMAGEN} relleno catalogo inicio desactivado '
-        '(no se programa hilo al arrancar)'
-    )
+    print(f'{_LOG_IMAGEN} relleno catalogo desactivado al arrancar')
     return None
 
 
+def programar_descubrimiento_listado(productos, limite=None):
+    """No dispara APIs de pago al listar el catálogo."""
+    del productos, limite
+    return 0
+
+
 def programar_descubrimiento_producto(producto_id, categoria=None):
-    """Busca foto oficial de un producto recien creado, sin bloquear el alta."""
+    """Tras el alta: si no hay foto manual, consulta la API en segundo plano."""
     if not producto_id:
-        return
+        return False
+    pid = int(producto_id)
+    with _descubrimiento_lock:
+        if pid in _descubrimiento_en_vuelo:
+            return False
+        _descubrimiento_en_vuelo.add(pid)
 
     def _trabajo():
         try:
@@ -640,51 +383,37 @@ def programar_descubrimiento_producto(producto_id, categoria=None):
                 cursor = conexion.cursor()
                 cursor.execute(
                     """
-                    SELECT p.id, p.nombre, p.descripcion, p.codigo_barras, p.imagen_url,
-                           cat.nombre AS categoria_nombre
-                    FROM productos p
-                    JOIN comercios c ON c.id = p.comercio_id
-                    LEFT JOIN categorias cat ON cat.id = c.categoria_id
-                    WHERE p.id = ?
+                    SELECT id, nombre, descripcion, codigo_barras, imagen_url
+                    FROM productos
+                    WHERE id = ?
                     """,
-                    (int(producto_id),),
+                    (pid,),
                 )
                 prod = cursor.fetchone()
             if not prod:
                 return
             prod = dict(prod)
-            if imagen_url_almacenada(prod.get('imagen_url')):
+            if (prod.get('imagen_url') or '').strip():
                 return
-            url_final = resolver_imagen_escritura(
-                imagen_manual=prod.get('imagen_url'),
+            resultado = resolver_imagen_automatica(
                 codigo_barras=prod.get('codigo_barras'),
                 nombre=prod.get('nombre'),
                 descripcion=prod.get('descripcion'),
-                categoria=categoria or prod.get('categoria_nombre'),
-                buscar_oficial=True,
+                categoria=categoria,
             )
-            if not url_final:
-                print(f'{_LOG_IMAGEN} descubrimiento producto={producto_id} sin foto')
-                return
-            with get_db_connection() as conexion:
-                cursor = conexion.cursor()
-                cursor.execute(
-                    """
-                    UPDATE productos SET imagen_url = ?
-                    WHERE id = ?
-                      AND (imagen_url IS NULL OR TRIM(CAST(imagen_url AS TEXT)) = '')
-                    """,
-                    (url_final, int(producto_id)),
-                )
-                conexion.commit()
-            print(f'{_LOG_IMAGEN} descubrimiento producto={producto_id} ok')
+            _persistir_resultado_pipeline(pid, resultado)
+            print(
+                f'{_LOG_IMAGEN} pipeline producto={pid} fuente={resultado.fuente}'
+            )
         except Exception as error:
-            _registrar_error_imagen(
-                f'descubrimiento producto={producto_id}', error
-            )
+            _registrar_error_imagen(f'descubrimiento producto={pid}', error)
+        finally:
+            with _descubrimiento_lock:
+                _descubrimiento_en_vuelo.discard(pid)
 
     threading.Thread(
         target=_trabajo,
-        name=f'localis-foto-{producto_id}',
+        name=f'localis-foto-{pid}',
         daemon=True,
     ).start()
+    return True

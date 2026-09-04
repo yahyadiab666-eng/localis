@@ -82,33 +82,58 @@ def es_placeholder_local(valor):
     return '/static/img/placeholder-' in texto or _MARCA_HERO_APROBADO in texto
 
 
+def _espejo_local_de_storage(url):
+    """Si el espejo a disco existe, úsalo: Storage a veces devuelve 400 con URL persistida."""
+    from backend.utils import url_estatica_existe
+
+    nombre = str(url or '').rstrip('/').split('/')[-1]
+    if not nombre or '/' in nombre or '\\' in nombre:
+        return ''
+    local = f'/static/uploads/productos/{nombre}'
+    return local if url_estatica_existe(local) else ''
+
+
 def url_publica_producto_desde_bd(valor):
     """
     Convierte el valor persistido en URL para <img src>.
-    Solo Storage público o upload local. URLs remotas OFF/API → vacío (placeholder).
+    Manual: Storage o /static/uploads. Automático: URL HTTPS de la API.
     """
     try:
         texto = _texto_url(valor)
         if not texto:
             return ''
         texto = texto.replace('/subase/', '/storage/').replace('/Subase/', '/storage/')
+        if es_placeholder_local(texto) or texto == PLACEHOLDER_PRODUCTO:
+            return PLACEHOLDER_PRODUCTO
         if es_url_storage_publica(texto):
-            return texto
-        from backend.utils import url_imagen_local_valida, url_imagen_subida_storage_valida
+            local = _espejo_local_de_storage(texto)
+            return local or texto
+        from backend.utils import (
+            url_imagen_api_oficial_valida,
+            url_imagen_local_valida,
+            url_imagen_subida_storage_valida,
+        )
 
         storage = url_imagen_subida_storage_valida(texto)
         if storage:
-            return storage
+            local = _espejo_local_de_storage(storage)
+            return local or storage
         local = url_imagen_local_valida(texto)
         if local:
             return local
+        api = url_imagen_api_oficial_valida(texto)
+        if api:
+            return api
+        if texto.startswith('/static/img/placeholder'):
+            return texto
         if '://' in texto or texto.startswith('/'):
             return ''
         from backend.supabase_client import construir_url_publica_storage
 
         canonica = construir_url_publica_storage(texto.lstrip('/'))
         if es_url_storage_publica(canonica):
-            return canonica
+            local = _espejo_local_de_storage(canonica)
+            return local or canonica
         return ''
     except Exception as error:
         logger.error(
@@ -151,6 +176,13 @@ def url_mostrable(valor, permitir_estatico=False, permitir_hero=False):
         local = url_imagen_local_valida(texto)
         if local:
             return local
+        from backend.utils import url_imagen_api_oficial_valida
+
+        api = url_imagen_api_oficial_valida(texto)
+        if api:
+            return api
+        if texto.startswith('/static/img/placeholder'):
+            return texto
         if permitir_hero and es_hero_aprobado(texto):
             return texto
         if permitir_estatico and es_asset_estatico_local(texto):
@@ -220,7 +252,7 @@ def imagen_fail_safe(placeholder=PLACEHOLDER_PRODUCTO, permitir_estatico=False, 
 
 @imagen_fail_safe(placeholder=PLACEHOLDER_PRODUCTO)
 def url_imagen_producto(producto=None, imagen_url=None, codigo_barras=None):
-    """URL persistida o catálogo maestro por EAN. Sin OpenFoodFacts."""
+    """URL persistida (manual o API). Sin llamadas de red."""
     if producto is not None:
         if imagen_url is None:
             imagen_url = valor_campo(producto, *CANDIDATOS_IMAGEN_PRODUCTO)
@@ -230,16 +262,15 @@ def url_imagen_producto(producto=None, imagen_url=None, codigo_barras=None):
     if directa:
         return directa
     try:
-        from backend.image_manager import resolver_imagen_catalogo
+        from backend.catalogo_maestro import imagen_maestro_por_codigo
+        from backend.utils import imagen_url_almacenada, url_imagen_api_oficial_valida
 
-        maestro = resolver_imagen_catalogo(
-            imagen_url=imagen_url,
-            codigo_barras=codigo_barras,
-        )
+        maestro = imagen_maestro_por_codigo(codigo_barras)
+        cached = imagen_url_almacenada(maestro) or url_imagen_api_oficial_valida(maestro)
     except Exception as error:
         logger.error('url_imagen_producto maestro: %s', error, exc_info=True)
-        maestro = None
-    return url_publica_producto_desde_bd(maestro)
+        cached = None
+    return url_publica_producto_desde_bd(cached)
 
 
 url_imagen_producto_segura = url_imagen_producto

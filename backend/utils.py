@@ -49,14 +49,19 @@ _MARCADORES_URL_ARTIFICIAL = (
     '/static/images/',
     '/static/img/placeholder',
 )
-_HOSTS_CATALOGO_OFICIAL = (
-    'images.openfoodfacts.org',
-    'static.openfoodfacts.org',
-    'world.openfoodfacts.org',
-    'openfoodfacts.org',
-    'openproductsfacts.org',
-    'openbeautyfacts.org',
-    'openpetfoodfacts.org',
+_HOSTS_API_RECHAZADOS = (
+    'images.google',
+    'google.com/imgres',
+    'bing.com',
+    'wsrv.nl',
+    'wikimedia',
+    'unsplash.com',
+    'pexels.com',
+    'ejemplo.com',
+    'example.com',
+    'openfoodfacts',
+    'openproductsfacts',
+    'openbeautyfacts',
 )
 
 
@@ -116,37 +121,30 @@ def url_imagen_externa_valida(valor):
 
 def url_imagen_catalogo_valida(valor):
     """
-    URL mostrable/persistible del catálogo: Storage público o foto oficial OFF.
-    Nunca placeholder, Pexels genérico ni /static/.
+    URL mostrable: Storage, upload local o HTTPS de API de catálogo.
     """
     storage = url_imagen_subida_storage_valida(valor)
     if storage:
         return storage
+    local = url_imagen_local_valida(valor)
+    if local:
+        return local
+    return url_imagen_api_oficial_valida(valor)
+
+
+def url_imagen_api_oficial_valida(valor):
+    """HTTPS de API de códigos de barras. No descarga el archivo."""
     texto = texto_campo_imagen(valor, default=None)
-    if not texto or es_imagen_generica(texto):
+    if not texto or es_imagen_generica(texto) or es_url_imagen_artificial(texto):
         return None
     if not texto.lower().startswith('https://'):
         return None
     lower = texto.lower()
-    if any(marca in lower for marca in ('placeholder', 'no-image', 'default-product', '.svg')):
+    if any(host in lower for host in _HOSTS_API_RECHAZADOS):
         return None
-    if any(host in lower for host in _HOSTS_CATALOGO_OFICIAL):
-        if any(bad in lower for bad in ('/user/', 'avatar', 'no-image', 'placeholder')):
-            return None
-        if '_small' in lower:
-            return None
-        return texto
-    if 'wsrv.nl' in lower and any(
-        host in lower
-        for host in (
-            'openfoodfacts',
-            'openproductsfacts',
-            'openbeautyfacts',
-            'openpetfoodfacts',
-        )
-    ):
-        return texto
-    return None
+    if '/storage/v1/object/public/' in lower:
+        return None
+    return texto
 
 
 # Alias histórico
@@ -186,13 +184,17 @@ def url_imagen_usable(valor):
 
 
 def imagen_url_almacenada(valor):
-    """Valor persistible: solo Storage o upload local (nunca URL remota OFF/API)."""
+    """Foto manual persistible: Storage o /static/uploads. Sin URL de API."""
     return url_imagen_subida_storage_valida(valor) or url_imagen_local_valida(valor)
 
 
 def url_imagen_para_vista(valor):
-    """URL para <img src>. Siempre str: catálogo usable o cadena vacía (nunca None)."""
-    return url_imagen_catalogo_valida(valor) or ''
+    """URL para <img src>: manual, API de catálogo o vacío."""
+    return (
+        imagen_url_almacenada(valor)
+        or url_imagen_api_oficial_valida(valor)
+        or ''
+    )
 
 
 def imagen_url_para_persistir(valor):

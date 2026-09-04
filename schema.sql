@@ -101,7 +101,8 @@ CREATE TABLE IF NOT EXISTS productos (
     nombre TEXT NOT NULL,
     precio_usd REAL NOT NULL, 
     descripcion TEXT,
-    imagen_url TEXT, -- URL pública externa, ruta /static/ o asset estático
+    imagen_url TEXT, -- URL pública de Storage o /static/uploads/
+    imagen_fuente TEXT, -- openfoodfacts | override_manual | placeholder
     stock INTEGER DEFAULT 0,
     codigo_barras TEXT,
     FOREIGN KEY (comercio_id) REFERENCES comercios(id) ON DELETE CASCADE
@@ -209,3 +210,30 @@ CREATE INDEX IF NOT EXISTS idx_productos_tienda ON productos(comercio_id);
 CREATE INDEX IF NOT EXISTS idx_tiendas_estado ON comercios(estado_pago, plan_id);
 CREATE INDEX IF NOT EXISTS idx_pagos_tienda ON pagos(tienda_id);
 CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_comercio ON solicitudes_pago(comercio_id);
+
+-- ==========================================
+-- 12. OVERRIDES MANUALES DE IMAGEN
+-- ==========================================
+CREATE TABLE IF NOT EXISTS product_image_overrides (
+    ean TEXT PRIMARY KEY,
+    image_url TEXT NOT NULL,
+    marca TEXT,
+    verificado_por TEXT,
+    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ==========================================
+-- 13. LOG DEL PIPELINE DE IMÁGENES
+-- ==========================================
+CREATE TABLE IF NOT EXISTS image_pipeline_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ean TEXT,
+    producto_id INTEGER,
+    resultado TEXT NOT NULL,
+    fuente TEXT,
+    motivo_descarte TEXT,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_image_pipeline_log_ean ON image_pipeline_log(ean);
+CREATE INDEX IF NOT EXISTS idx_image_pipeline_log_timestamp ON image_pipeline_log(timestamp);
+CREATE INDEX IF NOT EXISTS idx_image_pipeline_log_resultado ON image_pipeline_log(resultado);

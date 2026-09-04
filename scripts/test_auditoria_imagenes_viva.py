@@ -28,7 +28,7 @@ CASOS = (
         'categoria': 'Alimentos',
         'descripcion': 'crema de avellanas',
         'rubro': 'alimentos',
-        'espera': 'oficial',
+        'espera': 'oficial_o_placeholder',
     },
     {
         'nombre': 'Harina PAN 1kg',
@@ -36,7 +36,7 @@ CASOS = (
         'categoria': 'Alimentos',
         'descripcion': 'harina de maiz precocida',
         'rubro': 'alimentos',
-        'espera': 'oficial',
+        'espera': 'oficial_o_placeholder',
     },
     {
         'nombre': 'Martillo de uña',
@@ -272,21 +272,24 @@ def _lienzo_estudio(data):
 
 
 def _probar_fail_safe(errores):
-    print('\n=== Fail-safe IA ===')
+    print('\n=== Fail-safe pipeline ===')
     from unittest.mock import patch
 
-    from backend.image_ai import aislar_producto_webp, procesar_descarga_oficial
+    from services.smart_image_pipeline import PLACEHOLDER_PRODUCTO, resolver_imagen_automatica
 
-    _ok(aislar_producto_webp(b'') is None, 'bytes vacios -> None', errores)
-    _ok(aislar_producto_webp(b'no-es-imagen') is None, 'basura -> None', errores)
-    with patch('backend.image_ai._aislar_bytes_sync', side_effect=RuntimeError('boom')):
-        _ok(aislar_producto_webp(b'\x89PNG') is None, 'excepcion rembg -> None', errores)
-    with patch('backend.image_ai.ia_estudio_habilitada', return_value=False):
-        _ok(
-            procesar_descarga_oficial(b'\x89PNG', 'qa') is None,
-            'IA desactivada -> None',
-            errores,
-        )
+    with patch(
+        'services.smart_image_pipeline.hay_proveedor_pagado', return_value=False
+    ):
+        r = resolver_imagen_automatica(nombre='Martillo', categoria='Ferretería')
+    _ok(r.es_placeholder and r.url == PLACEHOLDER_PRODUCTO, 'sin API key -> placeholder', errores)
+
+    with patch(
+        'services.smart_image_pipeline.hay_proveedor_pagado', return_value=True
+    ), patch(
+        'services.smart_image_pipeline._get_json', side_effect=RuntimeError('boom')
+    ):
+        r2 = resolver_imagen_automatica(codigo_barras='0000000000000', nombre='X')
+    _ok(r2.es_placeholder, 'excepcion de red -> placeholder', errores)
 
 
 def _probar_http_no_bloquea(errores, producto_id, categoria):
@@ -332,13 +335,12 @@ def main() -> int:
         _limpiar()
         _probar_fail_safe(errores)
         usuario_id, comercio_id = _crear_sandbox()
-        print('\n=== Alta + worker + estudio ===')
-        from backend.image_ai import ia_estudio_habilitada
+        print('\n=== Alta + worker ===')
         from backend.image_lookup import programar_descubrimiento_producto
-        from backend.utils import imagen_url_almacenada
+        from backend.utils import imagen_url_almacenada, url_imagen_api_oficial_valida
 
-        ia_ok = ia_estudio_habilitada()
-        print(f'  rembg instalado={ia_ok}')
+        def _persistible(url):
+            return bool(imagen_url_almacenada(url) or url_imagen_api_oficial_valida(url))
 
         for caso in CASOS:
             print(f'\n--- {caso["rubro"]}: {caso["nombre"]} ---')
@@ -355,7 +357,7 @@ def main() -> int:
                 continue
 
             url = _esperar_url(producto_id)
-            if not imagen_url_almacenada(url) and espera == 'oficial':
+            if not _persistible(url) and espera == 'oficial':
                 print('  reintento worker...')
                 programar_descubrimiento_producto(
                     producto_id, categoria=caso['categoria']
@@ -371,22 +373,9 @@ def main() -> int:
                 )
                 _probar_vista(errores, producto_id, url, espera_placeholder=True)
                 continue
-            _ok(bool(imagen_url_almacenada(url)), f'{caso["rubro"]} URL persistible', errores)
+            _ok(bool(_persistible(url)), f'{caso["rubro"]} URL persistible', errores)
             _ok(not _es_placeholder(url), f'{caso["rubro"]} no es placeholder', errores)
             _probar_vista(errores, producto_id, url)
-            data = _descargar_bytes(url) if url else None
-            _ok(bool(data) and len(data) > 80, f'{caso["rubro"]} bytes descargables', errores)
-            if data:
-                from PIL import Image
-
-                img = Image.open(io.BytesIO(data))
-                _ok(
-                    img.size[0] >= 200 and img.size[1] >= 200,
-                    f'{caso["rubro"]} resolucion {img.size}',
-                    errores,
-                )
-                estudio_ok, detalle = _lienzo_estudio(data)
-                _ok(estudio_ok, f'{caso["rubro"]} estudio IA ({detalle})', errores)
     finally:
         _limpiar(usuario_id=usuario_id, comercio_id=comercio_id)
         if usuario_id:

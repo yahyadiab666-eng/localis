@@ -81,42 +81,25 @@ def main():
     recortado = recortar_mensaje_importacion('x' * 5000)
     _ok(len(recortado) <= 1400, 'mensaje de flash recortado')
 
-    import backend.image_manager as im
-    from backend.image_lookup import programar_asociacion_imagenes_inventario
+    from backend.image_lookup import (
+        preparar_mapa_imagenes_importacion,
+        programar_asociacion_imagenes_inventario,
+    )
     from backend.inventory_import import _imagen_final_importacion
 
-    llamadas_off = []
-    original_get = im.requests.get
-
-    def _off_prohibido(*_a, **_k):
-        llamadas_off.append(1)
-        raise AssertionError('OpenFoodFacts no debe consultarse en la ruta crítica del CSV')
-
-    im.requests.get = _off_prohibido
-    try:
-        mapa = im.preparar_mapa_imagenes_importacion(
-            [
-                {
-                    'nombre': 'Harina',
-                    'codigo_barras': '7590000040110',
-                    'imagen_url': None,
-                }
-            ],
-            snapshot_imagenes={},
-        )
-        _ok(llamadas_off == [], 'preparar_mapa de importación no llama a OFF')
-        url = _imagen_final_importacion(None, '7590000040110', {}, mapa or {})
-        _ok(url is None or str(url).startswith('http'), 'INSERT usa solo mapa local')
-        _ok(llamadas_off == [], 'INSERT no llama a OFF')
-        local = im.resolver_imagen_escritura(
-            codigo_barras='7590000040110',
-            mapa_maestro={},
-            buscar_oficial=False,
-        )
-        _ok(local is None or str(local).startswith('http'), 'resolver local no exige OFF')
-        _ok(llamadas_off == [], 'resolver(buscar_oficial=False) no llama a OFF')
-    finally:
-        im.requests.get = original_get
+    mapa = preparar_mapa_imagenes_importacion(
+        [
+            {
+                'nombre': 'Harina',
+                'codigo_barras': '7590000040110',
+                'imagen_url': None,
+            }
+        ],
+        snapshot_imagenes={},
+    )
+    _ok(mapa == {}, 'preparar_mapa de importación no inventa fotos')
+    url = _imagen_final_importacion(None, '7590000040110', {}, mapa or {})
+    _ok(url is None, 'INSERT CSV sin foto manual queda vacío (API diferida)')
 
     hilo = programar_asociacion_imagenes_inventario(0)
     _ok(hilo.daemon, 'asociación de imágenes corre en hilo daemon')

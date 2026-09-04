@@ -229,12 +229,12 @@ def _probar_integridad_sin_urls_quemadas() -> tuple[bool, str]:
     prohibido = 'openfoodfacts.org/images/products/'
     toca = []
     for rel in (
-        'backend/image_manager.py',
         'backend/image_lookup.py',
         'backend/catalogo_maestro.py',
         'backend/stores.py',
         'utils/images.py',
         'main.py',
+        'services/smart_image_pipeline.py',
     ):
         ruta = RAIZ / rel
         if not ruta.is_file():

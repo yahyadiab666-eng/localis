@@ -15,6 +15,7 @@ from backend.supabase_client import (
 )
 from backend.utils import (
     normalizar_codigo_barras,
+    url_imagen_api_oficial_valida,
     url_imagen_local_valida,
     url_imagen_subida_storage_valida,
 )
@@ -57,8 +58,12 @@ def _completar_con_semilla(mapa, codigos):
 
 
 def _url_maestro_valida(valor):
-    """Solo Storage o upload local. Nunca URLs remotas OFF/API."""
-    return url_imagen_subida_storage_valida(valor) or url_imagen_local_valida(valor)
+    """Storage/local (manual) o URL HTTPS de API de catálogo."""
+    return (
+        url_imagen_subida_storage_valida(valor)
+        or url_imagen_local_valida(valor)
+        or url_imagen_api_oficial_valida(valor)
+    )
 
 
 def _error_imagen(mensaje, error=None):
@@ -497,10 +502,5 @@ def sembrar_catalogo_maestro_imagenes(*, rellenar=False):
     except Exception as error:
         _error_imagen('politicas storage', error)
     if rellenar:
-        try:
-            from backend.image_lookup import rellenar_imagenes_catalogo
-
-            rellenar_imagenes_catalogo()
-        except Exception as error:
-            _error_imagen('relleno catalogo', error)
+        print(f'{_LOG} relleno masivo omitido (pipeline de pago por consumo)')
     return True

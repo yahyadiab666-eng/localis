@@ -7,13 +7,39 @@
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}?v=catalogo-img">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}">
+  <script>
+    window.PLACEHOLDER_PRODUCTO = {{ placeholder_producto|tojson }};
+    window.rescatarImagenProducto = function (img) {
+      if (!img) return;
+      img.onerror = null;
+      var fallback = window.PLACEHOLDER_PRODUCTO || '/static/img/placeholder-producto.svg';
+      var wrap = img.closest && img.closest('.localis-img-producto-wrap');
+      if (img.getAttribute('src') !== fallback) {
+        img.src = fallback;
+        if (wrap) wrap.classList.add('localis-img-producto-wrap--vacio');
+      }
+    };
+  </script>
   <style>
     body { font-family: 'DM Sans', sans-serif; }
     .font-display { font-family: 'Fraunces', serif; }
     .toast-copiado { animation: fadeOut 2s forwards; }
     @keyframes fadeOut { 0%,70%{opacity:1} 100%{opacity:0} }
+    .localis-img-producto-wrap {
+      height: 180px !important;
+      min-height: 180px !important;
+      max-height: 180px !important;
+      aspect-ratio: unset !important;
+    }
+    .localis-img-producto-wrap img,
+    .localis-img-producto {
+      position: absolute !important;
+      width: 100% !important;
+      height: 100% !important;
+      object-fit: contain !important;
+    }
   </style>
 </head>
 <body class="min-h-screen" style="background: rgb(254, 251, 246);">
@@ -107,7 +133,8 @@
         {% for producto in productos %}
           <div class="card-hover card-producto-mobile rounded-xl overflow-hidden bg-white shadow border border-stone-100 flex flex-col h-full">
             {% set img_producto = producto|url_imagen_producto %}
-            <div class="localis-img-producto-wrap{% if not img_producto %} localis-img-producto-wrap--vacio{% endif %}">
+            {% set es_placeholder = (not img_producto) or (img_producto == placeholder_producto) %}
+            <div class="localis-img-producto-wrap{% if es_placeholder %} localis-img-producto-wrap--vacio{% endif %}">
               <img src="{{ img_producto or placeholder_producto }}"
                    alt="{{ producto.nombre }}" width="400" height="180"
                    data-producto-id="{{ producto.id }}"

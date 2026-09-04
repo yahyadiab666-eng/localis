@@ -105,6 +105,9 @@ TABLAS_PERMITIDAS = frozenset({
     'logs_auditoria',
     'intentos_login',
     'solicitudes_pago',
+    'catalogo_maestro_imagenes',
+    'product_image_overrides',
+    'image_pipeline_log',
 })
 
 # Columnas que deben existir en tablas ya creadas (ADD COLUMN IF NOT EXISTS).
@@ -168,8 +171,24 @@ COLUMNAS_ESQUEMA = {
         ('precio_usd', 'DOUBLE PRECISION'),
         ('descripcion', 'TEXT'),
         ('imagen_url', 'TEXT'),
+        ('imagen_fuente', 'TEXT'),
         ('stock', 'INTEGER DEFAULT 0'),
         ('codigo_barras', 'TEXT'),
+    ],
+    'product_image_overrides': [
+        ('ean', 'TEXT'),
+        ('image_url', 'TEXT'),
+        ('marca', 'TEXT'),
+        ('verificado_por', 'TEXT'),
+        ('fecha', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+    ],
+    'image_pipeline_log': [
+        ('ean', 'TEXT'),
+        ('producto_id', 'INTEGER'),
+        ('resultado', 'TEXT'),
+        ('fuente', 'TEXT'),
+        ('motivo_descarte', 'TEXT'),
+        ('timestamp', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
     ],
     'soporte_y_reportes': [
         ('usuario_id', 'INTEGER'),
@@ -969,6 +988,7 @@ def _crear_tabla_productos(cursor):
             precio_usd DOUBLE PRECISION NOT NULL,
             descripcion TEXT,
             imagen_url TEXT,
+            imagen_fuente TEXT,
             stock INTEGER DEFAULT 0,
             codigo_barras TEXT
         )
@@ -983,6 +1003,36 @@ def _crear_tabla_catalogo_maestro_imagenes(cursor):
             codigo_barras TEXT PRIMARY KEY,
             url_imagen TEXT NOT NULL,
             updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+        """
+    )
+
+
+def _crear_tabla_product_image_overrides(cursor):
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS product_image_overrides (
+            ean TEXT PRIMARY KEY,
+            image_url TEXT NOT NULL,
+            marca TEXT,
+            verificado_por TEXT,
+            fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
+def _crear_tabla_image_pipeline_log(cursor):
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS image_pipeline_log (
+            id SERIAL PRIMARY KEY,
+            ean TEXT,
+            producto_id INTEGER,
+            resultado TEXT NOT NULL,
+            fuente TEXT,
+            motivo_descarte TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
@@ -1090,6 +1140,8 @@ def _crear_tablas(cursor):
         ('sucursales', _crear_tabla_sucursales),
         ('productos', _crear_tabla_productos),
         ('catalogo_maestro_imagenes', _crear_tabla_catalogo_maestro_imagenes),
+        ('product_image_overrides', _crear_tabla_product_image_overrides),
+        ('image_pipeline_log', _crear_tabla_image_pipeline_log),
         ('soporte_y_reportes', _crear_tabla_soporte_y_reportes),
         ('configuracion_sistema', _crear_tabla_configuracion_sistema),
         ('logs_auditoria', _crear_tabla_logs_auditoria),
@@ -1109,6 +1161,7 @@ def _asegurar_indices_unicos(cursor):
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_categorias_nombre ON categorias(nombre)',
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_planes_codigo ON planes(codigo)',
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_catalogo_maestro_codigo ON catalogo_maestro_imagenes(codigo_barras)',
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_product_image_overrides_ean ON product_image_overrides(ean)',
     ]
     for ddl in indices:
         _ejecutar_indice_si_falta(cursor, ddl)
@@ -1241,6 +1294,9 @@ def _crear_indices(cursor):
         'CREATE INDEX IF NOT EXISTS idx_intentos_correo ON intentos_login(correo_intentado)',
         'CREATE INDEX IF NOT EXISTS idx_productos_nombre ON productos(nombre)',
         'CREATE INDEX IF NOT EXISTS idx_productos_codigo_barras ON productos(codigo_barras)',
+        'CREATE INDEX IF NOT EXISTS idx_image_pipeline_log_ean ON image_pipeline_log(ean)',
+        'CREATE INDEX IF NOT EXISTS idx_image_pipeline_log_timestamp ON image_pipeline_log(timestamp DESC)',
+        'CREATE INDEX IF NOT EXISTS idx_image_pipeline_log_resultado ON image_pipeline_log(resultado)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_nombre ON comercios(nombre)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_categoria ON comercios(categoria_id)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_visible ON comercios(visible)',

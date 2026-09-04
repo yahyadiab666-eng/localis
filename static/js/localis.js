@@ -18,8 +18,10 @@
     if (!img) return;
     img.onerror = null;
     var fallback = window.PLACEHOLDER_PRODUCTO;
+    var wrap = img.closest('.localis-img-producto-wrap');
     if (img.getAttribute('src') !== fallback) {
       img.src = fallback;
+      if (wrap) wrap.classList.add('localis-img-producto-wrap--vacio');
       return;
     }
     img.removeAttribute('src');

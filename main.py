@@ -238,6 +238,9 @@ try:
     app.config['SUPABASE_CLIENT'] = obtener_cliente_storage()
     app.config['SUPABASE_BUCKET_IMAGENES'] = SUPABASE_BUCKET_IMAGENES
     app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_BYTES
+    app.config['TEMPLATES_AUTO_RELOAD'] = True
+    app.jinja_env.auto_reload = True
+    app.jinja_env.cache.clear()
     csrf = CSRFProtect(app)
     registrar_manejadores_errores(app)
 except Exception:
@@ -278,6 +281,7 @@ def _injectar_placeholders_imagen():
         'placeholder_banner': DEFAULT_BANNER_URL,
         'hero_local': DEFAULT_BANNER_URL,
         'default_banner': DEFAULT_BANNER_URL,
+        'asset_v': 'catalogo-180',
     }
 
 
@@ -495,7 +499,7 @@ def procesar_logo_comercio(file_storage, prefijo):
 def procesar_imagen_para_producto(
     file_storage, codigo_barras, nombre, descripcion, comercio_id
 ):
-    """Archivo a Storage o cascada oficial. Retorna (url, aviso)."""
+    """Archivo a Storage/local. Sin APIs de pago."""
     return persistir_imagen_producto_hibrida(
         file_storage=file_storage,
         codigo_barras=codigo_barras,

@@ -55,6 +55,24 @@ def _validar_url_publica_subida(url):
     return valida
 
 
+def url_publica_storage_accesible(url, timeout=6.0):
+    """True si el objeto público existe y el cuerpo es una imagen real."""
+    valida = url_imagen_subida_storage_valida(url)
+    if not valida:
+        return False
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True) as http:
+            respuesta = http.get(valida)
+        if respuesta.status_code != 200:
+            return False
+        tipo = (respuesta.headers.get('content-type') or '').lower()
+        if not tipo.startswith('image/'):
+            return False
+        return len(respuesta.content or b'') > 200
+    except Exception:
+        return False
+
+
 def _mensaje_cliente_no_configurado() -> str:
     if not SUPABASE_URL_VALIDA or not SUPABASE_URL:
         return (

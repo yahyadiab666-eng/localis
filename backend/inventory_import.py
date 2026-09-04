@@ -768,7 +768,7 @@ def persistir_importacion_por_lotes(comercio_id, factory_generador_lotes):
     Las imágenes del INSERT son solo locales (CSV, snapshot, catálogo maestro).
     """
     from backend.db import ejecutar_con_reintentos_bd, get_db_connection
-    from backend.image_manager import preparar_mapa_imagenes_importacion
+    from backend.image_lookup import preparar_mapa_imagenes_importacion
 
     productos_por_codigo = {}
     productos_sin_codigo = []

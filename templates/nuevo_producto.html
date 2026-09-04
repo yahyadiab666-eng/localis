@@ -123,8 +123,8 @@
 
           <!-- Imagen del Producto -->
           {% set img_producto = producto|url_imagen_producto if producto else placeholder_producto %}
-          {% set img_url_form = producto.imagen_url if producto and producto.imagen_url and producto.imagen_url.startswith('https://') else '' %}
-          {% set img_propia = producto and producto.imagen_url and (producto.imagen_url.startswith('https://') or producto.imagen_url.startswith('/static/uploads/')) %}
+          {% set img_url_form = img_producto if img_producto and '/storage/v1/object/public/' in img_producto else '' %}
+          {% set img_propia = img_producto and (('/storage/v1/object/public/' in img_producto) or (img_producto.startswith('/static/uploads/'))) %}
           <div>
             <label for="imagen" class="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-1.5">Imagen del Producto (Opcional)</label>
 

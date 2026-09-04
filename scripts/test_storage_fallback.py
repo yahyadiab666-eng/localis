@@ -21,9 +21,17 @@ def _jpeg_prueba():
 
 
 def main():
+    from dotenv import load_dotenv
     from werkzeug.datastructures import FileStorage
 
-    from backend.supabase_client import SUPABASE_URL, construir_url_publica_storage
+    load_dotenv(RAIZ / '.env', override=True)
+
+    from backend.supabase_client import (
+        SUPABASE_SERVICE_ROLE_KEY,
+        SUPABASE_URL,
+        clave_es_service_role,
+        construir_url_publica_storage,
+    )
     from backend.supabase_storage import (
         SupabaseUploadError,
         _persistir_con_respaldo,
@@ -56,16 +64,22 @@ def main():
             errores.append('imagen_url_almacenada no reconoce URL de Storage (sin env)')
 
     try:
-        _persistir_con_respaldo(
+        url_sin_sdk = _persistir_con_respaldo(
             b'fallback-bytes',
             'integrity_no_client.webp',
             'image/webp',
             'productos',
             supabase_client=None,
         )
-        errores.append(
-            '_persistir_con_respaldo sin cliente Supabase deberia lanzar SupabaseUploadError'
-        )
+        if clave_es_service_role(SUPABASE_SERVICE_ROLE_KEY):
+            if not imagen_url_almacenada(url_sin_sdk):
+                errores.append(
+                    f'sin SDK, con service_role, no devolvio Storage: {url_sin_sdk!r}'
+                )
+        else:
+            errores.append(
+                '_persistir_con_respaldo sin service_role deberia lanzar SupabaseUploadError'
+            )
     except SupabaseUploadError as error:
         mensaje = str(error).lower()
         if 'supabase' not in mensaje and 'storage' not in mensaje:
