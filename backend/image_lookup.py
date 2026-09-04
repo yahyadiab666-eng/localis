@@ -145,14 +145,35 @@ def url_imagen_con_respaldo(imagen_url=None, codigo_barras=None):
 
 
 def imagen_urls_para_catalogo(productos):
-    """Lectura: no llama APIs. Enriquece en memoria con la URL persistida."""
+    """Lectura: no llama APIs. Enriquece en memoria con la URL persistida o catálogo maestro."""
     if not productos:
         return productos
     try:
+        codigos_faltantes = set()
         for prod in productos:
             mostrable = _url_mostrable_persistida(prod.get('imagen_url'))
             if mostrable:
                 prod['imagen_url'] = mostrable
+            else:
+                codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
+                if codigo:
+                    codigos_faltantes.add(codigo)
+
+        if codigos_faltantes:
+            from backend.catalogo_maestro import mapa_imagenes_maestro
+            mapa_maestro = mapa_imagenes_maestro(list(codigos_faltantes))
+            for prod in productos:
+                if not prod.get('imagen_url'):
+                    codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
+                    if codigo and codigo in mapa_maestro:
+                        prod['imagen_url'] = mapa_maestro[codigo]
+                    else:
+                        prod['imagen_url'] = PLACEHOLDER_PRODUCTO
+        else:
+            for prod in productos:
+                if not prod.get('imagen_url'):
+                    prod['imagen_url'] = PLACEHOLDER_PRODUCTO
+
         return productos
     except Exception as error:
         _registrar_error_imagen('imagen_urls_para_catalogo', error)
