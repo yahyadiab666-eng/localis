@@ -153,7 +153,7 @@ def _extraer_url_de_nodo(nodo):
             hallada = _extraer_url_de_nodo(nodo.get(clave))
             if hallada:
                 return hallada
-    for clave in ('images', 'item_attributes', 'item', 'product', 'products', 'items'):
+    for clave in ('images', 'item_attributes', 'item', 'product', 'products', 'items', 'Data', 'data', 'result', 'results'):
         if clave in nodo:
             hallada = _extraer_url_de_nodo(nodo.get(clave))
             if hallada:
@@ -191,7 +191,7 @@ def _get_json(url, *, headers=None, params=None):
 
 
 def _clave_spider():
-    return (os.getenv('BARCODE_SPIDER_API_KEY') or os.getenv('BARCODESPIDER_TOKEN') or '').strip()
+    return (os.getenv('BARCODE_SPIDER_API_KEY') or '').strip()
 
 
 def _clave_upcitemdb():
@@ -211,18 +211,10 @@ def _buscar_barcode_spider_ean(ean):
     if not token:
         return None
     datos = _get_json(
-        'https://api.barcodespider.com/v1/lookup',
-        headers={'token': token},
-        params={'upc': ean, 'token': token},
-    )
-    url = _extraer_url_de_nodo(datos)
-    if url:
-        return url
-    datos_v2 = _get_json(
         f'https://api.barcodespider.com/v2/products/{ean}',
-        headers={'Authorization': f'Bearer {token}'},
+        params={'key': token},
     )
-    return _extraer_url_de_nodo(datos_v2)
+    return _extraer_url_de_nodo(datos)
 
 
 def _buscar_barcode_spider_nombre(consulta):
@@ -230,9 +222,8 @@ def _buscar_barcode_spider_nombre(consulta):
     if not token:
         return None
     datos = _get_json(
-        'https://api.barcodespider.com/v1/search',
-        headers={'token': token},
-        params={'s': consulta, 'token': token},
+        'https://api.barcodespider.com/v2/products',
+        params={'key': token, 'query': consulta},
     )
     return _extraer_url_de_nodo(datos)
 
