@@ -11,8 +11,8 @@ Prioridad:
 
 Credenciales (ninguna mensualidad fija en este código; cada proveedor cobra créditos):
   BARCODE_SPIDER_API_KEY
-  UPCITEMDB_API_KEY          (opcional)
-  BARCODE_LOOKUP_API_KEY     (opcional)
+  UPCITEMDB_API_KEY         (opcional)
+  BARCODE_LOOKUP_API_KEY    (opcional)
 """
 
 from __future__ import annotations
@@ -67,6 +67,7 @@ _HOSTS_BLOQUEADOS = (
     'example.com',
     'openfoodfacts',
 )
+
 _STOP = frozenset({
     'de', 'la', 'el', 'los', 'las', 'del', 'y', 'en', 'con', 'un', 'una',
     'kg', 'g', 'l', 'ml', 'und',
