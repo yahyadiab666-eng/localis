@@ -376,3 +376,43 @@ img.localis-img-producto-thumb--vacio:not([src]) {
     padding: 1.25rem !important;
   }
 }
+
+/* =========================================================
+   Estados de carga (loading) en botones que llaman al backend
+   ========================================================= */
+.localis-btn-cargando {
+  position: relative;
+  cursor: progress !important;
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+.localis-btn-cargando > * {
+  visibility: hidden;
+}
+
+.localis-btn-spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin: -0.55rem 0 0 -0.55rem;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 9999px;
+  visibility: visible;
+  animation: localis-spin 0.7s linear infinite;
+}
+
+@keyframes localis-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .localis-btn-spinner {
+    animation-duration: 1.4s;
+  }
+}

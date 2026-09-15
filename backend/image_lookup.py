@@ -8,6 +8,7 @@ Imágenes de producto: subida manual (Storage/local) y pipeline automático dife
 
 from __future__ import annotations
 
+from services import smart_image_pipeline  
 import os
 import sqlite3
 import threading
@@ -391,12 +392,16 @@ def programar_descubrimiento_listado(productos, limite=None):
 def programar_descubrimiento_producto(producto_id, categoria=None):
     """Tras el alta: si no hay foto manual, consulta la API en segundo plano."""
     if not producto_id:
+        print(f'{_LOG_IMAGEN} descubrimiento omitido: producto_id vacío')
         return False
     pid = int(producto_id)
     with _descubrimiento_lock:
         if pid in _descubrimiento_en_vuelo:
+            print(f'{_LOG_IMAGEN} descubrimiento producto={pid} ya en vuelo, omitido')
             return False
         _descubrimiento_en_vuelo.add(pid)
+
+    print(f'{_LOG_IMAGEN} descubrimiento programado producto={pid} categoria={categoria!r}')
 
     def _trabajo():
         try:
@@ -412,19 +417,31 @@ def programar_descubrimiento_producto(producto_id, categoria=None):
                 )
                 prod = cursor.fetchone()
             if not prod:
+                print(f'{_LOG_IMAGEN} descubrimiento producto={pid}: no encontrado en BD')
                 return
             prod = dict(prod)
             if (prod.get('imagen_url') or '').strip():
+                print(
+                    f'{_LOG_IMAGEN} descubrimiento producto={pid}: '
+                    f'ya tiene imagen_url, pipeline omitido'
+                )
                 return
+            ean = normalizar_codigo_barras(prod.get('codigo_barras'))
+            nombre = prod.get('nombre')
+            print(
+                f'{_LOG_IMAGEN} pipeline inicio producto={pid} '
+                f'ean={ean!r} nombre={nombre!r}'
+            )
             resultado = resolver_imagen_automatica(
                 codigo_barras=prod.get('codigo_barras'),
                 nombre=prod.get('nombre'),
                 descripcion=prod.get('descripcion'),
                 categoria=categoria,
             )
-            _persistir_resultado_pipeline(pid, resultado)
+            persistido = _persistir_resultado_pipeline(pid, resultado)
             print(
-                f'{_LOG_IMAGEN} pipeline producto={pid} fuente={resultado.fuente}'
+                f'{_LOG_IMAGEN} pipeline producto={pid} fuente={resultado.fuente} '
+                f'url={resultado.url!r} persistido={persistido}'
             )
         except Exception as error:
             _registrar_error_imagen(f'descubrimiento producto={pid}', error)

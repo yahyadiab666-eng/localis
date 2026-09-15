@@ -77,9 +77,10 @@
           </p>
         </div>
 
-        <form id="{% if producto %}form-producto-editar{% else %}form-producto-api{% endif %}"
+                        <form id="{% if producto %}form-producto-editar{% else %}form-producto-api{% endif %}"
               action="{{ url_for('editar_producto', producto_id=producto.id) if producto else url_for('nuevo_producto') }}"
               method="POST" enctype="multipart/form-data" class="space-y-5"
+              data-loading-texto="Guardando cambios…"
               {% if not producto %}data-redirect="{{ url_for('panel_comercio') }}"{% endif %}>
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 

@@ -162,10 +162,22 @@ def _extraer_url_de_nodo(nodo):
     return None
 
 
+def _log_url_segura(url, params=None):
+    """URL para consola sin exponer API keys."""
+    if params and 'key' in params:
+        params = {**params, 'key': '***'}
+    if params:
+        from urllib.parse import urlencode
+        return f'{url}?{urlencode(params)}'
+    return url
+
+
 def _get_json(url, *, headers=None, params=None):
+    url_log = _log_url_segura(url, params)
     ultimo = None
     for intento in range(_REINTENTOS):
         try:
+            _log(f'GET {url_log} intento={intento + 1}/{_REINTENTOS}')
             resp = requests.get(
                 url,
                 headers={'User-Agent': _USER_AGENT, **(headers or {})},
@@ -174,20 +186,24 @@ def _get_json(url, *, headers=None, params=None):
             )
             if resp.status_code in (429, 500, 502, 503, 504):
                 ultimo = f'HTTP {resp.status_code}'
+                _log(f'respuesta {ultimo} cuerpo={resp.text[:200]!r}')
                 time.sleep(0.4 * (2 ** intento))
                 continue
             if resp.status_code in (401, 403):
-                _log(f'auth proveedor HTTP {resp.status_code}')
+                _log(f'auth proveedor HTTP {resp.status_code} cuerpo={resp.text[:200]!r}')
                 return None
             if resp.status_code != 200:
+                _log(f'HTTP {resp.status_code} cuerpo={resp.text[:300]!r}')
                 return None
             datos = resp.json()
+            _log(f'HTTP 200 claves={list(datos.keys()) if isinstance(datos, dict) else type(datos).__name__}')
             return datos if isinstance(datos, (dict, list)) else None
         except Exception as error:
             ultimo = type(error).__name__
+            _log(f'excepción red {ultimo}: {error}')
             time.sleep(0.25 * (2 ** intento))
     if ultimo:
-        _log(f'red {ultimo}')
+        _log(f'red agotada: {ultimo}')
     return None
 
 
@@ -210,23 +226,37 @@ def hay_proveedor_pagado():
 def _buscar_barcode_spider_ean(ean):
     token = _clave_spider()
     if not token:
+        _log(f'barcodespider EAN {ean}: sin BARCODE_SPIDER_API_KEY')
         return None
+    _log(f'barcodespider lookup EAN={ean}')
     datos = _get_json(
         f'https://api.barcodespider.com/v2/products/{ean}',
         params={'key': token},
     )
-    return _extraer_url_de_nodo(datos)
+    url = _extraer_url_de_nodo(datos)
+    if url:
+        _log(f'barcodespider EAN={ean} imagen encontrada url={url[:120]!r}')
+    else:
+        _log(f'barcodespider EAN={ean} sin imagen en respuesta')
+    return url
 
 
 def _buscar_barcode_spider_nombre(consulta):
     token = _clave_spider()
     if not token:
+        _log(f'barcodespider búsqueda {consulta!r}: sin BARCODE_SPIDER_API_KEY')
         return None
+    _log(f'barcodespider búsqueda query={consulta!r}')
     datos = _get_json(
         'https://api.barcodespider.com/v2/products',
         params={'key': token, 'query': consulta},
     )
-    return _extraer_url_de_nodo(datos)
+    url = _extraer_url_de_nodo(datos)
+    if url:
+        _log(f'barcodespider query={consulta!r} imagen encontrada url={url[:120]!r}')
+    else:
+        _log(f'barcodespider query={consulta!r} sin imagen en respuesta')
+    return url
 
 
 def _buscar_upcitemdb_ean(ean):
@@ -348,6 +378,13 @@ def resolver_imagen_automatica(
     """
     global _aviso_sin_clave_emitido
     try:
+        ean_norm = _ean_normalizado(codigo_barras)
+        _log(
+            f'entrada codigo_barras={codigo_barras!r} ean_norm={ean_norm!r} '
+            f'nombre={nombre!r} categoria={categoria!r} '
+            f'proveedor_pagado={hay_proveedor_pagado()} '
+            f'spider_key={"sí" if _clave_spider() else "no"}'
+        )
         if not hay_proveedor_pagado():
             if not _aviso_sin_clave_emitido:
                 _log(

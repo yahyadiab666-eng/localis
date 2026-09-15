@@ -42,6 +42,77 @@
     return input ? input.value : '';
   }
 
+  const TEXTO_CARGANDO_POR_DEFECTO = 'Procesando...';
+
+  window.activarCargandoBoton = function activarCargandoBoton(boton, texto) {
+    if (!boton || boton.dataset.localisCargando === '1') return;
+    boton.dataset.localisCargando = '1';
+    boton.dataset.localisTextoOriginal = boton.innerHTML;
+    boton.disabled = true;
+    boton.setAttribute('aria-busy', 'true');
+    boton.classList.add('localis-btn-cargando');
+    if (texto) boton.setAttribute('title', texto);
+    const spinner = document.createElement('span');
+    spinner.className = 'localis-btn-spinner';
+    spinner.setAttribute('aria-hidden', 'true');
+    boton.appendChild(spinner);
+  };
+
+  window.desactivarCargandoBoton = function desactivarCargandoBoton(boton) {
+    if (!boton || boton.dataset.localisCargando !== '1') return;
+    const original = boton.dataset.localisTextoOriginal;
+    if (typeof original === 'string') boton.innerHTML = original;
+    boton.disabled = false;
+    boton.removeAttribute('aria-busy');
+    boton.classList.remove('localis-btn-cargando');
+    delete boton.dataset.localisCargando;
+    delete boton.dataset.localisTextoOriginal;
+  };
+
+  function marcarFormularioEnCarga(formulario) {
+    const boton = formulario.querySelector('button[type="submit"], input[type="submit"]');
+    if (!boton || boton.dataset.localisCargando === '1') return;
+    window.activarCargandoBoton(
+      boton,
+      formulario.dataset.loadingTexto || TEXTO_CARGANDO_POR_DEFECTO
+    );
+  }
+
+  function restaurarTodosLosBotones() {
+    document.querySelectorAll('.localis-btn-cargando').forEach(function (boton) {
+      window.desactivarCargandoBoton(boton);
+    });
+  }
+
+        function inicializarBotonesCargando() {
+    document
+      .querySelectorAll(
+        'form.panel-comercio-csv-form, #form-producto-editar, form[data-loading="true"]'
+      )
+      .forEach(function (formulario) {
+        formulario.addEventListener('submit', function () {
+          marcarFormularioEnCarga(formulario);
+        });
+      });
+
+    // Enlaces que abren acciones costosas (ej. abrir el formulario de producto):
+    // muestran un estado de carga mientras el navegador resuelve la nueva página.
+    document.querySelectorAll('a[data-loading-link]').forEach(function (enlace) {
+      enlace.addEventListener('click', function (evento) {
+        if (evento.metaKey || evento.ctrlKey || evento.shiftKey || evento.button !== 0) {
+          return;
+        }
+        if (evento.defaultPrevented) return;
+        window.activarCargandoBoton(
+          enlace,
+          enlace.dataset.loadingTexto || TEXTO_CARGANDO_POR_DEFECTO
+        );
+      });
+    });
+
+    window.addEventListener('pageshow', restaurarTodosLosBotones);
+  }
+
   window.mostrarAlertaLocalis = function mostrarAlertaLocalis(mensaje, tipo) {
     const contenedorId = 'localis-alertas-flotantes';
     let contenedor = document.getElementById(contenedorId);
@@ -256,7 +327,7 @@
     });
   }
 
-  function inicializarFormularioProductoApi() {
+      function inicializarFormularioProductoApi() {
     const formulario = document.getElementById('form-producto-api');
     if (!formulario) return;
 
@@ -264,7 +335,9 @@
       evento.preventDefault();
 
       const boton = formulario.querySelector('button[type="submit"]');
-      if (boton) boton.disabled = true;
+      if (boton) {
+        window.activarCargandoBoton(boton, 'Guardando producto…');
+      }
 
       const formData = new FormData(formulario);
 
@@ -308,7 +381,7 @@
           window.mostrarAlertaLocalis('Error de conexión al crear el producto.', 'error');
         })
         .finally(function () {
-          if (boton) boton.disabled = false;
+          if (boton) window.desactivarCargandoBoton(boton);
         });
     });
   }
@@ -347,10 +420,11 @@
     });
   }
 
-  document.addEventListener('DOMContentLoaded', function () {
+      document.addEventListener('DOMContentLoaded', function () {
     inicializarAlertasFlash();
     inicializarFormularioPagoMovil();
     inicializarFormularioProductoApi();
     inicializarBusquedaProductosPanel();
+    inicializarBotonesCargando();
   });
 })();
