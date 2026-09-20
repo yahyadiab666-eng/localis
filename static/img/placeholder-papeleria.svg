@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400" role="img" aria-label="Papelería">
+  <rect width="400" height="400" fill="#ffffff"/>
+  <rect x="1" y="1" width="398" height="398" rx="18" fill="none" stroke="#f1f0ed" stroke-width="2"/>
+  <path d="M150 108h96v184h-96z" fill="#fde68a" stroke="#f59e0b" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M246 108l24 24v160h-24z" fill="#f59e0b"/>
+  <path d="M166 152h64M166 184h64M166 216h40" stroke="#f59e0b" stroke-width="6" stroke-linecap="round"/>
+  <text x="200" y="330" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" fill="#a8a29e">Papelería</text>
+</svg>

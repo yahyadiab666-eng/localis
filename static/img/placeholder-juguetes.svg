@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400" role="img" aria-label="Juguetes">
+  <rect width="400" height="400" fill="#ffffff"/>
+  <rect x="1" y="1" width="398" height="398" rx="18" fill="none" stroke="#f1f0ed" stroke-width="2"/>
+  <circle cx="200" cy="170" r="66" fill="#fde68a" stroke="#f59e0b" stroke-width="6"/>
+  <path d="M200 104v132M134 170h132" stroke="#f59e0b" stroke-width="6"/>
+  <circle cx="160" cy="230" r="16" fill="#f59e0b"/>
+  <circle cx="240" cy="230" r="16" fill="#f59e0b"/>
+  <text x="200" y="330" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" fill="#a8a29e">Juguetes</text>
+</svg>

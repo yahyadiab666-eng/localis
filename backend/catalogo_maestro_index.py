@@ -34,7 +34,6 @@ _TTL_SEG = max(30, int(os.getenv('LOCALIS_MAESTRO_INDEX_TTL_SEC', '600')))
 _MAX_FILAS = max(1000, int(os.getenv('LOCALIS_MAESTRO_INDEX_MAX', '100000')))
 _UMBRAL_SIMILITUD = float(os.getenv('LOCALIS_MAESTRO_SIMILITUD_MIN', '0.6'))
 _MAX_POSTINGS = max(50, int(os.getenv('LOCALIS_MAESTRO_POSTINGS_MAX', '200')))
-_PLACEHOLDER_BASE = '/static/img/placeholder-'
 
 _PALABRAS_VACIAS = frozenset({
     'de', 'del', 'la', 'el', 'los', 'las', 'un', 'una', 'unos', 'unas',
@@ -265,25 +264,26 @@ def estadisticas_indice():
 # ---------------------------------------------------------------------------
 # Placeholder genérico por categoría (para productos nuevos sin coincidencia)
 # ---------------------------------------------------------------------------
-_CATEGORIAS_PLACEHOLDER = (
-    ('alimentos', ('aliment', 'comida', 'viveres', 'harina', 'snack', 'cereal', 'mercado', 'abarrote')),
-    ('bebidas', ('bebida', 'refresco', 'jugo', 'licor', 'cerveza', 'agua', 'vino')),
-    ('tecnologia', ('tecnolog', 'electron', 'celular', 'telefono', 'comput', 'informatic', 'accesorio')),
-    ('hogar', ('hogar', 'ferreter', 'herramient', 'mueble', 'limpieza', 'jardin', 'decoracion')),
-    ('belleza', ('belleza', 'cosmetic', 'perfum', 'cuidado personal', 'maquillaje', 'higiene')),
-    ('ropa', ('ropa', 'calzado', 'moda', 'textil', 'zapato', 'prenda')),
-    ('salud', ('salud', 'farmac', 'medic', 'medicina', 'bienestar')),
-)
-
-
 def imagen_generica_categoria(categoria=None):
-    """SVG limpio (fondo blanco) de la categoría, o el genérico de 'otros'."""
-    clave = _texto_plano(categoria)
-    if clave:
-        for carpeta, pistas in _CATEGORIAS_PLACEHOLDER:
-            if any(pista in clave for pista in pistas):
-                return f'{_PLACEHOLDER_BASE}{carpeta}.svg'
-    return f'{_PLACEHOLDER_BASE}otros.svg'
+    """SVG limpio (fondo blanco) de la categoría, o el genérico de 'otros'.
+
+    Delega en el clasificador universal ``backend.categorias_producto``.
+    """
+    from backend.categorias_producto import imagen_para_categoria
+
+    return imagen_para_categoria(categoria)
+
+
+def clasificar_categoria_producto(nombre=None, descripcion=None, marca=None, categoria_hint=None):
+    """Categoría inferida para un producto (delegado al clasificador universal)."""
+    from backend.categorias_producto import clasificar_categoria
+
+    return clasificar_categoria(
+        nombre=nombre,
+        descripcion=descripcion,
+        marca=marca,
+        categoria_hint=categoria_hint,
+    )
 
 
 def categoria_de_comercio(comercio_id):

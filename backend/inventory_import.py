@@ -94,6 +94,15 @@ SINONIMOS_COLUMNA = {
         'marca producto',
         'marca del producto',
     ],
+    'categoria': [
+        'categoria',
+        'rubro',
+        'seccion',
+        'departamento',
+        'linea',
+        'familia',
+        'tipo producto',
+    ],
 }
 
 ETIQUETAS_COLUMNA = {
@@ -101,6 +110,7 @@ ETIQUETAS_COLUMNA = {
     'precio': 'Precio (precio, costo, PVP, precio_usd, precio_bs…)',
     'stock': 'Cantidad / stock (cantidad, stock, existencia, inventario…)',
     'marca': 'Marca (marca, brand, fabricante…)',
+    'categoria': 'Categoría (categoría, rubro, sección, departamento…)',
 }
 
 CAMPOS_OBLIGATORIOS = ('nombre', 'precio')
@@ -121,6 +131,15 @@ INSERT_PRODUCTO_SQL = """
         codigo_barras, imagen_url, imagen_fuente, stock
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+# Variante para `execute_values` (inserción multi-fila en una sola sentencia).
+INSERT_PRODUCTO_VALUES_SQL = """
+    INSERT INTO productos (
+        comercio_id, nombre, descripcion, precio_usd,
+        codigo_barras, imagen_url, imagen_fuente, stock
+    )
+    VALUES %s
 """
 
 
@@ -184,6 +203,7 @@ def detectar_mapeo_columnas(encabezados):
         'codigo_barras',
         'imagen_url',
         'marca',
+        'categoria',
     )
 
     for campo in orden_campos:
@@ -718,6 +738,12 @@ def parsear_fila_inventario(fila, mapeo, meta, tasa_dolar=1.0, imagen_default=No
         if marca.lower() == 'none':
             marca = ''
 
+    categoria = ''
+    if mapeo.get('categoria'):
+        categoria = str(_obtener_valor_celda(fila, mapeo['categoria']) or '').strip()
+        if categoria.lower() == 'none':
+            categoria = ''
+
     return {
         'nombre': nombre,
         'descripcion': descripcion,
@@ -725,6 +751,7 @@ def parsear_fila_inventario(fila, mapeo, meta, tasa_dolar=1.0, imagen_default=No
         'codigo_barras': codigo_barras,
         'imagen_url': imagen_url,
         'marca': marca,
+        'categoria': categoria,
         'stock': stock,
     }
 
@@ -827,26 +854,35 @@ def asignar_imagenes_instantaneas(productos, snapshot_imagenes=None, categoria=N
       1. URL válida del propio archivo (CSV/Excel).
       2. Foto previa del comercio (snapshot) por código de barras.
       3. Catálogo maestro por código de barras.
-      4. Catálogo maestro por nombre/marca normalizados.
-      5. Placeholder genérico limpio de la categoría (producto nuevo).
+      4. Catálogo maestro por nombre/marca.
+      5. Placeholder profesional (fondo blanco) de la **categoría inferida** de
+         cada fila (matriz universal, sin listas de productos).
 
-    Retorna la cantidad de productos que quedaron con placeholder (nuevos).
+    Garantía: **ningún producto queda sin imagen**. Retorna cuántos usaron
+    placeholder de categoría (pendientes de relleno real en segundo plano).
     """
     snapshot = snapshot_imagenes or {}
-    generica = '/static/img/placeholder-otros.svg'
     indice = None
     try:
-        from backend.catalogo_maestro_index import (
-            imagen_generica_categoria,
-            obtener_indice,
-        )
+        from backend.catalogo_maestro_index import obtener_indice
 
         indice = obtener_indice()
-        generica = imagen_generica_categoria(categoria)
     except Exception as exc:
         print(f'{LOG_PREFIX} índice maestro no disponible: {type(exc).__name__}: {exc}')
 
+    try:
+        from backend.categorias_producto import clasificar_categoria, imagen_para_categoria
+    except Exception as exc:
+        print(f'{LOG_PREFIX} clasificador de categorías no disponible: {exc}')
+
+        def clasificar_categoria(nombre=None, descripcion=None, marca=None, categoria_hint=None):
+            return 'otros'
+
+        def imagen_para_categoria(_categoria):
+            return '/static/img/placeholder-otros.svg'
+
     nuevos = 0
+    por_categoria = {}
     for prod in productos:
         if prod.get('imagen_url'):
             prod['imagen_fuente'] = prod.get('imagen_fuente') or 'archivo'
@@ -869,16 +905,33 @@ def asignar_imagenes_instantaneas(productos, snapshot_imagenes=None, categoria=N
                 prod['imagen_fuente'] = f'maestro_{origen}'
                 continue
 
-        prod['imagen_url'] = generica
+        cat = clasificar_categoria(
+            nombre=prod.get('nombre'),
+            descripcion=prod.get('descripcion'),
+            marca=prod.get('marca'),
+            categoria_hint=prod.get('categoria') or categoria,
+        )
+        prod['categoria_inferida'] = cat
+        prod['imagen_url'] = imagen_para_categoria(cat)
         prod['imagen_fuente'] = 'placeholder_categoria'
+        por_categoria[cat] = por_categoria.get(cat, 0) + 1
         nuevos += 1
 
-    if indice is not None:
-        print(
-            f'{LOG_PREFIX} imágenes instantáneas: total={len(productos)} '
-            f'maestro_codigos={len(indice.por_codigo)} '
-            f'maestro_nombres={len(indice.por_nombre)} nuevos={nuevos}'
-        )
+    # Garantía absoluta: si algo quedó vacío, se fuerza el genérico limpio.
+    sin_imagen = 0
+    for prod in productos:
+        if not prod.get('imagen_url'):
+            prod['imagen_url'] = '/static/img/placeholder-otros.svg'
+            prod['imagen_fuente'] = 'placeholder_categoria'
+            sin_imagen += 1
+
+    print(
+        f'{LOG_PREFIX} imágenes instantáneas: total={len(productos)} '
+        f'maestro_codigos={len(indice.por_codigo) if indice else 0} '
+        f'maestro_nombres={len(indice.por_nombre) if indice else 0} '
+        f'placeholder_categoria={nuevos} forzados={sin_imagen} '
+        f'categorias={por_categoria}'
+    )
     return nuevos
 
 
@@ -954,10 +1007,14 @@ def persistir_importacion_por_lotes(comercio_id, factory_generador_lotes):
         insertados = 0
         for inicio in range(0, len(productos_finales), IMPORT_BATCH_SIZE):
             lote = productos_finales[inicio : inicio + IMPORT_BATCH_SIZE]
-            cursor.executemany(
-                INSERT_PRODUCTO_SQL,
-                _tuplas_insercion(comercio_id, lote, snapshot_imagenes),
-            )
+            tuplas = _tuplas_insercion(comercio_id, lote, snapshot_imagenes)
+            ejecutar_lote = getattr(cursor, 'execute_values', None)
+            if callable(ejecutar_lote):
+                ejecutar_lote(
+                    INSERT_PRODUCTO_VALUES_SQL, tuplas, page_size=IMPORT_BATCH_SIZE
+                )
+            else:
+                cursor.executemany(INSERT_PRODUCTO_SQL, tuplas)
             insertados += len(lote)
 
         if insertados == 0:

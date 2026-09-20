@@ -1,7 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400" role="img" aria-label="Sin imagen">
-  <rect width="400" height="400" fill="#f5f0e8"/>
-  <rect x="130" y="118" width="140" height="150" rx="16" fill="#ffffff" stroke="#f59e0b" stroke-width="4"/>
-  <path d="M150 210l32-36 28 32 22-18 38 44H150z" fill="#fde68a"/>
-  <circle cx="178" cy="168" r="12" fill="#f59e0b"/>
-  <text x="200" y="310" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#a8a29e">Sin imagen</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400" role="img" aria-label="Producto">
+  <rect width="400" height="400" fill="#ffffff"/>
+  <rect x="1" y="1" width="398" height="398" rx="18" fill="none" stroke="#f1f0ed" stroke-width="2"/>
+  <path d="M200 96l84 40-84 40-84-40z" fill="#fde68a" stroke="#f59e0b" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M116 136v92l84 44 84-44v-92" fill="none" stroke="#f59e0b" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M200 176v96" stroke="#f59e0b" stroke-width="6"/>
+  <text x="200" y="330" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" fill="#a8a29e">Producto</text>
 </svg>

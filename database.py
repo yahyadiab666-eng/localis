@@ -431,6 +431,25 @@ class _PgCursor:
         self._cursor.executemany(_adapt_sql(query), params_seq)
         return self
 
+    def execute_values(self, query, argslist, page_size=500):
+        """Inserción masiva eficiente (multi-fila) para PostgreSQL.
+
+        Evita el round-trip por fila de ``executemany``: envía hasta
+        ``page_size`` filas por sentencia. La query debe usar ``VALUES %s``.
+        """
+        from psycopg2.extras import execute_values as _execute_values
+
+        argslist = list(argslist)
+        if not argslist:
+            return self
+        _execute_values(
+            self._cursor,
+            _adapt_sql(query),
+            argslist,
+            page_size=max(1, int(page_size)),
+        )
+        return self
+
     def fetchone(self):
         return _normalizar_fila(self._cursor.fetchone())
 

@@ -102,7 +102,14 @@ def _auditar_importacion_instantanea():
     _ok('class IndiceMaestro' in indice, 'índice en memoria definido')
     _ok('por_codigo' in indice and 'por_nombre' in indice, 'índice por código y por nombre')
     _ok('_similitud' in indice, 'coincidencia por similitud de tokens')
-    _ok('placeholder-' in indice, 'placeholder limpio por categoría')
+
+    categorias = _leer('backend/categorias_producto.py')
+    _ok('def clasificar_categoria' in categorias, 'clasificador universal de categorías')
+    _ok('def imagen_para_categoria' in categorias, 'matriz de fallbacks por categoría')
+    svgs = sorted((RAIZ / 'static' / 'img').glob('placeholder-*.svg'))
+    _ok(len(svgs) >= 14, f'{len(svgs)} placeholders de categoría en disco')
+    _ok(all(svg.stat().st_size > 0 for svg in svgs), 'placeholders no vacíos')
+    _ok("'categoria'" in inventario, 'columna categoría reconocida')
 
     requisitos = _leer('requirements.txt')
     _ok('xlrd' in requisitos, 'xlrd declarado en requirements')

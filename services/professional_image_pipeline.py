@@ -98,8 +98,8 @@ _MAX_CANDIDATOS = _env_int('LOCALIS_IMG_MAX_CANDIDATOS', 8)
 _BLUR_MIN = _env_float('LOCALIS_IMG_BLUR_MIN', 35.0)
 _LADO_FINAL = _env_int('LOCALIS_IMG_LADO_FINAL', 800)
 _BUDGET_SEC = _env_float('LOCALIS_IMG_BUDGET_SEC', 120.0)
-_CSV_MAX = _env_int('LOCALIS_IMG_CSV_MAX', 25)
-_CSV_BUDGET_SEC = _env_float('LOCALIS_IMG_CSV_BUDGET_SEC', 180.0)
+_CSV_MAX = _env_int('LOCALIS_IMG_CSV_MAX', 2000)
+_CSV_BUDGET_SEC = _env_float('LOCALIS_IMG_CSV_BUDGET_SEC', 600.0)
 _TIMEOUT_DESCARGA = _env_float('LOCALIS_IMG_TIMEOUT_SEC', 12.0)
 _TIMEOUT_BUSQUEDA = _env_float('LOCALIS_IMG_SEARCH_TIMEOUT_SEC', 8.0)
 _BUSQUEDA_WEB = str(os.getenv('LOCALIS_IMG_BUSQUEDA_WEB', '1')).strip().lower() not in (
@@ -208,21 +208,6 @@ def _dominios_confiables():
     return _DOMINIOS_CONFIABLES_BASE + personalizados
 
 
-# Marcas frecuentes en Venezuela para inferir la marca desde el nombre.
-_MARCAS_VE = (
-    'pan', 'polar', 'savoy', 'coca-cola', 'pepsi', 'nestle', 'colgate',
-    'pantene', 'sedal', 'dove', 'rexona', 'axe', 'nivea', 'ponds',
-    'johnson', 'bimbo', 'mary', 'purolomo', 'mimosa', 'tony', 'lucky',
-    'diana', 'gustosa', 'festival', 'fruti', 'maltin', 'toddy',
-    'oval-tine', 'cerelac', 'nan', 'nido', 'la lechera', 'carnation',
-    'mavesa', 'tigresa', 'adidas', 'nike', 'samsung', 'lg', 'hp',
-    'dell', 'xiaomi', 'motorola', 'kalley', 'oster', 'philips', 'genius',
-    'mabe', 'fruto', 'villa del sur', 'plumrose', 'mendocina', 'cafe',
-    'fama de america', 'juana la aviadora', 'cristal', 'caracas', 'zulia',
-    'regional', 'mi gente', 'refresco', 'chicha', 'ron', 'santa teresa',
-    'cacique', 'pampero', 'doña pepa', 'splenda', 'maizina', 'cornflakes',
-)
-
 _ACENTOS = str.maketrans(
     'áéíóúüñÁÉÍÓÚÜÑ',
     'aeiouunAEIOUUN',
@@ -262,12 +247,14 @@ _STOPWORDS = frozenset({
 
 
 def _inferir_marca(nombre, descripcion=None, marca=None):
+    """Marca declarada en la fila. Sin listas estáticas de marcas.
+
+    Si el archivo no trae marca, no se inventa: el query usa el nombre completo,
+    que es universal para cualquier artículo.
+    """
+    del nombre, descripcion
     if marca and str(marca).strip():
         return str(marca).strip()
-    texto = _texto_plano(f'{nombre or ""} {descripcion or ""}').lower()
-    for cand in _MARCAS_VE:
-        if cand in texto:
-            return cand
     return None
 
 
@@ -592,15 +579,24 @@ def _buscar_web_ddg(consulta, limite=15):
     return candidatos
 
 
-def _consultas_busqueda(nombre, marca, presentacion, descripcion):
+def _consultas_busqueda(nombre, marca, presentacion, descripcion, categoria=None):
+    """Query universal construido solo con los metadatos de la fila.
+
+    ``[nombre] + [marca] + [presentación] + [categoría]`` → no depende del tipo
+    de artículo (refresco, teléfono, repuesto, etc.).
+    """
     base = ' '.join(
         str(p).strip() for p in (nombre, marca, presentacion) if p and str(p).strip()
     )
     if not base:
-        base = str(descripcion or '').strip()[:80]
+        base = ' '.join(
+            str(p).strip() for p in (descripcion, categoria) if p and str(p).strip()
+        )[:120]
     consultas = []
     if base:
         consultas.append(f'{base} venezuela')
+        if categoria and str(categoria).strip():
+            consultas.append(f'{base} {str(categoria).strip()}')
         consultas.append(base)
     return consultas
 
@@ -612,6 +608,7 @@ def buscar_candidatos(
     marca=None,
     presentacion=None,
     descripcion=None,
+    categoria=None,
     limite=None,
 ):
     """Devuelve candidatos ordenados por confianza (mejor primero)."""
@@ -638,15 +635,19 @@ def buscar_candidatos(
             )
         candidatos.extend(_buscar_off_por_ean(ean))
 
-    consultas = _consultas_busqueda(nombre, marca, presentacion, descripcion)
+    consultas = _consultas_busqueda(
+        nombre, marca, presentacion, descripcion, categoria=categoria
+    )
     for consulta in consultas:
         if not _BUSQUEDA_WEB:
             break
         candidatos.extend(_buscar_web_bing(consulta))
         candidatos.extend(_buscar_web_ddg(consulta))
     if nombre:
-        for consulta in [f'{nombre} {marca}' if marca else str(nombre)]:
-            candidatos.extend(_buscar_off_por_nombre(consulta))
+        consulta_off = ' '.join(
+            str(p).strip() for p in (nombre, marca, categoria) if p and str(p).strip()
+        )
+        candidatos.extend(_buscar_off_por_nombre(consulta_off))
 
     # Deduplicar preservando la mejor fuente.
     unicos = {}
@@ -1095,10 +1096,22 @@ def procesar_producto(
     except Exception:
         ean = codigo_barras
 
+    try:
+        from backend.categorias_producto import clasificar_categoria, imagen_para_categoria
+    except Exception:
+        clasificar_categoria = None
+        imagen_para_categoria = None
+
+    categoria_efectiva = categoria
+    if not categoria_efectiva and clasificar_categoria is not None:
+        categoria_efectiva = clasificar_categoria(
+            nombre=nombre, descripcion=descripcion, marca=marca
+        )
+
     inicio = time.monotonic()
     _log(
         f'producto={producto_id} inicio ean={ean!r} nombre={nombre!r} '
-        f'marca={marca!r} presentacion={presentacion!r}'
+        f'marca={marca!r} presentacion={presentacion!r} categoria={categoria_efectiva!r}'
     )
 
     candidatos = buscar_candidatos(
@@ -1107,6 +1120,7 @@ def procesar_producto(
         marca=marca,
         presentacion=presentacion,
         descripcion=descripcion,
+        categoria=categoria_efectiva,
     )
     _log(f'producto={producto_id} candidatos={len(candidatos)}')
 
@@ -1146,7 +1160,26 @@ def procesar_producto(
         )
 
     _log_pipeline(producto_id, ean, 'sin_imagen', motivo=ultimo_motivo)
-    _log(f'producto={producto_id} sin imagen ({ultimo_motivo})')
+    _log(f'producto={producto_id} sin imagen real ({ultimo_motivo}); se mantiene/asigna fallback')
+
+    # Garantía de cobertura universal: ningún producto queda sin imagen.
+    if producto_id and imagen_para_categoria is not None:
+        try:
+            fila = _leer_producto(producto_id) or {}
+            actual = str(fila.get('imagen_url') or '').strip()
+            if not actual:
+                fallback = imagen_para_categoria(categoria_efectiva or 'otros')
+                if _actualizar_imagen(producto_id, fallback, 'placeholder_categoria'):
+                    _log(
+                        f'producto={producto_id} fallback de categoría asignado '
+                        f'({categoria_efectiva!r})'
+                    )
+                    return ResultadoProcesamiento(
+                        ok=False, url=fallback, fuente='placeholder_categoria', motivo=ultimo_motivo
+                    )
+        except Exception as error:
+            _log(f'producto={producto_id} fallback no aplicado: {type(error).__name__}: {error}')
+
     return ResultadoProcesamiento(ok=False, motivo=ultimo_motivo)
 
 

@@ -34,9 +34,16 @@ PLACEHOLDERS_PRODUCTO_VALIDOS = frozenset({
     '/static/img/placeholder-bebidas.svg',
     '/static/img/placeholder-tecnologia.svg',
     '/static/img/placeholder-hogar.svg',
+    '/static/img/placeholder-ferreteria.svg',
     '/static/img/placeholder-belleza.svg',
     '/static/img/placeholder-ropa.svg',
     '/static/img/placeholder-salud.svg',
+    '/static/img/placeholder-juguetes.svg',
+    '/static/img/placeholder-mascotas.svg',
+    '/static/img/placeholder-deportes.svg',
+    '/static/img/placeholder-automotriz.svg',
+    '/static/img/placeholder-bebes.svg',
+    '/static/img/placeholder-papeleria.svg',
     '/static/img/placeholder-otros.svg',
 })
 

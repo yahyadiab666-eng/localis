@@ -27,7 +27,9 @@ PLACEHOLDER_PRODUCTO = '/static/img/placeholder-producto.svg'
 
 _LOG_CSV = '[Localis CSV]'
 _LOG_IMAGEN = '[Localis Imagen]'
-_MAX_CSV_API = int(os.getenv('LOCALIS_CSV_API_MAX', '25'))
+_MAX_CSV_API = int(
+    os.getenv('LOCALIS_IMG_CSV_MAX', os.getenv('LOCALIS_CSV_API_MAX', '2000'))
+)
 _descubrimiento_en_vuelo = set()
 _descubrimiento_lock = threading.Lock()
 
