@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400" role="img" aria-label="Ropa">
+  <rect width="400" height="400" fill="#ffffff"/>
+  <rect x="1" y="1" width="398" height="398" rx="18" fill="none" stroke="#f1f0ed" stroke-width="2"/>
+  <path d="M160 110l40-18 40 18 44 32-24 30-20-14v90a10 10 0 0 1-10 10h-60a10 10 0 0 1-10-10v-90l-20 14-24-30z" fill="#fde68a" stroke="#f59e0b" stroke-width="5" stroke-linejoin="round"/>
+  <text x="200" y="330" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" fill="#a8a29e">Ropa</text>
+</svg>

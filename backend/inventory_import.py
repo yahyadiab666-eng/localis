@@ -87,12 +87,20 @@ SINONIMOS_COLUMNA = {
         'url foto',
         'foto url',
     ],
+    'marca': [
+        'marca',
+        'brand',
+        'fabricante',
+        'marca producto',
+        'marca del producto',
+    ],
 }
 
 ETIQUETAS_COLUMNA = {
     'nombre': 'Nombre del producto (nombre, producto, artículo, descripción…)',
     'precio': 'Precio (precio, costo, PVP, precio_usd, precio_bs…)',
     'stock': 'Cantidad / stock (cantidad, stock, existencia, inventario…)',
+    'marca': 'Marca (marca, brand, fabricante…)',
 }
 
 CAMPOS_OBLIGATORIOS = ('nombre', 'precio')
@@ -110,9 +118,9 @@ _MAX_FLASH_CHARS = 1400
 INSERT_PRODUCTO_SQL = """
     INSERT INTO productos (
         comercio_id, nombre, descripcion, precio_usd,
-        codigo_barras, imagen_url, stock
+        codigo_barras, imagen_url, imagen_fuente, stock
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
@@ -175,6 +183,7 @@ def detectar_mapeo_columnas(encabezados):
         'descripcion',
         'codigo_barras',
         'imagen_url',
+        'marca',
     )
 
     for campo in orden_campos:
@@ -240,14 +249,42 @@ def _registrar_fallo_importacion(etapa, exc):
     traceback.print_exc()
 
 
+def _abrir_libro_xls(data):
+    """Abre un libro .xls (formato binario viejo) con xlrd. Retorna (libro, error)."""
+    try:
+        import xlrd
+    except ImportError:
+        return None, (
+            'Para leer archivos .xls falta la librería xlrd. '
+            'Guarda el archivo como .xlsx o CSV e intenta de nuevo.'
+        )
+    try:
+        return xlrd.open_workbook(file_contents=data), None
+    except Exception as exc:
+        _registrar_fallo_importacion('abrir_xls', exc)
+        return None, (
+            'El archivo .xls no se pudo leer. Ábrelo y guárdalo como .xlsx o CSV '
+            'e intenta de nuevo.'
+        )
+
+
+def _valor_celda_xls(celda):
+    if celda is None:
+        return None
+    try:
+        return celda.value
+    except Exception:
+        return None
+
+
 def cargar_archivo_inventario(archivo):
     """Lee el archivo subido con límite de tamaño. Retorna (bytes, extension, error)."""
     if not archivo or not getattr(archivo, 'filename', ''):
         return None, None, 'No se adjuntó ningún archivo.'
 
     extension = _extension_archivo(archivo)
-    if extension not in {'csv', 'xlsx'}:
-        return None, None, 'El archivo debe tener extensión .csv o .xlsx.'
+    if extension not in {'csv', 'xlsx', 'xls'}:
+        return None, None, 'El archivo debe tener extensión .csv, .xlsx o .xls.'
 
     try:
         stream = getattr(archivo, 'stream', archivo)
@@ -354,6 +391,21 @@ def leer_encabezados_inventario(data, extension):
             finally:
                 wb.close()
 
+        if extension == 'xls':
+            libro, error_xls = _abrir_libro_xls(data)
+            if error_xls:
+                return None, error_xls
+            hoja = libro.sheet_by_index(0)
+            if hoja.nrows == 0:
+                return None, 'El archivo Excel está vacío.'
+            primera = hoja.row_values(0)
+            encabezados = [str(v or '').strip() for v in primera]
+            while encabezados and not encabezados[-1]:
+                encabezados.pop()
+            if not encabezados:
+                return None, 'El archivo Excel no tiene encabezados en la primera fila.'
+            return encabezados, None
+
         contenido = _decodificar_csv(data)
         if contenido is None:
             return None, _MENSAJE_CODIFICACION_CSV
@@ -418,6 +470,27 @@ def iter_filas_inventario_enumeradas(data, extension, encabezados):
                     yield numero_fila, fila
         finally:
             wb.close()
+        return
+
+    if extension == 'xls':
+        libro, error_xls = _abrir_libro_xls(data)
+        if error_xls:
+            raise ErrorImportacionInventario(error_xls)
+        hoja = libro.sheet_by_index(0)
+        for indice in range(1, hoja.nrows):
+            fila_celdas = hoja.row(indice)
+            if not any(
+                _valor_celda_xls(celda) not in (None, '') for celda in fila_celdas
+            ):
+                continue
+            fila = {}
+            for idx, encabezado in enumerate(encabezados):
+                if not encabezado:
+                    continue
+                celda = fila_celdas[idx] if idx < len(fila_celdas) else None
+                fila[encabezado] = _valor_celda_xls(celda)
+            if _fila_tiene_datos(fila):
+                yield indice + 1, fila
         return
 
     contenido = _decodificar_csv(data)
@@ -639,12 +712,19 @@ def parsear_fila_inventario(fila, mapeo, meta, tasa_dolar=1.0, imagen_default=No
     if mapeo.get('stock'):
         stock = _parsear_entero(_obtener_valor_celda(fila, mapeo['stock']))
 
+    marca = ''
+    if mapeo.get('marca'):
+        marca = str(_obtener_valor_celda(fila, mapeo['marca']) or '').strip()
+        if marca.lower() == 'none':
+            marca = ''
+
     return {
         'nombre': nombre,
         'descripcion': descripcion,
         'precio_usd': precio_usd,
         'codigo_barras': codigo_barras,
         'imagen_url': imagen_url,
+        'marca': marca,
         'stock': stock,
     }
 
@@ -740,26 +820,94 @@ def _imagen_final_importacion(
     return None
 
 
+def asignar_imagenes_instantaneas(productos, snapshot_imagenes=None, categoria=None):
+    """Asigna imagen a cada producto con el índice maestro en memoria (O(1)).
+
+    Orden de prioridad:
+      1. URL válida del propio archivo (CSV/Excel).
+      2. Foto previa del comercio (snapshot) por código de barras.
+      3. Catálogo maestro por código de barras.
+      4. Catálogo maestro por nombre/marca normalizados.
+      5. Placeholder genérico limpio de la categoría (producto nuevo).
+
+    Retorna la cantidad de productos que quedaron con placeholder (nuevos).
+    """
+    snapshot = snapshot_imagenes or {}
+    generica = '/static/img/placeholder-otros.svg'
+    indice = None
+    try:
+        from backend.catalogo_maestro_index import (
+            imagen_generica_categoria,
+            obtener_indice,
+        )
+
+        indice = obtener_indice()
+        generica = imagen_generica_categoria(categoria)
+    except Exception as exc:
+        print(f'{LOG_PREFIX} índice maestro no disponible: {type(exc).__name__}: {exc}')
+
+    nuevos = 0
+    for prod in productos:
+        if prod.get('imagen_url'):
+            prod['imagen_fuente'] = prod.get('imagen_fuente') or 'archivo'
+            continue
+
+        codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
+        if codigo and codigo in snapshot:
+            prod['imagen_url'] = snapshot[codigo]
+            prod['imagen_fuente'] = 'comercio'
+            continue
+
+        if indice is not None:
+            url, origen = indice.buscar(
+                codigo=codigo,
+                nombre=prod.get('nombre'),
+                marca=prod.get('marca'),
+            )
+            if url:
+                prod['imagen_url'] = url
+                prod['imagen_fuente'] = f'maestro_{origen}'
+                continue
+
+        prod['imagen_url'] = generica
+        prod['imagen_fuente'] = 'placeholder_categoria'
+        nuevos += 1
+
+    if indice is not None:
+        print(
+            f'{LOG_PREFIX} imágenes instantáneas: total={len(productos)} '
+            f'maestro_codigos={len(indice.por_codigo)} '
+            f'maestro_nombres={len(indice.por_nombre)} nuevos={nuevos}'
+        )
+    return nuevos
+
+
 def _tuplas_insercion(comercio_id, lote, snapshot_imagenes=None, mapa_maestro=None):
     snapshot_imagenes = snapshot_imagenes or {}
     mapa_maestro = mapa_maestro or {}
-    return [
-        (
-            comercio_id,
-            prod['nombre'],
-            prod['descripcion'],
-            prod['precio_usd'],
-            prod['codigo_barras'],
-            _imagen_final_importacion(
+    tuplas = []
+    for prod in lote:
+        url = prod.get('imagen_url')
+        if not url:
+            url = _imagen_final_importacion(
                 prod.get('imagen_url'),
                 prod.get('codigo_barras'),
                 snapshot_imagenes,
                 mapa_maestro=mapa_maestro,
-            ),
-            prod['stock'],
+            )
+        tuplas.append(
+            (
+                comercio_id,
+                prod['nombre'],
+                prod['descripcion'],
+                prod['precio_usd'],
+                prod['codigo_barras'],
+                url,
+                prod.get('imagen_fuente'),
+                prod['stock'],
+            )
         )
-        for prod in lote
-    ]
+    return tuplas
 
 
 def persistir_importacion_por_lotes(comercio_id, factory_generador_lotes):
@@ -768,7 +916,6 @@ def persistir_importacion_por_lotes(comercio_id, factory_generador_lotes):
     Las imágenes del INSERT son solo locales (CSV, snapshot, catálogo maestro).
     """
     from backend.db import ejecutar_con_reintentos_bd, get_db_connection
-    from backend.image_lookup import preparar_mapa_imagenes_importacion
 
     productos_por_codigo = {}
     productos_sin_codigo = []
@@ -786,14 +933,18 @@ def persistir_importacion_por_lotes(comercio_id, factory_generador_lotes):
         cursor = conexion.cursor()
         snapshot_imagenes = _snapshot_imagenes_por_codigo(cursor, comercio_id)
 
+    # Asignación de imagen por índice en memoria (microsegundos, sin red/rembg).
+    categoria = None
     try:
-        mapa_imagenes = preparar_mapa_imagenes_importacion(
-            productos_finales,
-            snapshot_imagenes,
-        )
+        from backend.catalogo_maestro_index import categoria_de_comercio
+
+        categoria = categoria_de_comercio(comercio_id)
+    except Exception:
+        categoria = None
+    try:
+        asignar_imagenes_instantaneas(productos_finales, snapshot_imagenes, categoria)
     except Exception as exc:
-        print(f'{LOG_PREFIX} aviso mapa local de imágenes: {exc}')
-        mapa_imagenes = dict(snapshot_imagenes)
+        print(f'{LOG_PREFIX} aviso asignación instantánea de imágenes: {exc}')
 
     def _operacion(conexion):
         cursor = conexion.cursor()
@@ -805,7 +956,7 @@ def persistir_importacion_por_lotes(comercio_id, factory_generador_lotes):
             lote = productos_finales[inicio : inicio + IMPORT_BATCH_SIZE]
             cursor.executemany(
                 INSERT_PRODUCTO_SQL,
-                _tuplas_insercion(comercio_id, lote, snapshot_imagenes, mapa_imagenes),
+                _tuplas_insercion(comercio_id, lote, snapshot_imagenes),
             )
             insertados += len(lote)
 

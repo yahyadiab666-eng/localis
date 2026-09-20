@@ -267,46 +267,99 @@ def _asegurar_indice_unico_codigo(cursor):
     )
 
 
-def _guardar_imagen_maestro_postgres(codigo, url):
+def _guardar_imagen_maestro_postgres(codigo, url, nombre=None, marca=None, categoria=None):
     from backend.db import get_db_connection
+
+    nombre_normalizado = None
+    if nombre:
+        try:
+            from backend.catalogo_maestro_index import normalizar_clave_producto
+
+            nombre_normalizado = normalizar_clave_producto(nombre, marca)
+        except Exception:
+            nombre_normalizado = None
 
     with get_db_connection() as conexion:
         cursor = conexion.cursor()
         _asegurar_indice_unico_codigo(cursor)
-        cursor.execute(
-            f"""
-            INSERT INTO {TABLA_CATALOGO_MAESTRO} (codigo_barras, url_imagen)
-            VALUES (?, ?)
-            ON CONFLICT (codigo_barras)
-            DO UPDATE SET url_imagen = EXCLUDED.url_imagen
-            """,
-            (codigo, url),
-        )
+        try:
+            cursor.execute(
+                f"""
+                INSERT INTO {TABLA_CATALOGO_MAESTRO}
+                    (codigo_barras, url_imagen, nombre, marca, categoria,
+                     nombre_normalizado, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT (codigo_barras)
+                DO UPDATE SET
+                    url_imagen = EXCLUDED.url_imagen,
+                    nombre = COALESCE(EXCLUDED.nombre, {TABLA_CATALOGO_MAESTRO}.nombre),
+                    marca = COALESCE(EXCLUDED.marca, {TABLA_CATALOGO_MAESTRO}.marca),
+                    categoria = COALESCE(EXCLUDED.categoria, {TABLA_CATALOGO_MAESTRO}.categoria),
+                    nombre_normalizado = COALESCE(
+                        EXCLUDED.nombre_normalizado,
+                        {TABLA_CATALOGO_MAESTRO}.nombre_normalizado
+                    ),
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (codigo, url, nombre, marca, categoria, nombre_normalizado),
+            )
+        except Exception:
+            # Esquema anterior sin columnas de nombre/marca: upsert mínimo.
+            conexion.rollback()
+            cursor = conexion.cursor()
+            _asegurar_indice_unico_codigo(cursor)
+            cursor.execute(
+                f"""
+                INSERT INTO {TABLA_CATALOGO_MAESTRO} (codigo_barras, url_imagen)
+                VALUES (?, ?)
+                ON CONFLICT (codigo_barras)
+                DO UPDATE SET url_imagen = EXCLUDED.url_imagen
+                """,
+                (codigo, url),
+            )
     return True
 
 
-def guardar_imagen_maestro(codigo_barras, url_imagen):
-    """Persiste URL optimizada en catalogo_maestro_imagenes (upsert)."""
+def guardar_imagen_maestro(codigo_barras, url_imagen, *, nombre=None, marca=None, categoria=None):
+    """Persiste URL optimizada en catalogo_maestro_imagenes (upsert).
+
+    También guarda nombre/marca/normalizado para que el índice en memoria pueda
+    resolver futuras importaciones por nombre (no solo por código de barras).
+    """
     codigo = normalizar_codigo_barras(codigo_barras)
     url = _url_maestro_valida(url_imagen)
     if not codigo or not url or not _catalogo_disponible():
         return False
 
+    guardado = False
     try:
         if _postgresql_directo_disponible():
-            return _guardar_imagen_maestro_postgres(codigo, url)
-
-        if _postgrest_disponible():
+            guardado = _guardar_imagen_maestro_postgres(
+                codigo, url, nombre=nombre, marca=marca, categoria=categoria
+            )
+        elif _postgrest_disponible():
             if guardar_imagen_maestro_http(codigo, url):
-                return True
-            if _postgresql_directo_disponible():
-                return _guardar_imagen_maestro_postgres(codigo, url)
-            return False
-
-        return _guardar_imagen_maestro_postgres(codigo, url)
+                guardado = True
+            elif _postgresql_directo_disponible():
+                guardado = _guardar_imagen_maestro_postgres(
+                    codigo, url, nombre=nombre, marca=marca, categoria=categoria
+                )
+        else:
+            guardado = _guardar_imagen_maestro_postgres(
+                codigo, url, nombre=nombre, marca=marca, categoria=categoria
+            )
     except Exception as error:
         print(f'Error al guardar en catálogo maestro ({codigo}): {error}')
         return False
+
+    if guardado:
+        try:
+            from backend.catalogo_maestro_index import invalidar_indice
+
+            invalidar_indice()
+        except Exception:
+            pass
+    return guardado
 
 
 def _mapa_imagenes_maestro_postgres(lote):

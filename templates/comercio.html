@@ -146,7 +146,7 @@
             Importador Inteligente (CSV / Excel)
           </h4>
           <p class="text-stone-600 text-xs leading-relaxed">
-            Sube un archivo <code class="bg-white/80 px-1.5 py-0.5 rounded border">.csv</code> o <code class="bg-white/80 px-1.5 py-0.5 rounded border">.xlsx</code>.
+            Sube un archivo <code class="bg-white/80 px-1.5 py-0.5 rounded border">.csv</code>, <code class="bg-white/80 px-1.5 py-0.5 rounded border">.xlsx</code> o <code class="bg-white/80 px-1.5 py-0.5 rounded border">.xls</code>.
             El sistema detecta automáticamente las columnas.
             <strong class="text-amber-800">Reemplaza todos los productos actuales.</strong>
             Obligatorios: nombre y precio. Máx. 15 MB.
@@ -157,7 +157,7 @@
               data-loading-texto="Importando inventario…"
               class="panel-comercio-csv-form flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <input type="file" name="archivo_csv" accept=".csv,.xlsx" required
+          <input type="file" name="archivo_csv" accept=".csv,.xlsx,.xls" required
                  class="block w-full text-xs text-stone-600 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-amber-500 file:text-stone-900 hover:file:bg-amber-400 bg-white rounded-full border border-stone-200 cursor-pointer">
           <button type="submit" class="btn-touch w-full sm:w-auto bg-stone-900 text-white font-bold px-5 py-2.5 rounded-full text-xs hover:bg-stone-800 transition shadow-sm flex items-center justify-center gap-1.5 shrink-0">
             <i data-lucide="upload" style="width:14px;height:14px;"></i> Subir Archivo

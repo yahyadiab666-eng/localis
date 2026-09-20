@@ -182,6 +182,12 @@ COLUMNAS_ESQUEMA = {
         ('verificado_por', 'TEXT'),
         ('fecha', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
     ],
+    'catalogo_maestro_imagenes': [
+        ('nombre', 'TEXT'),
+        ('marca', 'TEXT'),
+        ('categoria', 'TEXT'),
+        ('nombre_normalizado', 'TEXT'),
+    ],
     'image_pipeline_log': [
         ('ean', 'TEXT'),
         ('producto_id', 'INTEGER'),
@@ -1002,6 +1008,10 @@ def _crear_tabla_catalogo_maestro_imagenes(cursor):
         CREATE TABLE IF NOT EXISTS catalogo_maestro_imagenes (
             codigo_barras TEXT PRIMARY KEY,
             url_imagen TEXT NOT NULL,
+            nombre TEXT,
+            marca TEXT,
+            categoria TEXT,
+            nombre_normalizado TEXT,
             updated_at TIMESTAMPTZ DEFAULT NOW()
         )
         """
@@ -1294,8 +1304,8 @@ def _crear_indices(cursor):
         'CREATE INDEX IF NOT EXISTS idx_intentos_correo ON intentos_login(correo_intentado)',
         'CREATE INDEX IF NOT EXISTS idx_productos_nombre ON productos(nombre)',
         'CREATE INDEX IF NOT EXISTS idx_productos_codigo_barras ON productos(codigo_barras)',
-        'CREATE INDEX IF NOT EXISTS idx_image_pipeline_log_ean ON image_pipeline_log(ean)',
-        'CREATE INDEX IF NOT EXISTS idx_image_pipeline_log_timestamp ON image_pipeline_log(timestamp DESC)',
+        'CREATE INDEX IF NOT EXISTS idx_catalogo_maestro_nombre ON catalogo_maestro_imagenes(nombre_normalizado)',
+        'CREATE INDEX IF NOT EXISTS idx_image_pipeline_log_ean ON image_pipeline_log(ean)',        'CREATE INDEX IF NOT EXISTS idx_image_pipeline_log_timestamp ON image_pipeline_log(timestamp DESC)',
         'CREATE INDEX IF NOT EXISTS idx_image_pipeline_log_resultado ON image_pipeline_log(resultado)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_nombre ON comercios(nombre)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_categoria ON comercios(categoria_id)',

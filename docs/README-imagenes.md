@@ -56,6 +56,38 @@ LOCALIS_IMPORT_JOB_TTL_SEC=3600
 
 > **Escala:** la cola y el estado de los trabajos viven en memoria del worker de Gunicorn. Mantén `WEB_CONCURRENCY=1` (valor por defecto) para que el *polling* siempre encuentre el trabajo; varios usuarios se atienden en paralelo con los hilos daemon (`LOCALIS_IMPORT_WORKERS`). Si necesitas varios procesos, usa un broker compartido (Redis + RQ/Celery).
 
+## 4. Catálogo maestro indexado (asignación en microsegundos)
+
+Módulo: `backend/catalogo_maestro_index.py`.
+
+Durante una importación masiva **no** se hace web scraping ni `rembg` por fila. El catálogo maestro (Supabase) se carga **una vez** y se indexa en memoria:
+
+- `por_codigo`: EAN/UPC normalizado → URL (coincidencia O(1), la más común).
+- `por_nombre`: tokens de nombre + marca normalizados (sin tildes, unidades ni palabras vacías) → URL.
+- Respaldo por **similitud de tokens (Jaccard ≥ 0.6)** para variaciones como “Harina P.A.N.” vs “Harina de Maíz P.A.N.”.
+
+Así, asignar la imagen de cada fila es un `dict.get` (~0.2–0.5 µs por búsqueda, verificado con 20.000 búsquedas).
+
+Para cada fila, la importación resuelve en este orden:
+
+1. URL del propio archivo (si el comercio la trae).
+2. Foto previa del comercio (snapshot) por código de barras.
+3. Catálogo maestro por **código de barras**.
+4. Catálogo maestro por **nombre/marca**.
+5. **Placeholder genérico limpio por categoría** (`/static/img/placeholder-*.svg`, fondo blanco) → la UI nunca queda vacía.
+
+Los productos que caen en el paso 5 se procesan **en segundo plano** (un hilo ligero) con el pipeline profesional (búsqueda + rembg + Storage) y, al guardarse, se cachean en el catálogo maestro con nombre/marca para que la **próxima** importación los resuelva al instante.
+
+```
+LOCALIS_MAESTRO_INDEX_TTL_SEC=600
+LOCALIS_MAESTRO_INDEX_MAX=100000
+LOCALIS_MAESTRO_SIMILITUD_MIN=0.6
+```
+
+## 5. Formatos soportados
+
+`backend/inventory_import.py` lee **CSV** (UTF-8, UTF-8 BOM, UTF-16, Latin-1/CP1252/ISO-8859-1), **XLSX** (openpyxl) y **XLS** (xlrd), con detección automática de columnas por sinónimos (incluye `marca`). Los CSV se leen con detección de delimitador (`,`, `;`, tab, `|`).
+
 ## Qué no hace el sistema
 
 - No hay llamadas a APIs de códigos de barras globales.

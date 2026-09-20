@@ -13,6 +13,7 @@ rapidocr-onnxruntime
 opencv-python-headless
 Pillow
 openpyxl
+xlrd>=2.0.1
 Werkzeug
 # Pipeline profesional de imágenes: segmentación local (sin suscripciones).
 rembg>=2.0.57

@@ -96,6 +96,24 @@ def _auditar_pipeline():
     _ok('rembg' in _leer('requirements.txt'), 'rembg declarado en requirements')
 
 
+def _auditar_importacion_instantanea():
+    print('\n=== 4b. Matching instantáneo y formatos de importación ===')
+    inventario = _leer('backend/inventory_import.py')
+    _ok('asignar_imagenes_instantaneas' in inventario, 'asignación instantánea en la importación')
+    _ok("'xls'" in inventario and 'xlrd' in inventario, 'soporte .xls con xlrd')
+    _ok('marca' in inventario, 'columna marca reconocida')
+
+    indice = _leer('backend/catalogo_maestro_index.py')
+    _ok('class IndiceMaestro' in indice, 'índice en memoria definido')
+    _ok('por_codigo' in indice and 'por_nombre' in indice, 'índice por código y por nombre')
+    _ok('_similitud' in indice, 'coincidencia por similitud de tokens')
+    _ok('placeholder-' in indice, 'placeholder limpio por categoría')
+
+    requisitos = _leer('requirements.txt')
+    _ok('xlrd' in requisitos, 'xlrd declarado en requirements')
+    _ok('openpyxl' in requisitos, 'openpyxl declarado en requirements')
+
+
 def _render_panel():
     """Renderiza el panel con datos simulados (sin Flask ni BD)."""
     from jinja2 import Environment, FileSystemLoader
@@ -189,6 +207,7 @@ def main() -> int:
     _auditar_css()
     _auditar_busqueda()
     _auditar_pipeline()
+    _auditar_importacion_instantanea()
     _auditar_render()
 
     print('\n=== RESULTADO ===')

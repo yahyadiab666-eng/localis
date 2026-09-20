@@ -962,6 +962,20 @@ def _almacenar_imagen(data, prefijo):
     return None, None
 
 
+def _guardar_en_catalogo_maestro(ean, url, *, nombre=None, marca=None, categoria=None):
+    """Cachea la imagen procesada en el catálogo maestro para futuros imports."""
+    if not ean or not url:
+        return
+    try:
+        from backend.catalogo_maestro import guardar_imagen_maestro
+
+        guardar_imagen_maestro(
+            ean, url, nombre=nombre, marca=marca, categoria=categoria
+        )
+    except Exception as error:
+        _log(f'catálogo maestro no actualizado ({type(error).__name__}: {error})')
+
+
 def _imagen_puede_reemplazarse(imagen_actual):
     if not imagen_actual:
         return True
@@ -1053,7 +1067,6 @@ def procesar_producto(
     forzar=False,
 ):
     """Ejecuta el pipeline completo para un producto. Nunca lanza."""
-    del categoria
     if not pipeline_habilitado():
         return ResultadoProcesamiento(ok=False, motivo='pipeline_deshabilitado')
 
@@ -1115,6 +1128,7 @@ def procesar_producto(
         if producto_id and not _actualizar_imagen(producto_id, url, fuente):
             ultimo_motivo = 'no_actualizado'
             continue
+        _guardar_en_catalogo_maestro(ean, url, nombre=nombre, marca=marca, categoria=categoria)
         _log_pipeline(producto_id, ean, 'asignada', fuente=fuente)
         _log(f'producto={producto_id} OK fuente={candidato.fuente} url={url}')
         return ResultadoProcesamiento(

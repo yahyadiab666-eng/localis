@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400" role="img" aria-label="Alimentos">
+  <rect width="400" height="400" fill="#ffffff"/>
+  <rect x="1" y="1" width="398" height="398" rx="18" fill="none" stroke="#f1f0ed" stroke-width="2"/>
+  <path d="M200 96c34 0 62 26 62 60 0 46-34 84-62 106-28-22-62-60-62-106 0-34 28-60 62-60z" fill="#fde68a"/>
+  <path d="M200 96c-6-18-22-30-40-32 4 18 18 32 40 32z" fill="#f59e0b"/>
+  <path d="M200 120v96" stroke="#f59e0b" stroke-width="5" stroke-linecap="round"/>
+  <text x="200" y="330" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" fill="#a8a29e">Alimentos</text>
+</svg>
