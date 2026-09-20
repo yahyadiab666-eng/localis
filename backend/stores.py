@@ -789,6 +789,7 @@ def obtener_productos_comercio(comercio_id):
                     p.descripcion,
                     p.precio_usd,
                     p.codigo_barras,
+                    p.imagen_estado,
                     {_SQL_IMAGEN_URL}
                 FROM productos p
                 WHERE p.comercio_id = ?
@@ -983,15 +984,58 @@ def procesar_csv_productos(comercio_id, archivo_csv):
             traceback.print_exc()
 
         print(f'{CSV_LOG} ok comercio={comercio_id} insertados={insertados}')
-        return (
-            True,
-            f'Importación completada: {insertados} productos cargados. '
-            'Columnas reconocidas automáticamente desde la primera fila. '
-            'Las fotos profesionales se prepararán en segundo plano.',
-            None,
+        conteos = _contar_estados_imagenes(comercio_id)
+        from backend.estado_imagenes import construir_reporte_importacion
+
+        mensaje, meta_imagenes = construir_reporte_importacion(
+            total=insertados,
+            reales=conteos.get('real', 0),
+            pendientes=conteos.get('pendiente', 0),
+            rechazadas=conteos.get('rechazada', 0),
         )
+        print(
+            f'{CSV_LOG} imágenes comercio={comercio_id} '
+            f'"{meta_imagenes["estado_imagenes"]}": '
+            f'reales={meta_imagenes["imagenes_reales"]} '
+            f'pendientes={meta_imagenes["imagenes_pendientes"]} '
+            f'rechazadas={meta_imagenes["imagenes_rechazadas"]}'
+        )
+        return True, recortar_mensaje_importacion(mensaje), meta_imagenes
 
     except Exception as exc:
         print(f'{CSV_LOG} FALLO etapa={etapa} {type(exc).__name__}: {exc}')
         traceback.print_exc()
         return False, recortar_mensaje_importacion(mensaje_error_importacion(exc)), None
+
+
+def _contar_estados_imagenes(comercio_id):
+    """Conteo por imagen_estado: {'real': n, 'pendiente': n, 'rechazada': n}."""
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT COALESCE(imagen_estado, 'pendiente') AS estado, COUNT(*) AS n
+                FROM productos
+                WHERE comercio_id = ?
+                GROUP BY 1
+                """,
+                (int(comercio_id),),
+            )
+            filas = cursor.fetchall()
+    except Exception as error:
+        print(f'{CSV_LOG} no se pudo contar estados de imagen: {type(error).__name__}: {error}')
+        return {}
+
+    conteos = {}
+    for fila in filas:
+        if isinstance(fila, dict):
+            estado_raw, valor = fila.get('estado'), fila.get('n')
+        else:
+            estado_raw, valor = fila[0], fila[1]
+        estado = str(estado_raw or 'pendiente').strip().lower()
+        try:
+            conteos[estado] = conteos.get(estado, 0) + int(valor or 0)
+        except (TypeError, ValueError):
+            continue
+    return conteos

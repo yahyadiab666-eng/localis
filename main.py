@@ -258,6 +258,14 @@ except Exception:
 # los workers. Los hilos se crean de forma perezosa en la primera importación.
 configurar_cola(app)
 
+# Reintento periódico de imágenes pendientes/rechazadas (sin falsos positivos).
+try:
+    from backend.image_backfill import iniciar_backfill_periodico
+
+    iniciar_backfill_periodico()
+except Exception as _error_backfill:
+    print(f'[Localis] backfill periódico no iniciado: {_error_backfill}')
+
 
 @app.template_filter('fecha_corta')
 def _filtro_fecha_corta(valor):

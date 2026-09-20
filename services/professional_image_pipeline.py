@@ -56,6 +56,7 @@ import re
 import threading
 import time
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
@@ -108,6 +109,10 @@ _BUSQUEDA_WEB = str(os.getenv('LOCALIS_IMG_BUSQUEDA_WEB', '1')).strip().lower() 
     'no',
     'off',
 )
+# Búsqueda ligera en paralelo (I/O) + caché agresiva por TTL.
+_BUSQUEDA_PARALELA = max(1, _env_int('LOCALIS_IMG_PARALELO', 4))
+_CACHE_BUSQUEDA_TTL = max(30, _env_int('LOCALIS_IMG_CACHE_TTL_SEC', 3600))
+_MAX_SITIOS = max(0, _env_int('LOCALIS_IMG_SITIOS', 2))
 
 _SEMAFORO = threading.Semaphore(max(1, _env_int('LOCALIS_IMG_MAX_CONCURRENT', 1)))
 _EN_VUELO: set = set()
@@ -121,36 +126,43 @@ _REMBG_LOCK = threading.Lock()
 # Fuentes confiables y bloqueadas
 # ---------------------------------------------------------------------------
 _DOMINIOS_CONFIABLES_BASE = (
-    # Farmacias y retail nacional
-    'farmatodo',
-    'locatel',
-    'centralmadeirense',
-    'gamaenex',
-    'makro.com.ve',
-    'plazas.com',
-    'tuexito',
-    'elrecreo',
-    'supermercadosgama',
-    'traki',
-    'radioshack.com.ve',
-    'tiendasva',
-    'bumblebee',
-    'multimax',
+    # Farmacias / salud
+    'farmatodo', 'locatel', 'farmahorro', 'farmaciasaavedra', 'farmarket',
+    'farmacialaredoma', 'farma redoma', 'farmadon',
+    # Supermercados / retail nacional (todos los rubros)
+    'centralmadeirense', 'gamaenex', 'makro.com.ve', 'plazas.com',
+    'tuexito', 'elrecreo', 'supermercadosgama', 'hiperlider', 'garzon',
+    'latodia', 'daka', 'casamia', 'bango', 'arenas', 'sigo', 'el patron',
+    'venezolanadealimentos', 'alimentosve', 'mercado', 'supermercado',
+    # Tecnología / electro
+    'traki', 'radioshack.com.ve', 'tiendasva', 'bumblebee', 'multimax',
+    'beco', 'tgo', 'macoutlet', 'vertigo', 'innovacom', 'planetacom',
     'sambil',
+    # Ferretería / construcción
+    'epa.com.ve', 'ferretotal', 'tufesa', 'ferremaq', 'sodi', 'construcasa',
+    'ferreter',
+    # Automotriz / repuestos
+    'cauchera', 'repuestos', 'autorepuestos', 'autoexpress', 'multirepuestos',
+    'automotriz',
+    # Calzado / ropa / hogar
+    'calzados', 'bata', 'flexi', 'cuero', 'multimax',
     # Distribuidores / mayoristas reconocidos
-    'distribuidor',
-    'mayorista',
-    'venezolanadealimentos',
-    'alimentosve',
+    'distribuidor', 'mayorista',
     # Catálogos abiertos (ficha de producto verificada por código)
-    'openfoodfacts',
-    'openbeautyfacts',
-    'openproductsfacts',
+    'openfoodfacts', 'openbeautyfacts', 'openproductsfacts',
     # Prensa/comercio venezolano que suele publicar fotos de producto
-    'eluniversal.com',
-    'elnacional.com',
-    'talcual',
-    'efectococuyo',
+    'eluniversal.com', 'elnacional.com', 'talcual', 'efectococuyo',
+)
+
+# Fuentes prioritarias para búsquedas restringidas por sitio (site:host).
+_FUENTES_SITE_BASE = (
+    'farmatodo.com.ve',
+    'locatel.com.ve',
+    'traki.com',
+    'epa.com.ve',
+    'centralmadeirense.com.ve',
+    'plazas.com',
+    'multimax.com.ve',
 )
 
 _DOMINIOS_BLOQUEADOS = (
@@ -208,6 +220,15 @@ def _dominios_confiables():
     return _DOMINIOS_CONFIABLES_BASE + personalizados
 
 
+def _fuentes_site():
+    """Hosts prioritarios para búsquedas restringidas por sitio (site:host)."""
+    extra = os.getenv('LOCALIS_IMG_SITIOS_EXTRA', '')
+    personalizados = tuple(
+        d.strip().lower() for d in extra.split(',') if d.strip()
+    )
+    return _FUENTES_SITE_BASE + personalizados
+
+
 _ACENTOS = str.maketrans(
     'áéíóúüñÁÉÍÓÚÜÑ',
     'aeiouunAEIOUUN',
@@ -247,15 +268,15 @@ _STOPWORDS = frozenset({
 
 
 def _inferir_marca(nombre, descripcion=None, marca=None):
-    """Marca declarada en la fila. Sin listas estáticas de marcas.
-
-    Si el archivo no trae marca, no se inventa: el query usa el nombre completo,
-    que es universal para cualquier artículo.
-    """
-    del nombre, descripcion
+    """Marca de la fila o reconocida del texto (marcas criollas/importadas)."""
     if marca and str(marca).strip():
         return str(marca).strip()
-    return None
+    try:
+        from backend.marcas_ve import detectar_marca
+
+        return detectar_marca(nombre, descripcion)
+    except Exception:
+        return None
 
 
 _RE_PRESENTACION = re.compile(
@@ -601,6 +622,14 @@ def _consultas_busqueda(nombre, marca, presentacion, descripcion, categoria=None
     return consultas
 
 
+def _clave_cache_candidatos(codigo_barras, nombre, marca, presentacion, categoria):
+    base = '|'.join(
+        str(p or '').strip().lower()
+        for p in (codigo_barras, nombre, marca, presentacion, categoria)
+    )
+    return hashlib.sha1(base.encode('utf-8', 'ignore')).hexdigest()
+
+
 def buscar_candidatos(
     *,
     codigo_barras=None,
@@ -611,7 +640,44 @@ def buscar_candidatos(
     categoria=None,
     limite=None,
 ):
-    """Devuelve candidatos ordenados por confianza (mejor primero)."""
+    """Candidatos ordenados por confianza (mejor primero).
+
+    Caché en memoria por TTL: reintentos y reimportaciones no vuelven a golpear
+    la red.
+    """
+    limite = limite or _MAX_CANDIDATOS
+    parametros = {
+        'codigo_barras': codigo_barras,
+        'nombre': nombre,
+        'marca': marca,
+        'presentacion': presentacion,
+        'descripcion': descripcion,
+        'categoria': categoria,
+        'limite': limite,
+    }
+    clave = _clave_cache_candidatos(codigo_barras, nombre, marca, presentacion, categoria)
+    try:
+        from backend.runtime_cache import get_or_load
+
+        return get_or_load(
+            f'candidatos_img:{clave}',
+            lambda: _buscar_candidatos_impl(**parametros),
+            ttl_seconds=_CACHE_BUSQUEDA_TTL,
+        )
+    except Exception:
+        return _buscar_candidatos_impl(**parametros)
+
+
+def _buscar_candidatos_impl(
+    *,
+    codigo_barras=None,
+    nombre=None,
+    marca=None,
+    presentacion=None,
+    descripcion=None,
+    categoria=None,
+    limite=None,
+):
     from backend.utils import normalizar_codigo_barras
 
     limite = limite or _MAX_CANDIDATOS
@@ -620,8 +686,8 @@ def buscar_candidatos(
     tokens = _tokens_relevancia(nombre, marca, descripcion)
 
     candidatos = []
-
     ean = normalizar_codigo_barras(codigo_barras)
+
     if ean:
         try:
             from backend.catalogo_maestro import imagen_maestro_por_codigo
@@ -633,21 +699,41 @@ def buscar_candidatos(
             candidatos.append(
                 Candidato(url=url_maestro, fuente='catalogo_maestro', dominio=_dominio(url_maestro))
             )
-        candidatos.extend(_buscar_off_por_ean(ean))
 
+    base = ' '.join(
+        str(p).strip() for p in (nombre, marca, presentacion) if p and str(p).strip()
+    )
     consultas = _consultas_busqueda(
         nombre, marca, presentacion, descripcion, categoria=categoria
     )
-    for consulta in consultas:
-        if not _BUSQUEDA_WEB:
-            break
-        candidatos.extend(_buscar_web_bing(consulta))
-        candidatos.extend(_buscar_web_ddg(consulta))
+
+    # Tareas de red (I/O) en paralelo: Bing/DDG por consulta, site:host locales
+    # y catálogos abiertos. rembg queda serializado aparte (CPU).
+    tareas = []
+    if _BUSQUEDA_WEB:
+        for consulta in consultas:
+            tareas.append((_buscar_web_bing, consulta))
+            tareas.append((_buscar_web_ddg, consulta))
+        if base and _MAX_SITIOS > 0:
+            for host in _fuentes_site()[:_MAX_SITIOS]:
+                tareas.append((_buscar_web_bing, f'{base} site:{host}'))
     if nombre:
         consulta_off = ' '.join(
             str(p).strip() for p in (nombre, marca, categoria) if p and str(p).strip()
         )
-        candidatos.extend(_buscar_off_por_nombre(consulta_off))
+        tareas.append((_buscar_off_por_nombre, consulta_off))
+    if ean:
+        tareas.append((_buscar_off_por_ean, ean))
+
+    if tareas:
+        workers = min(_BUSQUEDA_PARALELA, len(tareas))
+        with ThreadPoolExecutor(max_workers=workers) as ejecutor:
+            futuros = [ejecutor.submit(fn, arg) for fn, arg in tareas]
+            for futuro in as_completed(futuros):
+                try:
+                    candidatos.extend(futuro.result() or [])
+                except Exception:
+                    continue
 
     # Deduplicar preservando la mejor fuente.
     unicos = {}
@@ -1026,7 +1112,7 @@ def _leer_producto(producto_id):
     }
 
 
-def _actualizar_imagen(producto_id, url, fuente):
+def _actualizar_imagen(producto_id, url, fuente, estado='real'):
     from backend.db import get_db_connection
 
     # Sin comodines '%' en el SQL: psycopg2 interpreta '%' como formato cuando
@@ -1036,8 +1122,9 @@ def _actualizar_imagen(producto_id, url, fuente):
         cursor.execute(
             """
             UPDATE productos
-            SET imagen_url = ?, imagen_fuente = ?
+            SET imagen_url = ?, imagen_fuente = ?, imagen_estado = ?
             WHERE id = ?
+              AND COALESCE(imagen_estado, 'pendiente') <> 'real'
               AND (
                 imagen_url IS NULL
                 OR TRIM(CAST(imagen_url AS TEXT)) = ''
@@ -1051,11 +1138,34 @@ def _actualizar_imagen(producto_id, url, fuente):
                 )
               )
             """,
-            (url, fuente, int(producto_id)),
+            (url, fuente, estado, int(producto_id)),
         )
         actualizadas = cursor.rowcount
         conexion.commit()
     return bool(actualizadas)
+
+
+def _marcar_estado_imagen(producto_id, estado):
+    """Marca rechazada/pendiente sin tocar la imagen (nunca degrada una real)."""
+    from backend.db import get_db_connection
+
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                UPDATE productos
+                SET imagen_estado = ?
+                WHERE id = ?
+                  AND COALESCE(imagen_estado, 'pendiente') <> 'real'
+                """,
+                (estado, int(producto_id)),
+            )
+            conexion.commit()
+        return True
+    except Exception as error:
+        _log(f'marcar estado producto={producto_id} falló: {type(error).__name__}: {error}')
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -1160,25 +1270,32 @@ def procesar_producto(
         )
 
     _log_pipeline(producto_id, ean, 'sin_imagen', motivo=ultimo_motivo)
-    _log(f'producto={producto_id} sin imagen real ({ultimo_motivo}); se mantiene/asigna fallback')
+    _log(f'producto={producto_id} sin imagen real ({ultimo_motivo}); pendiente/rechazada')
 
-    # Garantía de cobertura universal: ningún producto queda sin imagen.
-    if producto_id and imagen_para_categoria is not None:
-        try:
-            fila = _leer_producto(producto_id) or {}
-            actual = str(fila.get('imagen_url') or '').strip()
-            if not actual:
-                fallback = imagen_para_categoria(categoria_efectiva or 'otros')
-                if _actualizar_imagen(producto_id, fallback, 'placeholder_categoria'):
-                    _log(
-                        f'producto={producto_id} fallback de categoría asignado '
-                        f'({categoria_efectiva!r})'
-                    )
-                    return ResultadoProcesamiento(
-                        ok=False, url=fallback, fuente='placeholder_categoria', motivo=ultimo_motivo
-                    )
-        except Exception as error:
-            _log(f'producto={producto_id} fallback no aplicado: {type(error).__name__}: {error}')
+    # Garantía de cobertura universal: ningún producto queda sin imagen, pero se
+    # marca explícitamente como PENDIENTE/RECHAZADA (nunca como real).
+    if producto_id:
+        candidatos_hubo = bool(candidatos)
+        if imagen_para_categoria is not None:
+            try:
+                fila = _leer_producto(producto_id) or {}
+                actual = str(fila.get('imagen_url') or '').strip()
+                if not actual:
+                    fallback = imagen_para_categoria(categoria_efectiva or 'otros')
+                    if _actualizar_imagen(
+                        producto_id, fallback, 'placeholder_categoria', estado='pendiente'
+                    ):
+                        _log(
+                            f'producto={producto_id} fallback de categoría asignado '
+                            f'({categoria_efectiva!r}) estado=pendiente'
+                        )
+            except Exception as error:
+                _log(f'producto={producto_id} fallback no aplicado: {type(error).__name__}: {error}')
+
+        # Si hubo candidatas y todas se rechazaron, marcar 'rechazada' para
+        # reintento con estrategia ampliada más adelante.
+        estado_final = 'rechazada' if candidatos_hubo else 'pendiente'
+        _marcar_estado_imagen(producto_id, estado_final)
 
     return ResultadoProcesamiento(ok=False, motivo=ultimo_motivo)
 
@@ -1218,7 +1335,7 @@ def _productos_pendientes(comercio_id):
         cursor = conexion.cursor()
         cursor.execute(
             """
-            SELECT id, nombre, descripcion, codigo_barras, imagen_url
+            SELECT id, nombre, descripcion, codigo_barras, imagen_url, imagen_estado
             FROM productos
             WHERE comercio_id = ?
             """,
@@ -1233,8 +1350,15 @@ def _productos_pendientes(comercio_id):
             'descripcion': fila[2],
             'codigo_barras': fila[3],
             'imagen_url': fila[4],
+            'imagen_estado': fila[5] if len(fila) > 5 else None,
         }
-        if _imagen_puede_reemplazarse(registro.get('imagen_url')):
+        estado = str(registro.get('imagen_estado') or '').strip().lower()
+        if estado == 'real':
+            continue
+        # Pendiente/rechazada o URL reemplazable (placeholder/vacía/externa).
+        if estado in ('pendiente', 'rechazada') or _imagen_puede_reemplazarse(
+            registro.get('imagen_url')
+        ):
             pendientes.append(registro)
     return pendientes
 

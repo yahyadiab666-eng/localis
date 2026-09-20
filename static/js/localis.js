@@ -435,14 +435,17 @@
           });
         })
         .then(function (datos) {
-          if (datos && datos.estado === 'completado') {
+          if (datos && (datos.estado === 'completado' || datos.estado === 'parcial')) {
             window.mostrarAlertaLocalis(
-              datos.mensaje || 'Importación completada con éxito.',
-              'exito'
+              datos.mensaje ||
+                (datos.estado === 'parcial'
+                  ? 'Catálogo cargado; quedan imágenes pendientes.'
+                  : 'Importación completada con éxito.'),
+              datos.estado === 'parcial' ? 'info' : 'exito'
             );
             window.setTimeout(function () {
               window.location.reload();
-            }, 1200);
+            }, 1500);
             return;
           }
           if (datos && datos.estado === 'error') {

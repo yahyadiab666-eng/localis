@@ -137,6 +137,11 @@ def _probar_cobertura_masiva():
     sin_imagen = [p for p in productos if not p.get('imagen_url')]
     _ok(not sin_imagen, f'cero productos sin imagen ({len(sin_imagen)})')
 
+    reales = [p for p in productos if p.get('imagen_estado') == 'real']
+    pendientes = [p for p in productos if p.get('imagen_estado') == 'pendiente']
+    _ok(not reales, f'sin imágenes reales con índice vacío ({len(reales)})')
+    _ok(len(pendientes) == total, f'todos marcados como pendientes ({len(pendientes)})')
+
     malas = [
         p
         for p in productos
@@ -277,10 +282,26 @@ def _probar_formatos_masivos():
         _ok(len(categorias) >= 5, f'{extension}: {len(categorias)} categorías inferidas')
 
 
+def _probar_reporte_honesto():
+    print('\n=== Reporte honesto (solo imágenes reales) ===')
+    from backend.estado_imagenes import construir_reporte_importacion
+
+    _mensaje, meta_sin = construir_reporte_importacion(2000, 0, 2000)
+    _ok(meta_sin['estado_imagenes'] == 'sin_reales', 'sin reales -> estado "sin_reales"')
+
+    _mensaje2, meta_parcial = construir_reporte_importacion(2000, 12, 1988)
+    _ok(meta_parcial['estado_imagenes'] == 'parcial', 'mezcla -> estado "parcial"')
+    _ok(meta_parcial['imagenes_reales'] == 12, 'reporta el número de imágenes reales')
+
+    _mensaje3, meta_ok = construir_reporte_importacion(50, 50, 0)
+    _ok(meta_ok['estado_imagenes'] == 'completo', 'todas reales -> estado "completo"')
+
+
 def main() -> int:
     _probar_clasificador()
     _probar_cobertura_masiva()
     _probar_formatos_masivos()
+    _probar_reporte_honesto()
 
     print('\n=== RESULTADO ===')
     if _ERRORES:

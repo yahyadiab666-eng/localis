@@ -82,7 +82,31 @@ Módulo: `backend/categorias_producto.py`. Clasificador universal **sin listas d
 
 **Garantía:** tras la asignación instantánea, ningún producto queda con `imagen_url` vacío; si por cualquier motivo faltara, se fuerza el placeholder limpio. Verificado con 2.000 productos de 15 categorías: 100% con imagen, ~0,4 ms/producto.
 
+### Éxito estricto (sin falsos positivos)
+
+Cada producto guarda su estado en `productos.imagen_estado`:
+
+- `real`: `imagen_url` apunta a una foto real (Storage/local).
+- `pendiente`: aún no se ha buscado la foto real (placeholder de categoría).
+- `rechazada`: se intentó y ninguna candidata superó la validación.
+
+Módulo: `backend/estado_imagenes.py`. El reporte de la importación **solo cuenta imágenes reales** y nunca declara "completo" si quedan pendientes:
+
+- `completo`: todas las imágenes son reales.
+- `parcial`: catálogo cargado con fotos reales + pendientes.
+- `sin_reales`: ninguna foto real todavía.
+
+El trabajo asíncrono se marca `parcial` (no `completado`) cuando quedan pendientes, y el panel muestra un badge **"Imagen pendiente"**. El motor reintenta en segundo plano (con búsqueda ampliada y por sitio) y actualiza a `real` cuando la consigue.
+
+**Reintento periódico:** `backend/image_backfill.py` arranca con la app y cada `LOCALIS_IMG_BACKFILL_INTERVALO` segundos procesa un lote pequeño de pendientes/rechazadas (`LOCALIS_IMG_BACKFILL_LOTE` × `LOCALIS_IMG_BACKFILL_COMERCIOS`), de modo que nada queda "sin imagen" para siempre sin saturar 1 CPU. Al inicio, `init_db` **reconcilia** `imagen_estado` con la URL real (corrige filas antiguas).
+
 Los productos que caen en el placeholder se procesan **en segundo plano** (hilo único, semáforo=1) con el pipeline profesional (búsqueda + rembg + Storage) y, al guardarse, se cachean en el catálogo maestro con nombre/marca para que la **próxima** importación los resuelva al instante.
+
+### Multi-rubro y marcas venezolanas
+
+- `backend/marcas_ve.py`: reconoce **marcas criollas e importadas** (metadatos de marca, no productos) para extraer la marca cuando el archivo no la trae.
+- `services/professional_image_pipeline.py`: fuentes confiables ampliadas a todos los rubros (farmacias, tecnología, ferretería, automotriz, hogar, calzado…) y **búsqueda restringida por sitio** (`site:farmatodo.com.ve`, `site:locatel.com.ve`, `site:traki.com`, `site:epa.com.ve`…) para encontrar fichas locales.
+- Consultas en paralelo (I/O) + caché en memoria por TTL; `rembg` sigue serializado (CPU).
 
 ```
 LOCALIS_MAESTRO_INDEX_TTL_SEC=600
@@ -91,6 +115,9 @@ LOCALIS_MAESTRO_SIMILITUD_MIN=0.6
 # Relleno real en segundo plano (acotado por tiempo para no saturar 1 CPU)
 LOCALIS_IMG_CSV_MAX=2000
 LOCALIS_IMG_CSV_BUDGET_SEC=600
+LOCALIS_IMG_PARALELO=4
+LOCALIS_IMG_CACHE_TTL_SEC=3600
+LOCALIS_IMG_SITIOS=2
 ```
 
 ## 5. Formatos soportados y rendimiento masivo

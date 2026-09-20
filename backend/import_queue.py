@@ -44,7 +44,7 @@ _WORKERS = max(1, int(os.getenv('LOCALIS_IMPORT_WORKERS', '2')))
 _JOB_TTL_SEG = max(60, int(os.getenv('LOCALIS_IMPORT_JOB_TTL_SEC', '3600')))
 _MAX_JOBS = max(50, int(os.getenv('LOCALIS_IMPORT_MAX_JOBS', '500')))
 
-_ESTADOS_FINALES = frozenset({'completado', 'error'})
+_ESTADOS_FINALES = frozenset({'completado', 'parcial', 'error'})
 
 
 class ColaImportacionLlena(Exception):
@@ -176,10 +176,16 @@ def _finalizar_job(job_id, *, exito, mensaje, meta=None, duracion=None):
         job = _jobs.get(job_id)
         if not job:
             return
-        job['estado'] = 'completado' if exito else 'error'
+        meta_limpio = _serializar_meta(meta)
+        estado = 'error' if not exito else 'completado'
+        # El éxito "real" solo cuando todas las imágenes son reales; si quedan
+        # pendientes, el trabajo se reporta como PARCIAL (sin falsos positivos).
+        if exito and meta_limpio.get('estado_imagenes') in ('parcial', 'sin_reales'):
+            estado = 'parcial'
+        job['estado'] = estado
         job['exito'] = bool(exito)
         job['mensaje'] = str(mensaje or '')[:1400]
-        job['meta'] = _serializar_meta(meta)
+        job['meta'] = meta_limpio
         job['duracion'] = round(duracion, 2) if duracion is not None else None
         job['actualizado'] = time.time()
         job.pop('data', None)  # liberar memoria

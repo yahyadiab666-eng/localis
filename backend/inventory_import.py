@@ -128,16 +128,16 @@ _MAX_FLASH_CHARS = 1400
 INSERT_PRODUCTO_SQL = """
     INSERT INTO productos (
         comercio_id, nombre, descripcion, precio_usd,
-        codigo_barras, imagen_url, imagen_fuente, stock
+        codigo_barras, imagen_url, imagen_fuente, imagen_estado, stock
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 # Variante para `execute_values` (inserción multi-fila en una sola sentencia).
 INSERT_PRODUCTO_VALUES_SQL = """
     INSERT INTO productos (
         comercio_id, nombre, descripcion, precio_usd,
-        codigo_barras, imagen_url, imagen_fuente, stock
+        codigo_barras, imagen_url, imagen_fuente, imagen_estado, stock
     )
     VALUES %s
 """
@@ -882,16 +882,21 @@ def asignar_imagenes_instantaneas(productos, snapshot_imagenes=None, categoria=N
             return '/static/img/placeholder-otros.svg'
 
     nuevos = 0
+    reales = 0
     por_categoria = {}
     for prod in productos:
         if prod.get('imagen_url'):
             prod['imagen_fuente'] = prod.get('imagen_fuente') or 'archivo'
+            prod['imagen_estado'] = 'real'
+            reales += 1
             continue
 
         codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
         if codigo and codigo in snapshot:
             prod['imagen_url'] = snapshot[codigo]
             prod['imagen_fuente'] = 'comercio'
+            prod['imagen_estado'] = 'real'
+            reales += 1
             continue
 
         if indice is not None:
@@ -903,6 +908,8 @@ def asignar_imagenes_instantaneas(productos, snapshot_imagenes=None, categoria=N
             if url:
                 prod['imagen_url'] = url
                 prod['imagen_fuente'] = f'maestro_{origen}'
+                prod['imagen_estado'] = 'real'
+                reales += 1
                 continue
 
         cat = clasificar_categoria(
@@ -914,22 +921,25 @@ def asignar_imagenes_instantaneas(productos, snapshot_imagenes=None, categoria=N
         prod['categoria_inferida'] = cat
         prod['imagen_url'] = imagen_para_categoria(cat)
         prod['imagen_fuente'] = 'placeholder_categoria'
+        prod['imagen_estado'] = 'pendiente'
         por_categoria[cat] = por_categoria.get(cat, 0) + 1
         nuevos += 1
 
-    # Garantía absoluta: si algo quedó vacío, se fuerza el genérico limpio.
+    # Garantía de UI: si algo quedara vacío, se fuerza el genérico limpio, pero
+    # SIEMPRE marcado como 'pendiente' (nunca se reporta como imagen real).
     sin_imagen = 0
     for prod in productos:
         if not prod.get('imagen_url'):
             prod['imagen_url'] = '/static/img/placeholder-otros.svg'
             prod['imagen_fuente'] = 'placeholder_categoria'
+            prod['imagen_estado'] = 'pendiente'
             sin_imagen += 1
 
     print(
         f'{LOG_PREFIX} imágenes instantáneas: total={len(productos)} '
+        f'reales={reales} pendientes={nuevos + sin_imagen} '
         f'maestro_codigos={len(indice.por_codigo) if indice else 0} '
         f'maestro_nombres={len(indice.por_nombre) if indice else 0} '
-        f'placeholder_categoria={nuevos} forzados={sin_imagen} '
         f'categorias={por_categoria}'
     )
     return nuevos
@@ -948,6 +958,9 @@ def _tuplas_insercion(comercio_id, lote, snapshot_imagenes=None, mapa_maestro=No
                 snapshot_imagenes,
                 mapa_maestro=mapa_maestro,
             )
+        estado = prod.get('imagen_estado')
+        if not estado:
+            estado = 'pendiente' if (not url or 'placeholder' in str(url).lower()) else 'real'
         tuplas.append(
             (
                 comercio_id,
@@ -957,6 +970,7 @@ def _tuplas_insercion(comercio_id, lote, snapshot_imagenes=None, mapa_maestro=No
                 prod['codigo_barras'],
                 url,
                 prod.get('imagen_fuente'),
+                estado,
                 prod['stock'],
             )
         )

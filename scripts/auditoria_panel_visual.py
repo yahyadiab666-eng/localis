@@ -111,6 +111,21 @@ def _auditar_importacion_instantanea():
     _ok(all(svg.stat().st_size > 0 for svg in svgs), 'placeholders no vacíos')
     _ok("'categoria'" in inventario, 'columna categoría reconocida')
 
+    estados = _leer('backend/estado_imagenes.py')
+    _ok('def construir_reporte_importacion' in estados, 'reporte honesto de imágenes')
+    _ok('ESTADO_PENDIENTE' in estados and 'ESTADO_RECHAZADA' in estados, 'estados pendiente/rechazada')
+    _ok('imagen_estado' in _leer('database.py'), 'columna imagen_estado migrada')
+    _ok('parcial' in _leer('backend/import_queue.py'), 'la cola distingue trabajos parciales')
+    _ok(
+        (RAIZ / 'backend' / 'marcas_ve.py').is_file(),
+        'reconocimiento de marcas criollas/importadas',
+    )
+    _ok('site:' in _leer('services/professional_image_pipeline.py'), 'búsqueda restringida por sitio')
+    _ok('Imagen pendiente' in _leer('templates/comercio.html'), 'badge de imagen pendiente en el panel')
+    backfill = _leer('backend/image_backfill.py')
+    _ok('def ejecutar_ciclo' in backfill, 'reintento periódico de pendientes')
+    _ok('iniciar_backfill_periodico' in _leer('main.py'), 'el reintento arranca con la app')
+
     requisitos = _leer('requirements.txt')
     _ok('xlrd' in requisitos, 'xlrd declarado en requirements')
     _ok('openpyxl' in requisitos, 'openpyxl declarado en requirements')

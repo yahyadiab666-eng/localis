@@ -172,6 +172,7 @@ COLUMNAS_ESQUEMA = {
         ('descripcion', 'TEXT'),
         ('imagen_url', 'TEXT'),
         ('imagen_fuente', 'TEXT'),
+        ('imagen_estado', "TEXT DEFAULT 'pendiente'"),
         ('stock', 'INTEGER DEFAULT 0'),
         ('codigo_barras', 'TEXT'),
     ],
@@ -847,6 +848,38 @@ def _migrar_columnas(cursor):
     _asegurar_columnas_imagen_oficiales(cursor)
 
 
+def _reconciliar_estados_imagenes(cursor):
+    """Alinea ``imagen_estado`` con la URL persistida (idempotente).
+
+    - Storage/local (foto real)          -> 'real'
+    - vacío / placeholder / URL externa  -> 'pendiente'
+
+    Corrige filas importadas antes de existir la columna, evitando reportar
+    como 'pendiente' fotos que en realidad son reales (y viceversa).
+    """
+    try:
+        condicion = (
+            "imagen_url LIKE '%/storage/v1/object/public/%' "
+            "OR imagen_url LIKE '/static/uploads/%'"
+        )
+        cursor.execute(
+            f"""
+            UPDATE productos
+            SET imagen_estado = CASE WHEN {condicion} THEN 'real' ELSE 'pendiente' END
+            WHERE imagen_estado IS DISTINCT FROM
+                  CASE WHEN {condicion} THEN 'real' ELSE 'pendiente' END
+            """
+        )
+        n = cursor.rowcount
+        if n:
+            print(
+                f'[Localis] imagen_estado reconciliado en {n} productos',
+                flush=True,
+            )
+    except Exception as error:
+        print(f'[Localis] no se pudo reconciliar imagen_estado: {error}', flush=True)
+
+
 def _asegurar_columnas_imagen_oficiales(cursor):
     """Columnas oficiales de comercios en Supabase (nombres con espacios)."""
     if not _tabla_existe(cursor, 'comercios'):
@@ -1015,6 +1048,7 @@ def _crear_tabla_productos(cursor):
             descripcion TEXT,
             imagen_url TEXT,
             imagen_fuente TEXT,
+            imagen_estado TEXT DEFAULT 'pendiente',
             stock INTEGER DEFAULT 0,
             codigo_barras TEXT
         )
@@ -1324,6 +1358,8 @@ def _crear_indices(cursor):
         'CREATE INDEX IF NOT EXISTS idx_intentos_correo ON intentos_login(correo_intentado)',
         'CREATE INDEX IF NOT EXISTS idx_productos_nombre ON productos(nombre)',
         'CREATE INDEX IF NOT EXISTS idx_productos_codigo_barras ON productos(codigo_barras)',
+        'CREATE INDEX IF NOT EXISTS idx_productos_imagen_estado ON productos(imagen_estado)',
+        'CREATE INDEX IF NOT EXISTS idx_productos_comercio_imagen ON productos(comercio_id, imagen_estado)',
         'CREATE INDEX IF NOT EXISTS idx_catalogo_maestro_nombre ON catalogo_maestro_imagenes(nombre_normalizado)',
         'CREATE INDEX IF NOT EXISTS idx_image_pipeline_log_ean ON image_pipeline_log(ean)',        'CREATE INDEX IF NOT EXISTS idx_image_pipeline_log_timestamp ON image_pipeline_log(timestamp DESC)',
         'CREATE INDEX IF NOT EXISTS idx_image_pipeline_log_resultado ON image_pipeline_log(resultado)',
@@ -1429,6 +1465,7 @@ def init_db():
             try:
                 _crear_tablas(cursor)
                 _migrar_columnas(cursor)
+                _reconciliar_estados_imagenes(cursor)
                 conexion.commit()
 
                 _asegurar_indices_unicos(cursor)
