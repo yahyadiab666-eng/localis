@@ -3,7 +3,6 @@
 import io
 import os
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from PIL import Image
 from werkzeug.utils import secure_filename
@@ -14,7 +13,6 @@ MAX_DIMENSION = 800
 QUALITY = 78
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp'}
 FONDO_LIENZO = (255, 254, 251)  # #fffefb, mismo tono que las tarjetas
-DEFAULT_WORKERS = 4
 
 
 class ImageProcessingError(Exception):
@@ -219,50 +217,3 @@ def comprimir_file_storage_a_bytes(
         formato=formato,
         lienzo_cuadrado=lienzo_cuadrado,
     )
-
-
-def procesar_tarea_imagen(tarea):
-    """
-    Ejecuta una tarea de imagen en un worker sin almacenamiento local.
-    Retorna dict con producto_id (opcional) y url resultante.
-    """
-    prefijo = tarea.get('prefijo', 'img')
-    producto_id = tarea.get('producto_id')
-    url = None
-    tipo = tarea.get('tipo')
-
-    if tipo == 'url' and tarea.get('url'):
-        url_externa = tarea['url']
-        if url_externa.startswith('http'):
-            url = url_externa
-        else:
-            url = url_externa
-
-    elif tipo == 'buscar':
-        # Deshabilitado: no asignar imágenes por búsqueda genérica.
-        url = None
-
-    return {'producto_id': producto_id, 'url': url}
-
-
-def procesar_imagenes_paralelo(tareas, max_workers=DEFAULT_WORKERS):
-    """
-    Procesa múltiples imágenes en paralelo con ThreadPoolExecutor.
-    Retorna lista de resultados {producto_id, url}.
-    """
-    if not tareas:
-        return []
-
-    resultados = []
-    workers = min(max_workers, max(1, len(tareas)))
-
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        futuros = {executor.submit(procesar_tarea_imagen, t): t for t in tareas}
-        for futuro in as_completed(futuros):
-            try:
-                resultados.append(futuro.result())
-            except Exception as e:
-                tarea = futuros[futuro]
-                print(f'Error en worker de imagen (prod {tarea.get("producto_id")}): {e}')
-
-    return resultados

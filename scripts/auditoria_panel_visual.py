@@ -82,14 +82,9 @@ def _auditar_pipeline():
         _ok(funcion in pipeline, f'define {funcion.split("def ")[1]}')
 
     _ok('255, 255, 255' in pipeline, 'fondo blanco puro (#FFFFFF)')
-    legado = _leer('services/smart_image_pipeline.py')
     _ok(
-        all(
-            host not in legado
-            for host in ('api.barcodespider.com', 'api.upcitemdb.com', 'api.barcodelookup.com')
-        )
-        and '_buscar_barcode_spider_ean' not in legado,
-        'sin llamadas a APIs de códigos de barras (Barcode Spider)',
+        not (RAIZ / 'services' / 'smart_image_pipeline.py').exists(),
+        'código legacy de Barcode Spider eliminado',
     )
     imagen_lookup = _leer('backend/image_lookup.py')
     _ok('professional_image_pipeline' in imagen_lookup, 'el backend usa el pipeline profesional')

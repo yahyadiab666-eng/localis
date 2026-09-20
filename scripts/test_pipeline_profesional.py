@@ -138,15 +138,15 @@ def main() -> int:
     _ok(not resultado.ok and resultado.motivo == 'imagen_manual_conservada', 'no pisa foto manual')
     _ok('update' not in capturado, 'no actualiza cuando hay foto manual')
 
-    print('\n=== Barcode Spider / APIs globales eliminadas ===')
-    from services import smart_image_pipeline as legado
+    print('\n=== Código legacy de Barcode Spider purgado ===')
+    ruta_legado = RAIZ / 'services' / 'smart_image_pipeline.py'
+    _ok(not ruta_legado.exists(), 'services/smart_image_pipeline.py eliminado')
+    import importlib.util
 
-    _ok(not hasattr(legado, '_buscar_barcode_spider_ean'), 'sin lookup Barcode Spider')
-    _ok(not hasattr(legado, '_buscar_upcitemdb_ean'), 'sin lookup UPCitemdb')
-    _ok(legado.buscar_por_ean('7702084137520') is None, 'EAN no llama APIs externas')
-    with patch('services.smart_image_pipeline.hay_proveedor_pagado', return_value=False):
-        r = legado.resolver_imagen_automatica(nombre='Producto local')
-    _ok(r.es_placeholder, 'sin red usa placeholder limpio')
+    _ok(
+        importlib.util.find_spec('services.smart_image_pipeline') is None,
+        'el módulo legacy ya no es importable',
+    )
 
     print('\n=== RESULTADO ===')
     if _ERRORES:

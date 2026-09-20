@@ -34,7 +34,7 @@ def main():
     )
     from backend.supabase_storage import (
         SupabaseUploadError,
-        _persistir_con_respaldo,
+        _persistir_en_supabase,
         intentar_subir_imagen,
     )
     from backend.utils import imagen_url_almacenada, url_imagen_subida_storage_valida
@@ -64,7 +64,7 @@ def main():
             errores.append('imagen_url_almacenada no reconoce URL de Storage (sin env)')
 
     try:
-        url_sin_sdk = _persistir_con_respaldo(
+        url_sin_sdk = _persistir_en_supabase(
             b'fallback-bytes',
             'integrity_no_client.webp',
             'image/webp',
@@ -78,14 +78,14 @@ def main():
                 )
         else:
             errores.append(
-                '_persistir_con_respaldo sin service_role deberia lanzar SupabaseUploadError'
+                '_persistir_en_supabase sin service_role deberia lanzar SupabaseUploadError'
             )
     except SupabaseUploadError as error:
         mensaje = str(error).lower()
         if 'supabase' not in mensaje and 'storage' not in mensaje:
             errores.append(f'Mensaje poco claro sin cliente: {error}')
     except Exception as error:
-        errores.append(f'_persistir_con_respaldo sin Supabase: {type(error).__name__}: {error}')
+        errores.append(f'_persistir_en_supabase sin Supabase: {type(error).__name__}: {error}')
 
     try:
         url_h, aviso_h = intentar_subir_imagen(None)

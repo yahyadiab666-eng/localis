@@ -101,7 +101,16 @@ def _probar_plantillas(errores):
     _ok('localis-img-producto-wrap' in tienda, 'tienda publica usa wrap 1:1', errores)
     _ok('id="modal-imagen"' in cliente and '<img id="modal-imagen"' in cliente, 'modal usa <img>', errores)
     _ok('backgroundImage' not in cliente, 'JS del modal no asigna backgroundImage', errores)
-    _ok('localis-img-producto-thumb-wrap' in comercio, 'panel comercio usa thumbs cuadrados', errores)
+    _ok(
+        'localis-img-producto-wrap' in comercio and 'panel-comercio-cards' in comercio,
+        'panel comercio usa tarjetas con imagen grande',
+        errores,
+    )
+    _ok(
+        'localis-img-producto-thumb-wrap' not in comercio,
+        'panel comercio sin miniaturas del formato viejo',
+        errores,
+    )
 
 
 def _probar_lienzo(errores):
@@ -196,10 +205,9 @@ def _probar_sql_listado(errores):
         errores,
     )
     lookup_src = (RAIZ / 'backend' / 'image_lookup.py').read_text(encoding='utf-8')
-    cuerpo_relleno = lookup_src.split('def programar_relleno_imagenes_catalogo')[1].split('def ')[0]
     _ok(
-        'localis-relleno-imagenes' not in cuerpo_relleno,
-        'programar_relleno no lanza hilo de arranque',
+        'smart_image_pipeline' not in lookup_src,
+        'image_lookup sin dependencia del pipeline legacy',
         errores,
     )
 

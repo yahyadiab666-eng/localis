@@ -234,7 +234,7 @@ def _probar_integridad_sin_urls_quemadas() -> tuple[bool, str]:
         'backend/stores.py',
         'utils/images.py',
         'main.py',
-        'services/smart_image_pipeline.py',
+        'services/professional_image_pipeline.py',
     ):
         ruta = RAIZ / rel
         if not ruta.is_file():
@@ -351,14 +351,19 @@ def main() -> int:
         if not ok_subida:
             fallos.append(f'Subida: {detalle_subida}')
 
-    print('\n=== Relleno cascada (maestro / EAN / nombre) ===')
+    print('\n=== Índice maestro en memoria (búsqueda instantánea) ===')
     if args.sin_relleno:
         print('  omitido (--sin-relleno)')
     else:
-        from backend.image_lookup import rellenar_imagenes_catalogo
+        from backend.catalogo_maestro_index import estadisticas_indice
 
-        n_fill = rellenar_imagenes_catalogo()
-        print(f'  actualizados={n_fill}')
+        stats = estadisticas_indice()
+        print(
+            f'  filas={stats["filas"]} codigos={stats["codigos"]} '
+            f'nombres={stats["nombres"]} error={stats["error"]}'
+        )
+        if stats['error']:
+            fallos.append(f'Índice maestro con error: {stats["error"]}')
 
     print('\n=== Consulta productos (url_bd no None) ===')
     ok_prod, detalle_prod = _probar_productos()

@@ -300,10 +300,6 @@ def _persistir_en_supabase(
     return url
 
 
-# Alias interno usado por scripts de prueba
-_persistir_con_respaldo = _persistir_en_supabase
-
-
 def _guardar_respaldo_local(data, filename, carpeta):
     from backend.uploads_locales import guardar_bytes_upload
 
@@ -465,41 +461,6 @@ def intentar_subir_bytes(
         return None, AVISO_HIBRIDO_USUARIO
 
 
-def subir_imagen_con_respaldo(
-    file_storage,
-    supabase_client=None,
-    prefijo='img',
-    carpeta='comercios',
-    max_dimension=800,
-):
-    """Subida manual a Supabase Storage (sin respaldo en disco local)."""
-    if not file_storage:
-        raise SupabaseUploadError('No se recibio ningun archivo de imagen.')
-
-    error_validacion = validar_archivo_subida(file_storage)
-    if error_validacion:
-        raise SupabaseUploadError(error_validacion)
-
-    try:
-        comprimido = comprimir_file_storage_a_bytes(
-            file_storage,
-            prefijo=prefijo,
-            max_dimension=max_dimension,
-            lienzo_cuadrado=(carpeta == 'productos'),
-        )
-    except ImageProcessingError as error:
-        raise SupabaseUploadError(str(error)) from error
-
-    data, content_type, filename = comprimido
-    return _persistir_en_supabase(
-        data,
-        filename,
-        content_type,
-        carpeta,
-        supabase_client=supabase_client,
-    )
-
-
 def subir_bytes_con_respaldo(
     data,
     filename,
@@ -517,40 +478,6 @@ def subir_bytes_con_respaldo(
         content_type,
         carpeta,
         supabase_client=supabase_client,
-    )
-
-
-def subir_imagen_a_supabase(
-    file_storage,
-    supabase_client=None,
-    prefijo='img',
-    carpeta='comercios',
-    max_dimension=800,
-):
-    """Alias retrocompatible -> subir_imagen_con_respaldo."""
-    return subir_imagen_con_respaldo(
-        file_storage,
-        supabase_client=supabase_client,
-        prefijo=prefijo,
-        carpeta=carpeta,
-        max_dimension=max_dimension,
-    )
-
-
-def subir_bytes_a_supabase(
-    data,
-    filename,
-    supabase_client=None,
-    content_type='image/webp',
-    carpeta='pagos',
-):
-    """Alias retrocompatible -> subir_bytes_con_respaldo."""
-    return subir_bytes_con_respaldo(
-        data,
-        filename=filename,
-        supabase_client=supabase_client,
-        content_type=content_type,
-        carpeta=carpeta,
     )
 
 

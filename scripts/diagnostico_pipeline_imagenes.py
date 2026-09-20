@@ -25,12 +25,7 @@ if str(RAIZ) not in sys.path:
     sys.path.insert(0, str(RAIZ))
 
 MODULOS_PROHIBIDOS = (
-    '_clave_spider',
-    '_clave_upcitemdb',
-    '_clave_barcodelookup',
-    '_buscar_barcode_spider_ean',
-    '_buscar_upcitemdb_ean',
-    '_buscar_barcodelookup_ean',
+    'services/smart_image_pipeline.py',
 )
 
 EAN_PRUEBA = '7702084137520'
@@ -59,15 +54,15 @@ def main() -> int:
     print(f'LOCALIS_IMG_QUEUE_MAX  : {os.getenv("LOCALIS_IMPORT_QUEUE_MAX", "(por defecto) 8")}')
 
     _separador('PASO 2 - Barcode Spider / APIs globales eliminadas')
-    from services import smart_image_pipeline as legado
+    for relativo in MODULOS_PROHIBIDOS:
+        ruta_modulo = RAIZ / relativo
+        existe = ruta_modulo.exists()
+        print(f'  {relativo:38s} -> {"PRESENTE (mal)" if existe else "eliminado (ok)"}')
+        if existe:
+            fallos.append(f'{relativo} sigue existiendo (código muerto)')
+    from services import professional_image_pipeline as pro_ok
 
-    for nombre in MODULOS_PROHIBIDOS:
-        presente = hasattr(legado, nombre)
-        print(f'  {nombre:32s} -> {"PRESENTE (mal)" if presente else "eliminada (ok)"}')
-        if presente:
-            fallos.append(f'{nombre} sigue presente en smart_image_pipeline')
-    print(f'  buscar_por_ean(EAN)      -> {legado.buscar_por_ean(EAN_PRUEBA)!r} (siempre None)')
-    print(f'  buscar_por_nombre(...)   -> {legado.buscar_por_nombre(NOMBRE_PRUEBA)!r} (siempre None)')
+    print(f'  pipeline activo -> {pro_ok.__name__}')
 
     _separador('PASO 3 - Pipeline profesional y rembg')
     from services import professional_image_pipeline as pro

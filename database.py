@@ -187,6 +187,7 @@ COLUMNAS_ESQUEMA = {
         ('marca', 'TEXT'),
         ('categoria', 'TEXT'),
         ('nombre_normalizado', 'TEXT'),
+        ('updated_at', 'TIMESTAMPTZ DEFAULT NOW()'),
     ],
     'image_pipeline_log': [
         ('ean', 'TEXT'),

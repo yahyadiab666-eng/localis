@@ -125,19 +125,11 @@ def _auditar_fuente():
     _ok("X-Requested-With': 'fetch'" in js, 'la subida pide JSON (202)')
     _ok('/comercio/productos/importacion/' in js, 'el panel hace polling del estado')
 
-    print('\n=== Barcode Spider y APIs globales eliminadas ===')
-    from services import smart_image_pipeline as legacy
-
-    for nombre in (
-        '_buscar_barcode_spider_ean',
-        '_buscar_barcode_spider_nombre',
-        '_buscar_upcitemdb_ean',
-        '_buscar_barcodelookup_ean',
-        '_clave_spider',
-    ):
-        _ok(not hasattr(legacy, nombre), f'eliminada {nombre}')
-    _ok(legacy.buscar_por_ean('7702084137520') is None, 'buscar_por_ean ya no sale a red')
-    _ok(legacy.buscar_por_nombre('Harina PAN') is None, 'buscar_por_nombre ya no sale a red')
+    print('\n=== Código legacy de Barcode Spider purgado ===')
+    _ok(
+        not (RAIZ / 'services' / 'smart_image_pipeline.py').exists(),
+        'services/smart_image_pipeline.py eliminado',
+    )
 
 
 def main() -> int:

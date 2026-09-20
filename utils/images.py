@@ -26,6 +26,20 @@ PLACEHOLDER_LOGO = '/static/img/placeholder-logo.svg'
 HERO_LOCAL = DEFAULT_BANNER_URL
 HERO_ONERROR = '/static/img/hero-compras.svg'
 
+# Placeholders limpios por categoría: se muestran tal cual (no se colapsan al
+# genérico "Sin imagen") para que la tarjeta nunca quede en blanco.
+PLACEHOLDERS_PRODUCTO_VALIDOS = frozenset({
+    PLACEHOLDER_PRODUCTO,
+    '/static/img/placeholder-alimentos.svg',
+    '/static/img/placeholder-bebidas.svg',
+    '/static/img/placeholder-tecnologia.svg',
+    '/static/img/placeholder-hogar.svg',
+    '/static/img/placeholder-belleza.svg',
+    '/static/img/placeholder-ropa.svg',
+    '/static/img/placeholder-salud.svg',
+    '/static/img/placeholder-otros.svg',
+})
+
 COL_PRODUCTO = 'imagen_url'
 CANDIDATOS_IMAGEN_PRODUCTO = (
     'imagen_url',
@@ -82,6 +96,16 @@ def es_placeholder_local(valor):
     return '/static/img/placeholder-' in texto or _MARCA_HERO_APROBADO in texto
 
 
+def es_placeholder_producto(valor):
+    """True si es un placeholder limpio de producto (genérico o por categoría)."""
+    texto = _texto_url(valor)
+    if texto in PLACEHOLDERS_PRODUCTO_VALIDOS:
+        return True
+    # Rutas antiguas con barra final o parámetros de caché.
+    limpio = texto.split('?', 1)[0].rstrip('/')
+    return limpio in PLACEHOLDERS_PRODUCTO_VALIDOS
+
+
 def _espejo_local_de_storage(url):
     """Si el espejo a disco existe, úsalo: Storage a veces devuelve 400 con URL persistida."""
     from backend.utils import url_estatica_existe
@@ -103,6 +127,8 @@ def url_publica_producto_desde_bd(valor):
         if not texto:
             return ''
         texto = texto.replace('/subase/', '/storage/').replace('/Subase/', '/storage/')
+        if es_placeholder_producto(texto):
+            return texto
         if es_placeholder_local(texto) or texto == PLACEHOLDER_PRODUCTO:
             return PLACEHOLDER_PRODUCTO
         if es_url_storage_publica(texto):

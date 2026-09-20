@@ -1028,6 +1028,8 @@ def _leer_producto(producto_id):
 def _actualizar_imagen(producto_id, url, fuente):
     from backend.db import get_db_connection
 
+    # Sin comodines '%' en el SQL: psycopg2 interpreta '%' como formato cuando
+    # se pasan parámetros y lanzaba "IndexError: tuple index out of range".
     with get_db_connection() as conexion:
         cursor = conexion.cursor()
         cursor.execute(
@@ -1038,10 +1040,13 @@ def _actualizar_imagen(producto_id, url, fuente):
               AND (
                 imagen_url IS NULL
                 OR TRIM(CAST(imagen_url AS TEXT)) = ''
-                OR LOWER(CAST(imagen_url AS TEXT)) LIKE '%placeholder%'
+                OR POSITION('placeholder' IN LOWER(CAST(imagen_url AS TEXT))) > 0
                 OR (
-                  LOWER(CAST(imagen_url AS TEXT)) LIKE 'http%'
-                  AND CAST(imagen_url AS TEXT) NOT LIKE '%/storage/v1/object/public/%'
+                  LEFT(LOWER(CAST(imagen_url AS TEXT)), 4) = 'http'
+                  AND POSITION(
+                        '/storage/v1/object/public/'
+                        IN CAST(imagen_url AS TEXT)
+                      ) = 0
                 )
               )
             """,
@@ -1125,7 +1130,12 @@ def procesar_producto(
             ultimo_motivo = 'url_no_persistible'
             continue
         fuente = f'profesional_{candidato.fuente}_{destino}'
-        if producto_id and not _actualizar_imagen(producto_id, url, fuente):
+        try:
+            actualizado = _actualizar_imagen(producto_id, url, fuente) if producto_id else True
+        except Exception as error:
+            _log(f'producto={producto_id} no se pudo actualizar la BD: {type(error).__name__}: {error}')
+            actualizado = False
+        if not actualizado:
             ultimo_motivo = 'no_actualizado'
             continue
         _guardar_en_catalogo_maestro(ean, url, nombre=nombre, marca=marca, categoria=categoria)

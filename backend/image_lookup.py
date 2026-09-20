@@ -22,10 +22,8 @@ from backend.utils import (
     url_imagen_local_valida,
     url_imagen_subida_storage_valida,
 )
-from services.smart_image_pipeline import (
-    PLACEHOLDER_PRODUCTO,
-    url_catalogo_api_valida,
-)
+
+PLACEHOLDER_PRODUCTO = '/static/img/placeholder-producto.svg'
 
 _LOG_CSV = '[Localis CSV]'
 _LOG_IMAGEN = '[Localis Imagen]'
@@ -45,10 +43,18 @@ def es_imagen_manual(valor):
 
 
 def _url_mostrable_persistida(valor):
+    try:
+        from utils.images import es_placeholder_producto
+
+        if es_placeholder_producto(valor):
+            from backend.utils import texto_campo_imagen
+
+            return texto_campo_imagen(valor, default=None)
+    except Exception:
+        pass
     return (
         imagen_url_almacenada(valor)
         or url_imagen_api_oficial_valida(valor)
-        or url_catalogo_api_valida(valor)
     )
 
 
@@ -63,22 +69,6 @@ def imagen_url_para_catalogo(imagen_url=None, codigo_barras=None):
     except Exception as error:
         _registrar_error_imagen('imagen_url_para_catalogo', error)
         return PLACEHOLDER_PRODUCTO
-
-
-def imagen_url_para_guardar(
-    imagen_manual=None,
-    codigo_barras=None,
-    nombre=None,
-    categoria=None,
-    descripcion=None,
-):
-    """Solo foto manual. El automático corre diferido, no en el INSERT."""
-    del codigo_barras, nombre, categoria, descripcion
-    try:
-        return imagen_url_para_persistir(imagen_manual)
-    except Exception as error:
-        _registrar_error_imagen('imagen_url_para_guardar', error)
-        return None
 
 
 def persistir_imagen_producto_hibrida(
@@ -129,19 +119,6 @@ def persistir_imagen_producto_hibrida(
     return None, aviso
 
 
-def url_imagen_con_respaldo(imagen_url=None, codigo_barras=None):
-    try:
-        from utils.images import url_imagen_producto
-
-        return url_imagen_producto(
-            imagen_url=imagen_url,
-            codigo_barras=codigo_barras,
-        )
-    except Exception as error:
-        _registrar_error_imagen('url_imagen_con_respaldo', error)
-        return PLACEHOLDER_PRODUCTO
-
-
 def imagen_urls_para_catalogo(productos):
     """Lectura: no llama APIs. Enriquece en memoria con la URL persistida o catálogo maestro."""
     if not productos:
@@ -178,26 +155,6 @@ def imagen_urls_para_catalogo(productos):
         return productos
 
 
-def resolver_imagen_url_definitiva(
-    imagen_url=None,
-    codigo_barras=None,
-    nombre=None,
-    descripcion=None,
-    mapa_codigos=None,
-    mapa_nombres=None,
-    mapa_maestro=None,
-):
-    del codigo_barras, nombre, descripcion, mapa_codigos, mapa_nombres, mapa_maestro
-    return imagen_url_para_persistir(imagen_url)
-
-
-def normalizar_imagen_registro(
-    imagen_url=None, codigo_barras=None, nombre=None, descripcion=None
-):
-    del nombre, descripcion
-    return imagen_url_para_catalogo(imagen_url=imagen_url, codigo_barras=codigo_barras)
-
-
 def obtener_imagen_url_producto(producto_id):
     if not producto_id:
         return None
@@ -221,31 +178,6 @@ def obtener_imagen_url_producto(producto_id):
     except Exception as error:
         _registrar_error_imagen(f'obtener_imagen_url_producto({producto_id})', error)
         return PLACEHOLDER_PRODUCTO
-
-
-def resolver_imagen_producto(
-    imagen_url=None,
-    codigo_barras=None,
-    nombre=None,
-    descripcion=None,
-    producto_id=None,
-    buscar_web=False,
-    excluir_url=None,
-    persistir=False,
-):
-    del buscar_web, persistir, nombre, descripcion
-    try:
-        url = imagen_url_para_catalogo(imagen_url, codigo_barras=codigo_barras)
-        if url and url != excluir_url:
-            return url
-        if producto_id:
-            url_bd = obtener_imagen_url_producto(producto_id)
-            if url_bd and url_bd != excluir_url:
-                return url_bd
-        return None
-    except Exception as error:
-        _registrar_error_imagen('resolver_imagen_producto', error)
-        return None
 
 
 def preparar_mapa_imagenes_importacion(productos, snapshot_imagenes=None):
@@ -296,23 +228,6 @@ def programar_asociacion_imagenes_inventario(comercio_id):
     )
     hilo.start()
     return hilo
-
-
-def rellenar_imagenes_catalogo():
-    """No-op: el relleno masivo no corre en Gunicorn. Usar alta/edición o CSV."""
-    print(f'{_LOG_IMAGEN} relleno masivo desactivado (pago por consumo)')
-    return 0
-
-
-def programar_relleno_imagenes_catalogo():
-    print(f'{_LOG_IMAGEN} relleno catalogo desactivado al arrancar')
-    return None
-
-
-def programar_descubrimiento_listado(productos, limite=None):
-    """No dispara APIs de pago al listar el catálogo."""
-    del productos, limite
-    return 0
 
 
 def programar_descubrimiento_producto(producto_id, categoria=None):

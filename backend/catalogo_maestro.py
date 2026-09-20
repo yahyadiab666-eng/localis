@@ -287,8 +287,8 @@ def _guardar_imagen_maestro_postgres(codigo, url, nombre=None, marca=None, categ
                 f"""
                 INSERT INTO {TABLA_CATALOGO_MAESTRO}
                     (codigo_barras, url_imagen, nombre, marca, categoria,
-                     nombre_normalizado, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                     nombre_normalizado)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT (codigo_barras)
                 DO UPDATE SET
                     url_imagen = EXCLUDED.url_imagen,
@@ -298,13 +298,16 @@ def _guardar_imagen_maestro_postgres(codigo, url, nombre=None, marca=None, categ
                     nombre_normalizado = COALESCE(
                         EXCLUDED.nombre_normalizado,
                         {TABLA_CATALOGO_MAESTRO}.nombre_normalizado
-                    ),
-                    updated_at = CURRENT_TIMESTAMP
+                    )
                 """,
                 (codigo, url, nombre, marca, categoria, nombre_normalizado),
             )
-        except Exception:
+        except Exception as error:
             # Esquema anterior sin columnas de nombre/marca: upsert mínimo.
+            print(
+                f'{_LOG} upsert extendido falló ({type(error).__name__}: {error}); '
+                'reintento con codigo+url'
+            )
             conexion.rollback()
             cursor = conexion.cursor()
             _asegurar_indice_unico_codigo(cursor)

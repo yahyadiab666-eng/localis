@@ -20,7 +20,7 @@ Se activa **solo** cuando el producto queda sin foto definitiva (alta o CSV). El
 4. **Procesamiento local (rembg)**: recorta el fondo y entrega un lienzo cuadrado **blanco puro (#FFFFFF)** de 800×800, estilo estudio.
 5. **Almacenamiento**: sube el WebP a Supabase Storage (`productos/auto_*.webp`) y actualiza `productos.imagen_url`.
 
-> **Barcode Spider, UPCitemdb y Barcode Lookup fueron eliminados**: no funcionan para el mercado venezolano y añadían dependencia de pago. `services/smart_image_pipeline.py` queda solo como capa de compatibilidad (`buscar_por_ean`/`buscar_por_nombre` devuelven `None`).
+> **Barcode Spider, UPCitemdb y Barcode Lookup fueron ELIMINADOS del repositorio**: no funcionan para el mercado venezolano y añadían dependencia de pago. El único pipeline de imágenes es `services/professional_image_pipeline.py`.
 
 ### Variables de entorno (opcionales)
 

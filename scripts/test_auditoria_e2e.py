@@ -631,25 +631,23 @@ def _probar_pagos_ocr(cliente, usuario_id, comercio_id, errores):
 
 
 def _probar_cascada_y_manual(errores):
-    print('\n=== Cascada y subida manual (unidad) ===')
+    print('\n=== Subida manual + pipeline profesional (unidad) ===')
     from backend.image_lookup import persistir_imagen_producto_hibrida
     from backend.utils import imagen_url_almacenada
-    from services.smart_image_pipeline import resolver_imagen_automatica
-    from unittest.mock import patch
+    from services.professional_image_pipeline import _imagen_puede_reemplazarse
 
-    with patch(
-        'services.smart_image_pipeline.hay_proveedor_pagado', return_value=True
-    ), patch(
-        'services.smart_image_pipeline.buscar_por_ean',
-        return_value='https://cdn.upcitemdb.com/image/ean.jpg',
-    ):
-        resultado = resolver_imagen_automatica(
-            codigo_barras='3017620422003',
-            nombre='Diablitos Underwood',
-            descripcion='pate',
-        )
-    _ok(resultado.fuente == 'barcode_api', f'EAN-first fuente={resultado.fuente}', errores)
-    _ok('ean.jpg' in str(resultado.url), 'usa URL del codigo', errores)
+    _ok(
+        _imagen_puede_reemplazarse('/static/img/placeholder-alimentos.svg'),
+        'el pipeline profesional reemplaza placeholders',
+        errores,
+    )
+    _ok(
+        not _imagen_puede_reemplazarse(
+            'https://x.supabase.co/storage/v1/object/public/imagenes/productos/x.webp'
+        ),
+        'el pipeline respeta la foto de Storage',
+        errores,
+    )
 
     archivo_url, aviso = persistir_imagen_producto_hibrida(
         file_storage=__import__('werkzeug.datastructures', fromlist=['FileStorage']).FileStorage(
