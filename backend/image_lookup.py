@@ -1,18 +1,17 @@
 """
-Imágenes de producto: subida manual (Storage/local) y pipeline automático diferido.
+Imágenes de producto: subida manual (Storage/local) y pipeline profesional diferido.
 
 - Foto del comerciante: cero llamadas a APIs de pago.
-- Sin foto: hilo daemon consulta el pipeline (EAN → nombre) y persiste la URL
-  oficial de la API, o un placeholder. El request HTTP no espera esa red.
+- Sin foto: un hilo daemon ejecuta el pipeline profesional
+  (EAN → búsqueda web + "venezuela" → rembg → Supabase Storage) y actualiza
+  ``productos.imagen_url``. El request HTTP nunca espera esa red.
 """
 
 from __future__ import annotations
 
-from services import smart_image_pipeline  
 import os
 import sqlite3
 import threading
-import time
 
 from backend.db import get_db_connection
 from backend.utils import (
@@ -25,13 +24,11 @@ from backend.utils import (
 )
 from services.smart_image_pipeline import (
     PLACEHOLDER_PRODUCTO,
-    resolver_imagen_automatica,
     url_catalogo_api_valida,
 )
 
 _LOG_CSV = '[Localis CSV]'
 _LOG_IMAGEN = '[Localis Imagen]'
-_PRESUPUESTO_API_SEG = int(os.getenv('IMPORT_API_IMAGEN_BUDGET_SEC', '60'))
 _MAX_CSV_API = int(os.getenv('LOCALIS_CSV_API_MAX', '25'))
 _descubrimiento_en_vuelo = set()
 _descubrimiento_lock = threading.Lock()
@@ -262,99 +259,28 @@ def preparar_mapa_imagenes_importacion(productos, snapshot_imagenes=None):
     return mapa
 
 
-def _persistir_resultado_pipeline(producto_id, resultado):
-    if not producto_id or not resultado or not resultado.url:
-        return False
-    try:
-        with get_db_connection() as conexion:
-            cursor = conexion.cursor()
-            try:
-                cursor.execute(
-                    """
-                    UPDATE productos
-                    SET imagen_url = ?, imagen_fuente = ?
-                    WHERE id = ?
-                      AND (imagen_url IS NULL OR TRIM(CAST(imagen_url AS TEXT)) = '')
-                    """,
-                    (resultado.url, resultado.fuente, int(producto_id)),
-                )
-            except Exception:
-                conexion.rollback()
-                cursor.execute(
-                    """
-                    UPDATE productos
-                    SET imagen_url = ?
-                    WHERE id = ?
-                      AND (imagen_url IS NULL OR TRIM(CAST(imagen_url AS TEXT)) = '')
-                    """,
-                    (resultado.url, int(producto_id)),
-                )
-            conexion.commit()
-        return True
-    except Exception as error:
-        _registrar_error_imagen(f'persistir pipeline id={producto_id}', error)
-        return False
-
-
 def asociar_imagenes_inventario(comercio_id):
-    """Tras CSV: rellena huecos con el pipeline de pago (tope de tiempo y de filas)."""
+    """Tras CSV: asigna fotos profesionales en segundo plano (pipeline local).
+
+    Usa el pipeline de imágenes profesional (EAN → búsqueda web → rembg →
+    Supabase Storage). Sin APIs de pago: cero suscripciones.
+    """
     try:
-        with get_db_connection(row_factory=sqlite3.Row) as conexion:
-            cursor = conexion.cursor()
-            cursor.execute(
-                """
-                SELECT id, codigo_barras, imagen_url, nombre, descripcion
-                FROM productos
-                WHERE comercio_id = ?
-                """,
-                (int(comercio_id),),
-            )
-            productos = [dict(fila) for fila in cursor.fetchall()]
+        from services.professional_image_pipeline import procesar_inventario
+
+        return procesar_inventario(comercio_id, limite=_MAX_CSV_API)
     except Exception as error:
-        print(f'{_LOG_CSV} Error al leer productos para asociar imágenes: {error}')
+        print(f'{_LOG_CSV} pipeline profesional no disponible: {type(error).__name__}: {error}')
         return 0
-
-    pendientes = [
-        p for p in productos
-        if not (p.get('imagen_url') or '').strip()
-    ]
-    if not pendientes:
-        return 0
-
-    inicio = time.monotonic()
-    actualizados = 0
-    for prod in pendientes[:_MAX_CSV_API]:
-        if time.monotonic() - inicio > _PRESUPUESTO_API_SEG:
-            print(
-                f'{_LOG_CSV} presupuesto API agotado comercio={comercio_id} '
-                f'actualizados={actualizados}'
-            )
-            break
-        if (prod.get('imagen_url') or '').strip():
-            continue
-        try:
-            resultado = resolver_imagen_automatica(
-                codigo_barras=prod.get('codigo_barras'),
-                nombre=prod.get('nombre'),
-                descripcion=prod.get('descripcion'),
-            )
-            if _persistir_resultado_pipeline(prod.get('id'), resultado):
-                actualizados += 1
-        except Exception as error:
-            print(
-                f'{_LOG_CSV} aviso imagen producto={prod.get("id")}: '
-                f'{type(error).__name__}'
-            )
-    return actualizados
 
 
 def programar_asociacion_imagenes_inventario(comercio_id):
     def _trabajo():
         try:
-            print(f'{_LOG_CSV} pipeline diferido inicio comercio={comercio_id}')
+            print(f'{_LOG_CSV} pipeline profesional inicio comercio={comercio_id}')
             actualizados = asociar_imagenes_inventario(comercio_id)
             print(
-                f'{_LOG_CSV} pipeline diferido fin comercio={comercio_id} '
+                f'{_LOG_CSV} pipeline profesional fin comercio={comercio_id} '
                 f'actualizados={actualizados}'
             )
         except Exception as error:
@@ -390,7 +316,11 @@ def programar_descubrimiento_listado(productos, limite=None):
 
 
 def programar_descubrimiento_producto(producto_id, categoria=None):
-    """Tras el alta: si no hay foto manual, consulta la API en segundo plano."""
+    """Tras el alta: ejecuta el pipeline profesional en segundo plano.
+
+    Solo actúa si el producto no tiene foto manual/definitiva. No bloquea nunca
+    la respuesta HTTP ni depende de APIs de pago.
+    """
     if not producto_id:
         print(f'{_LOG_IMAGEN} descubrimiento omitido: producto_id vacío')
         return False
@@ -401,47 +331,16 @@ def programar_descubrimiento_producto(producto_id, categoria=None):
             return False
         _descubrimiento_en_vuelo.add(pid)
 
-    print(f'{_LOG_IMAGEN} descubrimiento programado producto={pid} categoria={categoria!r}')
+    print(f'{_LOG_IMAGEN} pipeline profesional programado producto={pid} categoria={categoria!r}')
 
     def _trabajo():
         try:
-            with get_db_connection(row_factory=sqlite3.Row) as conexion:
-                cursor = conexion.cursor()
-                cursor.execute(
-                    """
-                    SELECT id, nombre, descripcion, codigo_barras, imagen_url
-                    FROM productos
-                    WHERE id = ?
-                    """,
-                    (pid,),
-                )
-                prod = cursor.fetchone()
-            if not prod:
-                print(f'{_LOG_IMAGEN} descubrimiento producto={pid}: no encontrado en BD')
-                return
-            prod = dict(prod)
-            if (prod.get('imagen_url') or '').strip():
-                print(
-                    f'{_LOG_IMAGEN} descubrimiento producto={pid}: '
-                    f'ya tiene imagen_url, pipeline omitido'
-                )
-                return
-            ean = normalizar_codigo_barras(prod.get('codigo_barras'))
-            nombre = prod.get('nombre')
+            from services.professional_image_pipeline import procesar_producto
+
+            resultado = procesar_producto(pid, categoria=categoria)
             print(
-                f'{_LOG_IMAGEN} pipeline inicio producto={pid} '
-                f'ean={ean!r} nombre={nombre!r}'
-            )
-            resultado = resolver_imagen_automatica(
-                codigo_barras=prod.get('codigo_barras'),
-                nombre=prod.get('nombre'),
-                descripcion=prod.get('descripcion'),
-                categoria=categoria,
-            )
-            persistido = _persistir_resultado_pipeline(pid, resultado)
-            print(
-                f'{_LOG_IMAGEN} pipeline producto={pid} fuente={resultado.fuente} '
-                f'url={resultado.url!r} persistido={persistido}'
+                f'{_LOG_IMAGEN} pipeline producto={pid} ok={resultado.ok} '
+                f'fuente={resultado.fuente!r} motivo={resultado.motivo!r} url={resultado.url!r}'
             )
         except Exception as error:
             _registrar_error_imagen(f'descubrimiento producto={pid}', error)

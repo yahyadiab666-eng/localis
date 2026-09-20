@@ -420,11 +420,133 @@
     });
   }
 
+  function seguirImportacionCatalogo(jobId, boton) {
+    var intentos = 0;
+    var maxIntentos = 200; // ~10 min con sondeos cada 3 s
+    function tick() {
+      intentos += 1;
+      fetch('/comercio/productos/importacion/' + encodeURIComponent(jobId), {
+        headers: { 'X-Requested-With': 'fetch', Accept: 'application/json' },
+        credentials: 'same-origin',
+      })
+        .then(function (respuesta) {
+          return respuesta.json().catch(function () {
+            return null;
+          });
+        })
+        .then(function (datos) {
+          if (datos && datos.estado === 'completado') {
+            window.mostrarAlertaLocalis(
+              datos.mensaje || 'Importación completada con éxito.',
+              'exito'
+            );
+            window.setTimeout(function () {
+              window.location.reload();
+            }, 1200);
+            return;
+          }
+          if (datos && datos.estado === 'error') {
+            window.mostrarAlertaLocalis(
+              datos.mensaje || 'No se pudo completar la importación.',
+              'error'
+            );
+            var plan = datos.meta && datos.meta.plan_sugerido;
+            if (plan) {
+              window.setTimeout(function () {
+                window.location.href =
+                  '/comercio/planes?abrir_pago=' + encodeURIComponent(plan);
+              }, 1600);
+              return;
+            }
+            if (boton) window.desactivarCargandoBoton(boton);
+            return;
+          }
+          if (intentos >= maxIntentos) {
+            window.mostrarAlertaLocalis(
+              'El catálogo sigue procesándose en segundo plano. Recarga la página en un momento.',
+              'info'
+            );
+            if (boton) window.desactivarCargandoBoton(boton);
+            return;
+          }
+          window.setTimeout(tick, 3000);
+        })
+        .catch(function () {
+          if (intentos >= maxIntentos) {
+            if (boton) window.desactivarCargandoBoton(boton);
+            return;
+          }
+          window.setTimeout(tick, 4000);
+        });
+    }
+    window.setTimeout(tick, 1500);
+  }
+
+  function inicializarFormularioCsv() {
+    var formulario = document.querySelector('form.panel-comercio-csv-form');
+    if (!formulario || !window.fetch || !window.FormData) return;
+
+    formulario.addEventListener('submit', function (evento) {
+      var input = formulario.querySelector('input[type="file"]');
+      var archivo = input && input.files && input.files[0];
+      if (!archivo) {
+        return; // deja que el navegador aplique 'required'
+      }
+      evento.preventDefault();
+
+      var boton = formulario.querySelector('button[type="submit"]');
+      if (boton) window.activarCargandoBoton(boton, 'Subiendo catálogo…');
+
+      fetch(formulario.action, {
+        method: 'POST',
+        headers: {
+          'X-CSRFToken': obtenerCsrfToken(),
+          'X-Requested-With': 'fetch',
+          Accept: 'application/json',
+        },
+        body: new FormData(formulario),
+        credentials: 'same-origin',
+      })
+        .then(function (respuesta) {
+          return respuesta.json().then(function (cuerpo) {
+            return { ok: respuesta.ok, status: respuesta.status, datos: cuerpo };
+          });
+        })
+        .then(function (resultado) {
+          var datos = resultado.datos || {};
+          if (!resultado.ok || !datos.ok) {
+            window.mostrarAlertaLocalis(
+              datos.error || 'No se pudo iniciar la importación.',
+              'error'
+            );
+            if (boton) window.desactivarCargandoBoton(boton);
+            if (datos.plan_sugerido) {
+              window.setTimeout(function () {
+                window.location.href =
+                  '/comercio/planes?abrir_pago=' + encodeURIComponent(datos.plan_sugerido);
+              }, 1500);
+            }
+            return;
+          }
+          window.mostrarAlertaLocalis(
+            datos.mensaje || 'Tu catálogo se está procesando en segundo plano.',
+            'info'
+          );
+          seguirImportacionCatalogo(datos.job_id, boton);
+        })
+        .catch(function () {
+          window.mostrarAlertaLocalis('Error de conexión al subir el catálogo.', 'error');
+          if (boton) window.desactivarCargandoBoton(boton);
+        });
+    });
+  }
+
       document.addEventListener('DOMContentLoaded', function () {
     inicializarAlertasFlash();
     inicializarFormularioPagoMovil();
     inicializarFormularioProductoApi();
     inicializarBusquedaProductosPanel();
     inicializarBotonesCargando();
+    inicializarFormularioCsv();
   });
 })();

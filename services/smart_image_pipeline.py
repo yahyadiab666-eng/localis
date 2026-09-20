@@ -1,18 +1,18 @@
 """
-Pipeline automático de imágenes (pago por consumo).
+Capa de compatibilidad del pipeline de imágenes LEGADO.
 
-Solo se usa cuando el producto NO tiene foto manual.
-No descarga binarios ni usa Pillow: guarda la URL HTTPS que devuelve la API.
+Las APIs globales de códigos de barras (Barcode Spider, UPCitemdb y Barcode
+Lookup) fueron ELIMINADAS: no funcionan para el mercado venezolano y añadían
+dependencia de pago. ``buscar_por_ean`` y ``buscar_por_nombre`` devuelven
+``None`` a propósito.
 
-Prioridad:
-1. Lookup por EAN/UPC (Barcode Spider, opcionalmente UPCitemdb / Barcode Lookup)
-2. Búsqueda por nombre + marca
-3. Placeholder de categoría
+El pipeline oficial y gratuito es ``services.professional_image_pipeline``:
+EAN/UPC → búsqueda web ``[nombre]+[marca]+[presentación]+"venezuela"`` →
+validación de fuentes/calidad → rembg (fondo blanco) → Supabase Storage.
 
-Credenciales (ninguna mensualidad fija en este código; cada proveedor cobra créditos):
-  BARCODE_SPIDER_API_KEY
-  UPCITEMDB_API_KEY         (opcional)
-  BARCODE_LOOKUP_API_KEY    (opcional)
+Este módulo se conserva solo por compatibilidad con scripts y pruebas:
+helpers de validación de URLs y la cascada ``resolver_imagen_automatica``
+(que ahora resuelve a placeholder sin salir a red).
 """
 
 from __future__ import annotations
@@ -207,160 +207,36 @@ def _get_json(url, *, headers=None, params=None):
     return None
 
 
-def _clave_spider():
-    return (os.getenv('BARCODE_SPIDER_API_KEY') or '').strip()
-
-
-def _clave_upcitemdb():
-    return (os.getenv('UPCITEMDB_API_KEY') or '').strip()
-
-
-def _clave_barcodelookup():
-    return (os.getenv('BARCODE_LOOKUP_API_KEY') or '').strip()
-
-
 def hay_proveedor_pagado():
-    return bool(_clave_spider() or _clave_upcitemdb() or _clave_barcodelookup())
+    """Compatibilidad: indica si el pipeline de imágenes está operativo.
 
-
-def _buscar_barcode_spider_ean(ean):
-    token = _clave_spider()
-    if not token:
-        _log(f'barcodespider EAN {ean}: sin BARCODE_SPIDER_API_KEY')
-        return None
-    _log(f'barcodespider lookup EAN={ean}')
-    datos = _get_json(
-        f'https://api.barcodespider.com/v2/products/{ean}',
-        params={'key': token},
-    )
-    url = _extraer_url_de_nodo(datos)
-    if url:
-        _log(f'barcodespider EAN={ean} imagen encontrada url={url[:120]!r}')
-    else:
-        _log(f'barcodespider EAN={ean} sin imagen en respuesta')
-    return url
-
-
-def _buscar_barcode_spider_nombre(consulta):
-    token = _clave_spider()
-    if not token:
-        _log(f'barcodespider búsqueda {consulta!r}: sin BARCODE_SPIDER_API_KEY')
-        return None
-    _log(f'barcodespider búsqueda query={consulta!r}')
-    datos = _get_json(
-        'https://api.barcodespider.com/v2/products',
-        params={'key': token, 'query': consulta},
-    )
-    url = _extraer_url_de_nodo(datos)
-    if url:
-        _log(f'barcodespider query={consulta!r} imagen encontrada url={url[:120]!r}')
-    else:
-        _log(f'barcodespider query={consulta!r} sin imagen en respuesta')
-    return url
-
-
-def _buscar_upcitemdb_ean(ean):
-    key = _clave_upcitemdb()
-    if not key:
-        return None
-    datos = _get_json(
-        'https://api.upcitemdb.com/prod/v1/lookup',
-        headers={'user_key': key, 'Accept': 'application/json'},
-        params={'upc': ean},
-    )
-    return _extraer_url_de_nodo(datos)
-
-
-def _buscar_upcitemdb_nombre(consulta):
-    key = _clave_upcitemdb()
-    if not key:
-        return None
-    datos = _get_json(
-        'https://api.upcitemdb.com/prod/v1/search',
-        headers={'user_key': key, 'Accept': 'application/json'},
-        params={'s': consulta},
-    )
-    return _extraer_url_de_nodo(datos)
-
-
-def _buscar_barcodelookup_ean(ean):
-    key = _clave_barcodelookup()
-    if not key:
-        return None
-    datos = _get_json(
-        'https://api.barcodelookup.com/v3/products',
-        params={'barcode': ean, 'key': key},
-    )
-    return _extraer_url_de_nodo(datos)
-
-
-def _buscar_barcodelookup_nombre(consulta):
-    key = _clave_barcodelookup()
-    if not key:
-        return None
-    datos = _get_json(
-        'https://api.barcodelookup.com/v3/products',
-        params={'search': consulta, 'key': key},
-    )
-    return _extraer_url_de_nodo(datos)
-
-
-def _cache_maestro(ean):
-    if not ean:
-        return None
+    Ya NO existen APIs de códigos de barras de pago (Barcode Spider, UPCitemdb
+    y Barcode Lookup fueron eliminadas). El pipeline oficial y gratuito es
+    ``services.professional_image_pipeline``.
+    """
     try:
-        from backend.catalogo_maestro import imagen_maestro_por_codigo
+        from services.professional_image_pipeline import pipeline_habilitado
 
-        return url_catalogo_api_valida(imagen_maestro_por_codigo(ean))
+        return pipeline_habilitado()
     except Exception:
-        return None
-
-
-def _guardar_maestro(ean, url):
-    if not ean or not url:
-        return
-    try:
-        from backend.catalogo_maestro import guardar_imagen_maestro
-
-        guardar_imagen_maestro(ean, url)
-    except Exception as error:
-        _log(f'cache maestro: {type(error).__name__}')
+        return False
 
 
 def buscar_por_ean(ean):
-    codigo = _ean_normalizado(ean)
-    if not codigo:
-        return None
-    cache = _cache_maestro(codigo)
-    if cache:
-        return cache
-    for fn, nombre in (
-        (_buscar_barcode_spider_ean, 'barcodespider'),
-        (_buscar_upcitemdb_ean, 'upcitemdb'),
-        (_buscar_barcodelookup_ean, 'barcodelookup'),
-    ):
-        url = fn(codigo)
-        if url:
-            _log(f'ean={codigo} fuente={nombre}')
-            _guardar_maestro(codigo, url)
-            return url
+    """DESACTIVADO a propósito.
+
+    Antes consultaba Barcode Spider / UPCitemdb / Barcode Lookup, inefectivas
+    para el mercado venezolano. La resolución real (EAN → búsqueda web gratuita
+    → rembg → Supabase Storage) vive en ``services.professional_image_pipeline``.
+    Se conserva la firma por compatibilidad con scripts y pruebas.
+    """
+    del ean
     return None
 
 
 def buscar_por_nombre(nombre, *, descripcion=None, marca=None, categoria=None):
-    del categoria
-    consulta = _consulta_nombre_util(nombre, descripcion=descripcion, marca=marca)
-    if not consulta:
-        return None
-    for fn, nombre_fn in (
-        (_buscar_barcode_spider_nombre, 'barcodespider-search'),
-        (_buscar_upcitemdb_nombre, 'upcitemdb-search'),
-        (_buscar_barcodelookup_nombre, 'barcodelookup-search'),
-    ):
-        url = fn(consulta)
-        if url:
-            _log(f'nombre={consulta!r} fuente={nombre_fn}')
-            return url
+    """DESACTIVADO a propósito. Ver ``buscar_por_ean``."""
+    del nombre, descripcion, marca, categoria
     return None
 
 
@@ -382,14 +258,13 @@ def resolver_imagen_automatica(
         _log(
             f'entrada codigo_barras={codigo_barras!r} ean_norm={ean_norm!r} '
             f'nombre={nombre!r} categoria={categoria!r} '
-            f'proveedor_pagado={hay_proveedor_pagado()} '
-            f'spider_key={"sí" if _clave_spider() else "no"}'
+            f'busqueda_imagen_activa={hay_proveedor_pagado()}'
         )
         if not hay_proveedor_pagado():
             if not _aviso_sin_clave_emitido:
                 _log(
-                    'sin API key (BARCODE_SPIDER_API_KEY / UPCITEMDB_API_KEY / '
-                    'BARCODE_LOOKUP_API_KEY); se usa placeholder'
+                    'pipeline de imágenes desactivado; se usa placeholder. '
+                    'Activa LOCALIS_IMG_PIPELINE=1 para el pipeline profesional.'
                 )
                 _aviso_sin_clave_emitido = True
             return ResultadoImagen(
@@ -411,8 +286,6 @@ def resolver_imagen_automatica(
             nombre, descripcion=descripcion, marca=marca, categoria=categoria
         )
         if url_nom:
-            if ean:
-                _guardar_maestro(ean, url_nom)
             return ResultadoImagen(
                 url=url_nom, fuente='nombre_api', es_placeholder=False, ean=ean
             )

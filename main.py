@@ -196,7 +196,13 @@ from backend.session_comercio import (
     limpiar_contexto_comercio,
     vincular_comercio_en_sesion,
 )
-from backend.inventory_import import recortar_mensaje_importacion
+from backend.inventory_import import cargar_archivo_inventario
+from backend.import_queue import (
+    ColaImportacionLlena,
+    configurar_cola,
+    encolar_importacion,
+    obtener_estado_job,
+)
 from backend.stores import (
     actualizar_datos_comercio,
     actualizar_producto,
@@ -208,7 +214,6 @@ from backend.stores import (
     obtener_producto_publico,
     obtener_productos_comercio,
     obtener_tasa_dolar,
-    procesar_csv_productos,
     registrar_comercio_completo,
 )
 
@@ -248,6 +253,10 @@ except Exception:
     traceback.print_exc()
     if not app.secret_key:
         app.secret_key = 'localis-arranque-degradado'
+
+# Cola de importación asíncrona: guarda la app para el contexto de Flask en
+# los workers. Los hilos se crean de forma perezosa en la primera importación.
+configurar_cola(app)
 
 
 @app.template_filter('fecha_corta')
@@ -635,14 +644,22 @@ def _bloquear_gestion_inventario(comercio, redirect_url='panel_comercio'):
     return redirect(url_for('comercio_planes', abrir_pago='pro'))
 
 
+def _peticion_acepta_json():
+    """True si la petición viene de fetch()/AJAX y espera JSON (no HTML)."""
+    if request.headers.get('X-Requested-With') == 'fetch':
+        return True
+    acepta = (request.headers.get('Accept') or '').lower()
+    return 'application/json' in acepta and 'text/html' not in acepta
+
+
 @app.errorhandler(CSRFError)
 def error_csrf(e):
     flash(
         'Tu sesión de formulario expiró o la petición no es segura. Inténtalo de nuevo.',
         'error',
     )
-    if request.path.startswith('/api/'):
-        return jsonify({'error': 'Token CSRF inválido o expirado.'}), 400
+    if request.path.startswith('/api/') or _peticion_acepta_json():
+        return jsonify({'ok': False, 'error': 'Token CSRF inválido o expirado.'}), 400
     return redirect(request.referrer or url_for(destino_panel_usuario()))
 
 
@@ -651,8 +668,8 @@ def error_archivo_demasiado_grande(e):
     max_mb = MAX_UPLOAD_BYTES // (1024 * 1024)
     mensaje = f'El archivo supera el tamaño máximo permitido ({max_mb} MB).'
 
-    if request.path.startswith('/api/'):
-        return jsonify({'error': mensaje}), 413
+    if request.path.startswith('/api/') or _peticion_acepta_json():
+        return jsonify({'ok': False, 'error': mensaje}), 413
 
     flash(mensaje, 'error')
     return redirect(request.referrer or url_for(destino_panel_usuario()))
@@ -1374,56 +1391,91 @@ def eliminar_producto_ruta(producto_id):
 @app.route('/comercio/productos/cargar-csv', methods=['POST'])
 @login_requerido
 def cargar_csv():
+    """Encola la importación y responde 202 sin bloquear la petición HTTP.
+
+    - Valida comercio, plan y archivo de forma síncrona (rápido).
+    - Encola el trabajo con ``queue`` + hilos daemon (contexto de Flask).
+    - Devuelve ``HTTP 202 Accepted`` con un ``job_id``; el cliente hace polling
+      en ``/comercio/productos/importacion/<job_id>``.
+    """
     comercio, redireccion = _requiere_comercio()
     if redireccion:
         return redireccion
 
-    bloqueo = _bloquear_gestion_inventario(comercio)
-    if bloqueo:
-        return bloqueo
+    respuesta_json = _peticion_acepta_json()
+
+    ok_gestion, mensaje_gestion = comercio_puede_gestionar_inventario(comercio['id'])
+    if not ok_gestion:
+        if respuesta_json:
+            return (
+                jsonify({'ok': False, 'error': mensaje_gestion, 'plan_sugerido': 'pro'}),
+                403,
+            )
+        flash(mensaje_gestion, 'error')
+        return redirect(url_for('comercio_planes', abrir_pago='pro'))
+
+    archivo = request.files.get('archivo_csv')
+    print(
+        f'[Localis CSV] POST comercio={comercio["id"]} '
+        f'archivo={getattr(archivo, "filename", None)!r} modo=asincrono'
+    )
+
+    data, _extension, error_lectura = cargar_archivo_inventario(archivo)
+    if error_lectura:
+        if respuesta_json:
+            return jsonify({'ok': False, 'error': error_lectura}), 400
+        flash(error_lectura, 'error')
+        return redirect(url_for('panel_comercio'))
 
     try:
-        archivo = request.files.get('archivo_csv')
-        print(
-            f'[Localis CSV] POST comercio={comercio["id"]} '
-            f'archivo={getattr(archivo, "filename", None)!r}'
+        job = encolar_importacion(
+            comercio['id'],
+            getattr(archivo, 'filename', 'inventario.csv'),
+            data,
+            usuario_id=session.get('usuario_id'),
         )
-        exito, mensaje, meta = procesar_csv_productos(comercio['id'], archivo)
-        mensaje = recortar_mensaje_importacion(mensaje)
-    except Exception as exc:
-        print(f'[Localis CSV] FALLO etapa=ruta {type(exc).__name__}: {exc}')
-        traceback.print_exc()
-        flash(
-            'No se pudo completar la importación. El inventario no fue modificado. '
-            'Revisa que el archivo sea CSV UTF-8 o Excel (.xlsx) e intenta de nuevo.',
-            'error',
-        )
+    except ColaImportacionLlena as error:
+        if respuesta_json:
+            return jsonify({'ok': False, 'error': str(error)}), 503
+        flash(str(error), 'error')
+        return redirect(url_for('panel_comercio'))
+    except ValueError as error:
+        if respuesta_json:
+            return jsonify({'ok': False, 'error': str(error)}), 400
+        flash(str(error), 'error')
         return redirect(url_for('panel_comercio'))
 
-    try:
-        if not exito and meta and meta.get('plan_sugerido'):
-            flash(mensaje, 'limite_plan')
-            return redirect(
-                url_for(
-                    'comercio_planes',
-                    abrir_pago=meta['plan_sugerido'],
-                )
-            )
+    mensaje = 'Tu catálogo se está procesando en segundo plano.'
+    if respuesta_json:
+        return (
+            jsonify(
+                {
+                    'ok': True,
+                    'job_id': job['job_id'],
+                    'estado': job['estado'],
+                    'mensaje': mensaje,
+                    'estado_url': url_for('estado_importacion', job_id=job['job_id']),
+                }
+            ),
+            202,
+        )
 
-        flash(mensaje, 'exito' if exito else 'error')
-        return redirect(url_for('panel_comercio'))
-    except Exception as exc:
-        print(f'[Localis CSV] FALLO etapa=respuesta {type(exc).__name__}: {exc}')
-        traceback.print_exc()
-        try:
-            flash(
-                'La importación terminó, pero no se pudo mostrar el detalle. '
-                'Revisa tu inventario e intenta de nuevo si faltan productos.',
-                'error',
-            )
-        except Exception:
-            pass
-        return redirect(url_for('panel_comercio'))
+    flash(mensaje, 'info')
+    return redirect(url_for('panel_comercio'))
+
+
+@app.route('/comercio/productos/importacion/<job_id>')
+@login_requerido
+def estado_importacion(job_id):
+    """Estado del trabajo de importación para el polling del panel."""
+    comercio, redireccion = _requiere_comercio()
+    if redireccion:
+        return redireccion
+
+    estado = obtener_estado_job(job_id, comercio_id=comercio['id'])
+    if not estado:
+        return jsonify({'ok': False, 'error': 'Trabajo no encontrado o expirado.'}), 404
+    return jsonify({'ok': True, **estado}), 200
 
 
 @app.route('/comercio/productos/cargar-csv', methods=['GET'])

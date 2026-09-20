@@ -167,7 +167,9 @@
       <div class="aviso-csv-imagenes" role="note">
         <i data-lucide="info" class="aviso-csv-imagenes-icono" aria-hidden="true"></i>
         <p>
-          <strong>Nota:</strong> La asociación automática de imágenes puede contener errores o no ser exacta. Puedes editar o subir la imagen manualmente si lo prefieres.
+          <strong>Automático:</strong> buscamos y preparamos una foto profesional de estudio
+          (fondo blanco) para cada producto en segundo plano. Si alguna no queda perfecta,
+          puedes editarla o subir tu propia imagen cuando quieras.
         </p>
       </div>
     </section>
@@ -199,138 +201,65 @@
       </div>
       {% endif %}
 
-      <!-- Tabla escritorio -->
-      <div class="panel-comercio-tabla bg-white rounded-2xl shadow-sm border border-stone-200/80 overflow-hidden">
-        <div class="overflow-x-auto tabla-responsive">
-          <table class="w-full text-left border-collapse">
-            <thead>
-              <tr class="bg-stone-50/80 border-b border-stone-200/80 text-stone-500 text-xs font-bold uppercase tracking-wider">
-                <th class="py-4 px-4 sm:px-6">Producto</th>
-                <th class="py-4 px-4 sm:px-6 hidden md:table-cell">Código</th>
-                <th class="py-4 px-4 sm:px-6 hidden lg:table-cell">Descripción</th>
-                <th class="py-4 px-4 sm:px-6 text-right">USD</th>
-                <th class="py-4 px-4 sm:px-6 text-right hidden sm:table-cell">Bs.</th>
-                <th class="py-4 px-4 sm:px-6 text-center">Acciones</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-stone-100 text-sm">
-              {% for producto in productos %}
-                <tr class="hover:bg-amber-50/30 transition panel-producto-fila"
-                    data-producto-busqueda="{{ producto.nombre }} {{ producto.descripcion }} {{ producto.codigo_barras }}">
-                  <td class="py-4 px-4 sm:px-6 font-semibold text-gray-900">
-                    <div class="flex items-center gap-3 min-w-0">
-                      {% set img_producto = producto|url_imagen_producto %}
-                      <div class="localis-img-producto-thumb-wrap">
-                        <img src="{{ img_producto or placeholder_producto }}"
-                             alt=""
-                             data-producto-id="{{ producto.id }}"
-                             class="localis-img-producto-thumb"
-                             loading="lazy" decoding="async"
-                             onerror="window.rescatarImagenProducto(this)">
-                      </div>
-                      <span class="truncate">{{ producto.nombre }}</span>
-                    </div>
-                  </td>
-                  <td class="py-4 px-4 sm:px-6 text-stone-500 text-xs font-mono hidden md:table-cell">
-                    {% if producto.codigo_barras %}
-                      <span class="bg-stone-100 text-stone-700 px-2 py-1 rounded border border-stone-200">{{ producto.codigo_barras }}</span>
-                    {% else %}
-                      <span class="text-stone-400 italic">Sin código</span>
-                    {% endif %}
-                  </td>
-                  <td class="py-4 px-4 sm:px-6 text-stone-500 max-w-xs truncate hidden lg:table-cell">
-                    {{ producto.descripcion or 'Sin descripción' }}
-                  </td>
-                  <td class="py-4 px-4 sm:px-6 text-right font-bold text-amber-600 whitespace-nowrap">
-                    ${{ "%.2f"|format(producto.precio_usd) }}
-                  </td>
-                  <td class="py-4 px-4 sm:px-6 text-right font-semibold text-stone-400 text-xs hidden sm:table-cell whitespace-nowrap">
-                    {{ "%.2f"|format(producto.precio_bs) }} Bs.
-                  </td>
-                  <td class="py-4 px-4 sm:px-6 text-center">
-                    <div class="flex items-center justify-center gap-1">
-                      <a href="{{ url_for('editar_producto', producto_id=producto.id) }}"
-                         class="btn-touch p-2.5 rounded-lg text-amber-600 hover:bg-amber-50 transition" title="Editar">
-                        <i data-lucide="pencil" style="width:18px;height:18px;"></i>
-                      </a>
-                                                                                        <form action="{{ url_for('eliminar_producto_ruta', producto_id=producto.id) }}" method="POST" class="inline-block" data-loading="true" data-loading-texto="Eliminando…">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" onclick="return confirm('¿Seguro que deseas eliminar este producto?')"
-                                class="btn-touch p-2.5 rounded-lg text-rose-600 hover:bg-rose-50 transition" title="Eliminar">
-                          <i data-lucide="trash-2" style="width:18px;height:18px;"></i>
-                        </button>
-                      </form>
-                    </div>
-                  </td>
-                </tr>
-              {% else %}
-                <tr>
-                  <td colspan="6" class="py-12 px-6 text-center">
-                    <div class="max-w-sm mx-auto space-y-3">
-                      <div class="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mx-auto">
-                        <i data-lucide="package-open" style="width:24px;height:24px;"></i>
-                      </div>
-                      <p class="text-stone-500 font-medium text-sm">No has subido ningún producto todavía.</p>
-                      <p class="text-stone-400 text-xs">Añade productos manualmente o importa un archivo CSV.</p>
-                    </div>
-                  </td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Tarjetas móvil -->
+      <!-- Catálogo unificado: tarjetas con imagen grande (formato nuevo) -->
       {% if productos %}
-      <div class="panel-comercio-cards grid grid-cols-1 gap-3">
+      <div class="panel-comercio-cards grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5 grid-productos-mobile">
         {% for producto in productos %}
-        <article class="panel-producto-card bg-white rounded-2xl border border-stone-200 p-4 shadow-sm"
-                 data-producto-busqueda="{{ producto.nombre }} {{ producto.descripcion }} {{ producto.codigo_barras }}">
-          <div class="flex gap-3">
-            {% set img_producto = producto|url_imagen_producto %}
-            <div class="localis-img-producto-thumb-wrap localis-img-producto-thumb-wrap--lg">
+          {% set img_producto = producto|url_imagen_producto %}
+          {% set es_placeholder = (not img_producto) or (img_producto == placeholder_producto) %}
+          <article class="card-hover card-producto-mobile panel-producto-card rounded-xl overflow-hidden bg-white shadow-sm border border-stone-100 flex flex-col h-full"
+                   data-producto-busqueda="{{ producto.nombre }} {{ producto.descripcion }} {{ producto.codigo_barras }}">
+            <div class="localis-img-producto-wrap{% if es_placeholder %} localis-img-producto-wrap--vacio{% endif %}">
               <img src="{{ img_producto or placeholder_producto }}"
-                   alt=""
+                   alt="{{ producto.nombre }}" width="400" height="180"
                    data-producto-id="{{ producto.id }}"
-                   class="localis-img-producto-thumb"
+                   class="localis-img-producto"
                    loading="lazy" decoding="async"
                    onerror="window.rescatarImagenProducto(this)">
             </div>
-            <div class="flex-1 min-w-0">
-              <h4 class="font-bold text-gray-900 text-sm truncate">{{ producto.nombre }}</h4>
-              <p class="text-stone-500 text-xs mt-0.5 line-clamp-2">{{ producto.descripcion or 'Sin descripción' }}</p>
+            <div class="p-3 flex-grow flex flex-col">
+              <h4 class="font-bold text-gray-900 text-sm line-clamp-2" title="{{ producto.nombre }}">{{ producto.nombre }}</h4>
+              <p class="text-stone-500 text-xs mt-1 line-clamp-2">{{ producto.descripcion or 'Sin descripción' }}</p>
               {% if producto.codigo_barras %}
-              <p class="text-[10px] font-mono text-stone-400 mt-1">{{ producto.codigo_barras }}</p>
+              <p class="text-[10px] font-mono text-stone-400 mt-1 truncate">{{ producto.codigo_barras }}</p>
               {% endif %}
-              <div class="flex items-center justify-between mt-2">
-                <div>
-                  <span class="font-bold text-amber-600">${{ "%.2f"|format(producto.precio_usd) }}</span>
-                  <span class="text-stone-400 text-xs ml-1">{{ "%.2f"|format(producto.precio_bs) }} Bs.</span>
+              <div class="mt-auto pt-3 border-t border-stone-100 flex items-end justify-between gap-2">
+                <div class="min-w-0">
+                  <span class="font-bold text-amber-600 text-sm whitespace-nowrap">${{ "%.2f"|format(producto.precio_usd) }}</span>
+                  <span class="block text-stone-400 text-[10px] whitespace-nowrap">{{ "%.2f"|format(producto.precio_bs) }} Bs.</span>
                 </div>
-                <div class="flex gap-1">
+                <div class="flex gap-1 shrink-0">
                   <a href="{{ url_for('editar_producto', producto_id=producto.id) }}"
-                     class="btn-touch p-2 rounded-lg text-amber-600 bg-amber-50">
+                     class="btn-touch p-2 rounded-lg text-amber-700 bg-amber-50 hover:bg-amber-100 transition" title="Editar">
                     <i data-lucide="pencil" style="width:16px;height:16px;"></i>
                   </a>
-                                                                        <form action="{{ url_for('eliminar_producto_ruta', producto_id=producto.id) }}" method="POST" class="inline-block" data-loading="true" data-loading-texto="Eliminando…">
+                  <form action="{{ url_for('eliminar_producto_ruta', producto_id=producto.id) }}" method="POST" class="inline-block" data-loading="true" data-loading-texto="Eliminando…">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" onclick="return confirm('¿Eliminar este producto?')"
-                            class="btn-touch p-2 rounded-lg text-rose-600 bg-rose-50">
+                    <button type="submit" onclick="return confirm('¿Seguro que deseas eliminar este producto?')"
+                            class="btn-touch p-2 rounded-lg text-rose-600 bg-rose-50 hover:bg-rose-100 transition" title="Eliminar">
                       <i data-lucide="trash-2" style="width:16px;height:16px;"></i>
                     </button>
                   </form>
                 </div>
               </div>
             </div>
-          </div>
-        </article>
+          </article>
         {% endfor %}
       </div>
 
       <p id="busqueda-sin-resultados" class="hidden text-center text-stone-500 text-sm py-8 bg-white rounded-2xl border border-dashed border-stone-200">
         No hay productos que coincidan con tu búsqueda.
       </p>
+      {% else %}
+      <div class="text-center py-12 px-6 bg-white rounded-2xl border border-dashed border-stone-200">
+        <div class="max-w-sm mx-auto space-y-3">
+          <div class="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mx-auto">
+            <i data-lucide="package-open" style="width:24px;height:24px;"></i>
+          </div>
+          <p class="text-stone-500 font-medium text-sm">No has subido ningún producto todavía.</p>
+          <p class="text-stone-400 text-xs">Añade productos manualmente o importa un archivo CSV.</p>
+        </div>
+      </div>
       {% endif %}
     </section>
   </main>

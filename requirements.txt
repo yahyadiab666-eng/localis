@@ -14,3 +14,6 @@ opencv-python-headless
 Pillow
 openpyxl
 Werkzeug
+# Pipeline profesional de imágenes: segmentación local (sin suscripciones).
+rembg>=2.0.57
+onnxruntime>=1.17.0

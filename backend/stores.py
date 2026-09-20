@@ -987,7 +987,7 @@ def procesar_csv_productos(comercio_id, archivo_csv):
             True,
             f'Importación completada: {insertados} productos cargados. '
             'Columnas reconocidas automáticamente desde la primera fila. '
-            'Las fotos oficiales se completarán en segundo plano.',
+            'Las fotos profesionales se prepararán en segundo plano.',
             None,
         )
 

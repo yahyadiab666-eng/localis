@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+"""Auditoría visual/lógica del panel de comercios de Localis.
+
+Recorre de forma automatizada lo que vería el usuario en el panel:
+
+  1. El panel usa un único formato de tarjetas con imagen grande (formato nuevo).
+  2. No queda la lista compacta/tabla antigua ni elementos duplicados.
+  3. El diseño sigue siendo responsivo (2 columnas en móvil, 3-4 en escritorio).
+  4. Las rutas de imagen apuntan al formato limpio (Storage / subida local /
+     placeholder) y el buscador del panel sigue operativo.
+  5. La estética de las imágenes nuevas es de estudio (fondo blanco puro).
+  6. El pipeline profesional está conectado y Barcode Spider desactivado.
+
+No importa ``main`` (evita tocar la base de datos de producción).
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+RAIZ = Path(__file__).resolve().parents[1]
+if str(RAIZ) not in sys.path:
+    sys.path.insert(0, str(RAIZ))
+
+_ERRORES = []
+
+
+def _ok(condicion, mensaje):
+    if condicion:
+        print(f'  OK  {mensaje}')
+        return True
+    print(f'  FALLO  {mensaje}')
+    _ERRORES.append(mensaje)
+    return False
+
+
+def _leer(relativo):
+    return (RAIZ / relativo).read_text(encoding='utf-8')
+
+
+def _auditar_plantilla():
+    print('\n=== 1. Formato único de tarjetas en el panel ===')
+    html = _leer('templates/comercio.html')
+    _ok('<table' not in html and 'panel-comercio-tabla' not in html, 'sin tabla compacta antigua')
+    _ok('localis-img-producto-thumb-wrap' not in html, 'sin miniaturas del formato viejo')
+    _ok('panel-comercio-cards' in html, 'contiene la grilla de tarjetas')
+    _ok('localis-img-producto-wrap' in html, 'usa la imagen grande de producto')
+    _ok('grid-cols-2' in html and 'md:grid-cols-3' in html and 'lg:grid-cols-4' in html,
+        'grilla responsiva 2/3/4 columnas')
+    _ok('editar_producto' in html and 'eliminar_producto_ruta' in html, 'acciones de gestión presentes')
+
+
+def _auditar_css():
+    print('\n=== 2. CSS del panel sin reglas duplicadas ===')
+    css = _leer('static/css/responsive.css')
+    _ok('.panel-comercio-tabla' not in css, 'CSS sin reglas de la tabla antigua')
+    _ok('.panel-comercio-cards {\n  display: none' not in css, 'las tarjetas no se ocultan en escritorio')
+    _ok('height: 180px' in css, 'franja de foto grande de altura fija')
+
+
+def _auditar_busqueda():
+    print('\n=== 3. Buscador del panel funcional con las tarjetas ===')
+    js = _leer('static/js/localis.js')
+    _ok('inicializarBusquedaProductosPanel' in js, 'inicializa el buscador')
+    _ok('data-producto-busqueda' in js, 'filtra por marca de búsqueda de cada tarjeta')
+    _ok('busqueda-sin-resultados' in js, 'muestra estado sin resultados')
+
+
+def _auditar_pipeline():
+    print('\n=== 4. Pipeline profesional conectado y sin suscripciones ===')
+    pipeline = _leer('services/professional_image_pipeline.py')
+    for funcion in (
+        'def buscar_candidatos',
+        'def validar_calidad',
+        'def procesar_fondo_blanco',
+        'def _almacenar_imagen',
+        'def procesar_producto',
+        'def programar_procesamiento_inventario',
+    ):
+        _ok(funcion in pipeline, f'define {funcion.split("def ")[1]}')
+
+    _ok('255, 255, 255' in pipeline, 'fondo blanco puro (#FFFFFF)')
+    legado = _leer('services/smart_image_pipeline.py')
+    _ok(
+        all(
+            host not in legado
+            for host in ('api.barcodespider.com', 'api.upcitemdb.com', 'api.barcodelookup.com')
+        )
+        and '_buscar_barcode_spider_ean' not in legado,
+        'sin llamadas a APIs de códigos de barras (Barcode Spider)',
+    )
+    imagen_lookup = _leer('backend/image_lookup.py')
+    _ok('professional_image_pipeline' in imagen_lookup, 'el backend usa el pipeline profesional')
+    _ok('rembg' in _leer('requirements.txt'), 'rembg declarado en requirements')
+
+
+def _render_panel():
+    """Renderiza el panel con datos simulados (sin Flask ni BD)."""
+    from jinja2 import Environment, FileSystemLoader
+
+    env = Environment(loader=FileSystemLoader(str(RAIZ / 'templates')), autoescape=True)
+    env.filters['url_imagen_producto'] = lambda p: (
+        (p.get('imagen_url') or '/static/img/placeholder-producto.svg')
+        if isinstance(p, dict)
+        else '/static/img/placeholder-producto.svg'
+    )
+    env.filters['fecha_corta'] = lambda v: str(v)[:10]
+    env.globals['csrf_token'] = lambda: 'tok'
+    env.globals['get_flashed_messages'] = lambda with_categories=False: []
+    env.globals['url_for'] = lambda endpoint, **kw: '/xxx'
+
+    productos = [
+        {
+            'id': 1,
+            'nombre': 'Harina P.A.N. 1kg',
+            'descripcion': 'Maíz blanco',
+            'precio_usd': 1.5,
+            'precio_bs': 55.0,
+            'codigo_barras': '7702084137520',
+            'imagen_url': (
+                'https://abc.supabase.co/storage/v1/object/public/imagenes/'
+                'productos/auto_harina.webp'
+            ),
+        },
+        {
+            'id': 2,
+            'nombre': 'Coca-Cola 2L',
+            'descripcion': 'Refresco',
+            'precio_usd': 2.0,
+            'precio_bs': 73.0,
+            'codigo_barras': None,
+            'imagen_url': None,
+        },
+    ]
+    comercio = {
+        'id': 9,
+        'nombre': 'Bodega Test',
+        'categoria': 'Alimentos',
+        'descripcion': 'Demo',
+        'telefono': '04120000000',
+        'direccion': 'Calle 1',
+        'ciudad': 'Caracas',
+        'zona': 'Centro',
+        'maps_link': None,
+        'logo_completo': None,
+        'visible': 1,
+        'fecha_vencimiento': '2026-10-01',
+    }
+    html = env.get_template('comercio.html').render(
+        productos=productos,
+        comercio=comercio,
+        plan_info={'nombre': 'Gratis'},
+        avisos={'bienvenida_prueba': False, 'suscripcion_vencida': False,
+                'fecha_vencimiento': None, 'plan_actual': 'gratis'},
+        tasa=36.5,
+        whatsapp_url='https://wa.me/58',
+        placeholder_producto='/static/img/placeholder-producto.svg',
+        nav_activo='panel',
+    )
+    return html, productos
+
+
+def _auditar_render():
+    print('\n=== 5. Render del panel (datos simulados) ===')
+    html, productos = _render_panel()
+    _ok('panel-comercio-cards' in html and 'grid-cols-2' in html, 'renderiza la grilla unificada')
+    _ok(html.count('class="localis-img-producto-wrap') == len(productos), 'una imagen grande por producto')
+    _ok('<table' not in html, 'no se renderiza tabla antigua')
+    _ok('placeholder-producto.svg' in html, 'producto sin foto usa placeholder limpio')
+    _ok('storage/v1/object/public' in html, 'la foto procesada apunta al bucket de Storage')
+    _ok('busqueda-productos-panel' in html and 'busqueda-sin-resultados' in html,
+        'buscador y estado vacío presentes')
+
+    print('\n=== 6. Validación de rutas de imagen del render ===')
+    from backend.utils import imagen_url_para_persistir
+
+    for producto in productos:
+        url = producto.get('imagen_url')
+        if not url:
+            continue
+        _ok(bool(imagen_url_para_persistir(url)), f'la URL de "{producto["nombre"]}" es persistible/mostrable')
+
+
+def main() -> int:
+    print('Auditoría visual del panel de comercios — Localis')
+    _auditar_plantilla()
+    _auditar_css()
+    _auditar_busqueda()
+    _auditar_pipeline()
+    _auditar_render()
+
+    print('\n=== RESULTADO ===')
+    if _ERRORES:
+        for item in _ERRORES:
+            print(f'  - {item}')
+        print(f'FALLOS: {len(_ERRORES)}')
+        return 1
+    print('OK panel visual unificado, responsivo y con imágenes limpias de estudio')
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
