@@ -126,6 +126,12 @@ def _auditar_importacion_instantanea():
     _ok('def ejecutar_ciclo' in backfill, 'reintento periódico de pendientes')
     _ok('iniciar_backfill_periodico' in _leer('main.py'), 'el reintento arranca con la app')
 
+    pipeline_src = _leer('services/professional_image_pipeline.py')
+    _ok('def _buscar_vtex' in pipeline_src, 'fuente VTEX (catálogo local directo)')
+    _ok('def _buscar_mercadolibre' in pipeline_src, 'fuente Mercado Libre (API)')
+    _ok('_fondo_ya_limpio' in pipeline_src, 'atajo sin rembg para fondos ya limpios')
+    _ok('ThreadPoolExecutor' in pipeline_src, 'enriquecimiento en paralelo')
+
     requisitos = _leer('requirements.txt')
     _ok('xlrd' in requisitos, 'xlrd declarado en requirements')
     _ok('openpyxl' in requisitos, 'openpyxl declarado en requirements')

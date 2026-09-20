@@ -111,6 +111,7 @@ _BUSQUEDA_WEB = str(os.getenv('LOCALIS_IMG_BUSQUEDA_WEB', '1')).strip().lower() 
 )
 # Búsqueda ligera en paralelo (I/O) + caché agresiva por TTL.
 _BUSQUEDA_PARALELA = max(1, _env_int('LOCALIS_IMG_PARALELO', 4))
+_IMG_TRABAJADORES = max(1, _env_int('LOCALIS_IMG_TRABAJADORES', 4))
 _CACHE_BUSQUEDA_TTL = max(30, _env_int('LOCALIS_IMG_CACHE_TTL_SEC', 3600))
 _MAX_SITIOS = max(0, _env_int('LOCALIS_IMG_SITIOS', 2))
 
@@ -163,6 +164,11 @@ _FUENTES_SITE_BASE = (
     'centralmadeirense.com.ve',
     'plazas.com',
     'multimax.com.ve',
+)
+
+# Tiendas VTEX con API pública de catálogo (imagen directa, multirrubro).
+_FUENTES_VTEX_BASE = (
+    'www.locatel.com.ve',
 )
 
 _DOMINIOS_BLOQUEADOS = (
@@ -227,6 +233,25 @@ def _fuentes_site():
         d.strip().lower() for d in extra.split(',') if d.strip()
     )
     return _FUENTES_SITE_BASE + personalizados
+
+
+def _fuentes_vtex():
+    """Tiendas VTEX con API pública de catálogo (imagen directa y fiable)."""
+    extra = os.getenv('LOCALIS_IMG_VTEX_HOSTS', '')
+    personalizados = tuple(
+        h.strip().lower().replace('https://', '').strip('/')
+        for h in extra.split(',')
+        if h.strip()
+    )
+    return _FUENTES_VTEX_BASE + personalizados
+
+
+def _token_mercadolibre():
+    return (
+        os.getenv('MELI_ACCESS_TOKEN')
+        or os.getenv('MERCADOLIBRE_ACCESS_TOKEN')
+        or ''
+    ).strip()
 
 
 _ACENTOS = str.maketrans(
@@ -306,6 +331,7 @@ class Candidato:
     score: float = 0.0
     ancho: int = 0
     alto: int = 0
+    confiable: bool = False
     urls_alternas: list = field(default_factory=list)
 
     def variantes(self):
@@ -387,13 +413,15 @@ def _dominio_bloqueado(url):
     return False
 
 
-def _url_imagen_valida(url):
+def _url_imagen_valida(url, confiable=False):
     if not url or not isinstance(url, str):
         return False
     texto = html.unescape(url).strip().replace('\\/', '/')
     if not texto.lower().startswith(('http://', 'https://')):
         return False
-    if _dominio_bloqueado(texto):
+    # Fuentes confiables (VTEX local, Mercado Libre API) se aceptan aunque su
+    # CDN esté en la lista de bloqueo para scraping genérico.
+    if not confiable and _dominio_bloqueado(texto):
         return False
     ruta = urlparse(texto).path.lower()
     if ruta.endswith('.svg'):
@@ -600,6 +628,94 @@ def _buscar_web_ddg(consulta, limite=15):
     return candidatos
 
 
+def _buscar_vtex(consulta, limite=6):
+    """Catálogo VTEX (Locatel y tiendas configuradas): imágenes directas.
+
+    Es una fuente local, fiable y multirrubro (farmacia, cuidado personal,
+    hogar, bebés, alimentos, tecnología…). Sin token ni scraping de HTML.
+    """
+    consulta = str(consulta or '').strip()
+    if not consulta:
+        return []
+    candidatos = []
+    for host in _fuentes_vtex():
+        try:
+            respuesta = requests.get(
+                f'https://{host}/api/catalog_system/pub/products/search/',
+                params={'ft': consulta, '_from': 0, '_to': max(1, limite) - 1},
+                headers={'User-Agent': _UA, 'Accept': 'application/json'},
+                timeout=_TIMEOUT_BUSQUEDA,
+            )
+            if respuesta.status_code not in (200, 206):
+                continue
+            datos = respuesta.json()
+        except Exception:
+            continue
+        if not isinstance(datos, list):
+            continue
+        for producto in datos[:limite]:
+            if not isinstance(producto, dict):
+                continue
+            for item in producto.get('items', []) or []:
+                for imagen in item.get('images', []) or []:
+                    url = imagen.get('imageUrl') if isinstance(imagen, dict) else None
+                    if not _url_imagen_valida(url, confiable=True):
+                        continue
+                    candidatos.append(
+                        Candidato(
+                            url=url,
+                            fuente=f'vtex:{host}',
+                            dominio=_dominio(url),
+                            confiable=True,
+                        )
+                    )
+                    break
+                if candidatos:
+                    break
+    return candidatos
+
+
+def _buscar_mercadolibre(consulta, limite=6):
+    """Mercado Libre Venezuela vía API oficial (requiere MELI_ACCESS_TOKEN).
+
+    Sin token se omite en silencio (la cascada continúa con las demás fuentes).
+    """
+    token = _token_mercadolibre()
+    consulta = str(consulta or '').strip()
+    if not token or not consulta:
+        return []
+    try:
+        respuesta = requests.get(
+            'https://api.mercadolibre.com/sites/MLV/search',
+            params={'q': consulta, 'limit': limite},
+            headers={'Authorization': f'Bearer {token}', 'User-Agent': _UA},
+            timeout=_TIMEOUT_BUSQUEDA,
+        )
+        if respuesta.status_code != 200:
+            return []
+        datos = respuesta.json()
+    except Exception:
+        return []
+    candidatos = []
+    for producto in (datos.get('results') or [])[:limite]:
+        urls = []
+        for imagen in producto.get('pictures') or []:
+            urls.append(imagen.get('secure_url') or imagen.get('url'))
+        urls.append(producto.get('thumbnail'))
+        for url in urls:
+            if _url_imagen_valida(url, confiable=True):
+                candidatos.append(
+                    Candidato(
+                        url=url,
+                        fuente='mercadolibre',
+                        dominio=_dominio(url),
+                        confiable=True,
+                    )
+                )
+                break
+    return candidatos
+
+
 def _consultas_busqueda(nombre, marca, presentacion, descripcion, categoria=None):
     """Query universal construido solo con los metadatos de la fila.
 
@@ -724,6 +840,15 @@ def _buscar_candidatos_impl(
         tareas.append((_buscar_off_por_nombre, consulta_off))
     if ean:
         tareas.append((_buscar_off_por_ean, ean))
+    # Catálogos locales directos (VTEX multirrubro y Mercado Libre con token):
+    # funcionan incluso sin motor de búsqueda y dan imagen directa.
+    consulta_local = base or ' '.join(
+        str(p).strip() for p in (nombre, marca) if p and str(p).strip()
+    )
+    if consulta_local:
+        tareas.append((_buscar_vtex, consulta_local))
+        if _token_mercadolibre():
+            tareas.append((_buscar_mercadolibre, consulta_local))
 
     if tareas:
         workers = min(_BUSQUEDA_PARALELA, len(tareas))
@@ -738,7 +863,9 @@ def _buscar_candidatos_impl(
     # Deduplicar preservando la mejor fuente.
     unicos = {}
     for candidato in candidatos:
-        if not _url_imagen_valida(candidato.url):
+        if not _url_imagen_valida(
+            candidato.url, confiable=getattr(candidato, 'confiable', False)
+        ):
             continue
         clave = candidato.url.split('?')[0]
         if clave not in unicos:
@@ -934,15 +1061,53 @@ def _recorte_fondo_claro(data):
     return recorte
 
 
+def _fondo_ya_limpio(data):
+    """True si la imagen ya tiene fondo blanco/limpio (foto de estudio).
+
+    En ese caso se evita rembg (CPU) y basta un recorte + lienzo blanco.
+    """
+    try:
+        from PIL import Image
+        import numpy as np
+
+        imagen = Image.open(io.BytesIO(data)).convert('RGB')
+        arreglo = np.asarray(imagen, dtype='uint8')
+        alto, ancho = arreglo.shape[:2]
+        if alto < 8 or ancho < 8:
+            return False
+        margen = max(1, min(alto, ancho) // 25)
+        bordes = np.concatenate(
+            [
+                arreglo[:margen].reshape(-1, 3),
+                arreglo[-margen:].reshape(-1, 3),
+                arreglo[:, :margen].reshape(-1, 3),
+                arreglo[:, -margen:].reshape(-1, 3),
+            ]
+        )
+        return bool(np.all(bordes >= 235, axis=1).mean() >= 0.9)
+    except Exception:
+        return False
+
+
 def procesar_fondo_blanco(data, *, url=None):
-    """Retorna (bytes_webp, content_type) con fondo blanco puro, o (None, motivo)."""
+    """Retorna (bytes_webp, content_type) con fondo blanco puro, o (None, motivo).
+
+    Atajo de velocidad: si la imagen ya viene con fondo blanco (catálogos VTEX,
+    Mercado Libre, marcas), se recorta sin usar IA (mucho menos CPU). Solo se
+    invoca rembg cuando el fondo no es limpio.
+    """
     try:
         recorte = None
-        try:
-            recorte = _quitar_fondo_rembg(data)
-        except Exception as error:
-            _log(f'rembg no disponible ({type(error).__name__}: {error}); respaldo recorte claro')
-            recorte = None
+        if _fondo_ya_limpio(data):
+            recorte = _recorte_fondo_claro(data)
+        if recorte is None:
+            # rembg es pesado en CPU: se serializa con el semáforo.
+            with _SEMAFORO:
+                try:
+                    recorte = _quitar_fondo_rembg(data)
+                except Exception as error:
+                    _log(f'rembg no disponible ({type(error).__name__}: {error}); respaldo recorte claro')
+                    recorte = None
         if recorte is None:
             recorte = _recorte_fondo_claro(data)
         if recorte is None:
@@ -1376,19 +1541,41 @@ def procesar_inventario(comercio_id, limite=None):
 
     inicio = time.monotonic()
     actualizados = 0
-    for producto in pendientes[:limite]:
+    seleccion = pendientes[:limite]
+    if not seleccion:
+        _log(f'inventario comercio={comercio_id} sin pendientes')
+        return 0
+
+    def _una(producto):
         if time.monotonic() - inicio > _CSV_BUDGET_SEC:
-            _log(f'inventario comercio={comercio_id} presupuesto agotado actualizados={actualizados}')
-            break
-        resultado = procesar_producto(
-            producto.get('id'),
-            codigo_barras=producto.get('codigo_barras'),
-            nombre=producto.get('nombre'),
-            descripcion=producto.get('descripcion'),
-        )
-        if resultado.ok:
-            actualizados += 1
-    _log(f'inventario comercio={comercio_id} actualizados={actualizados}/{len(pendientes)}')
+            return False
+        try:
+            resultado = procesar_producto(
+                producto.get('id'),
+                codigo_barras=producto.get('codigo_barras'),
+                nombre=producto.get('nombre'),
+                descripcion=producto.get('descripcion'),
+            )
+            return bool(resultado.ok)
+        except Exception as error:
+            _log(f'inventario producto={producto.get("id")} fallo: {type(error).__name__}')
+            return False
+
+    # Búsqueda/descarga en paralelo (I/O); rembg queda serializado por semáforo.
+    trabajadores = min(max(1, _IMG_TRABAJADORES), len(seleccion))
+    with ThreadPoolExecutor(max_workers=trabajadores) as ejecutor:
+        futuros = [ejecutor.submit(_una, producto) for producto in seleccion]
+        for futuro in as_completed(futuros):
+            try:
+                if futuro.result():
+                    actualizados += 1
+            except Exception:
+                continue
+
+    _log(
+        f'inventario comercio={comercio_id} actualizados={actualizados}/'
+        f'{len(pendientes)} (lote={len(seleccion)}, workers={trabajadores})'
+    )
     return actualizados
 
 

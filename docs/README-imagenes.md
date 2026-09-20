@@ -105,8 +105,11 @@ Los productos que caen en el placeholder se procesan **en segundo plano** (hilo 
 ### Multi-rubro y marcas venezolanas
 
 - `backend/marcas_ve.py`: reconoce **marcas criollas e importadas** (metadatos de marca, no productos) para extraer la marca cuando el archivo no la trae.
-- `services/professional_image_pipeline.py`: fuentes confiables ampliadas a todos los rubros (farmacias, tecnología, ferretería, automotriz, hogar, calzado…) y **búsqueda restringida por sitio** (`site:farmatodo.com.ve`, `site:locatel.com.ve`, `site:traki.com`, `site:epa.com.ve`…) para encontrar fichas locales.
-- Consultas en paralelo (I/O) + caché en memoria por TTL; `rembg` sigue serializado (CPU).
+- `services/professional_image_pipeline.py`: fuentes confiables ampliadas a todos los rubros (farmacias, tecnología, ferretería, automotriz, hogar, calzado…) y **búsqueda restringida por sitio** (`site:farmatodo.com.ve`, `site:locatel.com.ve`, `site:traki.com`, `site:epa.com.ve`…).
+- **VTEX (catálogo local directo):** `https://<tienda>/api/catalog_system/pub/products/search/?ft=<término>` devuelve la **URL directa de la imagen** (Locatel por defecto; añade más tiendas en `LOCALIS_IMG_VTEX_HOSTS`). Sin scraping ni token.
+- **Mercado Libre Venezuela:** API oficial vía `MELI_ACCESS_TOKEN` (se omite en silencio si no hay token).
+- **Cascada multi-fuente** en paralelo: VTEX → Mercado Libre → Open Facts → Bing/DuckDuckGo + `site:` locales; si una falla, las demás siguen.
+- **Atajo de velocidad:** si la imagen ya tiene fondo blanco (catálogos de estudio), se recorta **sin rembg**; solo se usa IA cuando el fondo no es limpio. El enriquecimiento corre **en paralelo** (I/O) con `rembg` serializado.
 
 ```
 LOCALIS_MAESTRO_INDEX_TTL_SEC=600
@@ -116,8 +119,11 @@ LOCALIS_MAESTRO_SIMILITUD_MIN=0.6
 LOCALIS_IMG_CSV_MAX=2000
 LOCALIS_IMG_CSV_BUDGET_SEC=600
 LOCALIS_IMG_PARALELO=4
+LOCALIS_IMG_TRABAJADORES=4
 LOCALIS_IMG_CACHE_TTL_SEC=3600
 LOCALIS_IMG_SITIOS=2
+LOCALIS_IMG_VTEX_HOSTS=
+MELI_ACCESS_TOKEN=
 ```
 
 ## 5. Formatos soportados y rendimiento masivo

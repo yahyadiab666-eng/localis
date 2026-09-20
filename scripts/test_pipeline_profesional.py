@@ -138,6 +138,32 @@ def main() -> int:
     _ok(not resultado.ok and resultado.motivo == 'imagen_manual_conservada', 'no pisa foto manual')
     _ok('update' not in capturado, 'no actualiza cuando hay foto manual')
 
+    print('\n=== Fuentes multifuente y atajo de velocidad ===')
+    _ok(callable(getattr(P, '_buscar_vtex', None)), 'fuente VTEX (catálogo local) disponible')
+    _ok(callable(getattr(P, '_buscar_mercadolibre', None)), 'fuente Mercado Libre disponible')
+    _ok(
+        P._url_imagen_valida('https://http2.mlstatic.com/x.jpg', confiable=True),
+        'acepta ML como fuente confiable',
+    )
+    _ok(
+        not P._url_imagen_valida('https://http2.mlstatic.com/x.jpg'),
+        'rechaza ML en scraping genérico',
+    )
+
+    llamadas = {'rembg': 0}
+
+    def _rembg_no_llamar(_data):
+        llamadas['rembg'] += 1
+        raise RuntimeError('no debería llamarse para fondo limpio')
+
+    original_rembg = P._quitar_fondo_rembg
+    P._quitar_fondo_rembg = _rembg_no_llamar
+    try:
+        procesada_rapida, _ct = P.procesar_fondo_blanco(_imagen_sintetica())
+    finally:
+        P._quitar_fondo_rembg = original_rembg
+    _ok(bool(procesada_rapida) and llamadas['rembg'] == 0, 'fondo limpio evita rembg (rápido)')
+
     print('\n=== Código legacy de Barcode Spider purgado ===')
     ruta_legado = RAIZ / 'services' / 'smart_image_pipeline.py'
     _ok(not ruta_legado.exists(), 'services/smart_image_pipeline.py eliminado')
