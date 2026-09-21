@@ -76,7 +76,15 @@ FUENTES_SITE_BASE = (
     'centralmadeirense.com.ve', 'plazas.com', 'multimax.com.ve',
 )
 
-FUENTES_VTEX_BASE = ('www.locatel.com.ve',)
+FUENTES_VTEX_BASE = (
+    # Venezuela (farmacia/cuidado/hogar/bebés)
+    'www.locatel.com.ve',
+    # Distribuidores regionales VTEX con marcas globales e imagen directa
+    'www.carulla.com',
+    'www.olimpica.com',
+    'www.plazavea.com.pe',
+    'www.jumbo.com.ar',
+)
 
 
 # ---------------------------------------------------------------------------

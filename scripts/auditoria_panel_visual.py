@@ -131,6 +131,13 @@ def _auditar_importacion_instantanea():
     _ok('def _buscar_mercadolibre' in pipeline_src, 'fuente Mercado Libre (API)')
     _ok('_fondo_ya_limpio' in pipeline_src, 'atajo sin rembg para fondos ya limpios')
     _ok('ThreadPoolExecutor' in pipeline_src, 'enriquecimiento en paralelo')
+    _ok('def _consultas_busqueda' in pipeline_src and '_SINONIMOS_LOCALES' in pipeline_src, 'variantes de búsqueda humana')
+    _ok('def _buscar_serpapi' in pipeline_src and 'def _buscar_brave' in pipeline_src, 'buscadores API opcionales (SerpAPI/Brave)')
+    _ok('def _buscar_bing_og' in pipeline_src, 'rastreo og:image de páginas de producto')
+    _ok('def _variantes_off' in pipeline_src, 'variantes de tamaño de Open Facts')
+    _ok('_DESCARGA_INTENTOS' in pipeline_src, 'descargas con reintentos')
+    fuentes_src = _leer('backend/fuentes_imagenes.py')
+    _ok('carulla' in fuentes_src or 'olimpica' in fuentes_src, 'VTEX regionales (marcas globales)')
     _ok('imagen_intentos' in _leer('database.py'), 'cola persistente con intentos')
     _ok('presupuesto_seg' in pipeline_src, 'lote acotado por presupuesto (30-60s)')
 

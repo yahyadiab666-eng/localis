@@ -109,8 +109,16 @@ Los productos que caen en el placeholder se procesan **en segundo plano** (hilo 
 ### Global (marcas internacionales) y registro modular
 
 - `backend/fuentes_imagenes.py`: **registro modular** con todas las fuentes (catálogo maestro, VTEX, Mercado Libre, Open Facts, Bing, DuckDuckGo, `site:` retail, favicon de marca, Simple Icons, monograma) y **112 dominios confiables** (Venezuela + marcas globales: Samsung, LG, Philips, Bosch, Makita, Nestlé, Coca-Cola, Altunsa…).
-- `backend/marca_logo.py`: **respaldo visual por marca**. Si tras agotar fuentes no hay foto real, se asigna el **logo oficial** de la marca (favicon de alta resolución o Simple Icons) y, si no existe, un **monograma PNG** generado localmente (fondo blanco, universal para cualquier marca: Altunsa, Mavesa, etc.). Nunca queda la tarjeta vacía ni con placeholder genérico.
-- Los estados son `real`, `logo`, `pendiente`, `rechazada`; el reporte informa foto real / logo de marca / pendientes. Los `logo` siguen reintentándose para conseguir la foto real.
+- **VTEX regional:** además de Locatel (VE), se consultan distribuidores regionales con API pública y **imagen directa** (Carulla, Olímpica, Plaza Vea, Jumbo AR), lo que cubre marcas globales y productos de importación que no están en catálogos venezolanos.
+- **Motor de búsqueda humana (`_consultas_busqueda`):** genera hasta 8 variantes combinando `[código]`, `[nombre]`, `[marca]`, `[categoría]`, `"venezuela"`, sinónimos locales y eliminando gramajes/unidades. Si una variante no rinde, se prueban las demás en paralelo.
+- **Buscadores API opcionales:** `SERPAPI_KEY` (Google Images) y `BRAVE_SEARCH_API_KEY` para replicar una búsqueda manual real desde el servidor; se activan solo si existen.
+- **Rastreo `og:image`:** de las páginas de producto que devuelve Bing Images se extrae la imagen de estudio (`og:image`).
+- **Descargas robustas:** reintentos con backoff y **múltiples variantes de tamaño** (`.400`, `.full`, sin tamaño) para CDN intermitentes.
+- **Filtro de relevancia por título:** los candidatos de buscadores/VTEX/ML deben compartir tokens con el producto (evita asignar fotos de otro artículo).
+- `backend/marca_logo.py`: **respaldo visual por marca** solo tras agotar la búsqueda real.
+- Los estados son `real`, `logo`, `pendiente`, `rechazada`; el reporte informa foto real / logo de marca / pendientes. Los `logo`/`pendiente` siguen reintentándose en segundo plano.
+
+**Medición real (catálogo ERP de 225 productos, muestra de 20):** la tasa de **imagen real** subió de ~5% a **55%** solo con catálogos directos (VTEX regional + Open Facts + variantes + reintentos), sin buscadores web (bloqueados desde el entorno de prueba). Con `SERPAPI_KEY`/`BRAVE_SEARCH_API_KEY` o desde la red de producción, la cobertura sube más.
 
 ### Alta concurrencia (cientos de usuarios)
 

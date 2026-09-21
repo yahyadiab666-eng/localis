@@ -102,6 +102,7 @@ _BUDGET_SEC = _env_float('LOCALIS_IMG_BUDGET_SEC', 120.0)
 _CSV_MAX = _env_int('LOCALIS_IMG_CSV_MAX', 2000)
 _CSV_BUDGET_SEC = _env_float('LOCALIS_IMG_CSV_BUDGET_SEC', 600.0)
 _TIMEOUT_DESCARGA = _env_float('LOCALIS_IMG_TIMEOUT_SEC', 12.0)
+_DESCARGA_INTENTOS = max(1, _env_int('LOCALIS_IMG_DESCARGA_INTENTOS', 2))
 _TIMEOUT_BUSQUEDA = _env_float('LOCALIS_IMG_SEARCH_TIMEOUT_SEC', 8.0)
 _BUSQUEDA_WEB = str(os.getenv('LOCALIS_IMG_BUSQUEDA_WEB', '1')).strip().lower() not in (
     '0',
@@ -114,6 +115,10 @@ _BUSQUEDA_PARALELA = max(1, _env_int('LOCALIS_IMG_PARALELO', 4))
 _IMG_TRABAJADORES = max(1, _env_int('LOCALIS_IMG_TRABAJADORES', 4))
 _CACHE_BUSQUEDA_TTL = max(30, _env_int('LOCALIS_IMG_CACHE_TTL_SEC', 3600))
 _MAX_SITIOS = max(0, _env_int('LOCALIS_IMG_SITIOS', 2))
+# Rastreo og:image de páginas de producto de Bing (emulación de búsqueda humana).
+_BING_OG = str(os.getenv('LOCALIS_IMG_BING_OG', '1')).strip().lower() not in (
+    '0', 'false', 'no', 'off',
+)
 
 _SEMAFORO = threading.Semaphore(max(1, _env_int('LOCALIS_IMG_MAX_CONCURRENT', 1)))
 _EN_VUELO: set = set()
@@ -221,6 +226,7 @@ class Candidato:
     score: float = 0.0
     ancho: int = 0
     alto: int = 0
+    titulo: str = ''
     confiable: bool = False
     urls_alternas: list = field(default_factory=list)
 
@@ -354,7 +360,8 @@ def _relevante_web(candidato: Candidato, tokens):
     if not tokens:
         # Sin tokens fiables solo confiamos en fuentes explícitamente confiables.
         return False
-    return any(token in host_path for token in tokens)
+    texto = f'{candidato.titulo} {host_path}'.lower()
+    return any(token in texto for token in tokens)
 
 
 def _get_json(url, *, params=None, headers=None):
@@ -379,33 +386,71 @@ def _off_url_alta_res(url):
     return re.sub(r'\.(\d{2,4})\.(jpg|jpeg|png|webp)$', r'.\2', url, flags=re.I)
 
 
+def _variantes_off(url):
+    """Tamaños/formatos alternativos de una imagen de Open Food Facts."""
+    if not url:
+        return []
+    variantes = []
+
+    def _add(valor):
+        if valor and valor not in variantes:
+            variantes.append(valor)
+
+    _add(url)
+    if re.search(r'\.\d{2,4}\.(?:jpg|jpeg|png|webp)$', url, re.I):
+        _add(re.sub(r'\.\d{2,4}\.(jpg|jpeg|png|webp)$', r'.\1', url, flags=re.I))
+        _add(re.sub(r'\.\d{2,4}\.(jpg|jpeg|png|webp)$', r'.full.\1', url, flags=re.I))
+    else:
+        _add(re.sub(r'\.(jpg|jpeg|png|webp)$', r'.400.\1', url, flags=re.I))
+        _add(re.sub(r'\.(jpg|jpeg|png|webp)$', r'.full.\1', url, flags=re.I))
+    return variantes
+
+
+def _urls_imagen_off(producto):
+    """URLs de imagen de un producto OFF (campos directos + estructura `images`)."""
+    urls = []
+
+    def _add(valor):
+        if isinstance(valor, str) and valor.strip():
+            urls.append(valor.strip())
+
+    for clave in ('image_front_url', 'image_url', 'image_front_small_url'):
+        _add(producto.get(clave))
+
+    imagenes = producto.get('images') or {}
+    if isinstance(imagenes, dict):
+        for clave, valor in imagenes.items():
+            if 'front' not in str(clave).lower() and 'principal' not in str(clave).lower():
+                continue
+            if isinstance(valor, str):
+                _add(valor)
+            elif isinstance(valor, dict):
+                for campo in ('url', 'display_url', 'small_url', 'medium_url'):
+                    _add(valor.get(campo))
+                tamanos = valor.get('sizes') or {}
+                if isinstance(tamanos, dict):
+                    for campo in ('400', 'full', 'display', '800'):
+                        tam = tamanos.get(campo)
+                        if isinstance(tam, dict):
+                            _add(tam.get('url'))
+    return urls
+
+
 def _candidatos_desde_off(producto, fuente='openfoodfacts'):
     candidatos = []
     if not isinstance(producto, dict):
         return candidatos
-    urls = []
-    for clave in ('image_front_url', 'image_url'):
-        url = producto.get(clave)
-        if url:
-            urls.append(url)
-    imagenes = producto.get('images') or {}
-    if isinstance(imagenes, dict):
-        for clave, valor in imagenes.items():
-            if not isinstance(valor, str):
-                continue
-            if 'front' in str(clave).lower() or 'principal' in str(clave).lower():
-                urls.append(valor)
     vistos = set()
-    for url in urls:
+    for url in _urls_imagen_off(producto):
         if not url or url in vistos:
             continue
         vistos.add(url)
-        alta = _off_url_alta_res(url)
+        variantes = _variantes_off(url)
         candidato = Candidato(
-            url=url,
+            url=variantes[0] if variantes else url,
             fuente=fuente,
             dominio=_dominio(url),
-            urls_alternas=[alta] if alta != url else [],
+            urls_alternas=variantes[1:],
         )
         candidatos.append(candidato)
     return candidatos
@@ -427,23 +472,153 @@ def _buscar_off_por_ean(ean):
     return []
 
 
-def _buscar_off_por_nombre(consulta):
+_OFF_HOSTS = (
+    'world.openfoodfacts.org',
+    'world.openbeautyfacts.org',
+    'world.openproductsfacts.org',
+)
+
+
+def _buscar_off_por_nombre(consulta, hosts=None, page_size=8):
+    """Búsqueda por nombre en los catálogos abiertos (OFF/OBF/OPF)."""
+    consulta = str(consulta or '').strip()
+    if not consulta:
+        return []
+    candidatos = []
+    for host in (hosts or _OFF_HOSTS):
+        datos = _get_json(
+            f'https://{host}/cgi/search.pl',
+            params={
+                'search_terms': consulta,
+                'search_simple': 1,
+                'action': 'process',
+                'json': 1,
+                'page_size': page_size,
+                'fields': 'product_name,product_name_es,brands,quantity,image_front_url,image_url',
+            },
+        )
+        if not datos:
+            continue
+        for producto in (datos.get('products') or [])[:page_size]:
+            candidatos.extend(
+                _candidatos_desde_off(producto, fuente=host.split('.')[1])
+            )
+    return candidatos
+
+
+def _clave_serpapi():
+    return (os.getenv('SERPAPI_KEY') or os.getenv('SERPAPI_API_KEY') or '').strip()
+
+
+def _buscar_serpapi(consulta, limite=10):
+    """Google Images vía SerpAPI (opcional, si hay clave). Búsqueda 'humana'."""
+    clave = _clave_serpapi()
+    consulta = str(consulta or '').strip()
+    if not clave or not consulta:
+        return []
     datos = _get_json(
-        'https://world.openfoodfacts.org/cgi/search.pl',
-        params={
-            'search_terms': consulta,
-            'search_simple': 1,
-            'action': 'process',
-            'json': 1,
-            'page_size': 10,
-            'fields': 'product_name,product_name_es,brands,quantity,image_front_url,image_url',
-        },
+        'https://serpapi.com/search.json',
+        params={'engine': 'google_images', 'q': consulta, 'num': limite, 'api_key': clave},
     )
     if not datos:
         return []
     candidatos = []
-    for producto in (datos.get('products') or [])[:10]:
-        candidatos.extend(_candidatos_desde_off(producto))
+    for item in (datos.get('images_results') or [])[:limite]:
+        url = item.get('original') or item.get('thumbnail')
+        if _url_imagen_valida(url, confiable=True):
+            candidatos.append(
+                Candidato(
+                    url=url,
+                    fuente='serpapi',
+                    dominio=_dominio(url),
+                    titulo=str(item.get('title') or ''),
+                    confiable=True,
+                )
+            )
+    return candidatos
+
+
+def _clave_brave():
+    return (os.getenv('BRAVE_SEARCH_API_KEY') or os.getenv('BRAVE_API_KEY') or '').strip()
+
+
+def _buscar_brave(consulta, limite=10):
+    """Brave Image Search (opcional, si hay clave)."""
+    clave = _clave_brave()
+    consulta = str(consulta or '').strip()
+    if not clave or not consulta:
+        return []
+    datos = _get_json(
+        'https://api.search.brave.com/res/v1/images/search',
+        params={'q': consulta, 'count': limite},
+        headers={'X-Subscription-Token': clave, 'Accept': 'application/json'},
+    )
+    if not datos:
+        return []
+    candidatos = []
+    for item in (datos.get('results') or [])[:limite]:
+        propiedades = item.get('properties') or {}
+        url = propiedades.get('url') or (item.get('thumbnail') or {}).get('src')
+        if _url_imagen_valida(url, confiable=True):
+            candidatos.append(
+                Candidato(
+                    url=url,
+                    fuente='brave',
+                    dominio=_dominio(url),
+                    titulo=str(item.get('title') or ''),
+                    confiable=True,
+                )
+            )
+    return candidatos
+
+
+_RE_OG = re.compile(
+    r'<meta[^>]+(?:property|name)=["\'](?:og:image|twitter:image)["\'][^>]+content=["\']([^"\']+)',
+    re.IGNORECASE,
+)
+
+
+def _buscar_bing_og(consulta, limite=2):
+    """Rastrea las páginas de producto de Bing Images y extrae su og:image.
+
+    Emula la búsqueda manual: imagen de estudio => página => og:image.
+    """
+    consulta = str(consulta or '').strip()
+    if not consulta:
+        return []
+    try:
+        respuesta = requests.get(
+            'https://www.bing.com/images/search',
+            params={'q': consulta, 'form': 'HDRSC2', 'first': '1'},
+            headers={'User-Agent': _UA, 'Accept-Language': 'es-VE,es;q=0.9,en;q=0.8'},
+            timeout=_TIMEOUT_BUSQUEDA,
+        )
+        if respuesta.status_code != 200:
+            return []
+        purls = re.findall(r'purl&quot;:&quot;(.*?)&quot;', respuesta.text)
+        purls = [html.unescape(u) for u in purls][: max(0, limite)]
+    except Exception:
+        return []
+    candidatos = []
+    for purl in purls:
+        try:
+            pagina = requests.get(
+                purl,
+                headers={'User-Agent': _UA, 'Accept-Language': 'es-VE,es;q=0.9'},
+                timeout=_TIMEOUT_BUSQUEDA,
+            )
+            if pagina.status_code != 200:
+                continue
+            coincidencias = _RE_OG.findall(pagina.text)
+        except Exception:
+            continue
+        for url in coincidencias[:2]:
+            url = html.unescape(url)
+            if _url_imagen_valida(url, confiable=True):
+                candidatos.append(
+                    Candidato(url=url, fuente='bing-og', dominio=_dominio(url), confiable=True)
+                )
+                break
     return candidatos
 
 
@@ -519,10 +694,10 @@ def _buscar_web_ddg(consulta, limite=15):
 
 
 def _buscar_vtex(consulta, limite=6):
-    """Catálogo VTEX (Locatel y tiendas configuradas): imágenes directas.
+    """Catálogo VTEX (nacionales y regionales): imágenes directas.
 
-    Es una fuente local, fiable y multirrubro (farmacia, cuidado personal,
-    hogar, bebés, alimentos, tecnología…). Sin token ni scraping de HTML.
+    Fuente fiable multirrubro (farmacia, tecnología, hogar, bebés, alimentos…).
+    Incluye el nombre del producto en ``titulo`` para filtrar por relevancia.
     """
     consulta = str(consulta or '').strip()
     if not consulta:
@@ -546,21 +721,26 @@ def _buscar_vtex(consulta, limite=6):
         for producto in datos[:limite]:
             if not isinstance(producto, dict):
                 continue
+            nombre = str(producto.get('productName') or '').strip()
+            marca = str(producto.get('brand') or '').strip()
+            titulo = ' '.join(filter(None, (nombre, marca)))
             for item in producto.get('items', []) or []:
+                url = None
                 for imagen in item.get('images', []) or []:
-                    url = imagen.get('imageUrl') if isinstance(imagen, dict) else None
-                    if not _url_imagen_valida(url, confiable=True):
-                        continue
+                    cand = imagen.get('imageUrl') if isinstance(imagen, dict) else None
+                    if _url_imagen_valida(cand, confiable=True):
+                        url = cand
+                        break
+                if url:
                     candidatos.append(
                         Candidato(
                             url=url,
                             fuente=f'vtex:{host}',
                             dominio=_dominio(url),
+                            titulo=titulo,
                             confiable=True,
                         )
                     )
-                    break
-                if candidatos:
                     break
     return candidatos
 
@@ -588,6 +768,7 @@ def _buscar_mercadolibre(consulta, limite=6):
         return []
     candidatos = []
     for producto in (datos.get('results') or [])[:limite]:
+        titulo = str(producto.get('title') or '').strip()
         urls = []
         for imagen in producto.get('pictures') or []:
             urls.append(imagen.get('secure_url') or imagen.get('url'))
@@ -599,6 +780,7 @@ def _buscar_mercadolibre(consulta, limite=6):
                         url=url,
                         fuente='mercadolibre',
                         dominio=_dominio(url),
+                        titulo=titulo,
                         confiable=True,
                     )
                 )
@@ -606,26 +788,93 @@ def _buscar_mercadolibre(consulta, limite=6):
     return candidatos
 
 
-def _consultas_busqueda(nombre, marca, presentacion, descripcion, categoria=None):
-    """Query universal construido solo con los metadatos de la fila.
+_RE_TOKEN_NUM = re.compile(r'^\d+$')
+_RE_TOKEN_UNIDAD = re.compile(
+    r'^\d+(?:[.,]\d+)?\s?'
+    r'(?:kg|kgs|g|gr|grs|gramos|mg|l|lt|lts|litro|litros|ml|cc|oz|lb|lbs|un|und|unid|'
+    r'unidad|unidades|%|x\d*)$'
+)
+_SINONIMOS_LOCALES = {
+    'refresco': 'gaseosa', 'gaseosa': 'refresco', 'soda': 'refresco',
+    'champu': 'shampoo', 'shampoo': 'champu', 'acondicionador': 'crema enjuague',
+    'celular': 'telefono', 'telefono': 'celular', 'computadora': 'computador',
+    'computador': 'computadora', 'audifonos': 'auriculares',
+    'detergente': 'jabon en polvo', 'panal': 'panal', 'atun': 'atun en lata',
+    'nevera': 'refrigerador', 'refrigerador': 'nevera', 'licuadora': 'batidora',
+    'desodorante': 'antitranspirante', 'toalla': 'toalla sanitaria',
+    'taladro': 'perforador', 'llave': 'llave inglesa', 'caucho': 'llanta',
+}
 
-    ``[nombre] + [marca] + [presentación] + [categoría]`` → no depende del tipo
-    de artículo (refresco, teléfono, repuesto, etc.).
+
+def _tokens_consulta(nombre, marca=None):
+    texto = _texto_plano(f'{nombre or ""} {marca or ""}').lower()
+    texto = re.sub(r'[^a-z0-9]+', ' ', texto)
+    tokens = []
+    vistos = set()
+    for token in texto.split():
+        if token in vistos:
+            continue
+        if token in _STOPWORDS or _RE_TOKEN_NUM.match(token):
+            continue
+        if _RE_TOKEN_UNIDAD.match(token):
+            continue
+        if len(token) < 3:
+            continue
+        vistos.add(token)
+        tokens.append(token)
+    return tokens
+
+
+def _consultas_busqueda(
+    nombre, marca, presentacion, descripcion, categoria=None, codigo_barras=None
+):
+    """Variantes de consulta tipo búsqueda humana.
+
+    Combina nombre completo, marca, presentación, código de barras, categoría y
+    sinónimos locales; elimina gramajes/unidades y limita a 8 variantes para no
+    saturar la red.
     """
-    base = ' '.join(
-        str(p).strip() for p in (nombre, marca, presentacion) if p and str(p).strip()
-    )
-    if not base:
-        base = ' '.join(
-            str(p).strip() for p in (descripcion, categoria) if p and str(p).strip()
-        )[:120]
-    consultas = []
-    if base:
-        consultas.append(f'{base} venezuela')
-        if categoria and str(categoria).strip():
-            consultas.append(f'{base} {str(categoria).strip()}')
-        consultas.append(base)
-    return consultas
+    marca_txt = _inferir_marca(nombre, descripcion, marca)
+    tokens = _tokens_consulta(nombre, marca_txt)
+    core = ' '.join(tokens)
+    primeros = ' '.join(tokens[:3])
+    nombre_txt = str(nombre or '').strip()
+
+    variantes = []
+
+    def _add(valor):
+        texto = ' '.join(str(valor or '').split()).strip()
+        if not texto or len(texto) < 3:
+            return
+        if texto.lower() in {v.lower() for v in variantes}:
+            return
+        variantes.append(texto)
+
+    if codigo_barras:
+        _add(str(codigo_barras))
+        _add(f'{codigo_barras} {marca_txt or ""}')
+    _add(core)
+    _add(f'{core} venezuela')
+    if marca_txt and primeros:
+        if marca_txt.lower() in primeros.lower():
+            _add(primeros)
+        else:
+            _add(f'{marca_txt} {primeros}')
+    _add(nombre_txt)
+    if core:
+        _add(f'{core} producto')
+        _add(f'{core} fondo blanco')
+    for indice, token in enumerate(tokens[:4]):
+        alterno = _SINONIMOS_LOCALES.get(token)
+        if alterno:
+            _add(' '.join(tokens[:indice] + [alterno] + tokens[indice + 1 :]))
+    if categoria and primeros:
+        _add(f'{primeros} {str(categoria).strip()}')
+    if not variantes:
+        _add(' '.join(
+            str(p).strip() for p in (nombre, marca, categoria) if p and str(p).strip()
+        ))
+    return variantes[:8]
 
 
 def _clave_cache_candidatos(codigo_barras, nombre, marca, presentacion, categoria):
@@ -706,39 +955,42 @@ def _buscar_candidatos_impl(
                 Candidato(url=url_maestro, fuente='catalogo_maestro', dominio=_dominio(url_maestro))
             )
 
-    base = ' '.join(
-        str(p).strip() for p in (nombre, marca, presentacion) if p and str(p).strip()
-    )
     consultas = _consultas_busqueda(
-        nombre, marca, presentacion, descripcion, categoria=categoria
+        nombre,
+        marca,
+        presentacion,
+        descripcion,
+        categoria=categoria,
+        codigo_barras=ean,
     )
+    base = consultas[0] if consultas else ''
 
-    # Tareas de red (I/O) en paralelo: Bing/DDG por consulta, site:host locales
-    # y catálogos abiertos. rembg queda serializado aparte (CPU).
+    # Tareas de red (I/O) en paralelo: variantes de búsqueda humana en varios
+    # motores, catálogos abiertos, site:host locales y catálogos directos.
     tareas = []
     if _BUSQUEDA_WEB:
-        for consulta in consultas:
+        for consulta in consultas[:4]:
             tareas.append((_buscar_web_bing, consulta))
             tareas.append((_buscar_web_ddg, consulta))
+        if _clave_serpapi():
+            for consulta in consultas[:3]:
+                tareas.append((_buscar_serpapi, consulta))
+        if _clave_brave():
+            for consulta in consultas[:3]:
+                tareas.append((_buscar_brave, consulta))
         if base and _MAX_SITIOS > 0:
             for host in _fuentes_site()[:_MAX_SITIOS]:
                 tareas.append((_buscar_web_bing, f'{base} site:{host}'))
-    if nombre:
-        consulta_off = ' '.join(
-            str(p).strip() for p in (nombre, marca, categoria) if p and str(p).strip()
-        )
-        tareas.append((_buscar_off_por_nombre, consulta_off))
+        if base and _BING_OG:
+            tareas.append((_buscar_bing_og, base))
+    for consulta in consultas[:2]:
+        tareas.append((_buscar_off_por_nombre, consulta))
     if ean:
         tareas.append((_buscar_off_por_ean, ean))
-    # Catálogos locales directos (VTEX multirrubro y Mercado Libre con token):
-    # funcionan incluso sin motor de búsqueda y dan imagen directa.
-    consulta_local = base or ' '.join(
-        str(p).strip() for p in (nombre, marca) if p and str(p).strip()
-    )
-    if consulta_local:
-        tareas.append((_buscar_vtex, consulta_local))
-        if _token_mercadolibre():
-            tareas.append((_buscar_mercadolibre, consulta_local))
+    for consulta in consultas[:2]:
+        tareas.append((_buscar_vtex, consulta))
+    if base and _token_mercadolibre():
+        tareas.append((_buscar_mercadolibre, base))
 
     if tareas:
         workers = min(_BUSQUEDA_PARALELA, len(tareas))
@@ -762,10 +1014,12 @@ def _buscar_candidatos_impl(
             unicos[clave] = candidato
 
     puntuados = []
+    fuentes_filtrables = (
+        'bing-web', 'ddg-web', 'vtex', 'mercadolibre', 'serpapi', 'brave', 'bing-og',
+    )
     for candidato in unicos.values():
-        if candidato.fuente in ('bing-web', 'ddg-web') and not _relevante_web(
-            candidato, tokens
-        ):
+        fuente_base = (candidato.fuente or '').split(':')[0]
+        if fuente_base in fuentes_filtrables and not _relevante_web(candidato, tokens):
             continue
         _puntuar(candidato, marca=marca)
         puntuados.append(candidato)
@@ -1017,36 +1271,45 @@ def procesar_fondo_blanco(data, *, url=None):
 # ---------------------------------------------------------------------------
 # Descarga y evaluación de candidatos
 # ---------------------------------------------------------------------------
-def _descargar(url):
-    try:
-        respuesta = requests.get(
-            url,
-            headers={
-                'User-Agent': _UA,
-                'Accept': 'image/avif,image/webp,image/*,*/*;q=0.8',
-                'Referer': f'{urlparse(url).scheme}://{urlparse(url).netloc}/',
-            },
-            timeout=_TIMEOUT_DESCARGA,
-            stream=True,
-            allow_redirects=True,
-        )
-        if respuesta.status_code != 200:
-            return None
-        tipo = (respuesta.headers.get('content-type') or '').lower()
-        if tipo.startswith('text/') or 'html' in tipo:
-            return None
-        if tipo and not tipo.startswith('image/'):
-            if not any(urlparse(url).path.lower().endswith(ext) for ext in _EXT_IMAGEN_OK):
+def _descargar(url, intentos=None):
+    """Descarga una imagen con reintentos (los CDN pueden fallar intermitentemente)."""
+    intentos = intentos or _DESCARGA_INTENTOS
+    for intento in range(max(1, intentos)):
+        try:
+            respuesta = requests.get(
+                url,
+                headers={
+                    'User-Agent': _UA,
+                    'Accept': 'image/avif,image/webp,image/*,*/*;q=0.8',
+                    'Referer': f'{urlparse(url).scheme}://{urlparse(url).netloc}/',
+                },
+                timeout=_TIMEOUT_DESCARGA,
+                stream=True,
+                allow_redirects=True,
+            )
+            if respuesta.status_code == 200:
+                tipo = (respuesta.headers.get('content-type') or '').lower()
+                if tipo.startswith('text/') or 'html' in tipo:
+                    return None
+                if tipo and not tipo.startswith('image/'):
+                    if not any(
+                        urlparse(url).path.lower().endswith(ext) for ext in _EXT_IMAGEN_OK
+                    ):
+                        return None
+                datos = bytearray()
+                for fragmento in respuesta.iter_content(65536):
+                    datos.extend(fragmento)
+                    if len(datos) > _MAX_BYTES:
+                        return None
+                return bytes(datos) or None
+            if respuesta.status_code in (403, 404, 410):
                 return None
-        datos = bytearray()
-        for fragmento in respuesta.iter_content(65536):
-            datos.extend(fragmento)
-            if len(datos) > _MAX_BYTES:
+        except Exception as error:
+            if intento + 1 >= intentos:
+                _log(f'descarga fallida {url[:90]}: {type(error).__name__}: {error}')
                 return None
-        return bytes(datos) or None
-    except Exception as error:
-        _log(f'descarga fallida {url[:90]}: {type(error).__name__}: {error}')
-        return None
+        time.sleep(0.25 * (2 ** intento))
+    return None
 
 
 def _evaluar_candidato(candidato: Candidato):
