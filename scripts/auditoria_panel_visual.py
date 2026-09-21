@@ -134,6 +134,17 @@ def _auditar_importacion_instantanea():
     _ok('imagen_intentos' in _leer('database.py'), 'cola persistente con intentos')
     _ok('presupuesto_seg' in pipeline_src, 'lote acotado por presupuesto (30-60s)')
 
+    _ok((RAIZ / 'backend' / 'marca_logo.py').is_file(), 'respaldo visual por logo/monograma de marca')
+    _ok(
+        (RAIZ / 'backend' / 'fuentes_imagenes.py').is_file()
+        and 'catalogo_fuentes' in _leer('backend/fuentes_imagenes.py'),
+        'registro modular de fuentes (global + Venezuela)',
+    )
+    _ok('ESTADO_LOGO' in _leer('backend/estado_imagenes.py'), 'estado "logo" en el reporte')
+    cola_src = _leer('backend/import_queue.py')
+    _ok('_guardar_spool' in cola_src and 'instance' in cola_src, 'cola con spooling a disco (alta concurrencia)')
+    _ok('LOCALIS_IMG_MAX_CONCURRENT' in _leer('.env.example'), 'límite de CPU configurable')
+
     requisitos = _leer('requirements.txt')
     _ok('xlrd' in requisitos, 'xlrd declarado en requirements')
     _ok('openpyxl' in requisitos, 'openpyxl declarado en requirements')

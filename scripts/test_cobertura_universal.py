@@ -297,11 +297,52 @@ def _probar_reporte_honesto():
     _ok(meta_ok['estado_imagenes'] == 'completo', 'todas reales -> estado "completo"')
 
 
+def _probar_respaldo_marca():
+    print('\n=== Respaldo visual por marca (logo/monograma) ===')
+    from unittest.mock import patch
+
+    from backend.catalogo_maestro_index import IndiceMaestro
+    from backend.inventory_import import asignar_imagenes_instantaneas
+    from backend.marca_logo import (
+        iniciales_marca,
+        logo_instantaneo,
+        monograma_png,
+        resolver_logo_marca,
+    )
+
+    _ok(iniciales_marca('Fama de América') == 'FA', 'iniciales de marca multi-palabra')
+    _ok(iniciales_marca('Altunsa') == 'AL', 'iniciales de marca simple')
+    png = monograma_png('Altunsa')
+    _ok(png[:8] == b'\x89PNG\r\n\x1a\n', 'monograma PNG válido')
+    url = logo_instantaneo('Altunsa')
+    _ok(bool(url) and url.startswith('/static/uploads/marcas/'), 'monograma local disponible')
+    ruta = RAIZ / url.lstrip('/')
+    _ok(ruta.is_file() and ruta.stat().st_size > 0, 'archivo de monograma en disco')
+
+    url2, fuente2 = resolver_logo_marca('Altunsa', permitir_red=False)
+    _ok(bool(url2) and fuente2 == 'logo_monograma', 'resolver cae a monograma sin red')
+
+    productos = [
+        {'nombre': 'Detergente Alta Espuma', 'descripcion': '', 'marca': 'Altunsa',
+         'categoria': '', 'codigo_barras': None, 'imagen_url': None},
+        {'nombre': 'Café molido', 'descripcion': '', 'marca': 'Fama de América',
+         'categoria': '', 'codigo_barras': None, 'imagen_url': None},
+    ]
+    with patch('backend.catalogo_maestro_index.obtener_indice', return_value=IndiceMaestro()):
+        asignar_imagenes_instantaneas(productos, {}, 'Alimentos')
+    _ok(
+        all(p['imagen_estado'] == 'logo' and p['imagen_url'].startswith('/static/uploads/marcas/')
+            for p in productos),
+        'la importación asigna logo/monograma de marca (nunca placeholder genérico)',
+    )
+
+
 def main() -> int:
     _probar_clasificador()
     _probar_cobertura_masiva()
     _probar_formatos_masivos()
     _probar_reporte_honesto()
+    _probar_respaldo_marca()
 
     print('\n=== RESULTADO ===')
     if _ERRORES:

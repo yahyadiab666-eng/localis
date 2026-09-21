@@ -106,14 +106,18 @@ El trabajo asíncrono se marca `parcial` (no `completado`) cuando quedan pendien
 
 Los productos que caen en el placeholder se procesan **en segundo plano** (hilo único, semáforo=1) con el pipeline profesional (búsqueda + rembg + Storage) y, al guardarse, se cachean en el catálogo maestro con nombre/marca para que la **próxima** importación los resuelva al instante.
 
-### Multi-rubro y marcas venezolanas
+### Global (marcas internacionales) y registro modular
 
-- `backend/marcas_ve.py`: reconoce **marcas criollas e importadas** (metadatos de marca, no productos) para extraer la marca cuando el archivo no la trae.
-- `services/professional_image_pipeline.py`: fuentes confiables ampliadas a todos los rubros (farmacias, tecnología, ferretería, automotriz, hogar, calzado…) y **búsqueda restringida por sitio** (`site:farmatodo.com.ve`, `site:locatel.com.ve`, `site:traki.com`, `site:epa.com.ve`…).
-- **VTEX (catálogo local directo):** `https://<tienda>/api/catalog_system/pub/products/search/?ft=<término>` devuelve la **URL directa de la imagen** (Locatel por defecto; añade más tiendas en `LOCALIS_IMG_VTEX_HOSTS`). Sin scraping ni token.
-- **Mercado Libre Venezuela:** API oficial vía `MELI_ACCESS_TOKEN` (se omite en silencio si no hay token).
-- **Cascada multi-fuente** en paralelo: VTEX → Mercado Libre → Open Facts → Bing/DuckDuckGo + `site:` locales; si una falla, las demás siguen.
-- **Atajo de velocidad:** si la imagen ya tiene fondo blanco (catálogos de estudio), se recorta **sin rembg**; solo se usa IA cuando el fondo no es limpio. El enriquecimiento corre **en paralelo** (I/O) con `rembg` serializado.
+- `backend/fuentes_imagenes.py`: **registro modular** con todas las fuentes (catálogo maestro, VTEX, Mercado Libre, Open Facts, Bing, DuckDuckGo, `site:` retail, favicon de marca, Simple Icons, monograma) y **112 dominios confiables** (Venezuela + marcas globales: Samsung, LG, Philips, Bosch, Makita, Nestlé, Coca-Cola, Altunsa…).
+- `backend/marca_logo.py`: **respaldo visual por marca**. Si tras agotar fuentes no hay foto real, se asigna el **logo oficial** de la marca (favicon de alta resolución o Simple Icons) y, si no existe, un **monograma PNG** generado localmente (fondo blanco, universal para cualquier marca: Altunsa, Mavesa, etc.). Nunca queda la tarjeta vacía ni con placeholder genérico.
+- Los estados son `real`, `logo`, `pendiente`, `rechazada`; el reporte informa foto real / logo de marca / pendientes. Los `logo` siguen reintentándose para conseguir la foto real.
+
+### Alta concurrencia (cientos de usuarios)
+
+- `backend/import_queue.py`: cola acotada (`LOCALIS_IMPORT_QUEUE_MAX`, por defecto 200) con **spooling a disco** (`instance/cola_import/`): los archivos no viven en RAM, así se absorben cientos de importaciones concurrentes sin agotar memoria. Responde `HTTP 202` y el panel hace *polling*.
+- **Límites de CPU configurables**: `LOCALIS_IMG_MAX_CONCURRENT` (rembg serializado), `LOCALIS_IMG_TRABAJADORES` (productos en paralelo), `LOCALIS_IMG_PARALELO` (búsquedas), `LOCALIS_IMPORT_WORKERS` (imports).
+- **Justicia entre comercios**: el backfill rota comercios y prioriza los productos con menos intentos.
+- Pruebas: `scripts/test_concurrencia.py` (120 imports concurrentes, 2.000 productos en 8 hilos, rembg nunca en paralelo).
 
 ```
 LOCALIS_MAESTRO_INDEX_TTL_SEC=600
@@ -128,6 +132,10 @@ LOCALIS_IMG_CACHE_TTL_SEC=3600
 LOCALIS_IMG_SITIOS=2
 LOCALIS_IMG_VTEX_HOSTS=
 MELI_ACCESS_TOKEN=
+LOCALIS_MARCA_LOGO_TTL_SEC=86400
+LOCALIS_IMG_MAX_CONCURRENT=1
+LOCALIS_IMPORT_QUEUE_MAX=200
+LOCALIS_IMPORT_WORKERS=2
 # Cola persistente en segundo plano (lotes de 30-60 s)
 LOCALIS_IMG_BACKFILL_LOTE=20
 LOCALIS_IMG_BACKFILL_PRESUPUESTO=50

@@ -990,6 +990,7 @@ def procesar_csv_productos(comercio_id, archivo_csv):
         mensaje, meta_imagenes = construir_reporte_importacion(
             total=insertados,
             reales=conteos.get('real', 0),
+            logo=conteos.get('logo', 0),
             pendientes=conteos.get('pendiente', 0),
             rechazadas=conteos.get('rechazada', 0),
         )
@@ -997,6 +998,7 @@ def procesar_csv_productos(comercio_id, archivo_csv):
             f'{CSV_LOG} imágenes comercio={comercio_id} '
             f'"{meta_imagenes["estado_imagenes"]}": '
             f'reales={meta_imagenes["imagenes_reales"]} '
+            f'logos={meta_imagenes["imagenes_logos"]} '
             f'pendientes={meta_imagenes["imagenes_pendientes"]} '
             f'rechazadas={meta_imagenes["imagenes_rechazadas"]}'
         )

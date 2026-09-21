@@ -18,3 +18,5 @@ android/keystore.properties
 *.jks
 *.keystore
 .capacitor/
+
+instance/

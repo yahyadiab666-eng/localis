@@ -124,126 +124,16 @@ _REMBG_LOCK = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
-# Fuentes confiables y bloqueadas
+# Fuentes confiables y bloqueadas (registro modular)
 # ---------------------------------------------------------------------------
-_DOMINIOS_CONFIABLES_BASE = (
-    # Farmacias / salud
-    'farmatodo', 'locatel', 'farmahorro', 'farmaciasaavedra', 'farmarket',
-    'farmacialaredoma', 'farma redoma', 'farmadon',
-    # Supermercados / retail nacional (todos los rubros)
-    'centralmadeirense', 'gamaenex', 'makro.com.ve', 'plazas.com',
-    'tuexito', 'elrecreo', 'supermercadosgama', 'hiperlider', 'garzon',
-    'latodia', 'daka', 'casamia', 'bango', 'arenas', 'sigo', 'el patron',
-    'venezolanadealimentos', 'alimentosve', 'mercado', 'supermercado',
-    # Tecnología / electro
-    'traki', 'radioshack.com.ve', 'tiendasva', 'bumblebee', 'multimax',
-    'beco', 'tgo', 'macoutlet', 'vertigo', 'innovacom', 'planetacom',
-    'sambil',
-    # Ferretería / construcción
-    'epa.com.ve', 'ferretotal', 'tufesa', 'ferremaq', 'sodi', 'construcasa',
-    'ferreter',
-    # Automotriz / repuestos
-    'cauchera', 'repuestos', 'autorepuestos', 'autoexpress', 'multirepuestos',
-    'automotriz',
-    # Calzado / ropa / hogar
-    'calzados', 'bata', 'flexi', 'cuero', 'multimax',
-    # Distribuidores / mayoristas reconocidos
-    'distribuidor', 'mayorista',
-    # Catálogos abiertos (ficha de producto verificada por código)
-    'openfoodfacts', 'openbeautyfacts', 'openproductsfacts',
-    # Prensa/comercio venezolano que suele publicar fotos de producto
-    'eluniversal.com', 'elnacional.com', 'talcual', 'efectococuyo',
-)
-
-# Fuentes prioritarias para búsquedas restringidas por sitio (site:host).
-_FUENTES_SITE_BASE = (
-    'farmatodo.com.ve',
-    'locatel.com.ve',
-    'traki.com',
-    'epa.com.ve',
-    'centralmadeirense.com.ve',
-    'plazas.com',
-    'multimax.com.ve',
-)
-
-# Tiendas VTEX con API pública de catálogo (imagen directa, multirrubro).
-_FUENTES_VTEX_BASE = (
-    'www.locatel.com.ve',
-)
-
-_DOMINIOS_BLOQUEADOS = (
-    'images.google',
-    'google.com',
-    'gstatic.com',
-    'bing.com',
-    'bing.net',
-    'duckduckgo.com',
-    'pinterest',
-    'facebook',
-    'instagram',
-    'tiktok',
-    'twitter',
-    'x.com',
-    'youtube.com',
-    'ytimg.com',
-    'wikimedia',
-    'wikipedia',
-    'shutterstock',
-    'istockphoto',
-    'gettyimages',
-    'dreamstime',
-    'alamy',
-    'depositphotos',
-    'stock.adobe',
-    'freepik',
-    '123rf',
-    'unsplash',
-    'pexels',
-    'amazon.',
-    'ebay.',
-    'aliexpress',
-    'alibaba',
-    'mercadolibre',
-    'mercadolivre',
-    'mlstatic',
-    'wish.com',
-    'placeholder',
-    'example.com',
-    'ejemplo.com',
-    'blogspot',
-    'wordpress.com',
-    'tumblr',
+from backend.fuentes_imagenes import (  # noqa: E402
+    DOMINIOS_BLOQUEADOS as _DOMINIOS_BLOQUEADOS,
+    dominios_confiables as _dominios_confiables,
+    fuentes_site as _fuentes_site,
+    fuentes_vtex as _fuentes_vtex,
 )
 
 _EXT_IMAGEN_OK = ('.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tiff', '.tif')
-
-
-def _dominios_confiables():
-    extra = os.getenv('LOCALIS_IMG_DOMINIOS_CONFIABLES', '')
-    personalizados = tuple(
-        d.strip().lower() for d in extra.split(',') if d.strip()
-    )
-    return _DOMINIOS_CONFIABLES_BASE + personalizados
-
-
-def _fuentes_site():
-    """Hosts prioritarios para búsquedas restringidas por sitio (site:host)."""
-    extra = os.getenv('LOCALIS_IMG_SITIOS_EXTRA', '')
-    personalizados = tuple(
-        d.strip().lower() for d in extra.split(',') if d.strip()
-    )
-    return _FUENTES_SITE_BASE + personalizados
-
-
-def _fuentes_vtex():
-    """Tiendas VTEX con API pública de catálogo (imagen directa y fiable)."""
-    extra = os.getenv('LOCALIS_IMG_VTEX_HOSTS', '')
-    personalizados = tuple(
-        h.strip().lower().replace('https://', '').strip('/')
-        for h in extra.split(',')
-        if h.strip()
-    )
-    return _FUENTES_VTEX_BASE + personalizados
 
 
 def _token_mercadolibre():
@@ -1228,7 +1118,13 @@ def _guardar_en_catalogo_maestro(ean, url, *, nombre=None, marca=None, categoria
         _log(f'catálogo maestro no actualizado ({type(error).__name__}: {error})')
 
 
-def _imagen_puede_reemplazarse(imagen_actual):
+def _imagen_puede_reemplazarse(imagen_actual, imagen_estado=None):
+    estado = str(imagen_estado or '').strip().lower()
+    if estado == 'real':
+        return False
+    if estado == 'logo':
+        # El logo/monograma es un respaldo: se sigue intentando la foto real.
+        return True
     if not imagen_actual:
         return True
     if isinstance(imagen_actual, memoryview):
@@ -1257,7 +1153,7 @@ def _leer_producto(producto_id):
         cursor = conexion.cursor()
         cursor.execute(
             """
-            SELECT id, nombre, descripcion, codigo_barras, imagen_url
+            SELECT id, nombre, descripcion, codigo_barras, imagen_url, imagen_estado
             FROM productos
             WHERE id = ?
             """,
@@ -1274,6 +1170,7 @@ def _leer_producto(producto_id):
         'descripcion': fila[2],
         'codigo_barras': fila[3],
         'imagen_url': fila[4],
+        'imagen_estado': fila[5] if len(fila) > 5 else None,
     }
 
 
@@ -1294,6 +1191,7 @@ def _actualizar_imagen(producto_id, url, fuente, estado='real'):
                 imagen_url IS NULL
                 OR TRIM(CAST(imagen_url AS TEXT)) = ''
                 OR POSITION('placeholder' IN LOWER(CAST(imagen_url AS TEXT))) > 0
+                OR COALESCE(imagen_estado, 'pendiente') = 'logo'
                 OR (
                   LEFT(LOWER(CAST(imagen_url AS TEXT)), 4) = 'http'
                   AND POSITION(
@@ -1373,16 +1271,20 @@ def procesar_producto(
     if not pipeline_habilitado():
         return ResultadoProcesamiento(ok=False, motivo='pipeline_deshabilitado')
 
+    estado_actual = None
     if producto_id and (nombre is None or codigo_barras is None or descripcion is None):
         fila = _leer_producto(producto_id) or {}
         nombre = nombre or fila.get('nombre')
         descripcion = descripcion or fila.get('descripcion')
         codigo_barras = codigo_barras or fila.get('codigo_barras')
         imagen_actual = fila.get('imagen_url')
+        estado_actual = fila.get('imagen_estado')
     else:
         imagen_actual = None
 
-    if producto_id and not forzar and not _imagen_puede_reemplazarse(imagen_actual):
+    if producto_id and not forzar and not _imagen_puede_reemplazarse(
+        imagen_actual, estado_actual
+    ):
         return ResultadoProcesamiento(ok=False, motivo='imagen_manual_conservada')
 
     if producto_id:
@@ -1460,25 +1362,48 @@ def procesar_producto(
         )
 
     _log_pipeline(producto_id, ean, 'sin_imagen', motivo=ultimo_motivo)
-    _log(f'producto={producto_id} sin imagen real ({ultimo_motivo}); pendiente/rechazada')
+    _log(f'producto={producto_id} sin imagen real ({ultimo_motivo}); respaldo por marca')
 
-    # Garantía de cobertura universal: ningún producto queda sin imagen, pero se
-    # marca explícitamente como PENDIENTE/RECHAZADA (nunca como real).
+    # Respaldo visual secundario: logo/monograma de la marca (nunca vacío ni
+    # placeholder genérico si la marca es conocida). Se mantiene reintentable
+    # para conseguir la foto real en segundo plano.
     if producto_id:
         candidatos_hubo = bool(candidatos)
+        marca_efectiva = marca or _inferir_marca(nombre, descripcion)
+        logo_url = None
+        logo_fuente = None
+        if marca_efectiva:
+            try:
+                from backend.marca_logo import resolver_logo_marca
+
+                logo_url, logo_fuente = resolver_logo_marca(marca_efectiva)
+            except Exception as error:
+                _log(f'producto={producto_id} logo de marca no resuelto: {type(error).__name__}')
+        if logo_url:
+            try:
+                if _actualizar_imagen(
+                    producto_id, logo_url, logo_fuente or 'logo_marca', estado='logo'
+                ):
+                    _log(
+                        f'producto={producto_id} logo de marca asignado '
+                        f'({logo_fuente!r}) marca={marca_efectiva!r}'
+                    )
+                    return ResultadoProcesamiento(
+                        ok=False, url=logo_url, fuente=logo_fuente, motivo=ultimo_motivo
+                    )
+            except Exception as error:
+                _log(f'producto={producto_id} logo no aplicado: {type(error).__name__}: {error}')
+
+        # Sin marca conocida: placeholder limpio de categoría (pendiente).
         if imagen_para_categoria is not None:
             try:
                 fila = _leer_producto(producto_id) or {}
                 actual = str(fila.get('imagen_url') or '').strip()
                 if not actual:
                     fallback = imagen_para_categoria(categoria_efectiva or 'otros')
-                    if _actualizar_imagen(
+                    _actualizar_imagen(
                         producto_id, fallback, 'placeholder_categoria', estado='pendiente'
-                    ):
-                        _log(
-                            f'producto={producto_id} fallback de categoría asignado '
-                            f'({categoria_efectiva!r}) estado=pendiente'
-                        )
+                    )
             except Exception as error:
                 _log(f'producto={producto_id} fallback no aplicado: {type(error).__name__}: {error}')
 
@@ -1550,8 +1475,8 @@ def _productos_pendientes(comercio_id):
         estado = str(registro.get('imagen_estado') or '').strip().lower()
         if estado == 'real':
             continue
-        # Pendiente/rechazada o URL reemplazable (placeholder/vacía/externa).
-        if estado in ('pendiente', 'rechazada') or _imagen_puede_reemplazarse(
+        # Pendiente/rechazada/logo o URL reemplazable (placeholder/vacía/externa).
+        if estado in ('pendiente', 'rechazada', 'logo') or _imagen_puede_reemplazarse(
             registro.get('imagen_url')
         ):
             pendientes.append(registro)

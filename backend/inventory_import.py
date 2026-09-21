@@ -883,7 +883,25 @@ def asignar_imagenes_instantaneas(productos, snapshot_imagenes=None, categoria=N
 
     nuevos = 0
     reales = 0
+    logos = 0
     por_categoria = {}
+
+    try:
+        from backend.marca_logo import logo_instantaneo
+    except Exception:
+        logo_instantaneo = None
+
+    def _marca_detectada(prod):
+        marca = str(prod.get('marca') or '').strip()
+        if marca:
+            return marca
+        try:
+            from backend.marcas_ve import detectar_marca
+
+            return detectar_marca(prod.get('nombre'), prod.get('descripcion'))
+        except Exception:
+            return None
+
     for prod in productos:
         if prod.get('imagen_url'):
             prod['imagen_fuente'] = prod.get('imagen_fuente') or 'archivo'
@@ -919,11 +937,27 @@ def asignar_imagenes_instantaneas(productos, snapshot_imagenes=None, categoria=N
             categoria_hint=prod.get('categoria') or categoria,
         )
         prod['categoria_inferida'] = cat
-        prod['imagen_url'] = imagen_para_categoria(cat)
-        prod['imagen_fuente'] = 'placeholder_categoria'
-        prod['imagen_estado'] = 'pendiente'
+
+        # Respaldo visual por marca (monograma local, sin red): la tarjeta nunca
+        # queda con un placeholder genérico si la marca es conocida.
+        marca_prod = _marca_detectada(prod)
+        logo = None
+        if marca_prod and logo_instantaneo is not None:
+            try:
+                logo = logo_instantaneo(marca_prod)
+            except Exception:
+                logo = None
+        if logo:
+            prod['imagen_url'] = logo
+            prod['imagen_fuente'] = 'logo_monograma'
+            prod['imagen_estado'] = 'logo'
+            logos += 1
+        else:
+            prod['imagen_url'] = imagen_para_categoria(cat)
+            prod['imagen_fuente'] = 'placeholder_categoria'
+            prod['imagen_estado'] = 'pendiente'
+            nuevos += 1
         por_categoria[cat] = por_categoria.get(cat, 0) + 1
-        nuevos += 1
 
     # Garantía de UI: si algo quedara vacío, se fuerza el genérico limpio, pero
     # SIEMPRE marcado como 'pendiente' (nunca se reporta como imagen real).
@@ -937,7 +971,8 @@ def asignar_imagenes_instantaneas(productos, snapshot_imagenes=None, categoria=N
 
     print(
         f'{LOG_PREFIX} imágenes instantáneas: total={len(productos)} '
-        f'reales={reales} pendientes={nuevos + sin_imagen} '
+        f'reales={reales} logos_marca={logos} '
+        f'pendientes={nuevos + sin_imagen} '
         f'maestro_codigos={len(indice.por_codigo) if indice else 0} '
         f'maestro_nombres={len(indice.por_nombre) if indice else 0} '
         f'categorias={por_categoria}'

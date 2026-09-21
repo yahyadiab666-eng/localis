@@ -221,6 +221,11 @@
                     title="Aún no hay foto real; el motor la buscará en segundo plano">
                 <i data-lucide="loader" style="width:10px;height:10px;"></i> Imagen pendiente
               </span>
+              {% elif producto.imagen_estado == 'logo' %}
+              <span class="absolute left-2 top-2 z-10 inline-flex items-center gap-1 rounded-full bg-stone-100/95 px-2 py-0.5 text-[10px] font-bold text-stone-600 shadow-sm"
+                    title="Identidad de la marca; se buscará la foto real en segundo plano">
+                <i data-lucide="badge-check" style="width:10px;height:10px;"></i> Logo de marca
+              </span>
               {% endif %}
             </div>
             <div class="p-3 flex-grow flex flex-col">

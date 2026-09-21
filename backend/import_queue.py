@@ -36,10 +36,11 @@ import threading
 import time
 import uuid
 from contextlib import nullcontext
+from pathlib import Path
 
 _LOG = '[Localis Cola]'
 
-_QUEUE_MAX = max(1, int(os.getenv('LOCALIS_IMPORT_QUEUE_MAX', '8')))
+_QUEUE_MAX = max(1, int(os.getenv('LOCALIS_IMPORT_QUEUE_MAX', '200')))
 _WORKERS = max(1, int(os.getenv('LOCALIS_IMPORT_WORKERS', '2')))
 _JOB_TTL_SEG = max(60, int(os.getenv('LOCALIS_IMPORT_JOB_TTL_SEC', '3600')))
 _MAX_JOBS = max(50, int(os.getenv('LOCALIS_IMPORT_MAX_JOBS', '500')))
@@ -71,6 +72,37 @@ _procesador = None  # inyección para pruebas
 
 def _log(mensaje):
     print(f'{_LOG} {mensaje}', flush=True)
+
+
+def _carpeta_cola():
+    from config import RUTA_RAIZ
+
+    destino = Path(RUTA_RAIZ) / 'instance' / 'cola_import'
+    destino.mkdir(parents=True, exist_ok=True)
+    return destino
+
+
+def _guardar_spool(job_id, data):
+    """Guarda el archivo en disco (no en RAM) para soportar cientos en cola."""
+    ruta = _carpeta_cola() / f'{job_id}.bin'
+    ruta.write_bytes(data)
+    return str(ruta)
+
+
+def _leer_spool(ruta):
+    try:
+        with open(ruta, 'rb') as archivo:
+            return archivo.read()
+    except Exception:
+        return None
+
+
+def _borrar_spool(ruta):
+    try:
+        if ruta and os.path.exists(ruta):
+            os.remove(ruta)
+    except Exception:
+        pass
 
 
 def configurar_cola(app=None, *, workers=None, maxsize=None):
@@ -145,7 +177,8 @@ def _ejecutar_job(job_id):
         job['actualizado'] = time.time()
         comercio_id = job['comercio_id']
         filename = job['filename']
-        data = job.get('data') or b''
+        ruta_spool = job.get('ruta')
+        data = _leer_spool(ruta_spool) if ruta_spool else (job.get('data') or b'')
 
     inicio = time.monotonic()
     _log(f'job={job_id} inicio comercio={comercio_id} archivo={filename!r} bytes={len(data)}')
@@ -156,6 +189,13 @@ def _ejecutar_job(job_id):
         _log(f'job={job_id} excepcion: {type(error).__name__}: {error}')
         _marcar_error(job_id, 'No se pudo completar la importación. Tu inventario no fue modificado.')
         return
+    finally:
+        _borrar_spool(ruta_spool)
+        with _jobs_lock:
+            job_actual = _jobs.get(job_id)
+            if job_actual is not None:
+                job_actual.pop('ruta', None)
+                job_actual.pop('data', None)
 
     duracion = time.monotonic() - inicio
     _finalizar_job(
@@ -188,6 +228,7 @@ def _finalizar_job(job_id, *, exito, mensaje, meta=None, duracion=None):
         job['meta'] = meta_limpio
         job['duracion'] = round(duracion, 2) if duracion is not None else None
         job['actualizado'] = time.time()
+        job.pop('ruta', None)
         job.pop('data', None)  # liberar memoria
 
 
@@ -200,6 +241,7 @@ def _marcar_error(job_id, mensaje):
         job['exito'] = False
         job['mensaje'] = str(mensaje or 'Error al procesar el catálogo.')[:1400]
         job['actualizado'] = time.time()
+        job.pop('ruta', None)
         job.pop('data', None)
 
 
@@ -223,7 +265,9 @@ def _limpiar_jobs_antiguos():
             and (ahora - job.get('actualizado', ahora)) > _JOB_TTL_SEG
         ]
         for jid in vencidos:
-            _jobs.pop(jid, None)
+            job = _jobs.pop(jid, None)
+            if job:
+                _borrar_spool(job.get('ruta'))
         if len(_jobs) > _MAX_JOBS:
             ordenados = sorted(
                 _jobs.items(),
@@ -235,6 +279,7 @@ def _limpiar_jobs_antiguos():
                     break
                 if job.get('estado') in _ESTADOS_FINALES:
                     _jobs.pop(jid, None)
+                    _borrar_spool(job.get('ruta'))
                     sobrantes -= 1
 
 
@@ -247,12 +292,16 @@ def encolar_importacion(comercio_id, filename, data, usuario_id=None):
 
     job_id = uuid.uuid4().hex
     ahora = time.time()
+    try:
+        ruta_spool = _guardar_spool(job_id, bytes(data))
+    except Exception as error:
+        raise ValueError(f'No se pudo guardar el catálogo temporalmente: {error}') from error
     job = {
         'job_id': job_id,
         'comercio_id': int(comercio_id) if comercio_id is not None else None,
         'usuario_id': usuario_id,
         'filename': str(filename or 'inventario.csv'),
-        'data': bytes(data),
+        'ruta': ruta_spool,
         'estado': 'encolado',
         'exito': None,
         'mensaje': 'En cola para procesar.',
@@ -263,6 +312,7 @@ def encolar_importacion(comercio_id, filename, data, usuario_id=None):
     try:
         cola.put_nowait(job_id)
     except queue.Full as error:
+        _borrar_spool(ruta_spool)
         raise ColaImportacionLlena(
             'El servidor está procesando varios catálogos a la vez. '
             'Espera unos segundos y vuelve a intentarlo.'
