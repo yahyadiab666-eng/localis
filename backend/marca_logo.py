@@ -23,6 +23,7 @@ import unicodedata
 from pathlib import Path
 
 from backend.runtime_cache import get_or_load
+from backend import http_client as _http
 
 _LOG = '[Localis Marca]'
 _LADO = 600
@@ -202,7 +203,7 @@ def _descargar(url, timeout=10.0):
     import requests
 
     try:
-        respuesta = requests.get(
+        respuesta = _http.get(
             url,
             headers={'User-Agent': 'Mozilla/5.0 (Localis; logo-marca)'},
             timeout=timeout,

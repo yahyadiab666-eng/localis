@@ -62,6 +62,8 @@ from urllib.parse import urlparse
 
 import requests
 
+from backend import http_client as _http
+
 _LOG = '[Localis Imagen Pro]'
 _UA = (
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
@@ -366,7 +368,7 @@ def _relevante_web(candidato: Candidato, tokens):
 
 def _get_json(url, *, params=None, headers=None):
     try:
-        respuesta = requests.get(
+        respuesta = _http.get(
             url,
             params=params,
             headers={'User-Agent': _UA, 'Accept': 'application/json', **(headers or {})},
@@ -572,6 +574,80 @@ def _buscar_brave(consulta, limite=10):
     return candidatos
 
 
+def _clave_google_cse():
+    key = (os.getenv('GOOGLE_CSE_KEY') or os.getenv('GOOGLE_API_KEY') or '').strip()
+    cx = (os.getenv('GOOGLE_CSE_CX') or os.getenv('GOOGLE_CSE_ID') or '').strip()
+    return key, cx
+
+
+def _buscar_google_cse(consulta, limite=10):
+    """Google Programmable Search (imágenes), opcional con clave + CX."""
+    key, cx = _clave_google_cse()
+    consulta = str(consulta or '').strip()
+    if not key or not cx or not consulta:
+        return []
+    datos = _get_json(
+        'https://www.googleapis.com/customsearch/v1',
+        params={
+            'key': key, 'cx': cx, 'q': consulta,
+            'searchType': 'image', 'num': min(10, limite),
+        },
+    )
+    if not datos:
+        return []
+    candidatos = []
+    for item in (datos.get('items') or [])[:limite]:
+        url = item.get('link') or (item.get('image') or {}).get('thumbnailLink')
+        if _url_imagen_valida(url, confiable=True):
+            candidatos.append(
+                Candidato(
+                    url=url,
+                    fuente='google-cse',
+                    dominio=_dominio(url),
+                    titulo=str(item.get('title') or ''),
+                    confiable=True,
+                )
+            )
+    return candidatos
+
+
+def _clave_bing_api():
+    return (
+        os.getenv('BING_SEARCH_V7_KEY')
+        or os.getenv('BING_SEARCH_API_KEY')
+        or ''
+    ).strip()
+
+
+def _buscar_bing_api(consulta, limite=10):
+    """Bing Image Search API oficial (Azure), opcional con clave."""
+    key = _clave_bing_api()
+    consulta = str(consulta or '').strip()
+    if not key or not consulta:
+        return []
+    datos = _get_json(
+        'https://api.bing.microsoft.com/v7.0/images/search',
+        params={'q': consulta, 'count': limite, 'mkt': 'es-VE'},
+        headers={'Ocp-Apim-Subscription-Key': key},
+    )
+    if not datos:
+        return []
+    candidatos = []
+    for item in (datos.get('value') or [])[:limite]:
+        url = item.get('contentUrl') or item.get('thumbnailUrl')
+        if _url_imagen_valida(url, confiable=True):
+            candidatos.append(
+                Candidato(
+                    url=url,
+                    fuente='bing-api',
+                    dominio=_dominio(url),
+                    titulo=str(item.get('name') or ''),
+                    confiable=True,
+                )
+            )
+    return candidatos
+
+
 _RE_OG = re.compile(
     r'<meta[^>]+(?:property|name)=["\'](?:og:image|twitter:image)["\'][^>]+content=["\']([^"\']+)',
     re.IGNORECASE,
@@ -587,7 +663,7 @@ def _buscar_bing_og(consulta, limite=2):
     if not consulta:
         return []
     try:
-        respuesta = requests.get(
+        respuesta = _http.get(
             'https://www.bing.com/images/search',
             params={'q': consulta, 'form': 'HDRSC2', 'first': '1'},
             headers={'User-Agent': _UA, 'Accept-Language': 'es-VE,es;q=0.9,en;q=0.8'},
@@ -602,7 +678,7 @@ def _buscar_bing_og(consulta, limite=2):
     candidatos = []
     for purl in purls:
         try:
-            pagina = requests.get(
+            pagina = _http.get(
                 purl,
                 headers={'User-Agent': _UA, 'Accept-Language': 'es-VE,es;q=0.9'},
                 timeout=_TIMEOUT_BUSQUEDA,
@@ -631,7 +707,7 @@ def _parsear_bing(texto):
 
 def _buscar_web_bing(consulta, limite=15):
     try:
-        respuesta = requests.get(
+        respuesta = _http.get(
             'https://www.bing.com/images/search',
             params={'q': consulta, 'form': 'HDRSC2', 'first': '1'},
             headers={'User-Agent': _UA, 'Accept-Language': 'es-VE,es;q=0.9,en;q=0.8'},
@@ -652,7 +728,7 @@ def _buscar_web_bing(consulta, limite=15):
 def _buscar_web_ddg(consulta, limite=15):
     try:
         sesion = requests.Session()
-        inicio = sesion.get(
+        inicio = _http.get(
             'https://duckduckgo.com/',
             params={'q': consulta, 'iax': 'images', 'ia': 'images'},
             headers={'User-Agent': _UA, 'Accept-Language': 'es-VE,es;q=0.9'},
@@ -661,7 +737,7 @@ def _buscar_web_ddg(consulta, limite=15):
         match = re.search(r'vqd=["\']?([\d-]+)', inicio.text)
         if not match:
             return []
-        datos = sesion.get(
+        datos = _http.get(
             'https://duckduckgo.com/i.js',
             params={'l': 'wt-wt', 'o': 'json', 'q': consulta, 'vqd': match.group(1), 'p': '1'},
             headers={
@@ -705,7 +781,7 @@ def _buscar_vtex(consulta, limite=6):
     candidatos = []
     for host in _fuentes_vtex():
         try:
-            respuesta = requests.get(
+            respuesta = _http.get(
                 f'https://{host}/api/catalog_system/pub/products/search/',
                 params={'ft': consulta, '_from': 0, '_to': max(1, limite) - 1},
                 headers={'User-Agent': _UA, 'Accept': 'application/json'},
@@ -755,7 +831,7 @@ def _buscar_mercadolibre(consulta, limite=6):
     if not token or not consulta:
         return []
     try:
-        respuesta = requests.get(
+        respuesta = _http.get(
             'https://api.mercadolibre.com/sites/MLV/search',
             params={'q': consulta, 'limit': limite},
             headers={'Authorization': f'Bearer {token}', 'User-Agent': _UA},
@@ -870,17 +946,21 @@ def _consultas_busqueda(
             _add(' '.join(tokens[:indice] + [alterno] + tokens[indice + 1 :]))
     if categoria and primeros:
         _add(f'{primeros} {str(categoria).strip()}')
+    if marca_txt:
+        _add(marca_txt)
+        if categoria:
+            _add(f'{marca_txt} {str(categoria).strip()}')
     if not variantes:
         _add(' '.join(
             str(p).strip() for p in (nombre, marca, categoria) if p and str(p).strip()
         ))
-    return variantes[:8]
+    return variantes[:12]
 
 
-def _clave_cache_candidatos(codigo_barras, nombre, marca, presentacion, categoria):
+def _clave_cache_candidatos(codigo_barras, nombre, marca, presentacion, categoria, nivel=0):
     base = '|'.join(
         str(p or '').strip().lower()
-        for p in (codigo_barras, nombre, marca, presentacion, categoria)
+        for p in (codigo_barras, nombre, marca, presentacion, categoria, nivel)
     )
     return hashlib.sha1(base.encode('utf-8', 'ignore')).hexdigest()
 
@@ -894,13 +974,16 @@ def buscar_candidatos(
     descripcion=None,
     categoria=None,
     limite=None,
+    nivel=0,
 ):
     """Candidatos ordenados por confianza (mejor primero).
 
-    Caché en memoria por TTL: reintentos y reimportaciones no vuelven a golpear
-    la red.
+    ``nivel`` permite búsquedas persistentes por escenarios: cada reintento en
+    segundo plano explora variantes de consulta nuevas (más genéricas) en lugar
+    de repetir la misma.
     """
     limite = limite or _MAX_CANDIDATOS
+    nivel = max(0, min(int(nivel or 0), 3))
     parametros = {
         'codigo_barras': codigo_barras,
         'nombre': nombre,
@@ -909,8 +992,11 @@ def buscar_candidatos(
         'descripcion': descripcion,
         'categoria': categoria,
         'limite': limite,
+        'nivel': nivel,
     }
-    clave = _clave_cache_candidatos(codigo_barras, nombre, marca, presentacion, categoria)
+    clave = _clave_cache_candidatos(
+        codigo_barras, nombre, marca, presentacion, categoria, nivel
+    )
     try:
         from backend.runtime_cache import get_or_load
 
@@ -932,10 +1018,12 @@ def _buscar_candidatos_impl(
     descripcion=None,
     categoria=None,
     limite=None,
+    nivel=0,
 ):
     from backend.utils import normalizar_codigo_barras
 
     limite = limite or _MAX_CANDIDATOS
+    nivel = max(0, min(int(nivel or 0), 3))
     marca = _inferir_marca(nombre, descripcion, marca)
     presentacion = _inferir_presentacion(nombre, descripcion, presentacion)
     tokens = _tokens_relevancia(nombre, marca, descripcion)
@@ -963,31 +1051,41 @@ def _buscar_candidatos_impl(
         categoria=categoria,
         codigo_barras=ean,
     )
-    base = consultas[0] if consultas else ''
+    # Escenario actual (0..3): cada reintento explora consultas nuevas.
+    offset = nivel
+    ventana_web = consultas[offset : offset + 4] or consultas[:4]
+    ventana_dos = consultas[offset : offset + 2] or consultas[:2]
+    base = ventana_web[0] if ventana_web else (consultas[0] if consultas else '')
 
     # Tareas de red (I/O) en paralelo: variantes de búsqueda humana en varios
     # motores, catálogos abiertos, site:host locales y catálogos directos.
     tareas = []
     if _BUSQUEDA_WEB:
-        for consulta in consultas[:4]:
+        for consulta in ventana_web:
             tareas.append((_buscar_web_bing, consulta))
             tareas.append((_buscar_web_ddg, consulta))
         if _clave_serpapi():
-            for consulta in consultas[:3]:
+            for consulta in ventana_web[:3]:
                 tareas.append((_buscar_serpapi, consulta))
         if _clave_brave():
-            for consulta in consultas[:3]:
+            for consulta in ventana_web[:3]:
                 tareas.append((_buscar_brave, consulta))
+        if _clave_google_cse()[0] and _clave_google_cse()[1]:
+            for consulta in ventana_web[:3]:
+                tareas.append((_buscar_google_cse, consulta))
+        if _clave_bing_api():
+            for consulta in ventana_web[:3]:
+                tareas.append((_buscar_bing_api, consulta))
         if base and _MAX_SITIOS > 0:
             for host in _fuentes_site()[:_MAX_SITIOS]:
                 tareas.append((_buscar_web_bing, f'{base} site:{host}'))
         if base and _BING_OG:
             tareas.append((_buscar_bing_og, base))
-    for consulta in consultas[:2]:
+    for consulta in ventana_dos:
         tareas.append((_buscar_off_por_nombre, consulta))
     if ean:
         tareas.append((_buscar_off_por_ean, ean))
-    for consulta in consultas[:2]:
+    for consulta in ventana_dos:
         tareas.append((_buscar_vtex, consulta))
     if base and _token_mercadolibre():
         tareas.append((_buscar_mercadolibre, base))
@@ -1276,7 +1374,7 @@ def _descargar(url, intentos=None):
     intentos = intentos or _DESCARGA_INTENTOS
     for intento in range(max(1, intentos)):
         try:
-            respuesta = requests.get(
+            respuesta = _http.get(
                 url,
                 headers={
                     'User-Agent': _UA,
@@ -1529,6 +1627,7 @@ def procesar_producto(
     presentacion=None,
     categoria=None,
     forzar=False,
+    nivel=0,
 ):
     """Ejecuta el pipeline completo para un producto. Nunca lanza."""
     if not pipeline_habilitado():
@@ -1586,8 +1685,9 @@ def procesar_producto(
         presentacion=presentacion,
         descripcion=descripcion,
         categoria=categoria_efectiva,
+        nivel=nivel,
     )
-    _log(f'producto={producto_id} candidatos={len(candidatos)}')
+    _log(f'producto={producto_id} candidatos={len(candidatos)} nivel={nivel}')
 
     ultimo_motivo = 'sin_candidatos'
     for candidato in candidatos:
@@ -1774,11 +1874,13 @@ def procesar_inventario(comercio_id, limite=None, presupuesto_seg=None):
         if time.monotonic() - inicio > presupuesto:
             return False
         try:
+            intentos = int(producto.get('imagen_intentos') or 0)
             resultado = procesar_producto(
                 producto.get('id'),
                 codigo_barras=producto.get('codigo_barras'),
                 nombre=producto.get('nombre'),
                 descripcion=producto.get('descripcion'),
+                nivel=min(intentos, 3),
             )
             return bool(resultado.ok)
         except Exception as error:

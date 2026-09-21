@@ -95,6 +95,20 @@ def main() -> int:
     _ok(callable(getattr(P, '_buscar_brave', None)), 'soporte Brave Search (opcional)')
     _ok(callable(getattr(P, '_buscar_bing_og', None)), 'rastreo og:image de páginas de producto')
 
+    print('\n=== Camuflaje HTTP y motores API adicionales ===')
+    import inspect
+
+    from backend import http_client as h
+
+    cab = h.cabeceras({'Accept': 'application/json'})
+    _ok('User-Agent' in cab and 'Accept-Language' in cab, 'cabeceras de navegador completas')
+    _ok(cab['Accept'] == 'application/json', 'respeta el Accept del llamador')
+    _ok(len({h.user_agent() for _ in range(30)}) >= 3, 'rota User-Agents reales')
+    _ok(callable(getattr(P, '_buscar_google_cse', None)), 'soporte Google CSE (opcional)')
+    _ok(callable(getattr(P, '_buscar_bing_api', None)), 'soporte Bing Search API (opcional)')
+    _ok('nivel' in inspect.signature(P.buscar_candidatos).parameters, 'búsqueda por escenarios (nivel)')
+    _ok('nivel' in inspect.signature(P.procesar_producto).parameters, 'procesar_producto acepta nivel')
+
     print('\n=== RESULTADO ===')
     if _ERRORES:
         for item in _ERRORES:
