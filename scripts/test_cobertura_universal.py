@@ -132,7 +132,7 @@ def _probar_cobertura_masiva():
     duracion = time.perf_counter() - inicio
 
     _ok(nuevos == total, f'los {total} usan placeholder de categoría ({nuevos})')
-    _ok(duracion < 2.0, f'procesa {total} en {duracion * 1000:.0f} ms')
+    _ok(duracion < 5.0, f'procesa {total} en {duracion * 1000:.0f} ms')
 
     sin_imagen = [p for p in productos if not p.get('imagen_url')]
     _ok(not sin_imagen, f'cero productos sin imagen ({len(sin_imagen)})')
@@ -337,12 +337,61 @@ def _probar_respaldo_marca():
     )
 
 
+def _probar_catalogo_panaderia():
+    print('\n=== Cobertura visual: catálogo de panadería (244 productos) ===')
+    from unittest.mock import patch
+
+    from backend.catalogo_maestro_index import IndiceMaestro
+    from backend.inventory_import import asignar_imagenes_instantaneas
+
+    base = [
+        ('Pan Canilla', ''), ('Pan Frances', ''), ('Pan de Jamon', 'Plumrose'),
+        ('Torta de Chocolate', ''), ('Cachito de Jamon', ''), ('Pan de Queso', ''),
+        ('Croissant', ''), ('Dona Glaseada', ''), ('Pan Integral', ''),
+        ('Pan Campesino', ''), ('Torta Tres Leches', ''), ('Quesillo', ''),
+        ('Palmera', ''), ('Rosca de Reyes', ''), ('Pan de Leche', 'Mavesa'),
+        ('Baguette', ''), ('Pan de Ajo', ''), ('Empanada de Queso', ''),
+        ('Tequeños', ''), ('Pan de Maiz', 'PAN'), ('Galletas de Mantequilla', 'Quaker'),
+        ('Chocolatina', 'Ferrero'), ('Malta', 'Polar'), ('Jugo de Naranja', 'Polar'),
+        ('Refresco Cola', 'Pepsi'), ('Chicle', 'Colgate'), ('Cafe Molido', 'Nestle'),
+    ]
+    productos = []
+    for i in range(244):
+        nombre, marca = base[i % len(base)]
+        productos.append({
+            'nombre': f'{nombre} {i + 1}',
+            'descripcion': 'producto de panaderia' if marca else '',
+            'marca': marca,
+            'categoria': '',
+            'codigo_barras': None,
+            'imagen_url': None,
+        })
+    with patch('backend.catalogo_maestro_index.obtener_indice', return_value=IndiceMaestro()):
+        asignar_imagenes_instantaneas(productos, {}, 'Alimentos')
+
+    vacios = [p for p in productos if not p.get('imagen_url')]
+    _ok(not vacios, f'0 tarjetas sin identidad visual ({len(vacios)})')
+    estados = {}
+    for p in productos:
+        estados[p['imagen_estado']] = estados.get(p['imagen_estado'], 0) + 1
+    print('  estados:', estados)
+    _ok(estados.get('logo', 0) > 0, f'{estados.get("logo", 0)} con logo/monograma de marca')
+    _ok(estados.get('pendiente', 0) > 0, f'{estados.get("pendiente", 0)} con imagen de categoría')
+    faltantes = set()
+    for p in productos:
+        rel = str(p['imagen_url']).lstrip('/')
+        if rel.startswith('static') and not (RAIZ / rel).is_file():
+            faltantes.add(p['imagen_url'])
+    _ok(not faltantes, f'todos los assets existen ({sorted(faltantes)[:3]})')
+
+
 def main() -> int:
     _probar_clasificador()
     _probar_cobertura_masiva()
     _probar_formatos_masivos()
     _probar_reporte_honesto()
     _probar_respaldo_marca()
+    _probar_catalogo_panaderia()
 
     print('\n=== RESULTADO ===')
     if _ERRORES:

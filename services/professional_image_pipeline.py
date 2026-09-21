@@ -648,6 +648,80 @@ def _buscar_bing_api(consulta, limite=10):
     return candidatos
 
 
+def _buscar_brave_html(consulta, limite=5):
+    """Brave Search (HTML plano) → página de producto → og:image.
+
+    Motor secundario que funciona incluso cuando Bing/DuckDuckGo bloquean la IP:
+    se extrae el resultado, se abre la ficha y se toma la imagen de estudio.
+    """
+    consulta = str(consulta or '').strip()
+    if not consulta:
+        return []
+    try:
+        respuesta = _http.get(
+            'https://search.brave.com/search',
+            params={'q': consulta},
+            timeout=_TIMEOUT_BUSQUEDA,
+            tipo='html',
+        )
+        if respuesta.status_code != 200:
+            return []
+        enlaces = re.findall(r'href="(https?://[^"]+)"', respuesta.text)
+    except Exception:
+        return []
+
+    paginas = []
+    vistos = set()
+    for enlace in enlaces:
+        url = html.unescape(enlace).split('#')[0]
+        if not url or url in vistos:
+            continue
+        if any(
+            dominio in url
+            for dominio in (
+                'brave.com', 'google.', 'bing.', 'yandex', 'duckduckgo',
+                'startpage', 'search.', 'facebook.', 'pinterest.', 'youtube.',
+            )
+        ):
+            continue
+        vistos.add(url)
+        paginas.append(url)
+        if len(paginas) >= limite:
+            break
+
+    candidatos = []
+    for pagina in paginas:
+        try:
+            ficha = _http.get(pagina, timeout=_TIMEOUT_BUSQUEDA, tipo='html')
+            if ficha.status_code != 200:
+                continue
+            coincidencias = _RE_OG.findall(ficha.text)
+            if not coincidencias:
+                coincidencias = re.findall(
+                    r'"image"\s*:\s*"(https?://[^"]+\.(?:jpg|jpeg|png|webp))"',
+                    ficha.text,
+                    re.IGNORECASE,
+                )
+            titulo_m = re.search(r'<title[^>]*>(.*?)</title>', ficha.text, re.S | re.IGNORECASE)
+            titulo = html.unescape(titulo_m.group(1)).strip() if titulo_m else ''
+        except Exception:
+            continue
+        for url in coincidencias[:2]:
+            url = html.unescape(url)
+            if _url_imagen_valida(url, confiable=True):
+                candidatos.append(
+                    Candidato(
+                        url=url,
+                        fuente='brave-og',
+                        dominio=_dominio(url),
+                        titulo=f'{titulo} {pagina}',
+                        confiable=True,
+                    )
+                )
+                break
+    return candidatos
+
+
 _RE_OG = re.compile(
     r'<meta[^>]+(?:property|name)=["\'](?:og:image|twitter:image)["\'][^>]+content=["\']([^"\']+)',
     re.IGNORECASE,
@@ -1064,6 +1138,10 @@ def _buscar_candidatos_impl(
         for consulta in ventana_web:
             tareas.append((_buscar_web_bing, consulta))
             tareas.append((_buscar_web_ddg, consulta))
+        # Motor secundario gratuito (HTML plano) que suele funcionar cuando
+        # Bing/DuckDuckGo bloquean la IP del datacenter.
+        for consulta in ventana_web[:3]:
+            tareas.append((_buscar_brave_html, consulta))
         if _clave_serpapi():
             for consulta in ventana_web[:3]:
                 tareas.append((_buscar_serpapi, consulta))
@@ -1113,7 +1191,8 @@ def _buscar_candidatos_impl(
 
     puntuados = []
     fuentes_filtrables = (
-        'bing-web', 'ddg-web', 'vtex', 'mercadolibre', 'serpapi', 'brave', 'bing-og',
+        'bing-web', 'ddg-web', 'vtex', 'mercadolibre', 'serpapi', 'brave',
+        'brave-og', 'bing-og', 'google-cse', 'bing-api',
     )
     for candidato in unicos.values():
         fuente_base = (candidato.fuente or '').split(':')[0]

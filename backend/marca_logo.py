@@ -24,6 +24,17 @@ from pathlib import Path
 
 from backend.runtime_cache import get_or_load
 from backend import http_client as _http
+from urllib.parse import quote as _quote
+
+
+def _get_json(url, params=None):
+    try:
+        respuesta = _http.get(url, params=params, timeout=12.0, tipo='json')
+        if respuesta is not None and respuesta.status_code == 200:
+            return respuesta.json()
+    except Exception:
+        return None
+    return None
 
 _LOG = '[Localis Marca]'
 _LADO = 600
@@ -291,17 +302,112 @@ def logo_simpleicons(marca):
     return _subir(data, f'marca_{slug}.svg', 'image/svg+xml')
 
 
+def _wikidata_claims(qid, propiedad):
+    datos = _get_json(
+        'https://www.wikidata.org/w/api.php',
+        params={
+            'action': 'wbgetclaims', 'entity': qid, 'property': propiedad,
+            'format': 'json',
+        },
+    )
+    if not datos:
+        return []
+    return (datos.get('claims') or {}).get(propiedad) or []
+
+
+def _wikidata_buscar(marca):
+    datos = _get_json(
+        'https://www.wikidata.org/w/api.php',
+        params={
+            'action': 'wbsearchentities', 'search': marca, 'language': 'es',
+            'uselang': 'es', 'type': 'item', 'limit': 5, 'format': 'json',
+        },
+    )
+    if not datos:
+        datos = _get_json(
+            'https://www.wikidata.org/w/api.php',
+            params={
+                'action': 'wbsearchentities', 'search': marca, 'language': 'en',
+                'type': 'item', 'limit': 5, 'format': 'json',
+            },
+        )
+    return (datos or {}).get('search') or []
+
+
+_PALABRAS_MARCA = (
+    'empresa', 'compañía', 'compania', 'marca', 'brand', 'company',
+    'corporation', 'fabricante', 'manufacturer', 'alimento', 'bebida',
+    'farmac', 'bodeg', 'supermercado', 'retail', 'tienda',
+)
+
+
+def _wikidata_es_marca(entidad, marca):
+    label = str(entidad.get('label') or '').strip().lower()
+    descripcion = str(entidad.get('description') or '').strip().lower()
+    marca_norm = str(marca or '').strip().lower()
+    if label and marca_norm and label != marca_norm:
+        # Se acepta igualdad exacta o que el label contenga la marca.
+        if marca_norm not in label and label not in marca_norm:
+            return False
+    return any(p in descripcion for p in _PALABRAS_MARCA)
+
+
+def logo_wikidata(marca):
+    """Logo **oficial vectorial** desde Wikidata/Wikimedia Commons (P154)."""
+    marca = str(marca or '').strip()
+    if not marca:
+        return None
+    for entidad in _wikidata_buscar(marca):
+        qid = entidad.get('id')
+        if not qid:
+            continue
+        if not _wikidata_es_marca(entidad, marca):
+            continue
+        claims = _wikidata_claims(qid, 'P154')
+        if not claims:
+            continue
+        try:
+            archivo = claims[0]['mainsnak']['datavalue']['value']
+        except Exception:
+            continue
+        if not archivo:
+            continue
+        url = 'https://commons.wikimedia.org/wiki/Special:FilePath/' + _quote(archivo)
+        data = _descargar(url)
+        if not data:
+            continue
+        extension = str(archivo).rsplit('.', 1)[-1].lower()
+        if extension == 'svg':
+            content_type = 'image/svg+xml'
+        elif extension in ('png', 'webp', 'gif'):
+            data = _procesar_logo_png(data) or data
+            content_type = 'image/webp'
+        else:
+            data = _procesar_logo_png(data)
+            if not data:
+                continue
+            extension = 'webp'
+            content_type = 'image/webp'
+        subido = _subir(data, f'marca_{slug_marca(marca)}.{extension}', content_type)
+        if subido:
+            return subido
+    return None
+
+
 def _resolver(marca, permitir_red=True):
     marca = str(marca or '').strip()
     if not marca:
         return None, None
     if permitir_red:
-        url = logo_favicon(marca)
-        if url:
-            return url, 'logo_favicon'
         url = logo_simpleicons(marca)
         if url:
             return url, 'logo_simpleicons'
+        url = logo_wikidata(marca)
+        if url:
+            return url, 'logo_wikidata'
+        url = logo_favicon(marca)
+        if url:
+            return url, 'logo_favicon'
     local = archivo_monograma_local(marca)
     if local:
         return local, 'logo_monograma'

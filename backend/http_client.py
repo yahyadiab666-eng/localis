@@ -53,18 +53,57 @@ def user_agent():
 
 
 def proxies():
-    """Proxy HTTP(S) opcional desde el entorno (para saltar bloqueos de IP)."""
-    proxy = (
-        os.getenv('LOCALIS_HTTP_PROXY')
-        or os.getenv('HTTPS_PROXY')
-        or os.getenv('https_proxy')
-        or os.getenv('HTTP_PROXY')
-        or os.getenv('http_proxy')
-    )
-    proxy = (proxy or '').strip()
-    if not proxy:
-        return None
-    return {'http': proxy, 'https': proxy}
+    """Proxy HTTP(S) único opcional desde el entorno."""
+    proxy = (os.getenv('LOCALIS_HTTP_PROXY') or '').strip()
+    if proxy:
+        return {'http': proxy, 'https': proxy}
+    return None
+
+
+_POOL_CACHE = {'valor': [], 'cargado': 0.0}
+
+
+def _proxies_publicos():
+    """Lista de proxies públicos (opt-in con LOCALIS_HTTP_PROXY_PUBLICO=1).
+
+    Por seguridad viene desactivado por defecto: solo se usa si el operador lo
+    habilita explícitamente para saltar bloqueos de IP del datacenter.
+    """
+    if str(os.getenv('LOCALIS_HTTP_PROXY_PUBLICO', '0')).strip().lower() not in (
+        '1', 'true', 'yes', 'on',
+    ):
+        return []
+    ahora = time.time()
+    if _POOL_CACHE['valor'] and ahora - _POOL_CACHE['cargado'] < 900:
+        return _POOL_CACHE['valor']
+    lista = []
+    try:
+        respuesta = requests.get(
+            'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt',
+            timeout=8,
+        )
+        if respuesta.status_code == 200:
+            lista = [linea.strip() for linea in respuesta.text.splitlines() if linea.strip()]
+    except Exception:
+        lista = []
+    lista = lista[:200]
+    random.shuffle(lista)
+    _POOL_CACHE['valor'] = lista
+    _POOL_CACHE['cargado'] = ahora
+    return lista
+
+
+def _proxies_variantes():
+    """Lista de diccionarios de proxy a rotar (env único + pool público)."""
+    variantes = []
+    unico = proxies()
+    if unico:
+        variantes.append(unico)
+    for entrada in _proxies_publicos():
+        variantes.append({'http': f'http://{entrada}', 'https': f'http://{entrada}'})
+    if not variantes:
+        variantes.append(None)  # conexión directa
+    return variantes
 
 
 def cabeceras(extra=None, *, tipo='html', referer=None):
@@ -103,9 +142,10 @@ def cabeceras(extra=None, *, tipo='html', referer=None):
 
 def get(url, *, params=None, headers=None, timeout=10.0, stream=False,
         reintentos=None, tipo='html', referer=None, **kwargs):
-    """GET con rotación de UA y reintentos con backoff exponencial."""
+    """GET con rotación de UA, backoff exponencial y rotación de proxies."""
     intentos = max(1, int(reintentos or _REINTENTOS_DEFECTO))
     cabeceras_base = dict(headers or {})
+    variantes_proxy = _proxies_variantes()
     ultimo = None
     for intento in range(intentos):
         cabecera = cabeceras(
@@ -117,6 +157,7 @@ def get(url, *, params=None, headers=None, timeout=10.0, stream=False,
             ),
             referer=referer,
         )
+        proxy = variantes_proxy[intento % len(variantes_proxy)] if variantes_proxy else None
         try:
             kwargs.setdefault('allow_redirects', True)
             respuesta = requests.get(
@@ -125,7 +166,7 @@ def get(url, *, params=None, headers=None, timeout=10.0, stream=False,
                 headers=cabecera,
                 timeout=timeout,
                 stream=stream,
-                proxies=proxies(),
+                proxies=proxy,
                 **kwargs,
             )
             ultimo = respuesta
