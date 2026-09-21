@@ -1333,6 +1333,28 @@ def _marcar_estado_imagen(producto_id, estado):
         return False
 
 
+def _marcar_intento(producto_id):
+    """Cuenta un intento de búsqueda (cola persistente con prioridad)."""
+    from backend.db import get_db_connection
+
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                UPDATE productos
+                SET imagen_intentos = COALESCE(imagen_intentos, 0) + 1,
+                    imagen_ultimo_intento = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND COALESCE(imagen_estado, 'pendiente') <> 'real'
+                """,
+                (int(producto_id),),
+            )
+            conexion.commit()
+    except Exception as error:
+        _log(f'contar intento producto={producto_id} falló: {type(error).__name__}: {error}')
+
+
 # ---------------------------------------------------------------------------
 # Orquestación
 # ---------------------------------------------------------------------------
@@ -1362,6 +1384,9 @@ def procesar_producto(
 
     if producto_id and not forzar and not _imagen_puede_reemplazarse(imagen_actual):
         return ResultadoProcesamiento(ok=False, motivo='imagen_manual_conservada')
+
+    if producto_id:
+        _marcar_intento(producto_id)
 
     ean = None
     try:
@@ -1500,9 +1525,13 @@ def _productos_pendientes(comercio_id):
         cursor = conexion.cursor()
         cursor.execute(
             """
-            SELECT id, nombre, descripcion, codigo_barras, imagen_url, imagen_estado
+            SELECT id, nombre, descripcion, codigo_barras, imagen_url,
+                   imagen_estado, imagen_intentos
             FROM productos
             WHERE comercio_id = ?
+            ORDER BY imagen_ultimo_intento ASC NULLS FIRST,
+                     COALESCE(imagen_intentos, 0) ASC,
+                     id ASC
             """,
             (int(comercio_id),),
         )
@@ -1516,6 +1545,7 @@ def _productos_pendientes(comercio_id):
             'codigo_barras': fila[3],
             'imagen_url': fila[4],
             'imagen_estado': fila[5] if len(fila) > 5 else None,
+            'imagen_intentos': fila[6] if len(fila) > 6 else 0,
         }
         estado = str(registro.get('imagen_estado') or '').strip().lower()
         if estado == 'real':
@@ -1528,8 +1558,12 @@ def _productos_pendientes(comercio_id):
     return pendientes
 
 
-def procesar_inventario(comercio_id, limite=None):
-    """Procesa en lote los productos sin imagen de un comercio (CSV)."""
+def procesar_inventario(comercio_id, limite=None, presupuesto_seg=None):
+    """Procesa en lote los productos sin imagen de un comercio (CSV).
+
+    ``presupuesto_seg`` permite acotar el ciclo (p. ej. 30-60 s) sin tocar el
+    presupuesto global del pipeline.
+    """
     if not pipeline_habilitado():
         return 0
     limite = limite or _CSV_MAX
@@ -1546,8 +1580,10 @@ def procesar_inventario(comercio_id, limite=None):
         _log(f'inventario comercio={comercio_id} sin pendientes')
         return 0
 
+    presupuesto = _CSV_BUDGET_SEC if presupuesto_seg is None else max(5.0, float(presupuesto_seg))
+
     def _una(producto):
-        if time.monotonic() - inicio > _CSV_BUDGET_SEC:
+        if time.monotonic() - inicio > presupuesto:
             return False
         try:
             resultado = procesar_producto(
@@ -1574,7 +1610,8 @@ def procesar_inventario(comercio_id, limite=None):
 
     _log(
         f'inventario comercio={comercio_id} actualizados={actualizados}/'
-        f'{len(pendientes)} (lote={len(seleccion)}, workers={trabajadores})'
+        f'{len(pendientes)} (lote={len(seleccion)}, workers={trabajadores}, '
+        f'presupuesto={presupuesto:.0f}s)'
     )
     return actualizados
 

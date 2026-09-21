@@ -8,9 +8,10 @@ el pipeline actualiza ``imagen_estado='real'``.
 Config (opcional)::
 
     LOCALIS_IMG_BACKFILL=1              # 0 desactiva el reintento periódico
-    LOCALIS_IMG_BACKFILL_LOTE=2         # productos por comercio y ciclo
+    LOCALIS_IMG_BACKFILL_LOTE=20        # productos por comercio y ciclo
     LOCALIS_IMG_BACKFILL_COMERCIOS=2    # comercios por ciclo
-    LOCALIS_IMG_BACKFILL_INTERVALO=300  # segundos entre ciclos
+    LOCALIS_IMG_BACKFILL_PRESUPUESTO=50 # segundos de trabajo por ciclo
+    LOCALIS_IMG_BACKFILL_INTERVALO=90   # segundos entre ciclos
 """
 
 from __future__ import annotations
@@ -29,9 +30,10 @@ def _env_int(nombre, defecto):
         return defecto
 
 
-_LOTE = max(1, _env_int('LOCALIS_IMG_BACKFILL_LOTE', 2))
+_LOTE = max(1, _env_int('LOCALIS_IMG_BACKFILL_LOTE', 20))
 _COMERCIOS = max(1, _env_int('LOCALIS_IMG_BACKFILL_COMERCIOS', 2))
-_INTERVALO = max(30, _env_int('LOCALIS_IMG_BACKFILL_INTERVALO', 300))
+_PRESUPUESTO = max(10, _env_int('LOCALIS_IMG_BACKFILL_PRESUPUESTO', 50))
+_INTERVALO = max(30, _env_int('LOCALIS_IMG_BACKFILL_INTERVALO', 90))
 
 _iniciado = False
 _lock = threading.Lock()
@@ -81,7 +83,9 @@ def ejecutar_ciclo():
     atendidos = 0
     for comercio_id in _comercios_con_pendientes(_COMERCIOS):
         try:
-            procesar_inventario(comercio_id, limite=_LOTE)
+            procesar_inventario(
+                comercio_id, limite=_LOTE, presupuesto_seg=_PRESUPUESTO
+            )
             atendidos += 1
         except Exception as error:
             print(f'{_LOG} comercio={comercio_id} fallo: {type(error).__name__}: {error}')
@@ -113,6 +117,6 @@ def iniciar_backfill_periodico():
         hilo.start()
         print(
             f'{_LOG} activo: cada {_INTERVALO}s, {_LOTE} producto(s) x '
-            f'{_COMERCIOS} comercio(s)'
+            f'{_COMERCIOS} comercio(s), presupuesto {_PRESUPUESTO}s'
         )
         return hilo

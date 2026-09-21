@@ -131,6 +131,8 @@ def _auditar_importacion_instantanea():
     _ok('def _buscar_mercadolibre' in pipeline_src, 'fuente Mercado Libre (API)')
     _ok('_fondo_ya_limpio' in pipeline_src, 'atajo sin rembg para fondos ya limpios')
     _ok('ThreadPoolExecutor' in pipeline_src, 'enriquecimiento en paralelo')
+    _ok('imagen_intentos' in _leer('database.py'), 'cola persistente con intentos')
+    _ok('presupuesto_seg' in pipeline_src, 'lote acotado por presupuesto (30-60s)')
 
     requisitos = _leer('requirements.txt')
     _ok('xlrd' in requisitos, 'xlrd declarado en requirements')

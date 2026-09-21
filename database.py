@@ -173,6 +173,8 @@ COLUMNAS_ESQUEMA = {
         ('imagen_url', 'TEXT'),
         ('imagen_fuente', 'TEXT'),
         ('imagen_estado', "TEXT DEFAULT 'pendiente'"),
+        ('imagen_intentos', 'INTEGER DEFAULT 0'),
+        ('imagen_ultimo_intento', 'TIMESTAMPTZ'),
         ('stock', 'INTEGER DEFAULT 0'),
         ('codigo_barras', 'TEXT'),
     ],
@@ -1049,6 +1051,8 @@ def _crear_tabla_productos(cursor):
             imagen_url TEXT,
             imagen_fuente TEXT,
             imagen_estado TEXT DEFAULT 'pendiente',
+            imagen_intentos INTEGER DEFAULT 0,
+            imagen_ultimo_intento TIMESTAMPTZ,
             stock INTEGER DEFAULT 0,
             codigo_barras TEXT
         )

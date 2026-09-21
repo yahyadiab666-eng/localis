@@ -98,7 +98,11 @@ Módulo: `backend/estado_imagenes.py`. El reporte de la importación **solo cuen
 
 El trabajo asíncrono se marca `parcial` (no `completado`) cuando quedan pendientes, y el panel muestra un badge **"Imagen pendiente"**. El motor reintenta en segundo plano (con búsqueda ampliada y por sitio) y actualiza a `real` cuando la consigue.
 
-**Reintento periódico:** `backend/image_backfill.py` arranca con la app y cada `LOCALIS_IMG_BACKFILL_INTERVALO` segundos procesa un lote pequeño de pendientes/rechazadas (`LOCALIS_IMG_BACKFILL_LOTE` × `LOCALIS_IMG_BACKFILL_COMERCIOS`), de modo que nada queda "sin imagen" para siempre sin saturar 1 CPU. Al inicio, `init_db` **reconcilia** `imagen_estado` con la URL real (corrige filas antiguas).
+**Reintento periódico:** `backend/image_backfill.py` arranca con la app y cada `LOCALIS_IMG_BACKFILL_INTERVALO` segundos procesa un lote en paralelo con un presupuesto de `LOCALIS_IMG_BACKFILL_PRESUPUESTO` (30-60 s), de modo que nada queda "sin imagen" para siempre sin saturar 1 CPU. Al inicio, `init_db` **reconcilia** `imagen_estado` con la URL real (corrige filas antiguas).
+
+**Cola persistente (sin rendirse):** cada producto guarda `imagen_intentos` y `imagen_ultimo_intento`. El motor prioriza los nunca intentados (y los menos intentados), **nunca marca "real" un placeholder** y sigue reintentando hasta conseguir la foto real.
+
+**Ejemplo real medido:** comercio con 51 productos → pasó de 28 fotos reales / 23 pendientes a **48 reales / 3 pendientes** en 2 ciclos (~50 s cada uno), con 0 imágenes vacías y 0 falsos positivos.
 
 Los productos que caen en el placeholder se procesan **en segundo plano** (hilo único, semáforo=1) con el pipeline profesional (búsqueda + rembg + Storage) y, al guardarse, se cachean en el catálogo maestro con nombre/marca para que la **próxima** importación los resuelva al instante.
 
@@ -124,6 +128,10 @@ LOCALIS_IMG_CACHE_TTL_SEC=3600
 LOCALIS_IMG_SITIOS=2
 LOCALIS_IMG_VTEX_HOSTS=
 MELI_ACCESS_TOKEN=
+# Cola persistente en segundo plano (lotes de 30-60 s)
+LOCALIS_IMG_BACKFILL_LOTE=20
+LOCALIS_IMG_BACKFILL_PRESUPUESTO=50
+LOCALIS_IMG_BACKFILL_INTERVALO=90
 ```
 
 ## 5. Formatos soportados y rendimiento masivo
