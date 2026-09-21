@@ -25,14 +25,15 @@ from backend.utils import (
 )
 from backend.inventory_import import (
     LOG_PREFIX as CSV_LOG,
+    analizar_inventario,
     cargar_archivo_inventario,
-    detectar_mapeo_columnas,
     iter_lotes_productos,
-    leer_encabezados_inventario,
     mensaje_error_importacion,
-    persistir_importacion_por_lotes,
+    normalizar_encabezado,
+    persistir_importacion_upsert,
+    productos_nuevos,
+    _cargar_existentes_comercio,
     recortar_mensaje_importacion,
-    validar_inventario_previo,
 )
 from backend.plans import (
     MENSAJE_LIMITE_PRODUCTOS,
@@ -892,9 +893,13 @@ def eliminar_producto(producto_id, comercio_id):
 
 
 def procesar_csv_productos(comercio_id, archivo_csv):
-    """
-    Importador inteligente con reemplazo total del inventario.
-    Procesa por lotes en memoria acotada y transacciones PostgreSQL seguras.
+    """Importador con detección dinámica de cabecera y UPSERT (cero rechazos falsos).
+
+    - Soporta CSV/XLSX/XLS, incluidos reportes ERP heredados con preámbulo y
+      columnas desalineadas (`analizar_inventario`).
+    - **UPSERT**: actualiza los productos existentes (precio, existencia,
+      descripción, imagen) e inserta los nuevos. Si el archivo solo trae
+      existencias, no se rechaza.
     """
     etapa = 'inicio'
     nombre_archivo = getattr(archivo_csv, 'filename', None)
@@ -906,18 +911,6 @@ def procesar_csv_productos(comercio_id, archivo_csv):
             print(f'{CSV_LOG} rechazo etapa={etapa}: {error_lectura}')
             return False, recortar_mensaje_importacion(error_lectura), None
 
-        etapa = 'encabezados'
-        encabezados, error_enc = leer_encabezados_inventario(data, extension)
-        if error_enc:
-            print(f'{CSV_LOG} rechazo etapa={etapa}: {error_enc}')
-            return False, recortar_mensaje_importacion(error_enc), None
-
-        etapa = 'mapeo_columnas'
-        mapeo, meta, error_mapeo = detectar_mapeo_columnas(encabezados)
-        if error_mapeo:
-            print(f'{CSV_LOG} rechazo etapa={etapa}: {error_mapeo}')
-            return False, recortar_mensaje_importacion(error_mapeo), None
-
         etapa = 'permiso_inventario'
         ok, msg = comercio_puede_gestionar_inventario(comercio_id)
         if not ok:
@@ -927,23 +920,52 @@ def procesar_csv_productos(comercio_id, archivo_csv):
         etapa = 'tasa_dolar'
         tasa = float(obtener_tasa_dolar() or 1.0)
 
-        etapa = 'validacion'
-        valido, error_validacion, meta_validacion = validar_inventario_previo(
+        etapa = 'analizar_inventario'
+        indice, encabezados, mapeo_indices, error_analisis = analizar_inventario(
+            data, extension
+        )
+        if error_analisis:
+            print(f'{CSV_LOG} rechazo etapa={etapa}: {error_analisis}')
+            return False, recortar_mensaje_importacion(error_analisis), None
+
+        meta = {'precio_en_bs': False}
+        col_precio = mapeo_indices.get('precio')
+        if col_precio is not None and col_precio < len(encabezados):
+            norm_precio = normalizar_encabezado(encabezados[col_precio])
+            if any(t in norm_precio for t in ('bs', 'bolivar', 'bolívares', 'ves')):
+                meta['precio_en_bs'] = True
+
+        mapeo = {campo: campo for campo in mapeo_indices}
+
+        etapa = 'parsear'
+        productos = []
+        for lote in iter_lotes_productos(
             data,
             extension,
             encabezados,
             mapeo,
             meta,
             tasa_dolar=tasa,
-        )
-        if not valido:
-            print(f'{CSV_LOG} rechazo etapa={etapa}: {error_validacion}')
-            return False, recortar_mensaje_importacion(error_validacion), None
+            imagen_default=None,
+            columnas=mapeo_indices,
+            fila_inicio=indice,
+        ):
+            productos.extend(lote)
+
+        if not productos:
+            print(f'{CSV_LOG} rechazo etapa={etapa}: sin filas válidas')
+            return False, recortar_mensaje_importacion(
+                'No se encontraron filas válidas con nombre/descripción de producto. '
+                'Revisa que el archivo tenga esa columna y vuelve a intentarlo.'
+            ), None
+
+        etapa = 'existencia'
+        existentes = _cargar_existentes_comercio(comercio_id)
+        nuevos = productos_nuevos(productos, existentes)
 
         etapa = 'limite_plan'
-        total_validos = (meta_validacion or {}).get('filas_validas', 0)
         limite = obtener_limite_productos_comercio(comercio_id)
-        if not es_limite_ilimitado(limite) and total_validos > limite:
+        if not es_limite_ilimitado(limite) and (existentes['total'] + len(nuevos)) > limite:
             with get_db_connection(row_factory=sqlite3.Row) as conexion:
                 cursor = conexion.cursor()
                 cursor.execute(
@@ -953,25 +975,16 @@ def procesar_csv_productos(comercio_id, archivo_csv):
                 fila = cursor.fetchone()
             plan_tipo = (fila['plan_tipo'] if fila else 'gratis') or 'gratis'
             mensaje, plan_sugerido = mensaje_limite_importacion(
-                plan_tipo, total_validos, limite
+                plan_tipo, len(nuevos), limite
             )
             return False, recortar_mensaje_importacion(mensaje), {
                 'plan_sugerido': plan_sugerido
             }
 
-        def _generador_lotes():
-            return iter_lotes_productos(
-                data,
-                extension,
-                encabezados,
-                mapeo,
-                meta,
-                tasa_dolar=tasa,
-                imagen_default=None,
-            )
-
-        etapa = 'persistir'
-        insertados = persistir_importacion_por_lotes(comercio_id, _generador_lotes)
+        etapa = 'persistir_upsert'
+        insertados, actualizados = persistir_importacion_upsert(
+            comercio_id, productos, existentes=existentes
+        )
 
         etapa = 'asociar_imagenes'
         try:
@@ -979,28 +992,39 @@ def procesar_csv_productos(comercio_id, archivo_csv):
         except Exception as exc_img:
             print(
                 f'{CSV_LOG} aviso etapa={etapa} {type(exc_img).__name__}: {exc_img} '
-                '(el inventario ya se guardó; las fotos oficiales se omiten)'
+                '(el inventario ya se guardó; las fotos se completan en segundo plano)'
             )
             traceback.print_exc()
 
-        print(f'{CSV_LOG} ok comercio={comercio_id} insertados={insertados}')
+        etapa = 'reporte'
         conteos = _contar_estados_imagenes(comercio_id)
         from backend.estado_imagenes import construir_reporte_importacion
 
+        total = (
+            conteos.get('real', 0)
+            + conteos.get('logo', 0)
+            + conteos.get('pendiente', 0)
+            + conteos.get('rechazada', 0)
+        )
         mensaje, meta_imagenes = construir_reporte_importacion(
-            total=insertados,
+            total=total,
             reales=conteos.get('real', 0),
-            logo=conteos.get('logo', 0),
+            logos=conteos.get('logo', 0),
             pendientes=conteos.get('pendiente', 0),
             rechazadas=conteos.get('rechazada', 0),
         )
+        meta_imagenes['insertados'] = insertados
+        meta_imagenes['actualizados'] = actualizados
+        mensaje = (
+            f'{insertados} nuevos, {actualizados} actualizados. ' + mensaje
+        )
         print(
-            f'{CSV_LOG} imágenes comercio={comercio_id} '
-            f'"{meta_imagenes["estado_imagenes"]}": '
+            f'{CSV_LOG} ok comercio={comercio_id} insertados={insertados} '
+            f'actualizados={actualizados} '
+            f'estado_imagenes={meta_imagenes["estado_imagenes"]} '
             f'reales={meta_imagenes["imagenes_reales"]} '
             f'logos={meta_imagenes["imagenes_logos"]} '
-            f'pendientes={meta_imagenes["imagenes_pendientes"]} '
-            f'rechazadas={meta_imagenes["imagenes_rechazadas"]}'
+            f'pendientes={meta_imagenes["imagenes_pendientes"]}'
         )
         return True, recortar_mensaje_importacion(mensaje), meta_imagenes
 

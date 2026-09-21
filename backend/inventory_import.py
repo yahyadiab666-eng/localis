@@ -464,8 +464,234 @@ def _celda_vacia(valor):
     return not texto or texto.lower() in ('none', 'null', 'nan', 'n/a', '-')
 
 
-def iter_filas_inventario_enumeradas(data, extension, encabezados):
-    """Generador (numero_fila, fila_dict). Datos desde fila 2 (Excel) o equivalente CSV."""
+# ---------------------------------------------------------------------------
+# Detección dinámica de cabecera (soporta reportes ERP con preámbulo y
+# encabezados desalineados de las columnas de datos, típicos de .xls viejos).
+# ---------------------------------------------------------------------------
+_MAX_FILAS_CABECERA = 20
+
+
+def _valor_fila_excel(celda):
+    if celda is None:
+        return None
+    return celda.value if hasattr(celda, 'value') else celda
+
+
+def _matriz_inicial(data, extension, max_filas=_MAX_FILAS_CABECERA):
+    """Primeras ``max_filas`` filas del archivo como listas de valores."""
+    if extension == 'xls':
+        libro, error = _abrir_libro_xls(data)
+        if error:
+            return []
+        hoja = libro.sheet_by_index(0)
+        return [hoja.row_values(i) for i in range(min(hoja.nrows, max_filas))]
+    if extension == 'xlsx':
+        wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        try:
+            hoja = wb.active
+            matriz = []
+            for indice, fila in enumerate(hoja.iter_rows()):
+                if indice >= max_filas:
+                    break
+                matriz.append([_valor_fila_excel(c) for c in fila])
+            return matriz
+        finally:
+            wb.close()
+    contenido = _decodificar_csv(data)
+    if contenido is None:
+        return []
+    delimitador = _detectar_delimitador_csv(contenido[:4096])
+    lector = csv.reader(io.StringIO(contenido), delimiter=delimitador)
+    matriz = []
+    for indice, fila in enumerate(lector):
+        if indice >= max_filas:
+            break
+        matriz.append(fila)
+    return matriz
+
+
+def _campos_en_fila(celdas):
+    campos = set()
+    for celdas_texto in celdas:
+        texto = normalizar_encabezado(celdas_texto)
+        if not texto:
+            continue
+        for campo, sinonimos in SINONIMOS_COLUMNA.items():
+            if campo in campos:
+                continue
+            if any(
+                _puntuacion_coincidencia(texto, sinonimo) >= _UMBRAL_COINCIDENCIA
+                for sinonimo in sinonimos
+            ):
+                campos.add(campo)
+    return campos
+
+
+def detectar_fila_cabecera(matriz):
+    """Fila de cabecera con más palabras clave. Retorna (indice, celdas, campos)."""
+    mejor_indice = None
+    mejor_campos = set()
+    for indice, fila in enumerate((matriz or [])[:_MAX_FILAS_CABECERA]):
+        campos = _campos_en_fila(fila)
+        if len(campos) > len(mejor_campos):
+            mejor_indice = indice
+            mejor_campos = campos
+    if mejor_indice is None or len(mejor_campos) < 2:
+        return None, None, set()
+    return mejor_indice, matriz[mejor_indice], mejor_campos
+
+
+def _mapear_columnas_por_indice(encabezados, matriz, indice_cabecera):
+    """{campo: índice de columna} con alineación exacta y, si el reporte está
+    desalineado (típico ERP), emparejado por orden de columnas con datos."""
+    filas_datos = (matriz or [])[indice_cabecera + 1 :]
+    columnas_con_datos = set()
+    for fila in filas_datos:
+        for col, valor in enumerate(fila):
+            if str(valor or '').strip():
+                columnas_con_datos.add(col)
+
+    etiquetas = {
+        col: normalizar_encabezado(valor)
+        for col, valor in enumerate(encabezados)
+        if str(valor or '').strip()
+    }
+
+    orden_campos = (
+        'codigo_barras', 'nombre', 'precio', 'stock',
+        'descripcion', 'marca', 'categoria', 'imagen_url',
+    )
+    mapeo = {}
+    etiquetas_usadas = set()
+
+    # 1) Coincidencia exacta si la propia columna del encabezado tiene datos.
+    for campo in orden_campos:
+        for col in sorted(etiquetas):
+            if col in etiquetas_usadas:
+                continue
+            if col not in columnas_con_datos:
+                continue
+            if any(
+                _puntuacion_coincidencia(etiquetas[col], sinonimo) >= _UMBRAL_COINCIDENCIA
+                for sinonimo in SINONIMOS_COLUMNA.get(campo, [])
+            ):
+                mapeo[campo] = col
+                etiquetas_usadas.add(col)
+                break
+
+    # 2) Emparejado por orden para etiquetas que no coinciden con su columna.
+    campos_restantes = [c for c in orden_campos if c not in mapeo]
+    etiquetas_restantes = [
+        (col, etiquetas[col]) for col in sorted(etiquetas) if col not in etiquetas_usadas
+    ]
+    asignaciones = []
+    for campo in campos_restantes:
+        for indice_etiqueta, (col, texto) in enumerate(etiquetas_restantes):
+            if any(
+                _puntuacion_coincidencia(texto, sinonimo) >= _UMBRAL_COINCIDENCIA
+                for sinonimo in SINONIMOS_COLUMNA.get(campo, [])
+            ):
+                asignaciones.append(campo)
+                etiquetas_restantes.pop(indice_etiqueta)
+                break
+
+    columnas_libres = sorted(c for c in columnas_con_datos if c not in mapeo.values())
+    for campo, col in zip(asignaciones, columnas_libres):
+        mapeo[campo] = col
+    return mapeo
+
+
+def analizar_inventario(data, extension):
+    """Detecta cabecera y mapea columnas por índice.
+
+    Retorna ``(indice_cabecera, encabezados, {campo: col}, error)``.
+    """
+    matriz = _matriz_inicial(data, extension)
+    if not matriz:
+        return None, None, None, 'El archivo está vacío o no se pudo leer.'
+    indice, encabezados, campos = detectar_fila_cabecera(matriz)
+    if indice is not None and {'nombre'} <= campos and (
+        {'precio', 'stock'} & campos or {'codigo_barras'} & campos
+    ):
+        mapeo = _mapear_columnas_por_indice(encabezados, matriz, indice)
+        if 'nombre' in mapeo:
+            encabezados_limpios = [str(v or '').strip() for v in encabezados]
+            return indice, encabezados_limpios, mapeo, None
+
+    # Compatibilidad: cabecera clásica en la primera fila no vacía.
+    for indice, fila in enumerate(matriz[:5]):
+        celdas = [str(v or '').strip() for v in fila]
+        if not any(celdas):
+            continue
+        mapeo_clasico, _meta, error = detectar_mapeo_columnas([c for c in celdas if c])
+        if not error:
+            columnas = {c: i for i, c in enumerate(celdas) if c}
+            mapeo_indice = {
+                campo: columnas[nombre]
+                for campo, nombre in mapeo_clasico.items()
+                if nombre in columnas
+            }
+            return indice, [c for c in celdas if c], mapeo_indice, None
+    return None, None, None, (
+        'No pudimos reconocer una fila de encabezados con columnas de '
+        'producto (Código, Descripción, Costo/Precio, Existencia). '
+        'Revisa el archivo e intenta de nuevo.'
+    )
+
+
+def _iter_filas_valores(data, extension, inicio):
+    """Genera (numero_fila, valores) a partir de ``inicio`` (índice 0-based)."""
+    if extension == 'xls':
+        libro, error = _abrir_libro_xls(data)
+        if error:
+            raise ErrorImportacionInventario(error)
+        hoja = libro.sheet_by_index(0)
+        for indice in range(inicio, hoja.nrows):
+            yield indice + 1, hoja.row_values(indice)
+        return
+
+    if extension == 'xlsx':
+        wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        try:
+            hoja = wb.active
+            for indice, fila in enumerate(hoja.iter_rows()):
+                if indice < inicio:
+                    continue
+                yield indice + 1, [_valor_fila_excel(c) for c in fila]
+        finally:
+            wb.close()
+        return
+
+    contenido = _decodificar_csv(data)
+    if contenido is None:
+        raise ErrorImportacionInventario(_MENSAJE_CODIFICACION_CSV)
+    delimitador = _detectar_delimitador_csv(contenido[:4096])
+    lector = csv.reader(io.StringIO(contenido), delimiter=delimitador)
+    for indice, fila in enumerate(lector):
+        if indice < inicio:
+            continue
+        yield indice + 1, fila
+
+
+def iter_filas_inventario_enumeradas(data, extension, encabezados, columnas=None, fila_inicio=None):
+    """Generador (numero_fila, fila_dict).
+
+    - Modo clásico: datos desde la fila 2 (Excel) o equivalente CSV.
+    - Modo ERP (``columnas`` = {campo: índice}): salta el preámbulo hasta
+      ``fila_inicio`` y construye la fila por **índice de columna**, soportando
+      encabezados desalineados de los reportes heredados.
+    """
+    if columnas is not None:
+        inicio = 0 if fila_inicio is None else int(fila_inicio) + 1
+        for numero, valores in _iter_filas_valores(data, extension, inicio):
+            fila = {}
+            for campo, col in columnas.items():
+                valor = valores[col] if (col is not None and col < len(valores)) else None
+                fila[campo] = valor
+            if _fila_tiene_datos(fila):
+                yield numero, fila
+        return
+
     if extension == 'xlsx':
         wb = openpyxl.load_workbook(
             io.BytesIO(data), read_only=True, data_only=True
@@ -536,9 +762,11 @@ def iter_filas_inventario_enumeradas(data, extension, encabezados):
         ) from exc
 
 
-def iter_filas_inventario(data, extension, encabezados):
+def iter_filas_inventario(data, extension, encabezados, columnas=None, fila_inicio=None):
     """Generador de filas {encabezado: valor} sin cargar todo el inventario en RAM."""
-    for _, fila in iter_filas_inventario_enumeradas(data, extension, encabezados):
+    for _, fila in iter_filas_inventario_enumeradas(
+        data, extension, encabezados, columnas=columnas, fila_inicio=fila_inicio
+    ):
         yield fila
 
 
@@ -690,24 +918,28 @@ def validar_inventario_previo(
 
 
 def parsear_fila_inventario(fila, mapeo, meta, tasa_dolar=1.0, imagen_default=None):
-    """Convierte una fila del archivo en dict de producto o None si es inválida."""
+    """Convierte una fila del archivo en dict de producto o None si es inválida.
+
+    El **precio es opcional**: si el archivo solo actualiza existencias
+    (reportes de inventario/ERP), ``precio_usd`` queda en ``None`` y el upsert
+    conserva el precio existente. Solo el nombre (o el código) es obligatorio.
+    """
     nombre_raw = _obtener_valor_celda(fila, mapeo.get('nombre'))
     nombre = str(nombre_raw or '').strip()
     if not nombre or nombre.lower() == 'none':
         return None
 
-    precio_raw = _parsear_numero(_obtener_valor_celda(fila, mapeo.get('precio')))
-    if precio_raw is None or precio_raw < 0:
-        return None
-
-    precio_usd = precio_raw
-    if meta.get('precio_en_bs'):
-        tasa = float(tasa_dolar or 1.0)
-        if tasa <= 0:
-            tasa = 1.0
-        precio_usd = round(precio_raw / tasa, 2)
-    else:
-        precio_usd = round(precio_raw, 2)
+    precio_usd = None
+    if mapeo.get('precio'):
+        precio_raw = _parsear_numero(_obtener_valor_celda(fila, mapeo.get('precio')))
+        if precio_raw is not None and precio_raw >= 0:
+            if meta.get('precio_en_bs'):
+                tasa = float(tasa_dolar or 1.0)
+                if tasa <= 0:
+                    tasa = 1.0
+                precio_usd = round(precio_raw / tasa, 2)
+            else:
+                precio_usd = round(precio_raw, 2)
 
     descripcion_col = mapeo.get('descripcion')
     descripcion = ''
@@ -728,7 +960,7 @@ def parsear_fila_inventario(fila, mapeo, meta, tasa_dolar=1.0, imagen_default=No
             _obtener_valor_celda(fila, mapeo['imagen_url'])
         )
 
-    stock = 0
+    stock = None
     if mapeo.get('stock'):
         stock = _parsear_entero(_obtener_valor_celda(fila, mapeo['stock']))
 
@@ -775,12 +1007,16 @@ def iter_lotes_productos(
     tasa_dolar=1.0,
     imagen_default=None,
     batch_size=None,
+    columnas=None,
+    fila_inicio=None,
 ):
     """Genera lotes de productos parseados para inserción por bloques."""
     tamano = batch_size or IMPORT_BATCH_SIZE
     lote = []
 
-    for fila in iter_filas_inventario(data, extension, encabezados):
+    for fila in iter_filas_inventario(
+        data, extension, encabezados, columnas=columnas, fila_inicio=fila_inicio
+    ):
         parsed = parsear_fila_inventario(
             fila, mapeo, meta, tasa_dolar=tasa_dolar, imagen_default=imagen_default
         )
@@ -1072,6 +1308,180 @@ def persistir_importacion_por_lotes(comercio_id, factory_generador_lotes):
                 'Revisa que los datos no estén vacíos y que el precio use formato numérico.'
             )
         return insertados
+
+    return ejecutar_con_reintentos_bd(_operacion)
+
+
+# Variante de UPDATE masivo (UPSERT) para `execute_values`.
+UPSERT_PRODUCTO_VALUES_SQL = """
+    UPDATE productos
+    SET nombre = v.nombre,
+        descripcion = v.descripcion,
+        precio_usd = v.precio_usd,
+        codigo_barras = v.codigo_barras,
+        imagen_url = v.imagen_url,
+        imagen_fuente = v.imagen_fuente,
+        imagen_estado = v.imagen_estado,
+        stock = v.stock
+    FROM (VALUES %s) AS v(
+        id, nombre, descripcion, precio_usd, codigo_barras,
+        imagen_url, imagen_fuente, imagen_estado, stock
+    )
+    WHERE productos.id = v.id
+"""
+
+
+def _cargar_existentes_comercio(comercio_id):
+    """Productos actuales del comercio indexados por código y por nombre."""
+    from backend.db import get_db_connection
+    from backend.utils import normalizar_nombre_producto
+
+    with get_db_connection() as conexion:
+        cursor = conexion.cursor()
+        cursor.execute(
+            """
+            SELECT id, codigo_barras, nombre, descripcion, precio_usd, stock,
+                   imagen_url, imagen_fuente, imagen_estado
+            FROM productos
+            WHERE comercio_id = ?
+            """,
+            (int(comercio_id),),
+        )
+        filas = cursor.fetchall()
+
+    por_codigo = {}
+    por_nombre = {}
+    for fila in filas:
+        registro = fila if isinstance(fila, dict) else {
+            'id': fila[0], 'codigo_barras': fila[1], 'nombre': fila[2],
+            'descripcion': fila[3], 'precio_usd': fila[4], 'stock': fila[5],
+            'imagen_url': fila[6], 'imagen_fuente': fila[7], 'imagen_estado': fila[8],
+        }
+        codigo = normalizar_codigo_barras(registro.get('codigo_barras'))
+        if codigo and codigo not in por_codigo:
+            por_codigo[codigo] = registro
+        nombre = normalizar_nombre_producto(registro.get('nombre'))
+        if nombre and nombre not in por_nombre:
+            por_nombre[nombre] = registro
+    return {'por_codigo': por_codigo, 'por_nombre': por_nombre, 'total': len(filas)}
+
+
+def _buscar_existente(prod, existentes):
+    from backend.utils import normalizar_nombre_producto
+
+    codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
+    if codigo and codigo in existentes['por_codigo']:
+        return existentes['por_codigo'][codigo]
+    nombre = normalizar_nombre_producto(prod.get('nombre'))
+    if nombre and nombre in existentes['por_nombre']:
+        return existentes['por_nombre'][nombre]
+    return None
+
+
+def productos_nuevos(productos, existentes):
+    """Subconjunto de productos que no existen aún en el comercio."""
+    return [p for p in productos if _buscar_existente(p, existentes) is None]
+
+
+def persistir_importacion_upsert(comercio_id, productos, categoria=None, existentes=None):
+    """UPSERT: actualiza productos existentes (precio/stock/imagen) e inserta nuevos.
+
+    Cero rechazos falsos: si el archivo solo trae existencias o precios, los
+    campos ausentes conservan su valor actual. Retorna (insertados, actualizados).
+    """
+    from backend.db import ejecutar_con_reintentos_bd, get_db_connection
+
+    existentes = existentes or _cargar_existentes_comercio(comercio_id)
+    nuevos = []
+    actualizaciones = []
+    for prod in productos:
+        registro = _buscar_existente(prod, existentes)
+        if registro is None:
+            nuevos.append(prod)
+        else:
+            actualizaciones.append((registro, prod))
+
+    snapshot_imagenes = {
+        codigo: reg.get('imagen_url')
+        for codigo, reg in existentes['por_codigo'].items()
+        if reg.get('imagen_url')
+    }
+    if categoria is None:
+        try:
+            from backend.catalogo_maestro_index import categoria_de_comercio
+
+            categoria = categoria_de_comercio(comercio_id)
+        except Exception:
+            categoria = None
+    if nuevos:
+        try:
+            asignar_imagenes_instantaneas(nuevos, snapshot_imagenes, categoria)
+        except Exception as exc:
+            print(f'{LOG_PREFIX} aviso imágenes de productos nuevos: {exc}')
+
+    def _operacion(conexion):
+        cursor = conexion.cursor()
+        cursor.execute('SELECT pg_advisory_xact_lock(?)', (int(comercio_id),))
+        ejecutar_lote = getattr(cursor, 'execute_values', None)
+
+        insertados = 0
+        for inicio in range(0, len(nuevos), IMPORT_BATCH_SIZE):
+            lote = nuevos[inicio : inicio + IMPORT_BATCH_SIZE]
+            tuplas = _tuplas_insercion(comercio_id, lote, snapshot_imagenes)
+            if callable(ejecutar_lote):
+                ejecutar_lote(INSERT_PRODUCTO_VALUES_SQL, tuplas, page_size=IMPORT_BATCH_SIZE)
+            else:
+                cursor.executemany(INSERT_PRODUCTO_SQL, tuplas)
+            insertados += len(lote)
+
+        filas_update = []
+        for registro, prod in actualizaciones:
+            precio = prod.get('precio_usd')
+            if precio is None:
+                precio = registro.get('precio_usd')
+            stock = prod.get('stock')
+            if stock is None:
+                stock = registro.get('stock')
+            imagen_nueva = prod.get('imagen_url')
+            filas_update.append(
+                (
+                    registro.get('id'),
+                    prod.get('nombre') or registro.get('nombre'),
+                    prod.get('descripcion') or registro.get('descripcion') or '',
+                    float(precio) if precio is not None else 0.0,
+                    prod.get('codigo_barras') or registro.get('codigo_barras'),
+                    imagen_nueva or registro.get('imagen_url'),
+                    'archivo' if imagen_nueva else registro.get('imagen_fuente'),
+                    'real' if imagen_nueva else (registro.get('imagen_estado') or 'pendiente'),
+                    int(stock) if stock is not None else 0,
+                )
+            )
+
+        actualizados = 0
+        for inicio in range(0, len(filas_update), IMPORT_BATCH_SIZE):
+            lote = filas_update[inicio : inicio + IMPORT_BATCH_SIZE]
+            if callable(ejecutar_lote):
+                ejecutar_lote(UPSERT_PRODUCTO_VALUES_SQL, lote, page_size=IMPORT_BATCH_SIZE)
+            else:
+                for fila in lote:
+                    cursor.execute(
+                        """
+                        UPDATE productos
+                        SET nombre = ?, descripcion = ?, precio_usd = ?,
+                            codigo_barras = ?, imagen_url = ?, imagen_fuente = ?,
+                            imagen_estado = ?, stock = ?
+                        WHERE id = ?
+                        """,
+                        fila[1:] + (fila[0],),
+                    )
+            actualizados += len(lote)
+
+        if insertados == 0 and actualizados == 0:
+            raise ErrorImportacionInventario(
+                'No se encontraron filas válidas para importar. '
+                'Revisa que el archivo tenga nombres/descripciones de producto.'
+            )
+        return insertados, actualizados
 
     return ejecutar_con_reintentos_bd(_operacion)
 

@@ -134,6 +134,13 @@ def _auditar_importacion_instantanea():
     _ok('imagen_intentos' in _leer('database.py'), 'cola persistente con intentos')
     _ok('presupuesto_seg' in pipeline_src, 'lote acotado por presupuesto (30-60s)')
 
+    _ok('def detectar_fila_cabecera' in inventario, 'detección dinámica de cabecera (ERP)')
+    _ok('def analizar_inventario' in inventario, 'analiza cabecera/columnas por índice')
+    _ok('def persistir_importacion_upsert' in inventario, 'UPSERT de inventario (cero rechazos falsos)')
+    _ok('UPSERT_PRODUCTO_VALUES_SQL' in inventario, 'UPDATE masivo por execute_values')
+    _ok('precio_usd = None' in inventario, 'precio/existencia opcionales (solo actualizar stock)')
+    _ok('Actualiza los productos existentes' in _leer('templates/comercio.html'), 'panel informa UPSERT')
+
     _ok((RAIZ / 'backend' / 'marca_logo.py').is_file(), 'respaldo visual por logo/monograma de marca')
     _ok(
         (RAIZ / 'backend' / 'fuentes_imagenes.py').is_file()

@@ -142,11 +142,15 @@ LOCALIS_IMG_BACKFILL_PRESUPUESTO=50
 LOCALIS_IMG_BACKFILL_INTERVALO=90
 ```
 
-## 5. Formatos soportados y rendimiento masivo
+## 5. Formatos soportados, parser ERP y UPSERT
 
-`backend/inventory_import.py` lee **CSV** (UTF-8, UTF-8 BOM, UTF-16, Latin-1/CP1252/ISO-8859-1), **XLSX** (openpyxl) y **XLS** (xlrd), con detección automática de columnas por sinónimos (incluye `marca` y `categoria`). Los CSV se leen con detección de delimitador (`,`, `;`, tab, `|`).
+`backend/inventory_import.py` lee **CSV** (UTF-8, UTF-8 BOM, UTF-16, Latin-1/CP1252/ISO-8859-1), **XLSX** (openpyxl) y **XLS** (xlrd). Los CSV se leen con detección de delimitador (`,`, `;`, tab, `|`).
 
-La inserción usa **`execute_values`** (multi-fila, lotes de 500) en lugar de `executemany` (que hacía un round-trip por fila): **2.000 productos pasaron de ~214 s a ~10 s** contra Supabase, sin bloquear la petición HTTP (responde `202`).
+**Parser de .xls heredados (ERP venezolanos):** `analizar_inventario` escanea las primeras 20 filas, detecta la fila de cabecera por palabras clave (`Código`, `Descripción`, `Costo`/`Precio`, `Existencia`/`Cantidad`, `Marca`, `Categoría`…) y mapea las columnas por **índice**, soportando reportes con preámbulo (membrete/empresa) y **encabezados desalineados** de las columnas de datos (p. ej. `Costo` en la columna 8 pero los valores en la 10). También ignora filas alternas vacías.
+
+**UPSERT (cero rechazos falsos):** una importación **no reemplaza** el inventario. Si el producto ya existe (por **código de barras** o por **nombre**), se actualizan sus campos (precio, existencia, descripción, imagen) y se insertan solo los nuevos. **El precio es opcional**: un reporte que solo trae existencias actualiza el stock y conserva el precio, sin rechazar el archivo. Verificado con el ERP real `ReporteGeneral.Xls` (225 productos): primera importación 225 nuevos; reimportación **225 actualizados, 0 nuevos**; actualización de stock/precio por lote aplicada en BD.
+
+La inserción/actualización usa **`execute_values`** (multi-fila, lotes de 500): **2.000 productos pasaron de ~214 s a ~10 s** contra Supabase, sin bloquear la petición HTTP (responde `202`).
 
 ## Qué no hace el sistema
 
