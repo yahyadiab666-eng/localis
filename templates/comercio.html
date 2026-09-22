@@ -84,7 +84,7 @@
           <div class="pt-3 flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-center md:justify-start gap-2 sm:gap-4 text-xs font-medium text-stone-500 border-t border-stone-100 panel-comercio-meta">
             <div class="flex items-center justify-center sm:justify-start gap-1.5">
               <i data-lucide="phone" class="text-amber-600 shrink-0" style="width:15px;height:15px;"></i>
-              <span>{{ comercio.telefono or 'No registrado' }}</span>
+              <span>{{ comercio.telefono or 'Número no disponible' }}</span>
             </div>
             <div class="flex items-center justify-center sm:justify-start gap-1.5">
               <i data-lucide="map-pin" class="text-amber-600 shrink-0" style="width:15px;height:15px;"></i>
@@ -137,6 +137,53 @@
       </div>
     </section>
 
+    {% if metricas is defined %}
+    <!-- Interacciones: interés real de los clientes -->
+    <section class="space-y-4">
+      <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+        <div>
+          <h3 class="font-display text-xl sm:text-2xl font-bold text-gray-900 flex items-center gap-2">
+            <i data-lucide="activity" class="text-amber-600" style="width:22px;height:22px;"></i> Interés de tus clientes
+          </h3>
+          <p class="text-stone-500 text-xs mt-0.5">Interacciones registradas en los últimos {{ metricas.dias }} días.</p>
+        </div>
+        <div class="text-right">
+          <span class="block text-3xl font-black text-amber-600 leading-none">{{ metricas.total }}</span>
+          <span class="text-[11px] font-semibold uppercase tracking-wider text-stone-400">interacciones</span>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+        {% for item in metricas.detalle %}
+        <div class="bg-white rounded-2xl border border-stone-200 p-4 text-center card-hover">
+          <span class="block text-2xl font-black text-stone-900">{{ item.total }}</span>
+          <span class="block text-[11px] font-semibold uppercase tracking-wider text-stone-500 mt-1">{{ item.etiqueta }}</span>
+        </div>
+        {% endfor %}
+      </div>
+
+      {% if metricas.productos_top %}
+      <div class="bg-white rounded-2xl border border-stone-200 p-5">
+        <h4 class="font-bold text-sm text-stone-900 mb-3 flex items-center gap-2">
+          <i data-lucide="trending-up" class="text-amber-600" style="width:16px;height:16px;"></i> Productos con más interés
+        </h4>
+        <ol class="space-y-2">
+          {% for p in metricas.productos_top %}
+          <li class="flex items-center justify-between gap-3 text-sm">
+            <span class="truncate text-stone-700">{{ loop.index }}. {{ p.nombre }}</span>
+            <span class="font-bold text-amber-600 shrink-0">{{ p.total }}</span>
+          </li>
+          {% endfor %}
+        </ol>
+      </div>
+      {% elif metricas.total == 0 %}
+      <p class="text-xs text-stone-400 bg-white rounded-2xl border border-dashed border-stone-200 p-4">
+        Aún no hay interacciones registradas. Comparte el enlace de tu tienda y verás aquí el interés real de tus clientes.
+      </p>
+      {% endif %}
+    </section>
+    {% endif %}
+
     <!-- Importador CSV -->
     <section class="bg-amber-500/10 border border-amber-200 rounded-2xl p-5 sm:p-6">
       <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-5">
@@ -167,9 +214,9 @@
       <div class="aviso-csv-imagenes" role="note">
         <i data-lucide="info" class="aviso-csv-imagenes-icono" aria-hidden="true"></i>
         <p>
-          <strong>Automático:</strong> buscamos y preparamos una foto profesional de estudio
-          (fondo blanco) para cada producto en segundo plano. Si alguna no queda perfecta,
-          puedes editarla o subir tu propia imagen cuando quieras.
+          <strong>Asociación automática de imágenes:</strong> buscamos y preparamos una foto
+          profesional de estudio (fondo blanco) para cada producto en segundo plano. Si alguna
+          no queda perfecta, puedes editarla o subir tu propia imagen cuando quieras.
         </p>
       </div>
     </section>

@@ -1190,16 +1190,35 @@ def _buscar_candidatos_impl(
             unicos[clave] = candidato
 
     puntuados = []
+    descartados_sector = {}
     fuentes_filtrables = (
         'bing-web', 'ddg-web', 'vtex', 'mercadolibre', 'serpapi', 'brave',
         'brave-og', 'bing-og', 'google-cse', 'bing-api',
     )
+    try:
+        from backend.politica_imagenes import evaluar_candidato_por_sector
+    except Exception:
+        evaluar_candidato_por_sector = None
+
     for candidato in unicos.values():
         fuente_base = (candidato.fuente or '').split(':')[0]
         if fuente_base in fuentes_filtrables and not _relevante_web(candidato, tokens):
             continue
+        if evaluar_candidato_por_sector is not None:
+            aceptado, motivo = evaluar_candidato_por_sector(
+                candidato, categoria=categoria, marca=marca
+            )
+            if not aceptado:
+                descartados_sector[motivo] = descartados_sector.get(motivo, 0) + 1
+                continue
         _puntuar(candidato, marca=marca)
         puntuados.append(candidato)
+
+    if descartados_sector:
+        _log(
+            f'política de sector categoria={categoria!r} descartados='
+            f'{descartados_sector}'
+        )
 
     puntuados.sort(key=lambda c: c.score, reverse=True)
     return puntuados[:limite]

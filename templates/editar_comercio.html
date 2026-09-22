@@ -41,6 +41,27 @@
                  class="w-full text-xs file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-stone-100 file:text-stone-800">
         </div>
 
+        {% set color_actual = (paleta_banner | selectattr('id', 'equalto', banner_color_actual) | list | first) %}
+        <div class="space-y-2 border-t border-stone-100 pt-4">
+          <label class="block text-xs font-bold uppercase text-stone-700">Color del banner</label>
+          <p class="text-[11px] text-stone-500">Personaliza el fondo detrás de tu logo. Solo colores de la paleta oficial.</p>
+          <div class="grid grid-cols-4 gap-2" id="paleta-banner" role="radiogroup" aria-label="Color del banner">
+            {% for color in paleta_banner %}
+              <button type="button" role="radio"
+                      class="paleta-color btn-touch h-11 rounded-xl border-2 transition {% if color.id == banner_color_actual %}border-stone-900 ring-2 ring-stone-900/10{% else %}border-transparent hover:border-stone-300{% endif %}"
+                      data-color-id="{{ color.id }}" data-color-hex="{{ color.hex }}"
+                      style="background: {{ color.hex }};"
+                      aria-checked="{{ 'true' if color.id == banner_color_actual else 'false' }}"
+                      title="{{ color.nombre }}" aria-label="{{ color.nombre }}"></button>
+            {% endfor %}
+          </div>
+          <input type="hidden" name="banner_color" id="banner_color" value="{{ banner_color_actual }}">
+          <div id="preview-banner" class="h-14 rounded-xl border border-stone-200 mt-1 flex items-center justify-center"
+               style="background: {{ color_actual.hex if color_actual else '#F59E0B' }};">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-white/90 mix-blend-luminosity">Vista previa del banner</span>
+          </div>
+        </div>
+
         <div>
           <label for="nombre" class="block text-xs font-bold uppercase text-stone-700 mb-1.5">Nombre</label>
           <input type="text" id="nombre" name="nombre" value="{{ comercio.nombre }}" required
@@ -48,8 +69,9 @@
         </div>
 
         <div>
-          <label for="telefono" class="block text-xs font-bold uppercase text-stone-700 mb-1.5">Teléfono</label>
+          <label for="telefono" class="block text-xs font-bold uppercase text-stone-700 mb-1.5">Teléfono / WhatsApp <span class="text-stone-400 normal-case font-normal">(opcional)</span></label>
           <input type="text" id="telefono" name="telefono" value="{{ comercio.telefono or '' }}"
+                 placeholder="Ej: 04141234567"
                  class="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:border-amber-500 outline-none">
         </div>
 
@@ -104,6 +126,28 @@
 
   <script>
     lucide.createIcons();
+
+    (function () {
+      const contenedor = document.getElementById('paleta-banner');
+      const input = document.getElementById('banner_color');
+      const preview = document.getElementById('preview-banner');
+      if (!contenedor || !input) return;
+      contenedor.addEventListener('click', function (evento) {
+        const boton = evento.target.closest('.paleta-color');
+        if (!boton) return;
+        input.value = boton.getAttribute('data-color-id');
+        if (preview) preview.style.background = boton.getAttribute('data-color-hex');
+        contenedor.querySelectorAll('.paleta-color').forEach(function (b) {
+          const activo = b === boton;
+          b.classList.toggle('border-stone-900', activo);
+          b.classList.toggle('ring-2', activo);
+          b.classList.toggle('ring-stone-900/10', activo);
+          b.classList.toggle('hover:border-stone-300', !activo);
+          b.setAttribute('aria-checked', activo ? 'true' : 'false');
+        });
+      });
+    })();
+
     document.getElementById('btn-ubicacion-actual')?.addEventListener('click', () => {
       if (!navigator.geolocation) {
         alert('Tu navegador no soporta geolocalización.');

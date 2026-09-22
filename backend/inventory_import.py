@@ -1232,17 +1232,29 @@ def _tuplas_insercion(comercio_id, lote, snapshot_imagenes=None, mapa_maestro=No
         estado = prod.get('imagen_estado')
         if not estado:
             estado = 'pendiente' if (not url or 'placeholder' in str(url).lower()) else 'real'
+        # Precio/stock son opcionales en inventarios ERP: un NULL explícito rompe
+        # la restricción NOT NULL de la BD. Se normaliza a 0.0 / 0 (cero rechazos).
+        precio = prod.get('precio_usd')
+        try:
+            precio = float(precio) if precio is not None else 0.0
+        except (TypeError, ValueError):
+            precio = 0.0
+        stock = prod.get('stock')
+        try:
+            stock = int(stock) if stock is not None else 0
+        except (TypeError, ValueError):
+            stock = 0
         tuplas.append(
             (
                 comercio_id,
                 prod['nombre'],
                 prod['descripcion'],
-                prod['precio_usd'],
+                precio,
                 prod['codigo_barras'],
                 url,
                 prod.get('imagen_fuente'),
                 estado,
-                prod['stock'],
+                stock,
             )
         )
     return tuplas

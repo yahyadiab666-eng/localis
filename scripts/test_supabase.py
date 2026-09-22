@@ -79,7 +79,7 @@ def _probar_listado_bucket() -> tuple[bool, str]:
         return False, str(error)
 
     try:
-        with httpx.Client(timeout=httpx.Timeout(connect=5.0, read=15.0)) as http:
+        with httpx.Client(timeout=httpx.Timeout(15.0, connect=5.0)) as http:
             respuesta = http.get(url, headers=headers)
     except Exception as error:
         return False, f'{type(error).__name__}: {error}'
@@ -201,12 +201,29 @@ def _probar_head_imagenes() -> tuple[bool, str]:
                 urls.append(url)
     if not urls:
         return False, 'no hay URLs para HEAD'
+
+    # Assets locales: se verifican en disco (no tienen sentido en HTTP).
+    from config import RUTA_RAIZ
+    from pathlib import Path
+
     fallos_head = []
+    remotas = []
+    locales = 0
+    for url in urls:
+        if str(url).startswith('/static/'):
+            locales += 1
+            rel = str(url)[len('/static/'):].split('?', 1)[0]
+            destino = Path(RUTA_RAIZ) / 'static' / Path(*[p for p in rel.split('/') if p])
+            if not (destino.is_file() and destino.stat().st_size > 0):
+                fallos_head.append(f'asset local faltante {url[:80]}')
+        elif str(url).startswith('http'):
+            remotas.append(url)
+
     with httpx.Client(
-        timeout=httpx.Timeout(connect=5.0, read=10.0, write=10.0, pool=5.0),
+        timeout=httpx.Timeout(10.0, connect=5.0),
         follow_redirects=True,
     ) as http:
-        for url in urls:
+        for url in remotas:
             try:
                 resp = http.head(url)
                 if resp.status_code >= 400:
@@ -217,7 +234,7 @@ def _probar_head_imagenes() -> tuple[bool, str]:
                 fallos_head.append(f'{type(error).__name__} {url[:80]}')
     if fallos_head:
         return False, f'{len(fallos_head)} URL(s) no responden: {fallos_head[:3]}'
-    return True, f'{len(urls)} URL(s) responden HTTP < 400'
+    return True, f'{locales} asset(s) local(es) en disco y {len(remotas)} URL(s) HTTP < 400'
 
 
 def _probar_integridad_sin_urls_quemadas() -> tuple[bool, str]:

@@ -42,6 +42,61 @@
     return input ? input.value : '';
   }
 
+  // ---------------------------------------------------------------------------
+  // Analítica de interés por comercio (beacon, no bloquea la navegación)
+  // ---------------------------------------------------------------------------
+  window.registrarInteraccion = function registrarInteraccion(comercioId, tipo, productoId) {
+    if (!comercioId || !tipo) return;
+    var cuerpo = JSON.stringify({ tipo: tipo, producto_id: productoId || null });
+    var url = '/api/comercio/' + encodeURIComponent(comercioId) + '/interaccion';
+    try {
+      if (navigator.sendBeacon) {
+        var blob = new Blob([cuerpo], { type: 'application/json' });
+        if (navigator.sendBeacon(url, blob)) return;
+      }
+    } catch (e) {
+      /* usa fetch como respaldo */
+    }
+    try {
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: cuerpo,
+        credentials: 'same-origin',
+        keepalive: true,
+      }).catch(function () {});
+    } catch (e) {
+      /* la analítica nunca debe romper la página */
+    }
+  };
+
+  function inicializarInteracciones() {
+    var auto = document.querySelector('[data-interaccion-auto]');
+    if (auto) {
+      window.registrarInteraccion(
+        auto.getAttribute('data-interaccion-comercio'),
+        auto.getAttribute('data-interaccion-auto') || 'visita_tienda',
+        null
+      );
+    }
+
+    document.addEventListener(
+      'click',
+      function (evento) {
+        var objetivo = evento.target;
+        if (!objetivo || !objetivo.closest) return;
+        var el = objetivo.closest('[data-interaccion]');
+        if (!el) return;
+        window.registrarInteraccion(
+          el.getAttribute('data-interaccion-comercio'),
+          el.getAttribute('data-interaccion'),
+          el.getAttribute('data-interaccion-producto')
+        );
+      },
+      true
+    );
+  }
+
   const TEXTO_CARGANDO_POR_DEFECTO = 'Procesando...';
 
   window.activarCargandoBoton = function activarCargandoBoton(boton, texto) {
@@ -551,5 +606,6 @@
     inicializarBusquedaProductosPanel();
     inicializarBotonesCargando();
     inicializarFormularioCsv();
+    inicializarInteracciones();
   });
 })();

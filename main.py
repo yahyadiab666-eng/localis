@@ -216,6 +216,13 @@ from backend.stores import (
     obtener_tasa_dolar,
     registrar_comercio_completo,
 )
+from backend.analytics import registrar_interaccion, resumen_interacciones, tipo_valido
+from backend.apariencia import (
+    color_banner,
+    gradiente_banner,
+    normalizar_color_banner,
+    opciones_banner,
+)
 
 print('[Localis] Creando aplicación Flask...', flush=True)
 
@@ -299,6 +306,7 @@ def _injectar_placeholders_imagen():
         'hero_local': DEFAULT_BANNER_URL,
         'default_banner': DEFAULT_BANNER_URL,
         'asset_v': 'catalogo-180',
+        'paleta_banner': opciones_banner(),
     }
 
 
@@ -660,6 +668,14 @@ def _peticion_acepta_json():
     return 'application/json' in acepta and 'text/html' not in acepta
 
 
+def _exento_csrf(funcion):
+    """Marca una ruta pública como exenta de CSRF (con fallback si csrf es None)."""
+    try:
+        return csrf.exempt(funcion)
+    except Exception:
+        return funcion
+
+
 @app.errorhandler(CSRFError)
 def error_csrf(e):
     flash(
@@ -821,12 +837,23 @@ def tienda_publica(comercio_id):
 
     comercio = _normalizar_imagenes_comercio(dict(comercio))
 
-    comercio['whatsapp_url'] = url_whatsapp_comercio(
-        comercio.get('telefono'),
-        'Hola, vi tu tienda en Localis',
+    telefono = (comercio.get('telefono') or '').strip()
+    color = color_banner(comercio.get('banner_color'))
+    comercio['telefono'] = telefono
+    comercio['telefono_disponible'] = bool(telefono)
+    comercio['whatsapp_url'] = (
+        url_whatsapp_comercio(telefono, 'Hola, vi tu tienda en Localis')
+        if telefono
+        else None
     )
-    comercio['whatsapp_numero'] = normalizar_telefono_whatsapp(comercio.get('telefono'))
+    comercio['whatsapp_numero'] = (
+        normalizar_telefono_whatsapp(telefono) if telefono else None
+    )
     comercio['maps_link'] = url_maps_comercio(comercio)
+    comercio['banner_color_id'] = color['id']
+    comercio['banner_color_hex'] = color['hex']
+    comercio['banner_color_texto'] = color['texto']
+    comercio['banner_gradiente'] = gradiente_banner(comercio.get('banner_color'))
 
     _debug_imagenes_antes_de_render(productos, 'tienda_publica')
     return render_template(
@@ -922,6 +949,41 @@ def logout():
     return redirect(url_for('index'))
 
 
+@app.route('/api/comercio/<int:comercio_id>/interaccion', methods=['POST'])
+@_exento_csrf
+def api_registrar_interaccion(comercio_id):
+    """Beacon público de interés (visitas y clics) ligado al comercio.
+
+    Respuesta 204 sin cuerpo: nunca bloquea ni rompe la navegación del cliente.
+    """
+    cuerpo = request.get_json(silent=True)
+    if not isinstance(cuerpo, dict):
+        cuerpo = request.form
+    tipo = cuerpo.get('tipo') if hasattr(cuerpo, 'get') else ''
+    producto_raw = cuerpo.get('producto_id') if hasattr(cuerpo, 'get') else None
+    origen = cuerpo.get('origen') if hasattr(cuerpo, 'get') else ''
+
+    if not tipo_valido(tipo):
+        return ('', 204)
+
+    producto_id = None
+    if producto_raw not in (None, '', 'null', 'None'):
+        try:
+            producto_id = int(producto_raw)
+        except (TypeError, ValueError):
+            producto_id = None
+
+    huella = f'{request.remote_addr}|{(request.headers.get("User-Agent") or "")[:40]}'
+    registrar_interaccion(
+        comercio_id,
+        tipo,
+        producto_id=producto_id,
+        origen=origen,
+        huella=huella,
+    )
+    return ('', 204)
+
+
 # ==========================================
 # RUTAS DE COMERCIO
 # ==========================================
@@ -1010,6 +1072,10 @@ def panel_comercio():
 
         plan_info = PLANES.get(comercio.get('plan_tipo', 'gratis'), PLANES['gratis'])
         avisos = obtener_avisos_suscripcion(comercio)
+        try:
+            metricas = resumen_interacciones(comercio['id'], dias=30)
+        except Exception:
+            metricas = {'total': 0, 'detalle': [], 'productos_top': [], 'disponible': False}
 
         _debug_imagenes_antes_de_render(productos, 'panel_comercio')
         return render_template(
@@ -1021,6 +1087,7 @@ def panel_comercio():
             whatsapp_url=WHATSAPP_SOPORTE_URL,
             plan_info=plan_info,
             avisos=avisos,
+            metricas=metricas,
             nav_activo='panel',
         )
     except psycopg2.Error:
@@ -1113,6 +1180,7 @@ def crear_comercio():
         zona = request.form.get('zona', '').strip()
         maps_url = request.form.get('maps_url', '').strip()
         documento_identidad = request.form.get('documento_identidad', '').strip()
+        banner_color = normalizar_color_banner(request.form.get('banner_color'))
         categoria_raw = request.form.get('categoria_id')
         if not categoria_raw or not str(categoria_raw).strip().isdigit():
             flash('Debes seleccionar una categoría válida.', 'error')
@@ -1140,6 +1208,7 @@ def crear_comercio():
             zona=zona or None,
             maps_url=maps_url or None,
             documento_identidad=documento_identidad or None,
+            banner_color=banner_color,
         )
 
         if exito:
@@ -1175,6 +1244,7 @@ def editar_comercio():
         ciudad = request.form.get('ciudad', '').strip()
         zona = request.form.get('zona', '').strip()
         maps_url = request.form.get('maps_url', '').strip()
+        banner_color = normalizar_color_banner(request.form.get('banner_color'))
         logo_archivo = request.files.get('logo')
 
         logo_url = None
@@ -1199,6 +1269,7 @@ def editar_comercio():
             zona=zona,
             maps_url=maps_url,
             logo_url=logo_url,
+            banner_color=banner_color,
         )
         flash(mensaje, 'exito' if exito else 'error')
         return redirect(url_for('panel_comercio'))
@@ -1206,6 +1277,7 @@ def editar_comercio():
     return render_template(
         'editar_comercio.html',
         comercio=_normalizar_imagenes_comercio(comercio),
+        banner_color_actual=normalizar_color_banner(comercio.get('banner_color')),
         nav_activo='editar',
     )
 

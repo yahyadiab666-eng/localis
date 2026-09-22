@@ -276,6 +276,17 @@ def _persistir_en_supabase(
     diferido=False,
 ):
     """Sube a Supabase Storage o lanza SupabaseUploadError; sin respaldo local."""
+    # Garantía central de compresión: ningún asset raster llega al bucket sin
+    # pasar por el pipeline de compresión (banners, logos, productos, pagos).
+    try:
+        from backend.images import normalizar_imagen_para_storage
+
+        data, filename, content_type = normalizar_imagen_para_storage(
+            data, filename, content_type, carpeta=carpeta
+        )
+    except Exception as error:
+        print(f'{LOG_PREFIX} compresión previa omitida: {type(error).__name__}: {error}')
+
     ruta_storage = f'{carpeta.strip("/")}/{filename}'
     if not clave_es_service_role(SUPABASE_SERVICE_ROLE_KEY):
         mensaje = _mensaje_cliente_no_configurado()

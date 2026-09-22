@@ -111,6 +111,9 @@
             <div class="card-hover card-producto-mobile rounded-xl overflow-hidden bg-white shadow flex flex-col justify-between h-full"
                  role="button" tabindex="0"
                  data-producto-id="{{ producto.id }}"
+                 data-interaccion="clic_producto"
+                 data-interaccion-comercio="{{ producto.comercio_id }}"
+                 data-interaccion-producto="{{ producto.id }}"
                  onclick="abrirModalProducto({{ producto.id }})"
                  onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();abrirModalProducto({{ producto.id }});}">
               {% set img_producto = producto|url_imagen_producto %}
@@ -165,7 +168,8 @@
             <span id="modal-precio-bs" class="text-xs text-gray-400 ml-2"></span>
           </div>
         </div>
-        <a id="modal-btn-tienda" href="#" class="btn-touch block w-full text-center py-3 rounded-full font-bold text-sm transition" style="background: rgb(245, 158, 11); color: rgb(26, 26, 26);">
+        <a id="modal-btn-tienda" href="#" data-interaccion="clic_tienda" data-interaccion-comercio=""
+           class="btn-touch block w-full text-center py-3 rounded-full font-bold text-sm transition" style="background: rgb(245, 158, 11); color: rgb(26, 26, 26);">
           Ir a la Tienda
         </a>
       </div>
@@ -219,6 +223,7 @@
         document.getElementById('modal-precio-usd').textContent = `$${Number(p.precio_usd).toFixed(2)}`;
         document.getElementById('modal-precio-bs').textContent = `${Number(p.precio_bs).toFixed(2)} Bs`;
         document.getElementById('modal-btn-tienda').href = `/tienda/${p.comercio_id}`;
+        document.getElementById('modal-btn-tienda').setAttribute('data-interaccion-comercio', p.comercio_id || '');
 
         document.getElementById('modal-producto').classList.add('activo');
         lucide.createIcons();

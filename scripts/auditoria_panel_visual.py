@@ -134,6 +134,33 @@ def _auditar_importacion_instantanea():
     _ok('def archivo_tarjeta_producto' in _leer('backend/marca_logo.py'), 'tarjeta limpia por producto')
     _ok('cobertura_visual' in _leer('backend/stores.py'), 'la importación valida la cobertura al cerrar')
 
+    # --- Mejoras de perfil: apariencia, analítica, teléfono y compresión ---
+    _ok(
+        (RAIZ / 'backend' / 'apariencia.py').is_file()
+        and 'PALETA_BANNER' in _leer('backend/apariencia.py'),
+        'paleta de banner controlada',
+    )
+    _ok('banner_color' in _leer('templates/editar_comercio.html'), 'selector de color de banner en ajustes')
+    _ok('banner_color' in _leer('database.py'), 'columna banner_color migrada')
+    _ok('def registrar_interaccion' in _leer('backend/analytics.py'), 'contador de interacciones por comercio')
+    _ok('/interaccion' in _leer('main.py'), 'endpoint beacon de interacción en main.py')
+    _ok('data-interaccion' in _leer('templates/tienda_publica.html'), 'la tienda registra el interés del cliente')
+    _ok('Número no disponible' in _leer('templates/tienda_publica.html'), 'fallback de teléfono opcional')
+    _ok(
+        'no tiene un número de teléfono asignado' in _leer('templates/tienda_publica.html'),
+        'modal de WhatsApp cuando no hay número',
+    )
+    registro_tel = next(
+        (l for l in _leer('templates/registro_comercio.html').splitlines() if 'name="telefono"' in l),
+        '',
+    )
+    _ok(bool(registro_tel) and 'required' not in registro_tel, 'teléfono opcional en el registro (sin required)')
+    _ok(
+        'normalizar_imagen_para_storage' in _leer('backend/supabase_storage.py'),
+        'compresión garantizada antes de Storage',
+    )
+    _ok((RAIZ / 'backend' / 'politica_imagenes.py').is_file(), 'política de imágenes por sector')
+
     pipeline_src = _leer('services/professional_image_pipeline.py')
     _ok('def _buscar_vtex' in pipeline_src, 'fuente VTEX (catálogo local directo)')
     _ok('def _buscar_mercadolibre' in pipeline_src, 'fuente Mercado Libre (API)')

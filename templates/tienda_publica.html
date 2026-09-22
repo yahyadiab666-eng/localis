@@ -42,7 +42,8 @@
     }
   </style>
 </head>
-<body class="min-h-screen" style="background: rgb(254, 251, 246);">
+<body class="min-h-screen" style="background: rgb(254, 251, 246);"
+      data-interaccion-auto="visita_tienda" data-interaccion-comercio="{{ comercio.id }}">
 
   <header class="bg-stone-900 text-white">
     <nav class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
@@ -59,7 +60,7 @@
         {% if comercio.banner_completo %}
           <img src="{{ comercio.banner_completo }}" alt="" class="w-full h-full object-cover" loading="lazy" decoding="async" onerror="this.onerror=null;this.style.display='none'">
         {% else %}
-          <div class="w-full h-full" style="background: linear-gradient(135deg, #f59e0b 0%, #ea580c 100%);"></div>
+          <div class="w-full h-full" style="background: {{ comercio.banner_gradiente }};"></div>
         {% endif %}
       </div>
       <div class="px-6 pb-6 -mt-12 relative">
@@ -78,26 +79,34 @@
         </div>
 
         <div class="mt-6 flex flex-wrap gap-3 text-sm">
-          {% if comercio.telefono and comercio.whatsapp_url %}
+          {% if comercio.telefono_disponible and comercio.whatsapp_url %}
             <a href="{{ comercio.whatsapp_url }}" target="_blank" rel="noopener"
+               data-interaccion="clic_whatsapp" data-interaccion-comercio="{{ comercio.id }}"
                class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500 text-white font-semibold hover:bg-emerald-400 transition">
               <i data-lucide="message-circle" style="width:16px;height:16px;"></i> WhatsApp
             </a>
-            <button type="button" onclick="copiarTelefono('{{ comercio.telefono }}')"
+            <button type="button" data-interaccion="clic_copiar" data-interaccion-comercio="{{ comercio.id }}"
+                    onclick="copiarTelefono('{{ comercio.telefono }}')"
                     class="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-stone-300 text-stone-700 font-semibold hover:bg-stone-50 transition">
               <i data-lucide="copy" style="width:16px;height:16px;"></i> Copiar número
             </button>
             <span class="flex items-center gap-1.5 text-stone-600 self-center">
               <i data-lucide="phone" style="width:16px;height:16px;"></i> {{ comercio.telefono }}
             </span>
-          {% elif comercio.telefono %}
-            <span class="flex items-center gap-1.5 text-stone-600">
-              <i data-lucide="phone" style="width:16px;height:16px;"></i> {{ comercio.telefono }}
+          {% else %}
+            <span class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-stone-100 text-stone-500 font-semibold"
+                  title="Este comercio no tiene un número de teléfono asignado">
+              <i data-lucide="phone-off" style="width:16px;height:16px;"></i> Número no disponible
             </span>
+            <button type="button" onclick="abrirModalSinTelefono()"
+                    class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/60 text-white font-semibold hover:bg-emerald-500 transition">
+              <i data-lucide="message-circle" style="width:16px;height:16px;"></i> WhatsApp
+            </button>
           {% endif %}
 
           {% if comercio.maps_link %}
             <a href="{{ comercio.maps_link }}" target="_blank" rel="noopener"
+               data-interaccion="clic_maps" data-interaccion-comercio="{{ comercio.id }}"
                class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500 text-stone-900 font-bold hover:bg-amber-400 transition btn-touch">
               <i data-lucide="map-pin" style="width:16px;height:16px;"></i> Cómo llegar / Ver en Google Maps
             </a>
@@ -131,7 +140,10 @@
     {% if productos %}
       <div class="grid grid-cols-2 md:grid-cols-4 gap-5 grid-productos-mobile">
         {% for producto in productos %}
-          <div class="card-hover card-producto-mobile rounded-xl overflow-hidden bg-white shadow border border-stone-100 flex flex-col h-full">
+          <div class="card-hover card-producto-mobile rounded-xl overflow-hidden bg-white shadow border border-stone-100 flex flex-col h-full cursor-pointer"
+               role="button" tabindex="0"
+               data-interaccion="clic_producto" data-interaccion-comercio="{{ comercio.id }}"
+               data-interaccion-producto="{{ producto.id }}">
             {% set img_producto = producto|url_imagen_producto %}
             {% set es_placeholder = (not img_producto) or (img_producto == placeholder_producto) %}
             <div class="localis-img-producto-wrap{% if es_placeholder %} localis-img-producto-wrap--vacio{% endif %}">
@@ -159,6 +171,20 @@
     {% endif %}
   </section>
 
+  <div id="modal-sin-telefono" class="hidden fixed inset-0 z-[200] items-center justify-center bg-black/60 p-4"
+       onclick="if(event.target===this)cerrarModalSinTelefono()">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-6 text-center shadow-2xl">
+      <div class="w-14 h-14 bg-amber-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+        <i data-lucide="phone-off" class="text-amber-600" style="width:28px;height:28px;"></i>
+      </div>
+      <h3 class="font-display text-xl font-bold text-gray-900">Sin número asignado</h3>
+      <p class="text-stone-600 text-sm mt-2">Este comercio no tiene un número de teléfono asignado.</p>
+      <button type="button" onclick="cerrarModalSinTelefono()"
+              class="btn-touch mt-4 w-full py-3 rounded-full font-bold text-sm"
+              style="background: rgb(245, 158, 11); color: rgb(26, 26, 26);">Entendido</button>
+    </div>
+  </div>
+
   <div id="toast-copiado" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 bg-stone-900 text-white text-sm px-4 py-2 rounded-full shadow-lg toast-copiado z-50">
     Número copiado al portapapeles
   </div>
@@ -173,6 +199,24 @@
         setTimeout(() => toast.classList.add('hidden'), 2000);
       });
     }
+
+    function abrirModalSinTelefono() {
+      const modal = document.getElementById('modal-sin-telefono');
+      if (!modal) return;
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function cerrarModalSinTelefono() {
+      const modal = document.getElementById('modal-sin-telefono');
+      if (!modal) return;
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    document.addEventListener('keydown', (evento) => {
+      if (evento.key === 'Escape') cerrarModalSinTelefono();
+    });
   </script>
   <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
   <script src="{{ url_for('static', filename='js/localis.js') }}"></script>

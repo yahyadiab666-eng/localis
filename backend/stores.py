@@ -174,6 +174,7 @@ def registrar_comercio_completo(
     zona=None,
     maps_url=None,
     documento_identidad=None,
+    banner_color=None,
 ):
     plan_gratis = obtener_plan_por_codigo(PLAN_GRATIS_CODIGO)
     plan_id = plan_gratis.get('id')
@@ -198,6 +199,13 @@ def registrar_comercio_completo(
     ubicacion_maps_url = datos_ubicacion['ubicacion_maps_url']
 
     try:
+        from backend.apariencia import normalizar_color_banner
+
+        color_banner = normalizar_color_banner(banner_color)
+    except Exception:
+        color_banner = 'ambar'
+
+    try:
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
 
@@ -214,10 +222,10 @@ def registrar_comercio_completo(
                     usuario_id, nombre, descripcion, telefono, direccion,
                     categoria_id, ciudad, zona, maps_url,
                     ubicacion_maps_url, documento_identidad, plan_id, plan_tipo,
-                    limite_productos, estado_pago, fecha_inicio_suscripcion,
-                    fecha_vencimiento
+                    limite_productos, estado_pago, banner_color,
+                    fecha_inicio_suscripcion, fecha_vencimiento
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo',
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?,
                         CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '30 days')
                 RETURNING id
                 """,
@@ -236,6 +244,7 @@ def registrar_comercio_completo(
                     plan_id,
                     PLAN_GRATIS_CODIGO,
                     limite,
+                    color_banner,
                 ),
             )
             fila_id = cursor.fetchone()
@@ -272,6 +281,7 @@ def actualizar_datos_comercio(
     maps_url=None,
     logo_url=None,
     banner_url=None,
+    banner_color=None,
 ):
     ok_ubicacion, datos_ubicacion = validar_ubicacion_comercio(
         direccion, ciudad=ciudad, zona=zona, maps_url=maps_url
@@ -319,6 +329,15 @@ def actualizar_datos_comercio(
                 extra, extra_vals = sql_set_imagenes(cursor, banner_url=banner_url)
                 campos.extend(extra)
                 valores.extend(extra_vals)
+
+            if banner_color is not None:
+                try:
+                    from backend.apariencia import normalizar_color_banner
+
+                    campos.append('banner_color = ?')
+                    valores.append(normalizar_color_banner(banner_color))
+                except Exception:
+                    pass
 
             valores.append(comercio_id)
             cursor.execute(

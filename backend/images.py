@@ -217,3 +217,68 @@ def comprimir_file_storage_a_bytes(
         formato=formato,
         lienzo_cuadrado=lienzo_cuadrado,
     )
+
+
+# Formatos que no se recomprimen: ya optimizados o vectoriales/animados.
+FORMATOS_OPTIMIZADOS = frozenset({'image/webp', 'image/svg+xml', 'image/gif'})
+
+# Lado máximo por tipo de asset (evita bloat en Storage).
+_MAX_POR_CARPETA = {
+    'productos': 800,
+    'comercios': 800,
+    'marcas': 600,
+    'genericos': 800,
+    'banners': 1920,
+    'pagos': 1920,
+}
+
+
+def _lado_por_carpeta(carpeta):
+    return _MAX_POR_CARPETA.get(str(carpeta or '').strip().lower(), MAX_DIMENSION)
+
+
+def normalizar_imagen_para_storage(
+    data,
+    filename,
+    content_type,
+    *,
+    carpeta='productos',
+    quality=QUALITY,
+):
+    """Garantiza que una imagen raster se suba **comprimida** a Supabase Storage.
+
+    Punto único de control previo al bucket: banners, logos de tienda, fotos de
+    producto y comprobantes pasan por aquí aunque su ruta ya comprima antes.
+
+    - WebP/SVG/GIF: se dejan intactos (idempotente, no reencodea).
+    - PNG/JPEG/BMP/TIFF: se reencodean a WebP con el lado máximo del asset.
+    - Si comprimir no reduce el tamaño, se conserva el original.
+
+    Retorna ``(data, filename, content_type)``.
+    """
+    if not data:
+        return data, filename, content_type
+    tipo = (content_type or '').lower()
+    if not tipo.startswith('image/') or tipo in FORMATOS_OPTIMIZADOS:
+        return data, filename, content_type
+
+    from pathlib import Path
+
+    prefijo = Path(str(filename or 'img')).stem or 'img'
+    try:
+        comprimido, nuevo_tipo, nuevo_nombre = comprimir_bytes_a_bytes(
+            data,
+            prefijo=prefijo,
+            max_dimension=_lado_por_carpeta(carpeta),
+            quality=quality,
+            formato='WEBP',
+            lienzo_cuadrado=(str(carpeta or '').strip().lower() == 'productos'),
+        )
+    except ImageProcessingError:
+        return data, filename, content_type
+    except Exception:
+        return data, filename, content_type
+
+    if not comprimido or len(comprimido) >= len(data):
+        return data, filename, content_type
+    return comprimido, nuevo_nombre, nuevo_tipo

@@ -108,6 +108,7 @@ TABLAS_PERMITIDAS = frozenset({
     'catalogo_maestro_imagenes',
     'product_image_overrides',
     'image_pipeline_log',
+    'interacciones_comercio',
 })
 
 # Columnas que deben existir en tablas ya creadas (ADD COLUMN IF NOT EXISTS).
@@ -159,6 +160,7 @@ COLUMNAS_ESQUEMA = {
         ('visible', 'INTEGER DEFAULT 1'),
         ('plan_pendiente', 'TEXT'),
         ('plan_id_pendiente', 'INTEGER'),
+        ('banner_color', "TEXT DEFAULT 'ambar'"),
     ],
     'sucursales': [
         ('comercio_id', 'INTEGER'),
@@ -244,6 +246,13 @@ COLUMNAS_ESQUEMA = {
         ('fecha_transferencia', 'TEXT'),
         ('estado', "TEXT DEFAULT 'pendiente'"),
         ('fecha_registro', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+    ],
+    'interacciones_comercio': [
+        ('comercio_id', 'INTEGER'),
+        ('producto_id', 'INTEGER'),
+        ('tipo', 'TEXT'),
+        ('origen', 'TEXT'),
+        ('fecha', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
     ],
 }
 
@@ -1023,7 +1032,8 @@ def _crear_tabla_comercios(cursor):
             fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             aviso_bienvenida_visto INTEGER DEFAULT 0,
             imagen_portada TEXT,
-            visible INTEGER DEFAULT 1
+            visible INTEGER DEFAULT 1,
+            banner_color TEXT DEFAULT 'ambar'
         )
         """
     )
@@ -1201,6 +1211,21 @@ def _crear_tabla_solicitudes_pago(cursor):
     )
 
 
+def _crear_tabla_interacciones_comercio(cursor):
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS interacciones_comercio (
+            id SERIAL PRIMARY KEY,
+            comercio_id INTEGER NOT NULL REFERENCES comercios(id) ON DELETE CASCADE,
+            producto_id INTEGER REFERENCES productos(id) ON DELETE SET NULL,
+            tipo TEXT NOT NULL,
+            origen TEXT,
+            fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
 def _crear_tablas(cursor):
     """Crea tablas faltantes. No reejecuta CREATE TABLE si ya existen (AccessExclusiveLock)."""
     pares = (
@@ -1219,6 +1244,7 @@ def _crear_tablas(cursor):
         ('intentos_login', _crear_tabla_intentos_login),
         ('pagos', _crear_tabla_pagos),
         ('solicitudes_pago', _crear_tabla_solicitudes_pago),
+        ('interacciones_comercio', _crear_tabla_interacciones_comercio),
     )
     for nombre, fn in pares:
         if _tabla_existe(cursor, nombre):
@@ -1377,6 +1403,8 @@ def _crear_indices(cursor):
         'CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_comercio ON solicitudes_pago(comercio_id)',
         'CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_referencia ON solicitudes_pago(referencia)',
         'CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_estado ON solicitudes_pago(estado)',
+        'CREATE INDEX IF NOT EXISTS idx_interacciones_comercio_fecha ON interacciones_comercio(comercio_id, fecha DESC)',
+        'CREATE INDEX IF NOT EXISTS idx_interacciones_comercio_producto ON interacciones_comercio(producto_id)',
     ]
     for ddl in indices:
         _ejecutar_indice_si_falta(cursor, ddl)

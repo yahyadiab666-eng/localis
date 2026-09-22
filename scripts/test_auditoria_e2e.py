@@ -534,15 +534,24 @@ def _probar_csv(cliente, usuario_id, comercio_id, errores):
     _ok('/comercio' in (bueno.headers.get('Location') or ''), 'CSV valido redirige', errores)
 
     from backend.db import get_db_connection
+    import time as _time
 
-    with get_db_connection() as conexion:
-        cursor = conexion.cursor()
-        cursor.execute(
-            'SELECT COUNT(*) FROM productos WHERE comercio_id = ? AND nombre LIKE ?',
-            (int(comercio_id), PREFIJO + '%'),
-        )
-        fila = cursor.fetchone()
-        total = fila['count'] if isinstance(fila, dict) else fila[0]
+    # La importación es asíncrona (HTTP 202/redirect): se espera a que el worker
+    # en segundo plano termine antes de contar (evita falsos negativos por carrera).
+    total = 0
+    limite = _time.monotonic() + 30
+    while _time.monotonic() < limite:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                'SELECT COUNT(*) FROM productos WHERE comercio_id = ? AND nombre LIKE ?',
+                (int(comercio_id), PREFIJO + '%'),
+            )
+            fila = cursor.fetchone()
+            total = fila['count'] if isinstance(fila, dict) else fila[0]
+        if int(total) >= 2:
+            break
+        _time.sleep(1.5)
     _ok(int(total) >= 2, f'CSV dejo al menos 2 productos sandbox (hay {total})', errores)
 
     panel, _ = _hit(
