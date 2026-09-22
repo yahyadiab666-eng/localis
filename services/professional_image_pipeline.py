@@ -56,7 +56,7 @@ import re
 import threading
 import time
 import unicodedata
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
@@ -1988,15 +1988,40 @@ def procesar_inventario(comercio_id, limite=None, presupuesto_seg=None):
             return False
 
     # Búsqueda/descarga en paralelo (I/O); rembg queda serializado por semáforo.
+    # Encolado acotado: nunca se registran los 2.000 productos de golpe, así el
+    # presupuesto del ciclo se respeta de verdad (solo quedan en vuelo <= workers).
     trabajadores = min(max(1, _IMG_TRABAJADORES), len(seleccion))
-    with ThreadPoolExecutor(max_workers=trabajadores) as ejecutor:
-        futuros = [ejecutor.submit(_una, producto) for producto in seleccion]
-        for futuro in as_completed(futuros):
-            try:
-                if futuro.result():
-                    actualizados += 1
-            except Exception:
-                continue
+    cola = list(seleccion)
+    ejecutor = ThreadPoolExecutor(max_workers=trabajadores)
+    en_vuelo = set()
+    try:
+        while True:
+            while (
+                len(en_vuelo) < trabajadores
+                and cola
+                and (time.monotonic() - inicio) <= presupuesto
+            ):
+                en_vuelo.add(ejecutor.submit(_una, cola.pop(0)))
+            if not en_vuelo:
+                break
+            restante = presupuesto - (time.monotonic() - inicio)
+            if restante <= 0:
+                break
+            hechos, en_vuelo = wait(
+                en_vuelo,
+                timeout=min(restante, 5.0),
+                return_when=FIRST_COMPLETED,
+            )
+            for futuro in hechos:
+                try:
+                    if futuro.result():
+                        actualizados += 1
+                except Exception:
+                    continue
+    finally:
+        for futuro in en_vuelo:
+            futuro.cancel()
+        ejecutor.shutdown(wait=False, cancel_futures=True)
 
     _log(
         f'inventario comercio={comercio_id} actualizados={actualizados}/'
