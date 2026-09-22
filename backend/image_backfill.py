@@ -34,9 +34,15 @@ _LOTE = max(1, _env_int('LOCALIS_IMG_BACKFILL_LOTE', 20))
 _COMERCIOS = max(1, _env_int('LOCALIS_IMG_BACKFILL_COMERCIOS', 2))
 _PRESUPUESTO = max(10, _env_int('LOCALIS_IMG_BACKFILL_PRESUPUESTO', 50))
 _INTERVALO = max(30, _env_int('LOCALIS_IMG_BACKFILL_INTERVALO', 90))
+_REPARAR = str(os.getenv('LOCALIS_IMG_REPARAR', '1')).strip().lower() not in (
+    '0', 'false', 'no', 'off',
+)
+_REPARAR_INTERVALO = max(600, _env_int('LOCALIS_IMG_REPARAR_INTERVALO', 1800))
+_REPARAR_LOTE = max(50, _env_int('LOCALIS_IMG_REPARAR_LOTE', 400))
 
 _iniciado = False
 _lock = threading.Lock()
+_ultima_reparacion = 0.0
 
 
 def _habilitado():
@@ -74,12 +80,37 @@ def _comercios_con_pendientes(limite):
     return comercios
 
 
+def _reparar_si_toca(forzar=False):
+    """Repara (throttled) imágenes 'reales' cuyo asset ya no existe."""
+    global _ultima_reparacion
+    if not _REPARAR:
+        return 0
+    ahora = time.monotonic()
+    if not forzar and (ahora - _ultima_reparacion) < _REPARAR_INTERVALO:
+        return 0
+    _ultima_reparacion = ahora
+    try:
+        from backend.cobertura_visual import reparar_imagenes_rotas
+
+        resultado = reparar_imagenes_rotas(limite=_REPARAR_LOTE)
+    except Exception as error:
+        print(f'{_LOG} reparación fallo: {type(error).__name__}: {error}')
+        return 0
+    if resultado.get('reparadas'):
+        print(
+            f'{_LOG} incoherencias reparadas: {resultado["reparadas"]}/'
+            f'{resultado["revisadas"]} imágenes rotas re-cubiertas'
+        )
+    return int(resultado.get('reparadas') or 0)
+
+
 def ejecutar_ciclo():
     """Procesa un lote acotado de pendientes. Retorna cuántos comercios atendió."""
     from services.professional_image_pipeline import pipeline_habilitado, procesar_inventario
 
     if not pipeline_habilitado():
         return 0
+    _reparar_si_toca()
     atendidos = 0
     for comercio_id in _comercios_con_pendientes(_COMERCIOS):
         try:
@@ -95,6 +126,7 @@ def ejecutar_ciclo():
 
 
 def _bucle():
+    _reparar_si_toca(forzar=True)
     while True:
         time.sleep(_INTERVALO)
         try:

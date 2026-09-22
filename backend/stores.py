@@ -1026,6 +1026,35 @@ def procesar_csv_productos(comercio_id, archivo_csv):
             f'logos={meta_imagenes["imagenes_logos"]} '
             f'pendientes={meta_imagenes["imagenes_pendientes"]}'
         )
+
+        # Validación dura de cobertura visual: TODO producto debe tener una
+        # imagen utilizable y su asset debe existir. Si baja de 100%, se
+        # reporta explícitamente (nunca se declara éxito silencioso).
+        try:
+            from backend.cobertura_visual import auditar_comercio
+
+            auditoria = auditar_comercio(comercio_id, verificar_storage=False)
+            cobertura_ok = auditoria.porcentaje >= 1.0 and not auditoria.problemas
+            meta_imagenes['cobertura_visual'] = {
+                'ok': cobertura_ok,
+                'con_imagen': auditoria.con_imagen,
+                'total': auditoria.total,
+                'porcentaje': round(auditoria.porcentaje, 4),
+            }
+            if not cobertura_ok:
+                meta_imagenes['cobertura_visual']['problemas'] = auditoria.problemas[:10]
+                meta_imagenes['estado_imagenes'] = 'cobertura_incompleta'
+                print(
+                    f'{CSV_LOG} ERROR cobertura_visual comercio={comercio_id} '
+                    f'{auditoria.resumen()} problemas={auditoria.problemas[:5]}'
+                )
+                mensaje = '⚠ Cobertura visual incompleta. ' + mensaje
+        except Exception as exc_cob:
+            print(
+                f'{CSV_LOG} aviso etapa=cobertura_visual '
+                f'{type(exc_cob).__name__}: {exc_cob}'
+            )
+
         return True, recortar_mensaje_importacion(mensaje), meta_imagenes
 
     except Exception as exc:

@@ -853,23 +853,26 @@ def _migrar_columnas(cursor):
 def _reconciliar_estados_imagenes(cursor):
     """Alinea ``imagen_estado`` con la URL persistida (idempotente).
 
-    - Storage/local (foto real)          -> 'real'
-    - vacío / placeholder / URL externa  -> 'pendiente'
+    - Storage / ``/static/uploads/productos/`` (foto real) -> 'real'
+    - ``/static/uploads/marcas/`` (logo/monograma)          -> 'logo'
+    - vacío / placeholder de categoría                      -> 'pendiente'
 
-    Corrige filas importadas antes de existir la columna, evitando reportar
-    como 'pendiente' fotos que en realidad son reales (y viceversa).
+    Corrige filas importadas antes de existir la columna y evita reportar como
+    'real' un monograma (falso positivo de cobertura).
     """
+    clasificacion = (
+        "CASE "
+        "WHEN imagen_url LIKE '/static/uploads/marcas/%' THEN 'logo' "
+        "WHEN imagen_url LIKE '%/storage/v1/object/public/%' "
+        "     OR imagen_url LIKE '/static/uploads/productos/%' THEN 'real' "
+        "ELSE 'pendiente' END"
+    )
     try:
-        condicion = (
-            "imagen_url LIKE '%/storage/v1/object/public/%' "
-            "OR imagen_url LIKE '/static/uploads/%'"
-        )
         cursor.execute(
             f"""
             UPDATE productos
-            SET imagen_estado = CASE WHEN {condicion} THEN 'real' ELSE 'pendiente' END
-            WHERE imagen_estado IS DISTINCT FROM
-                  CASE WHEN {condicion} THEN 'real' ELSE 'pendiente' END
+            SET imagen_estado = {clasificacion}
+            WHERE imagen_estado IS DISTINCT FROM {clasificacion}
             """
         )
         n = cursor.rowcount

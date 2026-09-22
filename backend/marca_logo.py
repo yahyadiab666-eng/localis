@@ -210,6 +210,30 @@ def archivo_monograma_local(marca):
     return f'/static/uploads/marcas/{nombre}'
 
 
+_MONO_CACHE = 'marca_monograma_v1'
+
+
+def logo_monograma_durable(marca):
+    """Monograma **durable**: se sube a Storage (o local) y se cachea por marca.
+
+    Evita que las tarjetas queden rotas tras un redespliegue (disco efímero).
+    """
+    def _generar():
+        try:
+            data = monograma_png(marca)
+        except Exception:
+            return archivo_monograma_local(marca)
+        subido = _subir(data, f'marca_{slug_marca(marca)}.png', 'image/png')
+        return subido or archivo_monograma_local(marca)
+
+    try:
+        return get_or_load(
+            f'{_MONO_CACHE}:{_normalizar(marca)}', _generar, ttl_seconds=_TTL_SEG
+        )
+    except Exception:
+        return _generar()
+
+
 def _descargar(url, timeout=10.0):
     import requests
 
@@ -408,7 +432,7 @@ def _resolver(marca, permitir_red=True):
         url = logo_favicon(marca)
         if url:
             return url, 'logo_favicon'
-    local = archivo_monograma_local(marca)
+    local = logo_monograma_durable(marca)
     if local:
         return local, 'logo_monograma'
     return None, None
@@ -434,3 +458,96 @@ def logo_instantaneo(marca):
         return local
     except Exception:
         return None
+
+
+def tarjeta_producto_png(nombre, categoria=None):
+    """Tarjeta limpia (fondo blanco) con el nombre del producto.
+
+    Placeholder profesional y **distinto por producto** para el último recurso
+    (evita el 'sin imagen' genérico y da identidad visual a toda la tarjeta).
+    """
+    from PIL import Image, ImageDraw
+
+    nombre = str(nombre or 'Producto').strip() or 'Producto'
+    categoria_txt = str(categoria or '').strip()
+    lado = _LADO
+    img = Image.new('RGB', (lado, lado), _BLANCO)
+    dibujo = ImageDraw.Draw(img)
+    dibujo.rectangle([0, 0, lado - 1, lado - 1], outline=(241, 240, 237), width=3)
+    dibujo.rectangle([0, 0, lado, 14], fill=_AMARILLO)
+
+    # Icono de caja (marca visual limpia).
+    dibujo.rounded_rectangle(
+        [lado * 0.34, lado * 0.20, lado * 0.66, lado * 0.46],
+        radius=18, outline=(245, 158, 11), width=8,
+    )
+    dibujo.line([lado * 0.34, lado * 0.30, lado * 0.66, lado * 0.30], fill=(245, 158, 11), width=8)
+
+    if categoria_txt:
+        fuente_cat = _fuente(26)
+        caja = dibujo.textbbox((0, 0), categoria_txt[:24], font=fuente_cat)
+        dibujo.text(
+            (lado / 2 - (caja[2] - caja[0]) / 2 - caja[0], lado * 0.50),
+            categoria_txt[:24], font=fuente_cat, fill=(168, 162, 158),
+        )
+
+    # Nombre con salto de línea simple (hasta 3 líneas).
+    fuente = _fuente(40)
+    palabras = nombre.split()
+    lineas = []
+    actual = ''
+    for palabra in palabras:
+        prueba = f'{actual} {palabra}'.strip()
+        caja = dibujo.textbbox((0, 0), prueba, font=fuente)
+        if caja[2] - caja[0] > lado * 0.78 and actual:
+            lineas.append(actual)
+            actual = palabra
+        else:
+            actual = prueba
+    if actual:
+        lineas.append(actual)
+    lineas = lineas[:3]
+    y = lado * 0.60
+    for linea in lineas:
+        caja = dibujo.textbbox((0, 0), linea, font=fuente)
+        dibujo.text(
+            (lado / 2 - (caja[2] - caja[0]) / 2 - caja[0], y),
+            linea, font=fuente, fill=(68, 64, 60),
+        )
+        y += (caja[3] - caja[1]) + 14
+
+    buffer = io.BytesIO()
+    img.save(buffer, 'PNG', optimize=True)
+    return buffer.getvalue()
+
+
+def archivo_tarjeta_producto(nombre, categoria=None):
+    """Genera (una vez, cacheada) y devuelve la URL de la tarjeta del producto."""
+    import hashlib
+
+    clave = hashlib.sha1(
+        f'{_normalizar(nombre)}|{_normalizar(categoria)}'.encode('utf-8', 'ignore')
+    ).hexdigest()[:14]
+    filename = f'producto_{clave}.png'
+
+    def _generar():
+        try:
+            data = tarjeta_producto_png(nombre, categoria)
+        except Exception:
+            return None
+        subido = _subir(data, filename, 'image/png')
+        if subido:
+            return subido
+        try:
+            from backend.uploads_locales import guardar_bytes_upload
+
+            return guardar_bytes_upload(data, filename, carpeta='genericos')
+        except Exception:
+            return None
+
+    try:
+        return get_or_load(
+            f'tarjeta_producto_v1:{clave}', _generar, ttl_seconds=_TTL_SEG
+        )
+    except Exception:
+        return _generar()

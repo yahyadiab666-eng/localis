@@ -1836,18 +1836,39 @@ def procesar_producto(
             except Exception as error:
                 _log(f'producto={producto_id} logo no aplicado: {type(error).__name__}: {error}')
 
-        # Sin marca conocida: placeholder limpio de categoría (pendiente).
-        if imagen_para_categoria is not None:
-            try:
-                fila = _leer_producto(producto_id) or {}
-                actual = str(fila.get('imagen_url') or '').strip()
-                if not actual:
+        # Sin marca conocida: tarjeta limpia y **distinta por producto** (pendiente).
+        # Sustituye al placeholder genérico de categoría para que ninguna tarjeta
+        # quede con un recurso vacío/impersonal; sigue reintentable para foto real.
+        try:
+            fila = _leer_producto(producto_id) or {}
+            actual = str(fila.get('imagen_url') or '').strip().lower()
+            reemplazable = (
+                not actual
+                or 'placeholder' in actual
+                or actual.startswith('/static/img/')
+            )
+            if reemplazable:
+                tarjeta = None
+                try:
+                    from backend.marca_logo import archivo_tarjeta_producto
+
+                    tarjeta = archivo_tarjeta_producto(nombre, categoria_efectiva)
+                except Exception as error:
+                    _log(
+                        f'producto={producto_id} tarjeta no generada: '
+                        f'{type(error).__name__}'
+                    )
+                if tarjeta:
+                    _actualizar_imagen(
+                        producto_id, tarjeta, 'tarjeta_producto', estado='pendiente'
+                    )
+                elif imagen_para_categoria is not None:
                     fallback = imagen_para_categoria(categoria_efectiva or 'otros')
                     _actualizar_imagen(
                         producto_id, fallback, 'placeholder_categoria', estado='pendiente'
                     )
-            except Exception as error:
-                _log(f'producto={producto_id} fallback no aplicado: {type(error).__name__}: {error}')
+        except Exception as error:
+            _log(f'producto={producto_id} fallback no aplicado: {type(error).__name__}: {error}')
 
         # Si hubo candidatas y todas se rechazaron, marcar 'rechazada' para
         # reintento con estrategia ampliada más adelante.
