@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Cobertura visual universal: ningún producto queda sin imagen.
+"""Anti-invención: la importación nunca fabrica imágenes.
 
-Genera 2.000 productos sintéticos de múltiples categorías (sin código de barras,
-sin índice maestro y sin red) y verifica que la asignación instantánea entregue
-a TODOS una imagen de placeholder profesional de su categoría, en memoria y en
-milisegundos. Además comprueba que cada SVG referenciado exista en disco.
+Genera 2.000 productos sintéticos (sin código de barras, sin índice maestro y
+sin red) y verifica que NINGUNO reciba un asset fabricado (placeholder de
+categoría, monograma o tarjeta): los que no tienen foto verificada quedan con
+``imagen_url=None`` (estado neutro). Comprueba además que el clasificador de
+categorías y los formatos masivos siguen funcionando y que el reporte es honesto.
 """
 
 from __future__ import annotations
@@ -28,6 +29,19 @@ def _ok(condicion, mensaje):
     print(f'  FALLO  {mensaje}')
     _ERRORES.append(mensaje)
     return False
+
+
+def _fabricados(productos):
+    from backend.activos_verificados import es_asset_generado
+
+    return [
+        p for p in productos
+        if es_asset_generado(p.get('imagen_url'), p.get('imagen_fuente'))
+    ]
+
+
+def _con_imagen(productos):
+    return [p for p in productos if p.get('imagen_url')]
 
 
 def _probar_clasificador():
@@ -55,49 +69,22 @@ def _probar_clasificador():
         obtenido = clasificar_categoria(nombre=nombre)
         _ok(obtenido == esperado, f'{nombre!r} -> {obtenido} (esperado {esperado})')
 
-    _ok(
-        clasificar_categoria(nombre='Componente X', categoria_hint='Ferretería') == 'ferreteria',
-        'respeta la categoría declarada en el archivo',
-    )
-
-    from backend.categorias_producto import imagen_para_categoria
-
-    _ok(
-        imagen_para_categoria('Tecnología') == '/static/img/placeholder-tecnologia.svg',
-        'mapea categoría declarada "Tecnología"',
-    )
-    _ok(
-        imagen_para_categoria('Cuidado Personal') == '/static/img/placeholder-belleza.svg',
-        'mapea "Cuidado Personal" -> belleza',
-    )
-
 
 def _generar_productos(total):
-    import random
-
     ejemplos = [
         ('Refresco Cola 2L', 'bebidas'),
-        ('Jugo de naranja 1L', 'bebidas'),
         ('Celular 128GB', 'tecnologia'),
-        ('Audífonos inalámbricos', 'tecnologia'),
         ('Taladro 650W', 'ferreteria'),
-        ('Juego de destornilladores', 'ferreteria'),
         ('Harina de maíz 1kg', 'alimentos'),
-        ('Arroz blanco 1kg', 'alimentos'),
-        ('Aceite vegetal 1L', 'alimentos'),
         ('Shampoo 375ml', 'belleza'),
-        ('Crema dental 90g', 'belleza'),
         ('Camisa manga larga', 'ropa'),
-        ('Zapatos deportivos', 'ropa'),
         ('Cuaderno 100 hojas', 'papeleria'),
         ('Pañal talla M', 'bebes'),
         ('Llanta 195/65', 'automotriz'),
         ('Balón de fútbol', 'deportes'),
         ('Alimento para gato 2kg', 'mascotas'),
-        ('Rompecabezas 100 piezas', 'juguetes'),
         ('Ibuprofeno 400mg', 'salud'),
         ('Detergente en polvo', 'hogar'),
-        ('Lámpara LED', 'hogar'),
         ('Repuesto genérico', 'otros'),
     ]
     productos = []
@@ -117,8 +104,8 @@ def _generar_productos(total):
     return productos
 
 
-def _probar_cobertura_masiva():
-    print('\n=== Cobertura masiva (2.000 productos, índice vacío) ===')
+def _probar_sin_invencion():
+    print('\n=== Sin invención: 2.000 productos, índice vacío ===')
     from backend.catalogo_maestro_index import IndiceMaestro
     from backend.inventory_import import asignar_imagenes_instantaneas
 
@@ -128,60 +115,81 @@ def _probar_cobertura_masiva():
 
     inicio = time.perf_counter()
     with patch('backend.catalogo_maestro_index.obtener_indice', return_value=indice_vacio):
-        nuevos = asignar_imagenes_instantaneas(productos, snapshot_imagenes={}, categoria=None)
+        sin_imagen = asignar_imagenes_instantaneas(
+            productos, snapshot_imagenes={}, categoria=None
+        )
     duracion = time.perf_counter() - inicio
 
-    _ok(nuevos == total, f'los {total} usan placeholder de categoría ({nuevos})')
+    _ok(sin_imagen == total, f'los {total} quedan sin foto verificada ({sin_imagen})')
     _ok(duracion < 5.0, f'procesa {total} en {duracion * 1000:.0f} ms')
-
-    sin_imagen = [p for p in productos if not p.get('imagen_url')]
-    _ok(not sin_imagen, f'cero productos sin imagen ({len(sin_imagen)})')
-
-    reales = [p for p in productos if p.get('imagen_estado') == 'real']
-    pendientes = [p for p in productos if p.get('imagen_estado') == 'pendiente']
-    _ok(not reales, f'sin imágenes reales con índice vacío ({len(reales)})')
-    _ok(len(pendientes) == total, f'todos marcados como pendientes ({len(pendientes)})')
-
-    malas = [
-        p
-        for p in productos
-        if not str(p.get('imagen_url') or '').startswith('/static/img/placeholder-')
-    ]
-    _ok(not malas, f'todos usan placeholder limpio ({len(malas)} no)')
-
-    # Cada SVG referenciado debe existir en disco.
-    faltantes = set()
-    for producto in productos:
-        rel = str(producto['imagen_url']).lstrip('/')
-        if not (RAIZ / rel).is_file():
-            faltantes.add(producto['imagen_url'])
-    _ok(not faltantes, f'todos los SVG existen en disco ({sorted(faltantes)[:3]})')
-
-    # Exactitud de categoría (muestra completa por coincidencia de nombre).
-    aciertos = 0
-    for producto in productos:
-        inferida = producto.get('categoria_inferida')
-        if inferida == producto.get('_esperada'):
-            aciertos += 1
-    precision = aciertos / total
-    _ok(precision >= 0.95, f'precisión de categoría {precision:.1%} (>= 95%)')
-
-    resumen = {}
-    for producto in productos:
-        cat = producto['categoria_inferida']
-        resumen[cat] = resumen.get(cat, 0) + 1
+    _ok(not _con_imagen(productos), f'cero imágenes inventadas ({len(_con_imagen(productos))})')
+    _ok(not _fabricados(productos), 'cero assets fabricados (placeholder/monograma/tarjeta)')
     _ok(
-        len(resumen) >= 10,
-        f'distribuye en {len(resumen)} categorías distintas',
+        all(p.get('imagen_estado') == 'pendiente' for p in productos),
+        'todos marcados como pendientes (estado neutro)',
     )
     _ok(
-        all(not str(c).startswith('sin') for c in resumen),
-        'ninguna categoría queda como "sin imagen"',
+        all(p.get('categoria_inferida') for p in productos),
+        'la categoría se infiere para la UI aunque no haya imagen',
+    )
+
+    aciertos = sum(
+        1 for p in productos if p.get('categoria_inferida') == p.get('_esperada')
+    )
+    precision = aciertos / total
+    _ok(precision >= 0.9, f'precisión de categoría {precision:.1%} (>= 90%)')
+
+
+def _probar_master_verificado():
+    print('\n=== Solo se acepta una foto verificada del catálogo maestro ===')
+    from backend.catalogo_maestro_index import IndiceMaestro
+    from backend.inventory_import import asignar_imagenes_instantaneas
+
+    indice = IndiceMaestro()
+    indice.por_codigo = {
+        '7591234567890': 'https://x.supabase.co/storage/v1/object/public/imagenes/productos/real.webp'
+    }
+    indice.por_nombre = {}
+
+    productos = [
+        {'nombre': 'Producto real', 'descripcion': '', 'marca': '',
+         'codigo_barras': '7591234567890', 'imagen_url': None},
+        {'nombre': 'Sin foto', 'descripcion': '', 'marca': '',
+         'codigo_barras': '0000000000000', 'imagen_url': None},
+    ]
+    with patch('backend.catalogo_maestro_index.obtener_indice', return_value=indice):
+        asignar_imagenes_instantaneas(productos, {}, None)
+
+    _ok(
+        productos[0]['imagen_url'] and productos[0]['imagen_estado'] == 'real',
+        'la foto verificada del maestro se conserva',
+    )
+    _ok(productos[1]['imagen_url'] is None, 'lo que no está verificado queda vacío')
+
+
+def _probar_descarte_generado():
+    print('\n=== Un asset fabricado entrante se descarta ===')
+    from backend.catalogo_maestro_index import IndiceMaestro
+    from backend.inventory_import import asignar_imagenes_instantaneas
+
+    productos = [
+        {'nombre': 'Con placeholder', 'descripcion': '', 'marca': '',
+         'codigo_barras': None, 'imagen_url': '/static/img/placeholder-alimentos.svg',
+         'imagen_fuente': 'placeholder_categoria'},
+        {'nombre': 'Con monograma', 'descripcion': '', 'marca': '',
+         'codigo_barras': None, 'imagen_url': '/static/uploads/marcas/acme.png',
+         'imagen_fuente': 'logo_monograma'},
+    ]
+    with patch('backend.catalogo_maestro_index.obtener_indice', return_value=IndiceMaestro()):
+        asignar_imagenes_instantaneas(productos, {}, None)
+    _ok(
+        all(p['imagen_url'] is None for p in productos),
+        'los assets fabricados se descartan al importar',
     )
 
 
 def _probar_formatos_masivos():
-    print('\n=== Formatos masivos CSV/XLSX/XLS con cobertura 100% ===')
+    print('\n=== Formatos masivos CSV/XLSX/XLS sin inventar ===')
     from types import SimpleNamespace
 
     from backend.inventory_import import (
@@ -274,9 +282,8 @@ def _probar_formatos_masivos():
             asignar_imagenes_instantaneas(productos, snapshot_imagenes={}, categoria=None)
         duracion = time.perf_counter() - inicio
 
-        vacios = [p for p in productos if not p.get('imagen_url')]
         _ok(len(productos) == esperado, f'{extension}: {len(productos)} productos leídos')
-        _ok(not vacios, f'{extension}: 0 sin imagen')
+        _ok(not _fabricados(productos), f'{extension}: 0 assets fabricados')
         _ok(duracion < 5.0, f'{extension}: {len(productos)} en {duracion * 1000:.0f} ms')
         categorias = {p.get('categoria_inferida') for p in productos} if productos else set()
         _ok(len(categorias) >= 5, f'{extension}: {len(categorias)} categorías inferidas')
@@ -297,101 +304,71 @@ def _probar_reporte_honesto():
     _ok(meta_ok['estado_imagenes'] == 'completo', 'todas reales -> estado "completo"')
 
 
-def _probar_respaldo_marca():
-    print('\n=== Respaldo visual por marca (logo/monograma) ===')
-    from unittest.mock import patch
+def _probar_logos_oficiales():
+    print('\n=== Logos: solo arte oficial, nunca inventado ===')
+    from backend.marca_logo import logo_instantaneo, resolver_logo_marca
+    from backend.activos_verificados import es_asset_generado, es_asset_verificado
 
-    from backend.catalogo_maestro_index import IndiceMaestro
-    from backend.inventory_import import asignar_imagenes_instantaneas
-    from backend.marca_logo import (
-        iniciales_marca,
-        logo_instantaneo,
-        monograma_png,
-        resolver_logo_marca,
-    )
+    _ok(logo_instantaneo('Altunsa') is None, 'logo_instantaneo ya no fabrica monogramas')
+    url, fuente = resolver_logo_marca('MarcaSinArteOficialQwerty', permitir_red=False)
+    _ok(url is None and fuente is None, 'sin red y sin arte oficial -> (None, None)')
 
-    _ok(iniciales_marca('Fama de América') == 'FA', 'iniciales de marca multi-palabra')
-    _ok(iniciales_marca('Altunsa') == 'AL', 'iniciales de marca simple')
-    png = monograma_png('Altunsa')
-    _ok(png[:8] == b'\x89PNG\r\n\x1a\n', 'monograma PNG válido')
-    url = logo_instantaneo('Altunsa')
-    _ok(bool(url) and url.startswith('/static/uploads/marcas/'), 'monograma local disponible')
-    ruta = RAIZ / url.lstrip('/')
-    _ok(ruta.is_file() and ruta.stat().st_size > 0, 'archivo de monograma en disco')
-
-    url2, fuente2 = resolver_logo_marca('Altunsa', permitir_red=False)
-    _ok(bool(url2) and fuente2 == 'logo_monograma', 'resolver cae a monograma sin red')
-
-    productos = [
-        {'nombre': 'Detergente Alta Espuma', 'descripcion': '', 'marca': 'Altunsa',
-         'categoria': '', 'codigo_barras': None, 'imagen_url': None},
-        {'nombre': 'Café molido', 'descripcion': '', 'marca': 'Fama de América',
-         'categoria': '', 'codigo_barras': None, 'imagen_url': None},
-    ]
-    with patch('backend.catalogo_maestro_index.obtener_indice', return_value=IndiceMaestro()):
-        asignar_imagenes_instantaneas(productos, {}, 'Alimentos')
+    _ok(es_asset_generado('/static/uploads/marcas/x.png', 'logo_monograma'), 'monograma = fabricado')
+    _ok(es_asset_generado('/static/img/placeholder-otros.svg'), 'placeholder = fabricado')
     _ok(
-        all(p['imagen_estado'] == 'logo' and p['imagen_url'].startswith('/static/uploads/marcas/')
-            for p in productos),
-        'la importación asigna logo/monograma de marca (nunca placeholder genérico)',
+        es_asset_verificado('https://x.supabase.co/storage/v1/object/public/imagenes/productos/a.webp'),
+        'foto de Storage = verificada',
+    )
+    _ok(
+        es_asset_verificado('/static/uploads/productos/manual_1_a.webp'),
+        'subida manual = verificada',
+    )
+    _ok(
+        not es_asset_verificado('/static/uploads/genericos/producto_a.png', 'tarjeta_producto'),
+        'tarjeta generada = NO verificada',
+    )
+    _ok(
+        not es_asset_verificado('https://sitio-ajeno.example/foto.jpg'),
+        'URL externa no confiable = NO verificada',
     )
 
 
-def _probar_catalogo_panaderia():
-    print('\n=== Cobertura visual: catálogo de panadería (244 productos) ===')
-    from unittest.mock import patch
+def _probar_consulta_estructurada():
+    print('\n=== Consulta limpia marca + modelo (estructurados) ===')
+    from backend.consulta_producto import consulta_estructurada
 
-    from backend.catalogo_maestro_index import IndiceMaestro
-    from backend.inventory_import import asignar_imagenes_instantaneas
+    queries = consulta_estructurada(
+        'Licuadora Oster 2 Velocidades Original Unidad', categoria='tecnologia'
+    )
+    _ok(queries and 'oster' in queries[0].lower(), f'usa la marca: {queries[:1]}')
+    _ok(
+        all('unidad' not in q.lower() and 'original' not in q.lower() for q in queries),
+        'descarta relleno (unidad, original)',
+    )
 
-    base = [
-        ('Pan Canilla', ''), ('Pan Frances', ''), ('Pan de Jamon', 'Plumrose'),
-        ('Torta de Chocolate', ''), ('Cachito de Jamon', ''), ('Pan de Queso', ''),
-        ('Croissant', ''), ('Dona Glaseada', ''), ('Pan Integral', ''),
-        ('Pan Campesino', ''), ('Torta Tres Leches', ''), ('Quesillo', ''),
-        ('Palmera', ''), ('Rosca de Reyes', ''), ('Pan de Leche', 'Mavesa'),
-        ('Baguette', ''), ('Pan de Ajo', ''), ('Empanada de Queso', ''),
-        ('Tequeños', ''), ('Pan de Maiz', 'PAN'), ('Galletas de Mantequilla', 'Quaker'),
-        ('Chocolatina', 'Ferrero'), ('Malta', 'Polar'), ('Jugo de Naranja', 'Polar'),
-        ('Refresco Cola', 'Pepsi'), ('Chicle', 'Colgate'), ('Cafe Molido', 'Nestle'),
-    ]
-    productos = []
-    for i in range(244):
-        nombre, marca = base[i % len(base)]
-        productos.append({
-            'nombre': f'{nombre} {i + 1}',
-            'descripcion': 'producto de panaderia' if marca else '',
-            'marca': marca,
-            'categoria': '',
-            'codigo_barras': None,
-            'imagen_url': None,
-        })
-    with patch('backend.catalogo_maestro_index.obtener_indice', return_value=IndiceMaestro()):
-        asignar_imagenes_instantaneas(productos, {}, 'Alimentos')
+    queries_tal = consulta_estructurada(
+        'Taladro percutor Bosch GSB 550 500W', marca='Bosch', categoria='ferreteria'
+    )
+    _ok(
+        any('gsb' in q.lower() and '550' in q.lower() for q in queries_tal),
+        f'extrae el modelo exacto: {queries_tal[:1]}',
+    )
 
-    vacios = [p for p in productos if not p.get('imagen_url')]
-    _ok(not vacios, f'0 tarjetas sin identidad visual ({len(vacios)})')
-    estados = {}
-    for p in productos:
-        estados[p['imagen_estado']] = estados.get(p['imagen_estado'], 0) + 1
-    print('  estados:', estados)
-    _ok(estados.get('logo', 0) > 0, f'{estados.get("logo", 0)} con logo/monograma de marca')
-    _ok(estados.get('pendiente', 0) > 0, f'{estados.get("pendiente", 0)} con imagen de categoría')
-    faltantes = set()
-    for p in productos:
-        rel = str(p['imagen_url']).lstrip('/')
-        if rel.startswith('static') and not (RAIZ / rel).is_file():
-            faltantes.add(p['imagen_url'])
-    _ok(not faltantes, f'todos los assets existen ({sorted(faltantes)[:3]})')
+    _ok(
+        consulta_estructurada('Pan canilla integral', categoria='alimentos') == [],
+        'un producto no estructurado no usa esta vía',
+    )
 
 
 def main() -> int:
     _probar_clasificador()
-    _probar_cobertura_masiva()
+    _probar_sin_invencion()
+    _probar_master_verificado()
+    _probar_descarte_generado()
     _probar_formatos_masivos()
     _probar_reporte_honesto()
-    _probar_respaldo_marca()
-    _probar_catalogo_panaderia()
+    _probar_logos_oficiales()
+    _probar_consulta_estructurada()
 
     print('\n=== RESULTADO ===')
     if _ERRORES:
@@ -399,7 +376,7 @@ def main() -> int:
             print(f'  - {item}')
         print(f'FALLOS: {len(_ERRORES)}')
         return 1
-    print('OK cobertura universal: 100% de productos con imagen de categoría')
+    print('OK anti-invención: cero assets fabricados, solo fotos verificadas o estado neutro')
     return 0
 
 

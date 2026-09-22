@@ -1,17 +1,19 @@
-"""Política de verificación de imágenes por sector (estructurado vs. abierto).
+"""Política de verificación de imágenes (whitelist de dominios).
 
-Sectores **estructurados** (tecnología, electrodomésticos/hogar, ferretería y
-automotriz) tienen fichas oficiales y assets limpios: aquí se **maximiza** el
-uso de fuentes oficiales (marca, retailer confiable, catálogos verificados) y se
-acepta el dominio de la marca como señal fuerte.
+Regla única para **todos** los sectores: una imagen solo se acepta si proviene
+de origen verificado:
 
-Sectores **no estructurados** (alimentos, panadería, bebidas, cuidado personal,
-etc.) no suelen tener ficha oficial por producto: se toman fotos de catálogos
-verificados (maestro, código de barras, VTEX/Mercado Libre) y de dominios
-confiables, pero se **rechaza el scraping de terceros no verificado** para evitar
-fotos ajenas o incorrectas.
+  1. Catálogos estructurados (maestro por código de barras, VTEX, Mercado Libre,
+     Open Food/Beauty/Products Facts).
+  2. Dominios confiables (e-commerce verificados y marcas oficiales).
+  3. El dominio del propio fabricante (coincide con la marca).
 
-Todo es configurable con ``LOCALIS_IMG_ESTRICTO=0`` para relajar la política.
+Cualquier buscador abierto en un dominio no verificado se **descarta** para no
+guardar fotos ajenas, corruptas o inventadas. Para los sectores estructurados
+(tecnología, electrodomésticos/hogar, ferretería, automotriz) la consulta además
+se reduce a marca + modelo exacto (ver ``backend/consulta_producto.py``).
+
+Configurable con ``LOCALIS_IMG_ESTRICTO=0`` solo para depuración.
 """
 
 from __future__ import annotations
@@ -95,12 +97,13 @@ def _coincide_marca(candidato, marca):
 
 
 def evaluar_candidato_por_sector(candidato, categoria=None, marca=None):
-    """(aceptado, motivo) según el sector del producto.
+    """(aceptado, motivo). Solo se aceptan assets de origen verificado.
 
-    - Catálogos verificados y logos: aceptados siempre.
-    - Dominios confiables (marca oficial / retailer): aceptados.
-    - Sectores estructurados: además se acepta el dominio de la marca.
-    - Buscadores en dominios no confiables: rechazados (scraping no verificado).
+    - Catálogos verificados (maestro, VTEX, Mercado Libre, Open*Facts): sí.
+    - Logos oficiales de marca: sí.
+    - Dominio confiable (retailer/e-commerce verificados): sí.
+    - Dominio del fabricante (coincide con la marca): sí.
+    - Cualquier buscador abierto en dominio no verificado: se descarta.
     """
     fuente_base = str(getattr(candidato, 'fuente', '') or '').split(':')[0]
     if fuente_base in FUENTES_CATALOGO:
@@ -111,14 +114,14 @@ def evaluar_candidato_por_sector(candidato, categoria=None, marca=None):
     dominio = getattr(candidato, 'dominio', '') or ''
     if _dominio_confiable(dominio):
         return True, 'dominio_confiable'
-
-    estructurada = categoria_estructurada(categoria)
-    if estructurada and _coincide_marca(candidato, marca):
+    if _coincide_marca(candidato, marca):
         return True, 'dominio_marca'
 
-    if fuente_base in FUENTES_WEB or fuente_base:
-        if not _estricto():
-            return True, 'no_verificado_relajado'
-        return False, ('estructurado_no_oficial' if estructurada else 'terceros_no_verificado')
-
-    return False, 'fuente_desconocida'
+    if not _estricto():
+        return True, 'no_verificado_relajado'
+    motivo = (
+        'estructurado_no_oficial'
+        if categoria_estructurada(categoria)
+        else 'terceros_no_verificado'
+    )
+    return False, motivo

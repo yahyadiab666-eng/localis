@@ -189,6 +189,94 @@ def limpiar_asset_anterior(anterior, nuevo=None):
     return eliminar_asset(anterior)
 
 
+def _eliminar_url_generada(url):
+    """Purga un asset fabricado concreto (monograma/tarjeta) de Storage o local.
+
+    Solo actúa sobre carpetas generadas (``marcas/``, ``genericos/``); nunca
+    borra los placeholders estáticos del repositorio.
+    """
+    texto = str(url or '').strip()
+    dato = ruta_storage_desde_url(texto)
+    if not dato:
+        return False
+    carpeta, filename = dato
+    if carpeta not in ('marcas', 'genericos'):
+        return False
+    ruta = f'{carpeta}/{filename}'
+    borrado = _eliminar_local(carpeta, filename)
+    if texto.startswith('http'):
+        borrado = eliminar_objetos_storage([ruta]) > 0 or borrado
+    return borrado
+
+
+def eliminar_assets_generados(limite=5000):
+    """Elimina assets **fabricados** de la BD y de Storage (anti-invención).
+
+    Vacía ``imagen_url`` de los productos cuyo asset sea un placeholder de
+    categoría, un monograma o una tarjeta, y purga esos archivos generados.
+    Devuelve ``{'revisados', 'limpiados', 'purgados'}``.
+    """
+    from backend.activos_verificados import es_asset_generado
+    from backend.db import get_db_connection
+
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                "SELECT id, imagen_url, imagen_fuente FROM productos "
+                "WHERE imagen_url IS NOT NULL"
+            )
+            filas = [
+                list(r.values()) if isinstance(r, dict) else list(r)
+                for r in cursor.fetchall()
+            ]
+    except Exception as error:
+        print(f'{_LOG} no se pudo auditar generados: {type(error).__name__}: {error}')
+        return {'revisados': 0, 'limpiados': 0, 'purgados': 0}
+
+    generados = [
+        (int(pid), url, fuente)
+        for pid, url, fuente in filas
+        if es_asset_generado(url, fuente)
+    ]
+    if not generados:
+        return {'revisados': len(filas), 'limpiados': 0, 'purgados': 0}
+
+    limpiados = 0
+    urls = set()
+    for pid, url, _fuente in generados[: int(limite)]:
+        try:
+            with get_db_connection() as conexion:
+                cursor = conexion.cursor()
+                cursor.execute(
+                    """
+                    UPDATE productos
+                    SET imagen_url = NULL, imagen_fuente = NULL,
+                        imagen_estado = 'pendiente'
+                    WHERE id = ?
+                    """,
+                    (pid,),
+                )
+                conexion.commit()
+                limpiados += cursor.rowcount
+            if url:
+                urls.add(str(url))
+        except Exception as error:
+            print(f'{_LOG} no se pudo limpiar producto={pid}: {type(error).__name__}')
+
+    purgados = 0
+    for url in urls:
+        try:
+            if _eliminar_url_generada(url):
+                purgados += 1
+        except Exception as error:
+            print(f'{_LOG} no se pudo purgar {url[:80]}: {type(error).__name__}')
+
+    if limpiados:
+        print(f'{_LOG} assets fabricados eliminados: {limpiados} (archivos {purgados})')
+    return {'revisados': len(filas), 'limpiados': limpiados, 'purgados': purgados}
+
+
 def _referencias_bd():
     """Conjunto ``carpeta/filename`` referenciado por la BD (nunca borrar)."""
     from backend.db import get_db_connection
@@ -301,9 +389,11 @@ def main(argv=None):
     except Exception:
         pass
     resultado = limpiar_huerfanos()
+    generados = eliminar_assets_generados()
     print(
         f"{_LOG} mantenimiento: revisados={resultado['revisados']} "
-        f"borrados={resultado['borrados']}"
+        f"huerfanos_borrados={resultado['borrados']} "
+        f"fabricados_limpiados={generados['limpiados']}"
     )
     return 0
 

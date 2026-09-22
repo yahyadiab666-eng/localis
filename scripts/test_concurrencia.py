@@ -4,7 +4,7 @@
 Valida la arquitectura para cientos de usuarios simultáneos:
 
   1. Cola de importación: N trabajos concurrentes, cola acotada, sin pérdidas.
-  2. Asignación instantánea de imágenes en paralelo (hilos), 100% cobertura.
+  2. Asignación instantánea de imágenes en paralelo (hilos), sin inventar assets.
   3. Semáforo de CPU: ``rembg`` nunca corre en paralelo (LOCALIS_IMG_MAX_CONCURRENT).
 """
 
@@ -115,7 +115,9 @@ def _probar_asignacion_paralela():
     productos = [p for lote_ in lotes for p in lote_]
     vacios = [p for p in productos if not p.get('imagen_url')]
     _ok(len(productos) == 2000, '2.000 productos procesados en 8 hilos')
-    _ok(not vacios, f'cero productos vacíos ({len(vacios)})')
+    _ok(not [p for p in productos if p.get('imagen_url')], 'cero imágenes inventadas (estado neutro)')
+    _ok(all(p.get('imagen_estado') == 'pendiente' for p in productos), 'todos pendientes de foto verificada')
+    _ok(len(vacios) == len(productos), 'sin foto verificada => imagen nula, no placeholder')
     _ok(duracion < 5, f'asignación paralela en {duracion:.2f}s')
 
 

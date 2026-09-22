@@ -1070,33 +1070,40 @@ def _imagen_final_importacion(
     nombre=None,
     descripcion=None,
 ):
-    """URL para INSERT: solo CSV, snapshot del comercio o catálogo maestro local."""
+    """URL para INSERT: solo CSV, snapshot del comercio o catálogo maestro local.
+
+    Nunca devuelve un asset generado (placeholder/monograma/tarjeta).
+    """
     del nombre, descripcion
+    from backend.activos_verificados import es_asset_verificado
+
     nueva = imagen_url_para_persistir(imagen_csv)
-    if nueva:
+    if nueva and es_asset_verificado(nueva):
         return nueva
     codigo = normalizar_codigo_barras(codigo_barras)
+    candidato = None
     if codigo and codigo in snapshot_imagenes:
-        return snapshot_imagenes[codigo]
-    if codigo and mapa_maestro:
-        return mapa_maestro.get(codigo)
-    return None
+        candidato = snapshot_imagenes[codigo]
+    elif codigo and mapa_maestro:
+        candidato = mapa_maestro.get(codigo)
+    return candidato if es_asset_verificado(candidato) else None
 
 
 def asignar_imagenes_instantaneas(productos, snapshot_imagenes=None, categoria=None):
-    """Asigna imagen a cada producto con el índice maestro en memoria (O(1)).
+    """Asigna imagen **solo** si es un asset verificado (sin inventar nada).
 
-    Orden de prioridad:
-      1. URL válida del propio archivo (CSV/Excel).
+    Orden:
+      1. URL del propio archivo (CSV/Excel), si es verificada.
       2. Foto previa del comercio (snapshot) por código de barras.
-      3. Catálogo maestro por código de barras.
-      4. Catálogo maestro por nombre/marca.
-      5. Placeholder profesional (fondo blanco) de la **categoría inferida** de
-         cada fila (matriz universal, sin listas de productos).
+      3. Catálogo maestro por código de barras o por nombre/marca.
 
-    Garantía: **ningún producto queda sin imagen**. Retorna cuántos usaron
-    placeholder de categoría (pendientes de relleno real en segundo plano).
+    Si no hay asset verificado, el producto queda **sin imagen**
+    (``imagen_url=None``, estado ``pendiente``): la interfaz muestra un estado
+    neutro y el motor seguirá buscando en segundo plano. Nunca se fabrica un
+    placeholder, monograma ni tarjeta. Retorna cuántos quedaron sin imagen.
     """
+    from backend.activos_verificados import es_asset_generado, es_asset_verificado
+
     snapshot = snapshot_imagenes or {}
     indice = None
     try:
@@ -1107,60 +1114,54 @@ def asignar_imagenes_instantaneas(productos, snapshot_imagenes=None, categoria=N
         print(f'{LOG_PREFIX} índice maestro no disponible: {type(exc).__name__}: {exc}')
 
     try:
-        from backend.categorias_producto import clasificar_categoria, imagen_para_categoria
+        from backend.categorias_producto import clasificar_categoria
     except Exception as exc:
         print(f'{LOG_PREFIX} clasificador de categorías no disponible: {exc}')
 
         def clasificar_categoria(nombre=None, descripcion=None, marca=None, categoria_hint=None):
             return 'otros'
 
-        def imagen_para_categoria(_categoria):
-            return '/static/img/placeholder-otros.svg'
-
-    nuevos = 0
     reales = 0
-    logos = 0
+    sin_imagen = 0
+    descartados = 0
     por_categoria = {}
 
-    try:
-        from backend.marca_logo import logo_instantaneo
-    except Exception:
-        logo_instantaneo = None
-
-    def _marca_detectada(prod):
-        marca = str(prod.get('marca') or '').strip()
-        if marca:
-            return marca
-        try:
-            from backend.marcas_ve import detectar_marca
-
-            return detectar_marca(prod.get('nombre'), prod.get('descripcion'))
-        except Exception:
-            return None
+    def _descartar_generado(prod):
+        if prod.get('imagen_url') and es_asset_generado(
+            prod.get('imagen_url'), prod.get('imagen_fuente')
+        ):
+            prod['imagen_url'] = None
+            prod['imagen_fuente'] = None
+            return True
+        return False
 
     for prod in productos:
-        if prod.get('imagen_url'):
+        url = prod.get('imagen_url')
+        if url and es_asset_verificado(url, prod.get('imagen_fuente')):
             prod['imagen_fuente'] = prod.get('imagen_fuente') or 'archivo'
             prod['imagen_estado'] = 'real'
             reales += 1
             continue
+        if _descartar_generado(prod):
+            descartados += 1
 
         codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
-        if codigo and codigo in snapshot:
-            prod['imagen_url'] = snapshot[codigo]
+        url_snapshot = snapshot.get(codigo) if codigo else None
+        if url_snapshot and es_asset_verificado(url_snapshot):
+            prod['imagen_url'] = url_snapshot
             prod['imagen_fuente'] = 'comercio'
             prod['imagen_estado'] = 'real'
             reales += 1
             continue
 
         if indice is not None:
-            url, origen = indice.buscar(
+            url_maestro, origen = indice.buscar(
                 codigo=codigo,
                 nombre=prod.get('nombre'),
                 marca=prod.get('marca'),
             )
-            if url:
-                prod['imagen_url'] = url
+            if url_maestro and es_asset_verificado(url_maestro):
+                prod['imagen_url'] = url_maestro
                 prod['imagen_fuente'] = f'maestro_{origen}'
                 prod['imagen_estado'] = 'real'
                 reales += 1
@@ -1173,47 +1174,23 @@ def asignar_imagenes_instantaneas(productos, snapshot_imagenes=None, categoria=N
             categoria_hint=prod.get('categoria') or categoria,
         )
         prod['categoria_inferida'] = cat
-
-        # Respaldo visual por marca (monograma local, sin red): la tarjeta nunca
-        # queda con un placeholder genérico si la marca es conocida.
-        marca_prod = _marca_detectada(prod)
-        logo = None
-        if marca_prod and logo_instantaneo is not None:
-            try:
-                logo = logo_instantaneo(marca_prod)
-            except Exception:
-                logo = None
-        if logo:
-            prod['imagen_url'] = logo
-            prod['imagen_fuente'] = 'logo_monograma'
-            prod['imagen_estado'] = 'logo'
-            logos += 1
-        else:
-            prod['imagen_url'] = imagen_para_categoria(cat)
-            prod['imagen_fuente'] = 'placeholder_categoria'
-            prod['imagen_estado'] = 'pendiente'
-            nuevos += 1
         por_categoria[cat] = por_categoria.get(cat, 0) + 1
 
-    # Garantía de UI: si algo quedara vacío, se fuerza el genérico limpio, pero
-    # SIEMPRE marcado como 'pendiente' (nunca se reporta como imagen real).
-    sin_imagen = 0
-    for prod in productos:
-        if not prod.get('imagen_url'):
-            prod['imagen_url'] = '/static/img/placeholder-otros.svg'
-            prod['imagen_fuente'] = 'placeholder_categoria'
-            prod['imagen_estado'] = 'pendiente'
-            sin_imagen += 1
+        # Sin asset verificado: NO se inventa nada (la UI muestra estado neutro).
+        prod['imagen_url'] = None
+        prod['imagen_fuente'] = None
+        prod['imagen_estado'] = 'pendiente'
+        sin_imagen += 1
 
     print(
-        f'{LOG_PREFIX} imágenes instantáneas: total={len(productos)} '
-        f'reales={reales} logos_marca={logos} '
-        f'pendientes={nuevos + sin_imagen} '
+        f'{LOG_PREFIX} imágenes verificadas: total={len(productos)} '
+        f'reales={reales} sin_imagen={sin_imagen} '
+        f'generados_descartados={descartados} '
         f'maestro_codigos={len(indice.por_codigo) if indice else 0} '
         f'maestro_nombres={len(indice.por_nombre) if indice else 0} '
         f'categorias={por_categoria}'
     )
-    return nuevos
+    return sin_imagen
 
 
 def _tuplas_insercion(comercio_id, lote, snapshot_imagenes=None, mapa_maestro=None):

@@ -1,17 +1,15 @@
-"""Respaldo visual por marca (logo oficial o monograma limpio).
+"""Logo **oficial** de marca (nunca se inventa arte).
 
-Cuando el motor agota todas las fuentes y no encuentra la foto real del
-producto, **nunca** deja la tarjeta vacía ni con un placeholder genérico:
-asigna la identidad visual de la marca.
+Cuando el motor agota las fuentes y no encuentra la foto real del producto,
+solo se acepta el **logo oficial** de la marca si existe arte verificable:
 
-Cadena de respaldo:
-  1. Logo oficial por dominio de la marca (favicon de alta resolución, PNG).
-  2. Logo oficial por Simple Icons (SVG, si el slug existe).
-  3. **Monograma de marca** generado localmente (PNG, fondo blanco) — universal,
-     instantáneo y sin red, válido para cualquier marca (Altunsa, Mavesa, etc.).
+  1. Logo oficial por Simple Icons (SVG).
+  2. Logo oficial por Wikidata/Wikimedia Commons (P154).
+  3. Favicon oficial del dominio de la marca (PNG).
 
-Todo se guarda en Supabase Storage (o `/static/uploads/marcas/` como respaldo)
-y se cachea por marca para no repetir trabajo.
+Si no hay arte oficial, se devuelve ``(None, None)`` y la ficha queda en estado
+neutro (imagen vacía). Las utilidades de monograma/tarjeta que existían antes
+se conservan solo por compatibilidad y **no** se usan en producción.
 """
 
 from __future__ import annotations
@@ -103,7 +101,7 @@ _FUENTES_FAVICON = (
     'https://www.google.com/s2/favicons?domain={dominio}&sz=128',
 )
 
-_PLANTILLA_CACHE = 'marca_logo_v1'
+_PLANTILLA_CACHE = 'marca_logo_v2'
 
 
 def _normalizar(marca):
@@ -419,22 +417,26 @@ def logo_wikidata(marca):
 
 
 def _resolver(marca, permitir_red=True):
+    """Logo **oficial** de la marca, o ``(None, None)``.
+
+    Nunca inventa un monograma ni un placeholder: si no hay arte oficial
+    verificable, el llamador debe dejar la imagen vacía (estado neutro).
+    """
     marca = str(marca or '').strip()
     if not marca:
         return None, None
     if permitir_red:
-        url = logo_simpleicons(marca)
-        if url:
-            return url, 'logo_simpleicons'
-        url = logo_wikidata(marca)
-        if url:
-            return url, 'logo_wikidata'
-        url = logo_favicon(marca)
-        if url:
-            return url, 'logo_favicon'
-    local = logo_monograma_durable(marca)
-    if local:
-        return local, 'logo_monograma'
+        for generador, nombre in (
+            (logo_simpleicons, 'logo_simpleicons'),
+            (logo_wikidata, 'logo_wikidata'),
+            (logo_favicon, 'logo_favicon'),
+        ):
+            try:
+                url = generador(marca)
+            except Exception:
+                url = None
+            if url:
+                return url, nombre
     return None, None
 
 
@@ -452,12 +454,12 @@ def resolver_logo_marca(marca, permitir_red=True):
 
 
 def logo_instantaneo(marca):
-    """Monograma local sin red (para asignación inmediata en importaciones)."""
-    try:
-        local = archivo_monograma_local(marca)
-        return local
-    except Exception:
-        return None
+    """Obsoleto: ya **no** se inventan monogramas.
+
+    Se conserva por compatibilidad de imports. Devuelve siempre ``None`` para
+    que ningún flujo de importación fabrique un logo de texto.
+    """
+    return None
 
 
 def tarjeta_producto_png(nombre, categoria=None):

@@ -51,14 +51,23 @@ def _probar_indice():
 
     print('\n=== Búsqueda en el índice ===')
     indice = IndiceMaestro(filas=3)
-    indice.por_codigo['7590000040110'] = 'https://x.supabase.co/ean.webp'
-    indice.por_nombre['harina maiz pan'] = 'https://x.supabase.co/nombre.webp'
+    indice.por_codigo['7590000040110'] = (
+        'https://x.supabase.co/storage/v1/object/public/imagenes/productos/ean.webp'
+    )
+    indice.por_nombre['harina maiz pan'] = (
+        'https://x.supabase.co/storage/v1/object/public/imagenes/productos/nombre.webp'
+    )
 
     url, origen = indice.buscar(codigo='7590000040110')
-    _ok(url == 'https://x.supabase.co/ean.webp' and origen == 'codigo', 'coincide por código de barras')
+    _ok(
+        url == 'https://x.supabase.co/storage/v1/object/public/imagenes/productos/ean.webp'
+        and origen == 'codigo',
+        'coincide por código de barras',
+    )
     url2, origen2 = indice.buscar(nombre='Harina P.A.N. 1kg', marca='PAN')
     _ok(
-        url2 == 'https://x.supabase.co/nombre.webp' and origen2 in ('nombre', 'nombre_similar'),
+        url2 == 'https://x.supabase.co/storage/v1/object/public/imagenes/productos/nombre.webp'
+        and origen2 in ('nombre', 'nombre_similar'),
         f'coincide por nombre/marca ({origen2})',
     )
     url3, origen3 = indice.buscar(nombre='Producto inexistente XYZ')
@@ -89,8 +98,12 @@ def _probar_asignacion_instantanea():
     from backend.inventory_import import asignar_imagenes_instantaneas
 
     indice = IndiceMaestro(filas=2)
-    indice.por_codigo['7590000040110'] = 'https://x.supabase.co/ean.webp'
-    indice.por_nombre['harina maiz pan'] = 'https://x.supabase.co/nombre.webp'
+    indice.por_codigo['7590000040110'] = (
+        'https://x.supabase.co/storage/v1/object/public/imagenes/productos/ean.webp'
+    )
+    indice.por_nombre['harina maiz pan'] = (
+        'https://x.supabase.co/storage/v1/object/public/imagenes/productos/nombre.webp'
+    )
 
     productos = [
         {
@@ -116,11 +129,11 @@ def _probar_asignacion_instantanea():
     _ok(productos[1]['imagen_fuente'] == 'maestro_codigo', 'asigna por código de barras')
     _ok(productos[2]['imagen_fuente'] == 'maestro_nombre', 'asigna por nombre/marca')
     _ok(
-        productos[3]['imagen_url'] == '/static/img/placeholder-alimentos.svg'
-        and productos[3]['imagen_fuente'] == 'placeholder_categoria',
-        'producto nuevo recibe placeholder limpio de su categoría',
+        productos[3]['imagen_url'] is None
+        and productos[3]['imagen_fuente'] is None,
+        'producto sin coincidencia queda SIN imagen (estado neutro)',
     )
-    _ok(nuevos == 1, 'cuenta solo 1 producto nuevo')
+    _ok(nuevos == 1, 'cuenta 1 producto sin imagen verificada')
 
 
 def _probar_xls():

@@ -105,7 +105,7 @@ def _auditar_importacion_instantanea():
 
     categorias = _leer('backend/categorias_producto.py')
     _ok('def clasificar_categoria' in categorias, 'clasificador universal de categorías')
-    _ok('def imagen_para_categoria' in categorias, 'matriz de fallbacks por categoría')
+    _ok('def imagen_para_categoria' in categorias, 'placeholder neutro por categoría (solo UI)')
     svgs = sorted((RAIZ / 'static' / 'img').glob('placeholder-*.svg'))
     _ok(len(svgs) >= 14, f'{len(svgs)} placeholders de categoría en disco')
     _ok(all(svg.stat().st_size > 0 for svg in svgs), 'placeholders no vacíos')
@@ -127,12 +127,30 @@ def _auditar_importacion_instantanea():
     _ok('iniciar_backfill_periodico' in _leer('main.py'), 'el reintento arranca con la app')
 
     cobertura = _leer('backend/cobertura_visual.py')
-    _ok('def auditar_comercio' in cobertura, 'auditoría de cobertura visual por comercio')
-    _ok('class ErrorCoberturaVisual' in cobertura, 'error duro cuando la cobertura < 100%')
+    _ok('def auditar_comercio' in cobertura, 'auditoría de assets por comercio')
+    _ok('class ErrorCoberturaVisual' in cobertura, 'error duro ante assets fabricados/rotos')
     _ok('def reparar_imagenes_rotas' in cobertura, 'auto-reparación de imágenes rotas')
     _ok('_reparar_si_toca' in backfill, 'la reparación corre en el reintento periódico')
-    _ok('def archivo_tarjeta_producto' in _leer('backend/marca_logo.py'), 'tarjeta limpia por producto')
-    _ok('cobertura_visual' in _leer('backend/stores.py'), 'la importación valida la cobertura al cerrar')
+    activos = _leer('backend/activos_verificados.py')
+    _ok('def es_asset_generado' in activos, 'identifica assets fabricados (placeholder/monograma/tarjeta)')
+    _ok('def es_asset_verificado' in activos, 'solo acepta assets verificados')
+    _ok(
+        'archivo_tarjeta_producto' not in _leer('services/professional_image_pipeline.py'),
+        'el pipeline no fabrica tarjetas de producto',
+    )
+    _ok(
+        'logo_instantaneo' not in _leer('backend/inventory_import.py'),
+        'la importación no inventa logos de marca',
+    )
+    _ok(
+        'def consulta_estructurada' in _leer('backend/consulta_producto.py'),
+        'consulta marca+modelo para productos estructurados',
+    )
+    _ok(
+        'def eliminar_assets_generados' in _leer('backend/storage_cleanup.py'),
+        'eliminación de assets fabricados en BD y Storage',
+    )
+    _ok('cobertura_visual' in _leer('backend/stores.py'), 'la importación valida los assets al cerrar')
 
     # --- Mejoras de perfil: apariencia, analítica, teléfono y compresión ---
     _ok(
@@ -207,7 +225,11 @@ def _auditar_importacion_instantanea():
     _ok('precio_usd = None' in inventario, 'precio/existencia opcionales (solo actualizar stock)')
     _ok('Actualiza los productos existentes' in _leer('templates/comercio.html'), 'panel informa UPSERT')
 
-    _ok((RAIZ / 'backend' / 'marca_logo.py').is_file(), 'respaldo visual por logo/monograma de marca')
+    _ok(
+        (RAIZ / 'backend' / 'marca_logo.py').is_file()
+        and 'logo_monograma' not in _leer('backend/marca_logo.py').split('def _resolver')[1].split('def resolver_logo_marca')[0],
+        'solo logos OFICIALES (sin monogramas inventados)',
+    )
     _ok(
         (RAIZ / 'backend' / 'fuentes_imagenes.py').is_file()
         and 'catalogo_fuentes' in _leer('backend/fuentes_imagenes.py'),

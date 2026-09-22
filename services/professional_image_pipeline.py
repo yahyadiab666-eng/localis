@@ -1125,6 +1125,24 @@ def _buscar_candidatos_impl(
         categoria=categoria,
         codigo_barras=ean,
     )
+    # Productos estructurados (tecnología/electro/ferretería/automotriz): la
+    # consulta se reduce a marca + modelo exacto, sin relleno ni ruido local.
+    try:
+        from backend.consulta_producto import consulta_estructurada
+
+        consultas_limpias = consulta_estructurada(
+            nombre, marca=marca, descripcion=descripcion, categoria=categoria
+        )
+    except Exception:
+        consultas_limpias = []
+    if consultas_limpias:
+        _log(
+            f'consulta estructurada categoria={categoria!r} -> {consultas_limpias!r} '
+            f'(original={consultas[:2]!r})'
+        )
+        consultas = consultas_limpias + [
+            c for c in consultas if c not in consultas_limpias
+        ]
     # Escenario actual (0..3): cada reintento explora consultas nuevas.
     offset = nivel
     ventana_web = consultas[offset : offset + 4] or consultas[:4]
@@ -1202,8 +1220,7 @@ def _buscar_candidatos_impl(
 
     for candidato in unicos.values():
         fuente_base = (candidato.fuente or '').split(':')[0]
-        if fuente_base in fuentes_filtrables and not _relevante_web(candidato, tokens):
-            continue
+        motivo = 'sin_politica'
         if evaluar_candidato_por_sector is not None:
             aceptado, motivo = evaluar_candidato_por_sector(
                 candidato, categoria=categoria, marca=marca
@@ -1211,6 +1228,15 @@ def _buscar_candidatos_impl(
             if not aceptado:
                 descartados_sector[motivo] = descartados_sector.get(motivo, 0) + 1
                 continue
+        # Un dominio confiable/marca ya está verificado: no exige coincidencia
+        # de tokens. Los buscadores abiertos sí deben ser relevantes.
+        verificado_por_dominio = motivo in ('dominio_confiable', 'dominio_marca')
+        if (
+            fuente_base in fuentes_filtrables
+            and not verificado_por_dominio
+            and not _relevante_web(candidato, tokens)
+        ):
+            continue
         _puntuar(candidato, marca=marca)
         puntuados.append(candidato)
 
@@ -1612,7 +1638,8 @@ def _leer_producto(producto_id):
         cursor = conexion.cursor()
         cursor.execute(
             """
-            SELECT id, nombre, descripcion, codigo_barras, imagen_url, imagen_estado
+            SELECT id, nombre, descripcion, codigo_barras, imagen_url,
+                   imagen_estado, imagen_fuente
             FROM productos
             WHERE id = ?
             """,
@@ -1630,7 +1657,40 @@ def _leer_producto(producto_id):
         'codigo_barras': fila[3],
         'imagen_url': fila[4],
         'imagen_estado': fila[5] if len(fila) > 5 else None,
+        'imagen_fuente': fila[6] if len(fila) > 6 else None,
     }
+
+
+def _limpiar_imagen_generada(producto_id):
+    """Vacía ``imagen_url`` si el producto solo tenía un asset generado.
+
+    Nunca deja un placeholder/monograma/tarjeta: si no hay asset verificado, el
+    campo queda nulo y la interfaz muestra un estado neutro.
+    """
+    from backend.activos_verificados import es_asset_generado
+    from backend.db import get_db_connection
+
+    fila = _leer_producto(producto_id) or {}
+    url = fila.get('imagen_url')
+    if not url or not es_asset_generado(url, fila.get('imagen_fuente')):
+        return False
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                UPDATE productos
+                SET imagen_url = NULL, imagen_fuente = NULL,
+                    imagen_estado = 'pendiente'
+                WHERE id = ?
+                """,
+                (int(producto_id),),
+            )
+            conexion.commit()
+            return cursor.rowcount > 0
+    except Exception as error:
+        _log(f'limpiar generado producto={producto_id} fallo: {type(error).__name__}: {error}')
+        return False
 
 
 def _actualizar_imagen(producto_id, url, fuente, estado='real'):
@@ -1759,10 +1819,9 @@ def procesar_producto(
         ean = codigo_barras
 
     try:
-        from backend.categorias_producto import clasificar_categoria, imagen_para_categoria
+        from backend.categorias_producto import clasificar_categoria
     except Exception:
         clasificar_categoria = None
-        imagen_para_categoria = None
 
     categoria_efectiva = categoria
     if not categoria_efectiva and clasificar_categoria is not None:
@@ -1823,11 +1882,11 @@ def procesar_producto(
         )
 
     _log_pipeline(producto_id, ean, 'sin_imagen', motivo=ultimo_motivo)
-    _log(f'producto={producto_id} sin imagen real ({ultimo_motivo}); respaldo por marca')
+    _log(f'producto={producto_id} sin foto verificada ({ultimo_motivo}); se evalúa logo oficial')
 
-    # Respaldo visual secundario: logo/monograma de la marca (nunca vacío ni
-    # placeholder genérico si la marca es conocida). Se mantiene reintentable
-    # para conseguir la foto real en segundo plano.
+    # Respaldo **solo** con arte oficial verificable. Si no existe, no se
+    # inventa nada: se retira cualquier asset generado (placeholder/monograma/
+    # tarjeta) y la ficha queda en estado neutro, reintentable en segundo plano.
     if producto_id:
         candidatos_hubo = bool(candidatos)
         marca_efectiva = marca or _inferir_marca(nombre, descripcion)
@@ -1839,14 +1898,21 @@ def procesar_producto(
 
                 logo_url, logo_fuente = resolver_logo_marca(marca_efectiva)
             except Exception as error:
-                _log(f'producto={producto_id} logo de marca no resuelto: {type(error).__name__}')
+                _log(f'producto={producto_id} logo oficial no resuelto: {type(error).__name__}')
+            try:
+                from backend.activos_verificados import es_asset_verificado
+
+                if logo_url and not es_asset_verificado(logo_url, logo_fuente):
+                    logo_url, logo_fuente = None, None
+            except Exception:
+                pass
         if logo_url:
             try:
                 if _actualizar_imagen(
                     producto_id, logo_url, logo_fuente or 'logo_marca', estado='logo'
                 ):
                     _log(
-                        f'producto={producto_id} logo de marca asignado '
+                        f'producto={producto_id} logo OFICIAL asignado '
                         f'({logo_fuente!r}) marca={marca_efectiva!r}'
                     )
                     return ResultadoProcesamiento(
@@ -1855,39 +1921,14 @@ def procesar_producto(
             except Exception as error:
                 _log(f'producto={producto_id} logo no aplicado: {type(error).__name__}: {error}')
 
-        # Sin marca conocida: tarjeta limpia y **distinta por producto** (pendiente).
-        # Sustituye al placeholder genérico de categoría para que ninguna tarjeta
-        # quede con un recurso vacío/impersonal; sigue reintentable para foto real.
         try:
-            fila = _leer_producto(producto_id) or {}
-            actual = str(fila.get('imagen_url') or '').strip().lower()
-            reemplazable = (
-                not actual
-                or 'placeholder' in actual
-                or actual.startswith('/static/img/')
-            )
-            if reemplazable:
-                tarjeta = None
-                try:
-                    from backend.marca_logo import archivo_tarjeta_producto
-
-                    tarjeta = archivo_tarjeta_producto(nombre, categoria_efectiva)
-                except Exception as error:
-                    _log(
-                        f'producto={producto_id} tarjeta no generada: '
-                        f'{type(error).__name__}'
-                    )
-                if tarjeta:
-                    _actualizar_imagen(
-                        producto_id, tarjeta, 'tarjeta_producto', estado='pendiente'
-                    )
-                elif imagen_para_categoria is not None:
-                    fallback = imagen_para_categoria(categoria_efectiva or 'otros')
-                    _actualizar_imagen(
-                        producto_id, fallback, 'placeholder_categoria', estado='pendiente'
-                    )
+            if _limpiar_imagen_generada(producto_id):
+                _log(
+                    f'producto={producto_id} asset generado retirado '
+                    '(sin foto ni logo oficial verificados)'
+                )
         except Exception as error:
-            _log(f'producto={producto_id} fallback no aplicado: {type(error).__name__}: {error}')
+            _log(f'producto={producto_id} limpieza de generado fallo: {type(error).__name__}')
 
         # Si hubo candidatas y todas se rechazaron, marcar 'rechazada' para
         # reintento con estrategia ampliada más adelante.

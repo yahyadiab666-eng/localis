@@ -135,6 +135,7 @@ def _probar_productos() -> tuple[bool, str]:
     from backend.db import DATABASE_URL, get_db_connection, using_postgres
     from backend.utils import url_imagen_catalogo_valida
     from utils.images import url_publica_producto_desde_bd
+    from backend.activos_verificados import es_asset_generado
 
     if not DATABASE_URL:
         return False, 'DATABASE_URL ausente'
@@ -144,37 +145,44 @@ def _probar_productos() -> tuple[bool, str]:
             cursor = conexion.cursor()
             cursor.execute(
                 """
-                SELECT id, nombre, codigo_barras, imagen_url
+                SELECT id, nombre, codigo_barras, imagen_url, imagen_fuente
                 FROM productos
                 ORDER BY id
                 """
             )
             filas = [dict(r) if isinstance(r, dict) else {
-                'id': r[0], 'nombre': r[1], 'codigo_barras': r[2], 'imagen_url': r[3],
+                'id': r[0], 'nombre': r[1], 'codigo_barras': r[2],
+                'imagen_url': r[3], 'imagen_fuente': r[4] if len(r) > 4 else None,
             } for r in cursor.fetchall()]
         total = len(filas)
         con_url = 0
-        vacias = []
+        sin_imagen = 0
+        fabricadas = []
+        invalidas = []
         for fila in filas:
-            url = url_publica_producto_desde_bd(fila.get('imagen_url')) or url_imagen_catalogo_valida(
-                fila.get('imagen_url')
-            )
-            vista = url or 'None'
-            print(
-                f"  id={fila.get('id')} nombre={fila.get('nombre')!r} "
-                f"codigo={fila.get('codigo_barras')!r} url_bd={fila.get('imagen_url')!r} "
-                f"vista={vista!r}"
-            )
+            crudo = fila.get('imagen_url')
+            if not crudo or not str(crudo).strip():
+                # Estado neutro legítimo: no se inventa ninguna imagen.
+                sin_imagen += 1
+                continue
+            if es_asset_generado(crudo, fila.get('imagen_fuente')):
+                fabricadas.append(f"{fila.get('id')}:{str(crudo)[:60]}")
+                continue
+            url = url_publica_producto_desde_bd(crudo) or url_imagen_catalogo_valida(crudo)
             if url:
                 con_url += 1
             else:
-                vacias.append(fila.get('nombre') or fila.get('id'))
+                invalidas.append(f"{fila.get('id')}:{str(crudo)[:60]}")
         motor = 'postgres' if using_postgres() else 'sqlite'
-        if vacias:
-            return False, (
-                f'{motor}: {con_url}/{total} con imagen; sin URL: {vacias}'
-            )
-        return True, f'{motor}: {con_url}/{total} productos con URL operativa'
+        resumen = (
+            f'{motor}: {con_url} con URL, {sin_imagen} sin imagen (neutro), '
+            f'{len(fabricadas)} fabricadas, {len(invalidas)} inválidas'
+        )
+        if fabricadas:
+            return False, f'{resumen} | fabricadas: {fabricadas[:3]}'
+        if invalidas:
+            return False, f'{resumen} | inválidas: {invalidas[:3]}'
+        return True, resumen
     except Exception as error:
         return False, f'{type(error).__name__}: {error}'
 
@@ -182,6 +190,7 @@ def _probar_productos() -> tuple[bool, str]:
 def _probar_head_imagenes() -> tuple[bool, str]:
     import httpx
 
+    from backend.activos_verificados import es_asset_generado
     from backend.db import get_db_connection
     from utils.images import url_publica_producto_desde_bd
 
@@ -189,13 +198,18 @@ def _probar_head_imagenes() -> tuple[bool, str]:
         cursor = conexion.cursor()
         cursor.execute(
             """
-            SELECT imagen_url FROM productos
+            SELECT imagen_url, imagen_fuente FROM productos
             WHERE imagen_url IS NOT NULL AND TRIM(CAST(imagen_url AS TEXT)) <> ''
             """
         )
         urls = []
         for fila in cursor.fetchall():
-            crudo = fila[0] if not isinstance(fila, dict) else fila.get('imagen_url')
+            if isinstance(fila, dict):
+                crudo, fuente = fila.get('imagen_url'), fila.get('imagen_fuente')
+            else:
+                crudo, fuente = fila[0], (fila[1] if len(fila) > 1 else None)
+            if es_asset_generado(crudo, fuente):
+                continue
             url = url_publica_producto_desde_bd(crudo)
             if url:
                 urls.append(url)

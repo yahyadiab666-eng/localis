@@ -36,6 +36,8 @@ class ReporteCobertura:
     reales: int = 0
     logos: int = 0
     pendientes: int = 0
+    sin_imagen: int = 0
+    generadas: int = 0
     problemas: list = field(default_factory=list)
 
     @property
@@ -46,9 +48,10 @@ class ReporteCobertura:
 
     def resumen(self) -> str:
         return (
-            f'comercio={self.comercio_id} cobertura_visual='
+            f'comercio={self.comercio_id} con_imagen='
             f'{self.con_imagen}/{self.total} ({self.porcentaje:.1%}) '
-            f'reales={self.reales} logos={self.logos} pendientes={self.pendientes}'
+            f'reales={self.reales} logos={self.logos} '
+            f'sin_imagen={self.sin_imagen} fabricadas={self.generadas}'
         )
 
 
@@ -66,16 +69,24 @@ def _ruta_local(url):
 
 
 def _url_efectiva_producto(producto):
+    """URL **persistida** (sin el fallback de UI) para auditar el asset real."""
     try:
-        from utils.images import url_imagen_producto
+        from utils.images import url_publica_producto_desde_bd
 
-        return url_imagen_producto(producto)
+        crudo = producto.get('imagen_url') if hasattr(producto, 'get') else None
+        return url_publica_producto_desde_bd(crudo) or ''
     except Exception:
-        return None
+        return ''
 
 
 def auditar_comercio(comercio_id, *, verificar_storage=False, muestra_storage=5):
-    """Audita la cobertura de un comercio. No lanza; retorna el reporte."""
+    """Audita los assets de un comercio. No lanza; retorna el reporte.
+
+    Un producto **sin imagen** es un estado honesto (no un problema). Solo se
+    reportan como problema los assets rotos y los **fabricados** (placeholder,
+    monograma, tarjeta) que no deberían estar persistidos.
+    """
+    from backend.activos_verificados import es_asset_generado
     from backend.db import get_db_connection
     from backend.estado_imagenes import normalizar_estado, ESTADO_REAL, ESTADO_LOGO
 
@@ -84,7 +95,8 @@ def auditar_comercio(comercio_id, *, verificar_storage=False, muestra_storage=5)
         cursor = conexion.cursor()
         cursor.execute(
             """
-            SELECT id, nombre, codigo_barras, imagen_url, imagen_estado
+            SELECT id, nombre, codigo_barras, imagen_url, imagen_estado,
+                   imagen_fuente
             FROM productos
             WHERE comercio_id = ?
             ORDER BY id
@@ -98,14 +110,22 @@ def auditar_comercio(comercio_id, *, verificar_storage=False, muestra_storage=5)
         registro = fila if isinstance(fila, dict) else {
             'id': fila[0], 'nombre': fila[1], 'codigo_barras': fila[2],
             'imagen_url': fila[3], 'imagen_estado': fila[4],
+            'imagen_fuente': fila[5] if len(fila) > 5 else None,
         }
         reporte.total += 1
         url = _url_efectiva_producto(registro)
         if not url:
+            # Sin imagen: estado neutro legítimo (no se inventa nada).
+            reporte.sin_imagen += 1
+            continue
+
+        if es_asset_generado(url, registro.get('imagen_fuente')):
+            reporte.generadas += 1
             reporte.problemas.append(
-                f'producto={registro.get("id")} sin URL de imagen'
+                f'producto={registro.get("id")} asset fabricado: {str(url)[:90]}'
             )
             continue
+
         reporte.con_imagen += 1
 
         estado = normalizar_estado(registro.get('imagen_estado'))
@@ -157,39 +177,21 @@ def auditar_comercio(comercio_id, *, verificar_storage=False, muestra_storage=5)
     return reporte
 
 
-def validar_cobertura(comercio_id, minimo=1.0, *, verificar_storage=False):
-    """Lanza ``ErrorCoberturaVisual`` si la cobertura no alcanza ``minimo``."""
+def validar_cobertura(comercio_id, minimo=0.0, *, verificar_storage=False):
+    """Lanza ``ErrorCoberturaVisual`` si hay assets fabricados/rotos.
+
+    ``minimo`` es opcional (por defecto 0.0): la ausencia de imagen es un estado
+    honesto, no un error. Lo que **sí** falla es persistir un asset fabricado o
+    un archivo roto.
+    """
     reporte = auditar_comercio(
         comercio_id, verificar_storage=verificar_storage
     )
-    if reporte.porcentaje < float(minimo) or reporte.problemas:
+    sin_cobertura = float(minimo) > 0 and reporte.porcentaje < float(minimo)
+    if reporte.problemas or sin_cobertura:
         detalle = '; '.join(reporte.problemas[:10]) or 'cobertura insuficiente'
         raise ErrorCoberturaVisual(f'{reporte.resumen()} -> {detalle}')
     return reporte
-
-
-def _respaldo_para_producto(nombre):
-    """(url, fuente) de respaldo inmediato para un producto sin foto usable."""
-    try:
-        from backend.categorias_producto import clasificar_categoria
-
-        categoria = clasificar_categoria(nombre=nombre)
-    except Exception:
-        categoria = None
-    try:
-        from backend.marca_logo import archivo_tarjeta_producto
-
-        url = archivo_tarjeta_producto(nombre, categoria)
-        if url:
-            return url, 'tarjeta_producto'
-    except Exception:
-        pass
-    try:
-        from backend.categorias_producto import imagen_para_categoria
-
-        return imagen_para_categoria(categoria or 'otros'), 'placeholder_categoria'
-    except Exception:
-        return None, None
 
 
 def _url_real_es_valida(url, *, verificar_remotas=True):
@@ -213,12 +215,11 @@ def _url_real_es_valida(url, *, verificar_remotas=True):
 
 
 def reparar_imagenes_rotas(comercio_id=None, limite=400, *, verificar_remotas=True):
-    """Auto-reparación: degrada fotos 'reales' cuyo asset ya no existe.
+    """Auto-reparación: vacía las fotos 'reales' cuyo asset ya no existe.
 
-    Nunca deja hueco: la URL rota se sustituye por la tarjeta del producto
-    (``pendiente``, reintentable) para conservar la cobertura visual y evitar
-    reportar como real una imagen que el cliente vería rota. Devuelve
-    ``{'revisadas', 'reparadas', 'detalle'}``.
+    Nunca inventa un reemplazo: la URL rota se deja **nula** (estado neutro,
+    ``pendiente``) para no mostrar un asset falso y seguir reintentando la foto
+    real en segundo plano. Devuelve ``{'revisadas', 'reparadas', 'detalle'}``.
     """
     from backend.db import get_db_connection
 
@@ -254,28 +255,22 @@ def reparar_imagenes_rotas(comercio_id=None, limite=400, *, verificar_remotas=Tr
         if _url_real_es_valida(url, verificar_remotas=verificar_remotas):
             continue
 
-        nueva_url, nueva_fuente = _respaldo_para_producto(registro.get('nombre'))
-        if not nueva_url:
-            resultado['detalle'].append(
-                f'producto={registro.get("id")} sin respaldo para {str(url)[:80]}'
-            )
-            continue
         try:
             with get_db_connection() as conexion:
                 cursor = conexion.cursor()
                 cursor.execute(
                     """
                     UPDATE productos
-                    SET imagen_url = ?, imagen_fuente = ?,
+                    SET imagen_url = NULL, imagen_fuente = NULL,
                         imagen_estado = 'pendiente', imagen_intentos = 0
                     WHERE id = ?
                     """,
-                    (nueva_url, nueva_fuente, int(registro.get('id'))),
+                    (int(registro.get('id')),),
                 )
                 conexion.commit()
             resultado['reparadas'] += 1
             resultado['detalle'].append(
-                f'producto={registro.get("id")} rota -> {nueva_fuente}'
+                f'producto={registro.get("id")} rota -> sin imagen (neutro)'
             )
         except Exception as error:
             resultado['detalle'].append(
@@ -316,7 +311,7 @@ def main(argv=None):
     verificar_storage = '--storage' in argv
     reparar = '--reparar' in argv
     argv = [a for a in argv if a not in ('--storage', '--reparar')]
-    minimo = float(argv[1]) if len(argv) > 1 else 1.0
+    minimo = float(argv[1]) if len(argv) > 1 else 0.0
     comercios = (
         [(int(argv[0]), None)]
         if argv and argv[0].isdigit()
@@ -343,12 +338,12 @@ def main(argv=None):
         print(reporte.resumen())
         for problema in reporte.problemas[:10]:
             print(f'   - {problema}')
-        if reporte.porcentaje < minimo or reporte.problemas:
+        if reporte.problemas or (minimo > 0 and reporte.porcentaje < minimo):
             fallos += 1
     if fallos:
-        print(f'COBERTURA INSUFICIENTE en {fallos} comercio(s) (mínimo {minimo:.0%})')
+        print(f'ASSETS INVÁLIDOS en {fallos} comercio(s)')
         return 1
-    print('OK cobertura visual 100% (sin URLs vacías ni assets rotos)')
+    print('OK integridad de assets (sin fabricados ni roto; los faltantes son estados neutros)')
     return 0
 
 

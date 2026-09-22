@@ -123,13 +123,20 @@ def _limpiar_si_toca(forzar=False):
         from backend.storage_cleanup import limpiar_huerfanos
 
         resultado = limpiar_huerfanos(max_por_carpeta=_LIMPIAR_LOTE)
+        generados = 0
+        try:
+            from backend.storage_cleanup import eliminar_assets_generados
+
+            generados = int(eliminar_assets_generados(limite=_LIMPIAR_LOTE * 5).get('limpiados') or 0)
+        except Exception as error_generados:
+            print(f'{_LOG} limpieza de fabricados fallo: {type(error_generados).__name__}')
     except Exception as error:
         print(f'{_LOG} limpieza de huérfanos fallo: {type(error).__name__}: {error}')
         return 0
-    if resultado.get('borrados'):
+    if resultado.get('borrados') or generados:
         print(
-            f'{_LOG} huérfanos purgados: {resultado["borrados"]}/'
-            f'{resultado["revisados"]} assets manuales sin referencia'
+            f'{_LOG} mantenimiento: huérfanos={resultado["borrados"]}/'
+            f'{resultado["revisados"]} fabricados_limpiados={generados}'
         )
     return int(resultado.get('borrados') or 0)
 
