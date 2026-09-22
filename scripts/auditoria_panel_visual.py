@@ -161,6 +161,25 @@ def _auditar_importacion_instantanea():
     )
     _ok((RAIZ / 'backend' / 'politica_imagenes.py').is_file(), 'política de imágenes por sector')
 
+    # --- Consolidación de métricas y limpieza de assets ---
+    analytics_src = _leer('backend/analytics.py')
+    _ok('TIPOS_LEGADO' in analytics_src, 'los clics "Ir a la tienda" se consolidan en visitas')
+    _ok('def normalizar_tipo' in analytics_src, 'normalización de tipos de evento')
+    _ok(
+        'def _crear_tabla_interacciones_comercio' in _leer('database.py'),
+        'tabla de interacciones creada por init_db',
+    )
+    limpieza = _leer('backend/storage_cleanup.py')
+    _ok('def eliminar_asset' in limpieza, 'purga de assets manuales')
+    _ok('def limpiar_asset_anterior' in limpieza, 'purga del asset reemplazado')
+    _ok('def limpiar_huerfanos' in limpieza, 'barrido de huérfanos')
+    _ok('.remove(' in limpieza, 'invoca la API de borrado de Supabase Storage')
+    _ok(
+        'limpiar_asset_anterior' in _leer('backend/stores.py'),
+        'la actualización de producto/logo purga el asset anterior',
+    )
+    _ok('_limpiar_si_toca' in backfill, 'la limpieza corre en el mantenimiento periódico')
+
     pipeline_src = _leer('services/professional_image_pipeline.py')
     _ok('def _buscar_vtex' in pipeline_src, 'fuente VTEX (catálogo local directo)')
     _ok('def _buscar_mercadolibre' in pipeline_src, 'fuente Mercado Libre (API)')

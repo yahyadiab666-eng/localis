@@ -103,14 +103,20 @@ def _probar_politica_por_sector():
 
 
 def _probar_analitica_tipos():
-    print('\n=== Analítica: lista blanca de eventos ===')
-    from backend.analytics import TIPOS_INTERACCION, tipo_valido
+    print('\n=== Analítica: métrica principal consolidada ===')
+    from backend.analytics import TIPOS_INTERACCION, normalizar_tipo, tipo_valido
 
     _ok(tipo_valido('clic_producto'), 'clic_producto es válido')
     _ok(tipo_valido('Visita_Tienda'), 'normaliza mayúsculas')
     _ok(not tipo_valido('drop_table'), 'tipo arbitrario rechazado')
     _ok(not tipo_valido(''), 'tipo vacío rechazado')
     _ok('visita_tienda' in TIPOS_INTERACCION, 'incluye visita_tienda')
+    _ok('clic_tienda' not in TIPOS_INTERACCION, 'sin contador duplicado de "Ir a la tienda"')
+    _ok(
+        normalizar_tipo('clic_tienda') == 'visita_tienda',
+        'el clic heredado "clic_tienda" se consolida como visita_tienda',
+    )
+    _ok(normalizar_tipo('no_permitido') is None, 'tipo desconocido -> None')
 
 
 def _probar_compresion():
@@ -169,6 +175,18 @@ def _probar_ruta_beacon():
         with patch('main.registrar_interaccion') as espia:
             respuesta = main.api_registrar_interaccion(1)
             _ok(respuesta == ('', 204) and not espia.called, 'ignora tipos inválidos')
+
+    with main.app.test_request_context(
+        '/api/comercio/1/interaccion', method='POST',
+        json={'tipo': 'clic_tienda'},
+    ):
+        with patch('main.registrar_interaccion') as espia:
+            respuesta = main.api_registrar_interaccion(1)
+            _ok(respuesta == ('', 204), 'el clic heredado responde 204')
+            _ok(
+                espia.called and espia.call_args[0][1] == 'visita_tienda',
+                'el clic heredado se consolida como visita_tienda',
+            )
 
 
 def main_test() -> int:

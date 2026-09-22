@@ -20,13 +20,20 @@ from datetime import datetime, timedelta
 _LOG = '[Localis Analitica]'
 
 # Tipos de evento permitidos (clave interna -> etiqueta para el panel).
+# Métrica principal: "Visitas a la tienda". No hay contador duplicado de
+# "Ir a la tienda": entrar a la tienda ya cuenta como visita.
 TIPOS_INTERACCION = {
     'visita_tienda': 'Visitas a la tienda',
     'clic_producto': 'Clics en productos',
-    'clic_tienda': 'Clics en "Ir a la tienda"',
     'clic_whatsapp': 'Clics en WhatsApp',
     'clic_maps': 'Clics en Google Maps',
     'clic_copiar': 'Copias del número',
+}
+
+# Eventos heredados que se consolidan en la métrica principal (no se pierden
+# filas históricas ni se muestran contadores duplicados).
+TIPOS_LEGADO = {
+    'clic_tienda': 'visita_tienda',
 }
 
 _DEDUP_SEGUNDOS = 2.0
@@ -38,8 +45,10 @@ def tipo_valido(tipo):
     return str(tipo or '').strip().lower() in TIPOS_INTERACCION
 
 
-def _normalizar_tipo(tipo):
+def normalizar_tipo(tipo):
+    """Tipo canónico del evento, consolidando los heredados, o ``None``."""
     clave = str(tipo or '').strip().lower()
+    clave = TIPOS_LEGADO.get(clave, clave)
     return clave if clave in TIPOS_INTERACCION else None
 
 
@@ -83,7 +92,7 @@ def registrar_interaccion(comercio_id, tipo, producto_id=None, origen=None, huel
     if comercio_id <= 0:
         return False
 
-    tipo = _normalizar_tipo(tipo)
+    tipo = normalizar_tipo(tipo)
     if not tipo:
         return False
 
@@ -158,16 +167,24 @@ def resumen_interacciones(comercio_id, dias=30):
     try:
         from backend.db import get_db_connection
 
+        # Se consolidan los eventos heredados ('clic_tienda') dentro de la
+        # métrica principal ('visita_tienda') y se ignoran tipos desconocidos,
+        # de modo que el total siempre coincida con el desglose mostrado.
+        tipos_consulta = tuple(TIPOS_INTERACCION) + tuple(TIPOS_LEGADO)
+        marcadores = ', '.join('?' for _ in tipos_consulta)
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
             cursor.execute(
-                """
-                SELECT tipo, COUNT(*) AS n
+                f"""
+                SELECT CASE WHEN tipo = 'clic_tienda' THEN 'visita_tienda'
+                            ELSE tipo END AS tipo,
+                       COUNT(*) AS n
                 FROM interacciones_comercio
                 WHERE comercio_id = ? AND fecha >= ?
-                GROUP BY tipo
+                  AND tipo IN ({marcadores})
+                GROUP BY 1
                 """,
-                (comercio_id, corte),
+                (comercio_id, corte, *tipos_consulta),
             )
             por_tipo = {}
             total = 0

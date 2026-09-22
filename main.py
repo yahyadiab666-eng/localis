@@ -216,7 +216,11 @@ from backend.stores import (
     obtener_tasa_dolar,
     registrar_comercio_completo,
 )
-from backend.analytics import registrar_interaccion, resumen_interacciones, tipo_valido
+from backend.analytics import (
+    normalizar_tipo,
+    registrar_interaccion,
+    resumen_interacciones,
+)
 from backend.apariencia import (
     color_banner,
     gradiente_banner,
@@ -959,12 +963,11 @@ def api_registrar_interaccion(comercio_id):
     cuerpo = request.get_json(silent=True)
     if not isinstance(cuerpo, dict):
         cuerpo = request.form
-    tipo = cuerpo.get('tipo') if hasattr(cuerpo, 'get') else ''
+    tipo = normalizar_tipo(cuerpo.get('tipo') if hasattr(cuerpo, 'get') else '')
+    if not tipo:
+        return ('', 204)
     producto_raw = cuerpo.get('producto_id') if hasattr(cuerpo, 'get') else None
     origen = cuerpo.get('origen') if hasattr(cuerpo, 'get') else ''
-
-    if not tipo_valido(tipo):
-        return ('', 204)
 
     producto_id = None
     if producto_raw not in (None, '', 'null', 'None'):

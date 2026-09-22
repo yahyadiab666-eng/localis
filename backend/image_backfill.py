@@ -39,10 +39,16 @@ _REPARAR = str(os.getenv('LOCALIS_IMG_REPARAR', '1')).strip().lower() not in (
 )
 _REPARAR_INTERVALO = max(600, _env_int('LOCALIS_IMG_REPARAR_INTERVALO', 1800))
 _REPARAR_LOTE = max(50, _env_int('LOCALIS_IMG_REPARAR_LOTE', 400))
+_LIMPIAR = str(os.getenv('LOCALIS_LIMPIAR_HUERFANOS', '1')).strip().lower() not in (
+    '0', 'false', 'no', 'off',
+)
+_LIMPIAR_INTERVALO = max(1800, _env_int('LOCALIS_LIMPIAR_HUERFANOS_INTERVALO', 21600))
+_LIMPIAR_LOTE = max(50, _env_int('LOCALIS_LIMPIAR_HUERFANOS_LOTE', 400))
 
 _iniciado = False
 _lock = threading.Lock()
 _ultima_reparacion = 0.0
+_ultima_limpieza = 0.0
 
 
 def _habilitado():
@@ -104,6 +110,30 @@ def _reparar_si_toca(forzar=False):
     return int(resultado.get('reparadas') or 0)
 
 
+def _limpiar_si_toca(forzar=False):
+    """Purga (throttled) assets manuales huérfanos del bucket/local."""
+    global _ultima_limpieza
+    if not _LIMPIAR:
+        return 0
+    ahora = time.monotonic()
+    if not forzar and (ahora - _ultima_limpieza) < _LIMPIAR_INTERVALO:
+        return 0
+    _ultima_limpieza = ahora
+    try:
+        from backend.storage_cleanup import limpiar_huerfanos
+
+        resultado = limpiar_huerfanos(max_por_carpeta=_LIMPIAR_LOTE)
+    except Exception as error:
+        print(f'{_LOG} limpieza de huérfanos fallo: {type(error).__name__}: {error}')
+        return 0
+    if resultado.get('borrados'):
+        print(
+            f'{_LOG} huérfanos purgados: {resultado["borrados"]}/'
+            f'{resultado["revisados"]} assets manuales sin referencia'
+        )
+    return int(resultado.get('borrados') or 0)
+
+
 def ejecutar_ciclo():
     """Procesa un lote acotado de pendientes. Retorna cuántos comercios atendió."""
     from services.professional_image_pipeline import pipeline_habilitado, procesar_inventario
@@ -111,6 +141,7 @@ def ejecutar_ciclo():
     if not pipeline_habilitado():
         return 0
     _reparar_si_toca()
+    _limpiar_si_toca()
     atendidos = 0
     for comercio_id in _comercios_con_pendientes(_COMERCIOS):
         try:

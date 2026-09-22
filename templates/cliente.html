@@ -168,7 +168,7 @@
             <span id="modal-precio-bs" class="text-xs text-gray-400 ml-2"></span>
           </div>
         </div>
-        <a id="modal-btn-tienda" href="#" data-interaccion="clic_tienda" data-interaccion-comercio=""
+        <a id="modal-btn-tienda" href="#"
            class="btn-touch block w-full text-center py-3 rounded-full font-bold text-sm transition" style="background: rgb(245, 158, 11); color: rgb(26, 26, 26);">
           Ir a la Tienda
         </a>
@@ -223,7 +223,6 @@
         document.getElementById('modal-precio-usd').textContent = `$${Number(p.precio_usd).toFixed(2)}`;
         document.getElementById('modal-precio-bs').textContent = `${Number(p.precio_bs).toFixed(2)} Bs`;
         document.getElementById('modal-btn-tienda').href = `/tienda/${p.comercio_id}`;
-        document.getElementById('modal-btn-tienda').setAttribute('data-interaccion-comercio', p.comercio_id || '');
 
         document.getElementById('modal-producto').classList.add('activo');
         lucide.createIcons();
