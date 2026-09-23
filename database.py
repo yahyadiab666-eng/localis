@@ -1,5 +1,6 @@
 import os
 import re
+import threading
 import time
 import traceback
 from datetime import date, datetime, time as time_of_day
@@ -39,6 +40,7 @@ _RE_NOMBRE_INDICE = re.compile(
 )
 
 _connection_pool = None
+_pool_lock = threading.Lock()
 
 # Parámetros válidos en URIs libpq/psycopg2. El resto (p. ej. pgbouncer=true) se descarta.
 _PARAMS_URI_PERMITIDOS = frozenset({
@@ -549,13 +551,15 @@ class _PgConnection:
 def _obtener_pool():
     global _connection_pool
     if _connection_pool is None:
-        _require_database_url()
-        _connection_pool = pool.ThreadedConnectionPool(
-            minconn=DB_POOL_MIN,
-            maxconn=DB_POOL_MAX,
-            dsn=DATABASE_URL,
-            connect_timeout=DB_CONNECT_TIMEOUT,
-        )
+        with _pool_lock:
+            if _connection_pool is None:
+                _require_database_url()
+                _connection_pool = pool.ThreadedConnectionPool(
+                    minconn=DB_POOL_MIN,
+                    maxconn=DB_POOL_MAX,
+                    dsn=DATABASE_URL,
+                    connect_timeout=DB_CONNECT_TIMEOUT,
+                )
     return _connection_pool
 
 

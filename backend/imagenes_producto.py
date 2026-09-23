@@ -233,7 +233,17 @@ def resolver_activa(producto_id):
                 clave = normalizar_clave(
                     datos.get('codigo_barras'), datos.get('nombre'), datos.get('descripcion')
                 )
-                registro = obtener_automatica(clave) or {}
+                # Se consulta el registro con el MISMO cursor: evita tomar una
+                # segunda conexión del pool (menos presión bajo alta concurrencia).
+                registro = {}
+                if clave:
+                    cursor.execute(
+                        "SELECT url_imagen, fuente FROM imagenes_automaticas WHERE clave = ?",
+                        (clave,),
+                    )
+                    fila_auto = cursor.fetchone()
+                    if fila_auto is not None:
+                        registro = _fila_dict(fila_auto) or {}
                 url_auto = registro.get('url_imagen')
                 if url_auto:
                     activa, fuente, estado = url_auto, (registro.get('fuente') or 'automatica'), 'real'
