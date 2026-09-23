@@ -494,6 +494,19 @@ def buscar_o_cachear_automatica(
         if not google_cse.habilitado():
             resultado['fuente'] = 'api_no_configurada'
             return resultado
+
+        def _no_disponible():
+            if google_cse.cuota_agotada():
+                return 'cuota_agotada'
+            if getattr(google_cse, 'api_invalida', lambda: False)():
+                return 'api_invalida'
+            return None
+
+        motivo = _no_disponible()
+        if motivo:
+            # No se consulta ni se envenena el caché: queda pendiente.
+            resultado['fuente'] = motivo
+            return resultado
     except Exception:
         resultado['fuente'] = 'api_no_disponible'
         return resultado
@@ -504,13 +517,19 @@ def buscar_o_cachear_automatica(
         hallazgos = google_cse.buscar_por_codigo(codigo_barras, limite=limite)
         if hallazgos:
             encontrado, termino_usado = hallazgos[0], str(codigo_barras)
-    if encontrado is None:
+    if encontrado is None and not _no_disponible():
         hallazgos = google_cse.buscar_por_nombre_descripcion(nombre, descripcion, limite=limite)
         if hallazgos:
             encontrado = hallazgos[0]
             termino_usado = ' '.join(
                 p for p in [str(nombre or '').strip(), ' '.join(str(descripcion or '').split())[:80]] if p
             )
+
+    motivo_final = _no_disponible()
+    if encontrado is None and motivo_final:
+        # Cuota/config en mitad de la consulta: pendiente, sin caché negativo.
+        resultado['fuente'] = motivo_final
+        return resultado
 
     if encontrado:
         registrar_automatica(

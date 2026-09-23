@@ -206,6 +206,97 @@ def _probar_proteccion_manual():
     )
 
 
+def _probar_cuota_y_parametros():
+    print('\n=== Cuota, tope diario y searchType=image ===')
+    import os
+
+    from backend import google_cse
+    from backend import imagenes_producto as ip
+
+    google_cse.reiniciar_estado()
+
+    # searchType=image en la petición HTTP.
+    capturado = {}
+    respuesta_ok = SimpleNamespace(status_code=200, json=lambda: {'items': []})
+
+    def _fake_get(url, **kwargs):
+        capturado.update(kwargs)
+        return respuesta_ok
+
+    with patch.object(google_cse, 'clave_cse', return_value=('k', 'cx')), patch(
+        'backend.http_client.get', side_effect=_fake_get
+    ):
+        google_cse.buscar_imagenes('taladro bosch')
+    _ok(capturado.get('params', {}).get('searchType') == 'image',
+        'la petición envía searchType=image')
+
+    # 429 / cuota agotada: [] sin excepción y bandera activada.
+    google_cse.reiniciar_estado()
+    with patch.object(google_cse, 'clave_cse', return_value=('k', 'cx')), patch(
+        'backend.http_client.get',
+        return_value=SimpleNamespace(
+            status_code=429, json=lambda: {'error': {'message': 'Quota exceeded'}}
+        ),
+    ):
+        salida = google_cse.buscar_imagenes('algo')
+    _ok(salida == [], 'HTTP 429 devuelve [] sin lanzar')
+    _ok(google_cse.cuota_agotada(), 'HTTP 429 marca la cuota como agotada')
+
+    # Con cuota agotada: el producto queda PENDIENTE, sin caché negativo.
+    with patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
+        ip, 'registrar_automatica'
+    ) as reg, patch('backend.google_cse.habilitado', return_value=True), patch(
+        'backend.google_cse.cuota_agotada', return_value=True
+    ):
+        res = ip.buscar_o_cachear_automatica(9, categoria='tecnologia', nombre='TV')
+    _ok(
+        res['url'] is None and not reg.called and res['fuente'] == 'cuota_agotada',
+        'cuota agotada: pendiente, sin caché negativo',
+    )
+
+    # Clave inválida (HTTP 400): se marca config inválida y NO se cachea negativo.
+    google_cse.reiniciar_estado()
+    with patch.object(google_cse, 'clave_cse', return_value=('k', 'cx')), patch(
+        'backend.http_client.get',
+        return_value=SimpleNamespace(
+            status_code=400, json=lambda: {'error': {'message': 'API key not valid. Please pass a valid API key.'}}
+        ),
+    ):
+        salida = google_cse.buscar_imagenes('x')
+    _ok(salida == [], 'HTTP 400 (clave inválida) devuelve [] sin lanzar')
+    _ok(google_cse.api_invalida(), 'HTTP 400 marca la API como inválida')
+
+    with patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
+        ip, 'registrar_automatica'
+    ) as reg, patch('backend.google_cse.habilitado', return_value=True), patch(
+        'backend.google_cse.cuota_agotada', return_value=False
+    ), patch('backend.google_cse.api_invalida', return_value=True):
+        res = ip.buscar_o_cachear_automatica(10, categoria='tecnologia', nombre='TV')
+    _ok(
+        res['url'] is None and not reg.called and res['fuente'] == 'api_invalida',
+        'clave inválida: pendiente, sin caché negativo',
+    )
+    google_cse.reiniciar_estado()
+
+    # Tope diario: al alcanzarlo deja de consultar.
+    google_cse.reiniciar_estado()
+    with patch.dict(os.environ, {'LOCALIS_GOOGLE_CSE_LIMITE_DIARIO': '1'}, clear=False), patch.object(
+        google_cse, 'clave_cse', return_value=('k', 'cx')
+    ), patch('backend.http_client.get', return_value=respuesta_ok):
+        google_cse.buscar_imagenes('uno')
+    _ok(google_cse.cuota_agotada(), 'tope diario alcanzado: no más consultas')
+    google_cse.reiniciar_estado()
+
+    # Alias GOOGLE_SEARCH_API_KEY / GOOGLE_SEARCH_CX.
+    with patch.dict(
+        os.environ,
+        {'GOOGLE_SEARCH_API_KEY': 'k2', 'GOOGLE_SEARCH_CX': 'cx2'},
+        clear=False,
+    ):
+        clave, cx = google_cse.clave_cse()
+    _ok(clave == 'k2' and cx == 'cx2', 'lee GOOGLE_SEARCH_API_KEY / GOOGLE_SEARCH_CX')
+
+
 def main() -> int:
     _probar_clave_y_categorias()
     _probar_google_cse()
@@ -213,6 +304,7 @@ def main() -> int:
     _probar_registro_no_borra()
     _probar_purga_manual()
     _probar_proteccion_manual()
+    _probar_cuota_y_parametros()
 
     print('\n=== RESULTADO ===')
     if _ERRORES:

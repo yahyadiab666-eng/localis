@@ -222,10 +222,17 @@ def _auditar_importacion_instantanea():
         'tabla permanente de imágenes automáticas',
     )
     cse = _leer('backend/google_cse.py')
-    _ok('GOOGLE_CSE_API_KEY' in cse, 'cliente Google CSE (GOOGLE_CSE_API_KEY)')
+    _ok(
+        'GOOGLE_SEARCH_API_KEY' in cse and 'GOOGLE_SEARCH_CX' in cse,
+        'cliente Google CSE (GOOGLE_SEARCH_API_KEY / GOOGLE_SEARCH_CX)',
+    )
     _ok(
         'def buscar_por_codigo' in cse and 'def buscar_por_nombre_descripcion' in cse,
         'EAN primero; nombre+descripción como respaldo',
+    )
+    _ok(
+        'searchType' in cse and 'def cuota_agotada' in cse and 'def api_invalida' in cse,
+        'searchType=image y manejo de cuota/clave inválida',
     )
     _ok(
         'buscar_o_cachear_automatica' in _leer('services/professional_image_pipeline.py'),
