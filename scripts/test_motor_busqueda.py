@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Pruebas del motor de búsqueda heurística (sin red).
 
-Verifica las variantes de consulta tipo búsqueda humana, las variantes de URL
-de Open Food Facts, el filtro de relevancia por título y la expansión de fuentes
-VTEX regionales.
+Verifica las variantes de consulta tipo búsqueda humana, la integración del
+conector Serper.dev, el filtro de relevancia por título y la expansión de
+fuentes VTEX regionales.
 """
 
 from __future__ import annotations
@@ -47,27 +47,22 @@ def main() -> int:
         'sin variantes duplicadas',
     )
 
-    print('\n=== Variantes de URL de Open Food Facts ===')
-    url = 'https://images.openfoodfacts.org/images/products/759/118/400/2018/front_es.5.400.jpg'
-    alternas = P._variantes_off(url)
-    _ok(len(alternas) >= 2, f'genera alternativas de tamaño ({len(alternas)})')
-    _ok(any('.full.' in a for a in alternas), 'incluye versión .full')
+    print('\n=== Conector Serper.dev integrado ===')
+    from unittest.mock import patch
 
-    producto = {
-        'image_front_url': url,
-        'images': {
-            'front_es': {
-                'sizes': {
-                    '400': {'url': url},
-                    'full': {'url': url.replace('.400.', '.full.')},
-                }
-            }
-        },
-    }
-    urls = P._urls_imagen_off(producto)
-    _ok(len(urls) >= 2, f'extrae URLs de la estructura images ({len(urls)})')
-    candidatos = P._candidatos_desde_off(producto)
-    _ok(candidatos and candidatos[0].variantes(), 'candidato OFF con variantes de descarga')
+    hallazgos = [
+        {'url': 'https://cdn.tienda.com/foto.webp', 'titulo': 'Taladro Bosch',
+         'dominio': 'cdn.tienda.com', 'ancho': 800, 'alto': 800},
+    ]
+    with patch('backend.serper_images.habilitado', return_value=True), patch(
+        'backend.serper_images.cuota_agotada', return_value=False
+    ), patch('backend.serper_images.api_invalida', return_value=False), patch(
+        'backend.serper_images.buscar_imagenes', return_value=hallazgos
+    ):
+        cands = P._buscar_serper('taladro bosch', limite=5)
+    _ok(cands and cands[0].url == 'https://cdn.tienda.com/foto.webp',
+        'mapea los resultados de Serper a candidatos')
+    _ok(cands and cands[0].fuente == 'serper', 'marca la fuente como serper')
 
     print('\n=== Relevancia por título ===')
     tokens = P._tokens_relevancia('Celular Samsung A15', None, None)
@@ -86,8 +81,8 @@ def main() -> int:
         f'incluye distribuidores regionales ({hosts})',
     )
     ids = {f['id'] for f in catalogo_fuentes()}
-    for fuente in ('vtex', 'openfacts', 'serpapi' if 'serpapi' in ids else 'bing_imagenes', 'logo_favicon'):
-        _ok(fuente in ids or fuente == 'serpapi', f'registro de fuentes incluye {fuente}')
+    for fuente in ('vtex', 'serper', 'bing_imagenes', 'logo_favicon'):
+        _ok(fuente in ids, f'registro de fuentes incluye {fuente}')
 
     print('\n=== Reintentos y buscadores API opcionales ===')
     _ok(hasattr(P, '_descargar') and P._DESCARGA_INTENTOS >= 1, 'descarga con reintentos')
@@ -104,7 +99,7 @@ def main() -> int:
     _ok('User-Agent' in cab and 'Accept-Language' in cab, 'cabeceras de navegador completas')
     _ok(cab['Accept'] == 'application/json', 'respeta el Accept del llamador')
     _ok(len({h.user_agent() for _ in range(30)}) >= 3, 'rota User-Agents reales')
-    _ok(callable(getattr(P, '_buscar_google_cse', None)), 'soporte Google CSE (opcional)')
+    _ok(callable(getattr(P, '_buscar_serper', None)), 'soporte Serper.dev (oficial)')
     _ok(callable(getattr(P, '_buscar_bing_api', None)), 'soporte Bing Search API (opcional)')
     _ok('nivel' in inspect.signature(P.buscar_candidatos).parameters, 'búsqueda por escenarios (nivel)')
     _ok('nivel' in inspect.signature(P.procesar_producto).parameters, 'procesar_producto acepta nivel')

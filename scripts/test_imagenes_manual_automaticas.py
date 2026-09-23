@@ -3,7 +3,7 @@
 
 Pruebas sin base de datos (se parchean las funciones de persistencia):
   - Clave de producto y categorías permitidas (Hardware/Tech/Appliances/Health/Food).
-  - Google Custom Search: deshabilitado sin claves; parseo correcto con clave.
+  - Serper.dev (Google Images): deshabilitado sin clave; parseo con clave.
   - ``buscar_o_cachear_automatica``: caché positiva/negativa, una consulta por
     producto, EAN primero y nombre+descripción como respaldo.
   - El registro automático nunca degrada un acierto previo (COALESCE).
@@ -51,39 +51,66 @@ def _probar_clave_y_categorias():
     _ok(categoria_permitida('Electrodomésticos'), 'texto libre "Electrodomésticos" permitido')
 
 
-def _probar_google_cse():
-    print('\n=== Cliente Google Custom Search ===')
+def _probar_serper():
+    print('\n=== Cliente Serper.dev (Google Images) ===')
     import os
 
-    from backend import google_cse
+    from backend import serper_images
 
-    with patch.dict(os.environ, {'GOOGLE_CSE_API_KEY': '', 'GOOGLE_CSE_CX': ''}, clear=False):
-        _ok(not google_cse.habilitado(), 'sin claves -> deshabilitado')
-        _ok(google_cse.buscar_imagenes('algo') == [], 'sin claves no llama a la API')
+    # Sin clave (vacío explícito) -> deshabilitado y sin llamadas.
+    with patch.dict(os.environ, {'SERPER_API_KEY': ''}, clear=False):
+        serper_images.reiniciar_estado()
+        _ok(not serper_images.habilitado(), 'sin clave -> deshabilitado')
+        _ok(serper_images.buscar_imagenes('algo') == [], 'sin clave no llama a la API')
+        _ok(serper_images.buscar_imagen('algo') is None, 'buscar_imagen -> None sin clave')
 
-    with patch.dict(
-        os.environ,
-        {'GOOGLE_CSE_API_KEY': 'k', 'GOOGLE_CSE_CX': 'cx'},
-        clear=False,
-    ), patch.object(google_cse, 'clave_cse', return_value=('k', 'cx')):
-        _ok(google_cse.habilitado(), 'con GOOGLE_CSE_API_KEY + CX -> habilitado')
-        respuesta = SimpleNamespace(
-            status_code=200,
-            json=lambda: {
-                'items': [
-                    {'title': 'X', 'link': 'https://cdn.tienda.com/foto.webp',
-                     'image': {'width': 800, 'height': 800, 'thumbnailLink': 'https://t/f.jpg'}},
-                ]
-            },
+    respuesta = SimpleNamespace(
+        status_code=200,
+        json=lambda: {
+            'images': [
+                {'title': 'X', 'imageUrl': 'https://cdn.tienda.com/foto.webp',
+                 'imageWidth': 800, 'imageHeight': 800, 'domain': 'cdn.tienda.com'},
+                {'title': 'mini', 'imageUrl': 'https://cdn.tienda.com/mini.webp',
+                 'imageWidth': 10, 'imageHeight': 10, 'domain': 'cdn.tienda.com'},
+            ]
+        },
+    )
+    capturado = {}
+
+    def _fake_post(url, json=None, headers=None, timeout=None):
+        capturado['url'] = url
+        capturado['json'] = json
+        capturado['headers'] = headers
+        return respuesta
+
+    with patch.dict(os.environ, {'SERPER_API_KEY': 'k-test'}, clear=False), patch(
+        'backend.serper_images.requests.post', side_effect=_fake_post
+    ):
+        serper_images.reiniciar_estado()
+        datos = serper_images.buscar_imagenes('taladro bosch', limite=5)
+    _ok(capturado.get('url') == serper_images.ENDPOINT, 'usa el endpoint oficial de imágenes')
+    _ok(capturado.get('headers', {}).get('X-API-KEY') == 'k-test', 'envía la clave en X-API-KEY')
+    _ok(capturado.get('json', {}).get('q') == 'taladro bosch', 'envía la consulta en el payload')
+    _ok(
+        capturado.get('json', {}).get('gl') == 've'
+        and capturado.get('json', {}).get('hl') == 'es',
+        'afina país/idioma (gl/hl)',
+    )
+    _ok(len(datos) == 2 and datos[0]['dominio'] == 'cdn.tienda.com', 'parsea imageUrl')
+
+    # Contrato estricto: primera imagen limpia y de calidad (descarta la de 10px).
+    with patch.dict(os.environ, {'SERPER_API_KEY': 'k-test'}, clear=False), patch(
+        'backend.serper_images.requests.post', return_value=respuesta
+    ):
+        serper_images.reiniciar_estado()
+        _ok(
+            serper_images.buscar_imagen('taladro bosch') == 'https://cdn.tienda.com/foto.webp',
+            'buscar_imagen devuelve la primera URL limpia y de calidad',
         )
-        with patch('backend.http_client.get', return_value=respuesta):
-            datos = google_cse.buscar_imagenes('taladro bosch', limite=5)
-        _ok(len(datos) == 1 and datos[0]['dominio'] == 'cdn.tienda.com',
-            'parsea los resultados de imagen')
 
     # Nombre+descripción como respaldo.
-    with patch('backend.google_cse.buscar_imagenes', return_value=[{'url': 'u'}]) as espia:
-        google_cse.buscar_por_nombre_descripcion('Licuadora Oster', '2 velocidades')
+    with patch('backend.serper_images.buscar_imagenes', return_value=[{'url': 'u'}]) as espia:
+        serper_images.buscar_por_nombre_descripcion('Licuadora Oster', '2 velocidades')
         consulta = espia.call_args[0][0]
         _ok('Licuadora Oster' in consulta and '2 velocidades' in consulta,
             'la consulta combina nombre + descripción')
@@ -94,7 +121,7 @@ def _probar_cache_automatica():
     from backend import imagenes_producto as ip
 
     # 1) Caché positiva: no consulta la API.
-    with patch.object(ip, 'obtener_automatica', return_value={'url_imagen': 'auto.webp', 'fuente': 'google_cse', 'encontrada': 1}), patch.object(
+    with patch.object(ip, 'obtener_automatica', return_value={'url_imagen': 'auto.webp', 'fuente': 'serper', 'encontrada': 1}), patch.object(
         ip, 'registrar_automatica'
     ) as reg:
         res = ip.buscar_o_cachear_automatica(1, categoria='tecnologia', nombre='X', codigo_barras='123')
@@ -102,9 +129,9 @@ def _probar_cache_automatica():
             'acierto en caché: no se gasta API')
 
     # 2) Caché negativa: tampoco consulta.
-    with patch.object(ip, 'obtener_automatica', return_value={'url_imagen': None, 'fuente': 'google_cse', 'encontrada': 0}), patch.object(
+    with patch.object(ip, 'obtener_automatica', return_value={'url_imagen': None, 'fuente': 'serper', 'encontrada': 0}), patch.object(
         ip, 'registrar_automatica'
-    ) as reg, patch('backend.google_cse.buscar_por_codigo') as por_codigo:
+    ) as reg, patch('backend.serper_images.buscar_por_codigo') as por_codigo:
         res = ip.buscar_o_cachear_automatica(1, categoria='salud', nombre='Y', codigo_barras='9')
         _ok(res['url'] is None and res['desde_cache'] and not reg.called and not por_codigo.called,
             'caché negativa: no se repite la consulta')
@@ -112,14 +139,14 @@ def _probar_cache_automatica():
     # 3) Categoría no permitida: no consulta ni registra.
     with patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
         ip, 'registrar_automatica'
-    ) as reg, patch('backend.google_cse.habilitado', return_value=True):
+    ) as reg, patch('backend.serper_images.habilitado', return_value=True):
         res = ip.buscar_o_cachear_automatica(2, categoria='ropa', nombre='Camisa')
         _ok(res['url'] is None and not reg.called, 'categoría fuera de alcance: sin API')
 
     # 4) API no configurada: no registra (no envenena el caché).
     with patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
         ip, 'registrar_automatica'
-    ) as reg, patch('backend.google_cse.habilitado', return_value=False):
+    ) as reg, patch('backend.serper_images.habilitado', return_value=False):
         res = ip.buscar_o_cachear_automatica(3, categoria='tecnologia', nombre='TV')
         _ok(res['url'] is None and not reg.called and res['fuente'] == 'api_no_configurada',
             'sin API configurada no se registra negativo')
@@ -127,10 +154,10 @@ def _probar_cache_automatica():
     # 5) EAN primero y registro positivo.
     with patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
         ip, 'registrar_automatica'
-    ) as reg, patch('backend.google_cse.habilitado', return_value=True), patch(
-        'backend.google_cse.buscar_por_codigo', return_value=[{'url': 'ean.webp'}]
+    ) as reg, patch('backend.serper_images.habilitado', return_value=True), patch(
+        'backend.serper_images.buscar_por_codigo', return_value=[{'url': 'ean.webp'}]
     ) as por_codigo, patch(
-        'backend.google_cse.buscar_por_nombre_descripcion'
+        'backend.serper_images.buscar_por_nombre_descripcion'
     ) as por_nombre:
         res = ip.buscar_o_cachear_automatica(4, categoria='tecnologia', nombre='TV', codigo_barras='759')
         _ok(res['url'] == 'ean.webp' and por_codigo.called and not por_nombre.called,
@@ -140,8 +167,8 @@ def _probar_cache_automatica():
     # 6) Sin barcode: nombre+descripción, y negativo si no hay resultados.
     with patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
         ip, 'registrar_automatica'
-    ) as reg, patch('backend.google_cse.habilitado', return_value=True), patch(
-        'backend.google_cse.buscar_por_nombre_descripcion', return_value=[{'url': 'nom.webp'}]
+    ) as reg, patch('backend.serper_images.habilitado', return_value=True), patch(
+        'backend.serper_images.buscar_por_nombre_descripcion', return_value=[{'url': 'nom.webp'}]
     ):
         res = ip.buscar_o_cachear_automatica(5, categoria='alimentos', nombre='Harina', descripcion='maíz')
         _ok(res['url'] == 'nom.webp', 'Priority 2: nombre + descripción')
@@ -149,8 +176,8 @@ def _probar_cache_automatica():
 
     with patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
         ip, 'registrar_automatica'
-    ) as reg, patch('backend.google_cse.habilitado', return_value=True), patch(
-        'backend.google_cse.buscar_por_nombre_descripcion', return_value=[]
+    ) as reg, patch('backend.serper_images.habilitado', return_value=True), patch(
+        'backend.serper_images.buscar_por_nombre_descripcion', return_value=[]
     ):
         res = ip.buscar_o_cachear_automatica(6, categoria='alimentos', nombre='Nada')
         _ok(res['url'] is None and reg.call_args.kwargs.get('encontrada') is False,
@@ -207,46 +234,27 @@ def _probar_proteccion_manual():
 
 
 def _probar_cuota_y_parametros():
-    print('\n=== Cuota, tope diario y searchType=image ===')
+    print('\n=== Cuota, errores HTTP y payload de Serper ===')
     import os
 
-    from backend import google_cse
+    from backend import serper_images
     from backend import imagenes_producto as ip
 
-    google_cse.reiniciar_estado()
-
-    # searchType=image en la petición HTTP.
-    capturado = {}
-    respuesta_ok = SimpleNamespace(status_code=200, json=lambda: {'items': []})
-
-    def _fake_get(url, **kwargs):
-        capturado.update(kwargs)
-        return respuesta_ok
-
-    with patch.object(google_cse, 'clave_cse', return_value=('k', 'cx')), patch(
-        'backend.http_client.get', side_effect=_fake_get
+    # 429 -> cuota agotada, [] sin excepción.
+    serper_images.reiniciar_estado()
+    with patch.dict(os.environ, {'SERPER_API_KEY': 'k'}, clear=False), patch(
+        'backend.serper_images.requests.post',
+        return_value=SimpleNamespace(status_code=429, json=lambda: {'message': 'rate limit'}),
     ):
-        google_cse.buscar_imagenes('taladro bosch')
-    _ok(capturado.get('params', {}).get('searchType') == 'image',
-        'la petición envía searchType=image')
-
-    # 429 / cuota agotada: [] sin excepción y bandera activada.
-    google_cse.reiniciar_estado()
-    with patch.object(google_cse, 'clave_cse', return_value=('k', 'cx')), patch(
-        'backend.http_client.get',
-        return_value=SimpleNamespace(
-            status_code=429, json=lambda: {'error': {'message': 'Quota exceeded'}}
-        ),
-    ):
-        salida = google_cse.buscar_imagenes('algo')
+        salida = serper_images.buscar_imagenes('algo')
     _ok(salida == [], 'HTTP 429 devuelve [] sin lanzar')
-    _ok(google_cse.cuota_agotada(), 'HTTP 429 marca la cuota como agotada')
+    _ok(serper_images.cuota_agotada(), 'HTTP 429 marca la cuota como agotada')
 
     # Con cuota agotada: el producto queda PENDIENTE, sin caché negativo.
     with patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
         ip, 'registrar_automatica'
-    ) as reg, patch('backend.google_cse.habilitado', return_value=True), patch(
-        'backend.google_cse.cuota_agotada', return_value=True
+    ) as reg, patch('backend.serper_images.habilitado', return_value=True), patch(
+        'backend.serper_images.cuota_agotada', return_value=True
     ):
         res = ip.buscar_o_cachear_automatica(9, categoria='tecnologia', nombre='TV')
     _ok(
@@ -254,52 +262,69 @@ def _probar_cuota_y_parametros():
         'cuota agotada: pendiente, sin caché negativo',
     )
 
-    # Clave inválida (HTTP 400): se marca config inválida y NO se cachea negativo.
-    google_cse.reiniciar_estado()
-    with patch.object(google_cse, 'clave_cse', return_value=('k', 'cx')), patch(
-        'backend.http_client.get',
-        return_value=SimpleNamespace(
-            status_code=400, json=lambda: {'error': {'message': 'API key not valid. Please pass a valid API key.'}}
-        ),
+    # 401 -> clave inválida; NO se cachea negativo.
+    serper_images.reiniciar_estado()
+    with patch.dict(os.environ, {'SERPER_API_KEY': 'k'}, clear=False), patch(
+        'backend.serper_images.requests.post',
+        return_value=SimpleNamespace(status_code=401, json=lambda: {'message': 'unauthorized'}),
     ):
-        salida = google_cse.buscar_imagenes('x')
-    _ok(salida == [], 'HTTP 400 (clave inválida) devuelve [] sin lanzar')
-    _ok(google_cse.api_invalida(), 'HTTP 400 marca la API como inválida')
+        salida = serper_images.buscar_imagenes('x')
+    _ok(salida == [], 'HTTP 401 (clave inválida) devuelve [] sin lanzar')
+    _ok(serper_images.api_invalida(), 'HTTP 401 marca la API como inválida')
 
     with patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
         ip, 'registrar_automatica'
-    ) as reg, patch('backend.google_cse.habilitado', return_value=True), patch(
-        'backend.google_cse.cuota_agotada', return_value=False
-    ), patch('backend.google_cse.api_invalida', return_value=True):
+    ) as reg, patch('backend.serper_images.habilitado', return_value=True), patch(
+        'backend.serper_images.cuota_agotada', return_value=False
+    ), patch('backend.serper_images.api_invalida', return_value=True):
         res = ip.buscar_o_cachear_automatica(10, categoria='tecnologia', nombre='TV')
     _ok(
         res['url'] is None and not reg.called and res['fuente'] == 'api_invalida',
         'clave inválida: pendiente, sin caché negativo',
     )
-    google_cse.reiniciar_estado()
+    serper_images.reiniciar_estado()
 
-    # Tope diario: al alcanzarlo deja de consultar.
-    google_cse.reiniciar_estado()
-    with patch.dict(os.environ, {'LOCALIS_GOOGLE_CSE_LIMITE_DIARIO': '1'}, clear=False), patch.object(
-        google_cse, 'clave_cse', return_value=('k', 'cx')
-    ), patch('backend.http_client.get', return_value=respuesta_ok):
-        google_cse.buscar_imagenes('uno')
-    _ok(google_cse.cuota_agotada(), 'tope diario alcanzado: no más consultas')
-    google_cse.reiniciar_estado()
-
-    # Alias GOOGLE_SEARCH_API_KEY / GOOGLE_SEARCH_CX.
-    with patch.dict(
-        os.environ,
-        {'GOOGLE_SEARCH_API_KEY': 'k2', 'GOOGLE_SEARCH_CX': 'cx2'},
-        clear=False,
+    # Reintento ante 5xx y éxito posterior.
+    respuestas = [
+        SimpleNamespace(status_code=503, json=lambda: {}),
+        SimpleNamespace(
+            status_code=200,
+            json=lambda: {'images': [{'imageUrl': 'https://x/f.webp', 'imageWidth': 800}]},
+        ),
+    ]
+    with patch.dict(os.environ, {'SERPER_API_KEY': 'k'}, clear=False), patch(
+        'backend.serper_images.requests.post', side_effect=respuestas
     ):
-        clave, cx = google_cse.clave_cse()
-    _ok(clave == 'k2' and cx == 'cx2', 'lee GOOGLE_SEARCH_API_KEY / GOOGLE_SEARCH_CX')
+        serper_images.reiniciar_estado()
+        datos = serper_images.buscar_imagenes('tv')
+    _ok(
+        len(datos) == 1 and datos[0]['url'] == 'https://x/f.webp',
+        'reintenta ante 5xx y devuelve el resultado del reintento',
+    )
+
+    # Sin SERPER_API_KEY: configuración obligatoria y fallo explícito.
+    env_sin = {k: v for k, v in os.environ.items() if k != 'SERPER_API_KEY'}
+    with patch.dict(os.environ, env_sin, clear=True):
+        _ok(not serper_images.configurada(), 'sin SERPER_API_KEY -> no configurada')
+        _ok(not serper_images.habilitado(), 'sin SERPER_API_KEY -> deshabilitado')
+        _ok(serper_images.buscar_imagenes('algo') == [], 'sin clave no llama a la API')
+        _ok(serper_images.buscar_imagen('algo') is None, 'buscar_imagen -> None sin clave')
+        lanzo = False
+        try:
+            serper_images.require_clave()
+        except serper_images.SerperConfigError:
+            lanzo = True
+        _ok(lanzo, 'require_clave lanza SerperConfigError sin clave')
+        estado = serper_images.estado_configuracion()
+        _ok(
+            estado['configurada'] is False and estado['key_longitud'] == 0,
+            'estado_configuracion reporta ausencia sin exponer el secreto',
+        )
 
 
 def main() -> int:
     _probar_clave_y_categorias()
-    _probar_google_cse()
+    _probar_serper()
     _probar_cache_automatica()
     _probar_registro_no_borra()
     _probar_purga_manual()

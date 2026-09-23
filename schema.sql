@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS productos (
     precio_usd REAL NOT NULL, 
     descripcion TEXT,
     imagen_url TEXT, -- URL pública de Storage o /static/uploads/
-    imagen_fuente TEXT, -- openfoodfacts | override_manual | placeholder
+    imagen_fuente TEXT, -- serper | override_manual | placeholder
     stock INTEGER DEFAULT 0,
     codigo_barras TEXT,
     FOREIGN KEY (comercio_id) REFERENCES comercios(id) ON DELETE CASCADE

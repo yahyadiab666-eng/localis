@@ -204,7 +204,7 @@ def _consultar_catalogo_supabase(codigo):
 
 
 def _consultar_semilla_memoria(codigo):
-    """Fuente 2: diccionario en memoria (URLs públicas OFF/wsrv). Sin red."""
+    """Fuente 2: diccionario en memoria (semilla local). Sin red."""
     try:
         clave = normalizar_codigo_barras(codigo) or codigo or ''
         return _url_maestro_valida(IMAGENES_CATALOGO_SEMILLA.get(clave))

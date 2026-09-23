@@ -199,7 +199,7 @@ def _auditar_importacion_instantanea():
         'sin purga del catálogo maestro',
     )
 
-    # --- Registro manual/automático y Google CSE ---
+    # --- Registro manual/automático y Serper.dev ---
     _ok(
         (RAIZ / 'backend' / 'imagenes_producto.py').is_file(),
         'registro permanente de imágenes automáticas y ciclo manual',
@@ -221,18 +221,22 @@ def _auditar_importacion_instantanea():
         and 'def _crear_tabla_imagenes_automaticas' in _leer('database.py'),
         'tabla permanente de imágenes automáticas',
     )
-    cse = _leer('backend/google_cse.py')
+    serper = _leer('backend/serper_images.py')
     _ok(
-        'GOOGLE_SEARCH_API_KEY' in cse and 'GOOGLE_SEARCH_CX' in cse,
-        'cliente Google CSE (GOOGLE_SEARCH_API_KEY / GOOGLE_SEARCH_CX)',
+        'SERPER_API_KEY' in serper and 'https://google.serper.dev/images' in serper,
+        'conector Serper.dev (SERPER_API_KEY / endpoint de imágenes)',
     )
     _ok(
-        'def buscar_por_codigo' in cse and 'def buscar_por_nombre_descripcion' in cse,
+        'def buscar_por_codigo' in serper and 'def buscar_por_nombre_descripcion' in serper,
         'EAN primero; nombre+descripción como respaldo',
     )
     _ok(
-        'searchType' in cse and 'def cuota_agotada' in cse and 'def api_invalida' in cse,
-        'searchType=image y manejo de cuota/clave inválida',
+        'def cuota_agotada' in serper and 'def api_invalida' in serper,
+        'manejo de cuota y clave inválida en Serper',
+    )
+    _ok(
+        not (RAIZ / 'backend' / 'google_cse.py').is_file(),
+        'sin conector Google CSE (eliminado)',
     )
     _ok(
         'buscar_o_cachear_automatica' in _leer('services/professional_image_pipeline.py'),
@@ -259,7 +263,7 @@ def _auditar_importacion_instantanea():
     _ok('ThreadPoolExecutor' in pipeline_src, 'enriquecimiento en paralelo')
     _ok('def _consultas_busqueda' in pipeline_src and '_SINONIMOS_LOCALES' in pipeline_src, 'variantes de búsqueda humana')
     _ok('def _buscar_serpapi' in pipeline_src and 'def _buscar_brave' in pipeline_src, 'buscadores API opcionales (SerpAPI/Brave)')
-    _ok('def _buscar_google_cse' in pipeline_src and 'def _buscar_bing_api' in pipeline_src, 'motores API adicionales (Google CSE/Bing)')
+    _ok('def _buscar_serper' in pipeline_src and 'def _buscar_bing_api' in pipeline_src, 'motores API adicionales (Serper/Bing)')
     _ok((RAIZ / 'backend' / 'http_client.py').is_file(), 'camuflaje HTTP (rotación UA y backoff)')
     _ok('nivel' in pipeline_src, 'búsqueda persistente por escenarios')
     _ok('def _buscar_bing_og' in pipeline_src, 'rastreo og:image de páginas de producto')

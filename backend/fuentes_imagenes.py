@@ -7,8 +7,8 @@ o usar las variables de entorno documentadas, sin tocar la lógica del pipeline.
 
 Orden conceptual de la cascada:
   1. Catálogo maestro indexado (instantáneo, sin red).
-  2. Catálogos estructurados: VTEX local, Mercado Libre (token), Open Facts.
-  3. Buscadores web (Bing/DuckDuckGo) + búsquedas `site:` en retailers.
+  2. Catálogos estructurados: VTEX local, Mercado Libre (token).
+  3. Buscadores web (Bing/DuckDuckGo) + Serper.dev + site: en retailers.
   4. Logos de marca (favicon oficial / Simple Icons / monograma generado).
 """
 
@@ -48,8 +48,6 @@ DOMINIOS_CONFIABLES_GLOBAL = (
     'loreal.', 'heineken.', 'redbull.', 'ferrero.', 'bayer.', '3m.',
     'makita.', 'dewalt.', 'stanleytools.', 'blackanddecker.', 'tefal.',
     'kenwoodworld.', 'oster.', 'mabe.', 'altunsa.',
-    # Catálogos abiertos globales (ficha verificada por código de barras)
-    'openfoodfacts', 'openbeautyfacts', 'openproductsfacts',
 )
 
 DOMINIOS_CONFIABLES_BASE = DOMINIOS_CONFIABLES_VE + DOMINIOS_CONFIABLES_GLOBAL
@@ -119,10 +117,10 @@ def catalogo_fuentes():
             'requiere': 'MELI_ACCESS_TOKEN',
         },
         {
-            'id': 'openfacts',
-            'tipo': 'catalogo_estructurado',
-            'descripcion': 'Open Food/Beauty/Products Facts (global, por EAN y marca)',
-            'requiere': None,
+            'id': 'serper',
+            'tipo': 'buscador',
+            'descripcion': 'Serper.dev (Google Images) — conector oficial',
+            'requiere': 'SERPER_API_KEY',
         },
         {
             'id': 'bing_imagenes',

@@ -499,16 +499,16 @@ def buscar_o_cachear_automatica(
         return resultado
 
     try:
-        from backend import google_cse
+        from backend import serper_images as proveedor
 
-        if not google_cse.habilitado():
+        if not proveedor.habilitado():
             resultado['fuente'] = 'api_no_configurada'
             return resultado
 
         def _no_disponible():
-            if google_cse.cuota_agotada():
+            if proveedor.cuota_agotada():
                 return 'cuota_agotada'
-            if getattr(google_cse, 'api_invalida', lambda: False)():
+            if getattr(proveedor, 'api_invalida', lambda: False)():
                 return 'api_invalida'
             return None
 
@@ -524,11 +524,11 @@ def buscar_o_cachear_automatica(
     encontrado = None
     termino_usado = None
     if codigo_barras:
-        hallazgos = google_cse.buscar_por_codigo(codigo_barras, limite=limite)
+        hallazgos = proveedor.buscar_por_codigo(codigo_barras, limite=limite)
         if hallazgos:
             encontrado, termino_usado = hallazgos[0], str(codigo_barras)
     if encontrado is None and not _no_disponible():
-        hallazgos = google_cse.buscar_por_nombre_descripcion(nombre, descripcion, limite=limite)
+        hallazgos = proveedor.buscar_por_nombre_descripcion(nombre, descripcion, limite=limite)
         if hallazgos:
             encontrado = hallazgos[0]
             termino_usado = ' '.join(
@@ -545,7 +545,7 @@ def buscar_o_cachear_automatica(
         registrar_automatica(
             clave=clave,
             url=encontrado.get('url'),
-            fuente='google_cse',
+            fuente='serper',
             termino=termino_usado,
             codigo_barras=codigo_barras,
             nombre=nombre,
@@ -555,7 +555,7 @@ def buscar_o_cachear_automatica(
         resultado.update(
             {
                 'url': encontrado.get('url'),
-                'fuente': 'google_cse',
+                'fuente': 'serper',
                 'termino': termino_usado,
                 'encontrada': True,
             }
@@ -565,12 +565,12 @@ def buscar_o_cachear_automatica(
         registrar_automatica(
             clave=clave,
             url=None,
-            fuente='google_cse',
+            fuente='serper',
             termino=termino_usado,
             codigo_barras=codigo_barras,
             nombre=nombre,
             producto_id=producto_id,
             encontrada=False,
         )
-        resultado['fuente'] = 'google_cse'
+        resultado['fuente'] = 'serper'
     return resultado

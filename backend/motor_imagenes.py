@@ -31,9 +31,6 @@ FUENTES_CATALOGO = frozenset(
         'catalogo_maestro',
         'vtex',
         'mercadolibre',
-        'openfoodfacts',
-        'openbeautyfacts',
-        'openproductsfacts',
     }
 )
 
@@ -51,7 +48,7 @@ FUENTES_WEB = frozenset(
         'brave',
         'brave-og',
         'bing-og',
-        'google-cse',
+        'serper',
         'bing-api',
     }
 )

@@ -346,6 +346,37 @@ def _debug_imagenes_antes_de_render(productos, origen):
         traceback.print_exc()
 
 
+def _diagnosticar_serper():
+    """Diagnóstico opcional del buscador de imágenes al arrancar.
+
+    Se activa con ``LOCALIS_SERPER_DIAGNOSTICO=1`` y nunca bloquea la
+    inicialización: verifica la clave de Serper.dev y clasifica el fallo.
+    """
+    activo = str(os.getenv('LOCALIS_SERPER_DIAGNOSTICO', '0')).strip().lower()
+    if activo not in ('1', 'true', 'yes', 'on'):
+        return
+    try:
+        from backend.serper_images import diagnosticar
+
+        informe = diagnosticar(imprimir=False)
+        if informe.get('ok'):
+            print('[Localis Serper] Credenciales válidas (HTTP 200).', flush=True)
+        elif informe.get('categoria') == 'clave_invalida':
+            print(
+                '[Localis Serper] La clave SERPER_API_KEY NO es válida. '
+                'Revisa la credencial de Serper.dev.',
+                flush=True,
+            )
+        else:
+            print(
+                f'[Localis Serper] Diagnóstico: {informe.get("categoria")} '
+                f'- {informe.get("mensaje")}',
+                flush=True,
+            )
+    except Exception as error:
+        print(f'[Localis Serper] diagnóstico omitido: {type(error).__name__}: {error}')
+
+
 def _inicializar_aplicacion():
     """Migraciones y diagnóstico fuera del hilo que importa el WSGI (Gunicorn ya puede bind)."""
     print('[Localis] Inicialización en segundo plano...', flush=True)
@@ -367,6 +398,7 @@ def _inicializar_aplicacion():
         except Exception:
             traceback.print_exc()
         ejecutar_diagnostico_inicio()
+        _diagnosticar_serper()
         verificar_vencimientos_comercios()
         print('[Localis] Inicialización completada.', flush=True)
     except Exception as error:

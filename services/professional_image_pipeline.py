@@ -9,9 +9,9 @@ No usa suscripciones de pago mensuales: se apoya en librerías locales de IA
 Flujo automático (se dispara al crear un producto o importar un CSV):
 
   Paso A. Búsqueda inteligente
-     1. Intenta resolver por EAN/UPC (Open Food/Beauty/Products Facts, gratis).
-     2. Si falla (lo común en productos locales), busca en la web con la
-        combinación estructurada:
+     1. Registro automático permanente (una sola consulta por producto) contra
+        Serper.dev (Google Images) vía ``backend.serper_images``.
+     2. Si no hay caché, busca en la web con la combinación estructurada:
             [Nombre] + [Marca] + [Presentación] + "venezuela"
 
   Paso B. Validación de fuente y calidad
@@ -113,8 +113,16 @@ _BUSQUEDA_WEB = str(os.getenv('LOCALIS_IMG_BUSQUEDA_WEB', '1')).strip().lower() 
     'off',
 )
 # Búsqueda ligera en paralelo (I/O) + caché agresiva por TTL.
-_BUSQUEDA_PARALELA = max(1, _env_int('LOCALIS_IMG_PARALELO', 4))
-_IMG_TRABAJADORES = max(1, _env_int('LOCALIS_IMG_TRABAJADORES', 4))
+# Topes duros: evitan picos de red / agotamiento del pool de conexiones bajo
+# carga (varios comercios a la vez). Ajustables con los *_MAX.
+_MAX_PARALELO = max(1, _env_int('LOCALIS_IMG_PARALELO_MAX', 8))
+_MAX_TRABAJADORES = max(1, _env_int('LOCALIS_IMG_TRABAJADORES_MAX', 8))
+_BUSQUEDA_PARALELA = min(
+    max(1, _env_int('LOCALIS_IMG_PARALELO', 4)), _MAX_PARALELO
+)
+_IMG_TRABAJADORES = min(
+    max(1, _env_int('LOCALIS_IMG_TRABAJADORES', 4)), _MAX_TRABAJADORES
+)
 _CACHE_BUSQUEDA_TTL = max(30, _env_int('LOCALIS_IMG_CACHE_TTL_SEC', 3600))
 _MAX_SITIOS = max(0, _env_int('LOCALIS_IMG_SITIOS', 2))
 # Rastreo og:image de páginas de producto de Bing (emulación de búsqueda humana).
@@ -339,8 +347,6 @@ def _puntuar(candidato: Candidato, marca=None):
             score += 120.0
     if candidato.dominio.endswith('.ve') or '.com.ve' in candidato.dominio:
         score += 45.0
-    if candidato.fuente.startswith('openfoodfacts') or 'openfoodfacts' in host_path:
-        score += 60.0
     if any(k in host_path for k in ('/producto', '/product', 'catalogo', 'catalog', '/p/')):
         score += 25.0
     if candidato.ancho and candidato.alto:
@@ -380,133 +386,6 @@ def _get_json(url, *, params=None, headers=None):
         return respuesta.json()
     except Exception:
         return None
-
-
-def _off_url_alta_res(url):
-    """Open Food Facts sirve variantes ``.400.jpg``; la original no lleva el px."""
-    if not url:
-        return url
-    return re.sub(r'\.(\d{2,4})\.(jpg|jpeg|png|webp)$', r'.\2', url, flags=re.I)
-
-
-def _variantes_off(url):
-    """Tamaños/formatos alternativos de una imagen de Open Food Facts."""
-    if not url:
-        return []
-    variantes = []
-
-    def _add(valor):
-        if valor and valor not in variantes:
-            variantes.append(valor)
-
-    _add(url)
-    if re.search(r'\.\d{2,4}\.(?:jpg|jpeg|png|webp)$', url, re.I):
-        _add(re.sub(r'\.\d{2,4}\.(jpg|jpeg|png|webp)$', r'.\1', url, flags=re.I))
-        _add(re.sub(r'\.\d{2,4}\.(jpg|jpeg|png|webp)$', r'.full.\1', url, flags=re.I))
-    else:
-        _add(re.sub(r'\.(jpg|jpeg|png|webp)$', r'.400.\1', url, flags=re.I))
-        _add(re.sub(r'\.(jpg|jpeg|png|webp)$', r'.full.\1', url, flags=re.I))
-    return variantes
-
-
-def _urls_imagen_off(producto):
-    """URLs de imagen de un producto OFF (campos directos + estructura `images`)."""
-    urls = []
-
-    def _add(valor):
-        if isinstance(valor, str) and valor.strip():
-            urls.append(valor.strip())
-
-    for clave in ('image_front_url', 'image_url', 'image_front_small_url'):
-        _add(producto.get(clave))
-
-    imagenes = producto.get('images') or {}
-    if isinstance(imagenes, dict):
-        for clave, valor in imagenes.items():
-            if 'front' not in str(clave).lower() and 'principal' not in str(clave).lower():
-                continue
-            if isinstance(valor, str):
-                _add(valor)
-            elif isinstance(valor, dict):
-                for campo in ('url', 'display_url', 'small_url', 'medium_url'):
-                    _add(valor.get(campo))
-                tamanos = valor.get('sizes') or {}
-                if isinstance(tamanos, dict):
-                    for campo in ('400', 'full', 'display', '800'):
-                        tam = tamanos.get(campo)
-                        if isinstance(tam, dict):
-                            _add(tam.get('url'))
-    return urls
-
-
-def _candidatos_desde_off(producto, fuente='openfoodfacts'):
-    candidatos = []
-    if not isinstance(producto, dict):
-        return candidatos
-    vistos = set()
-    for url in _urls_imagen_off(producto):
-        if not url or url in vistos:
-            continue
-        vistos.add(url)
-        variantes = _variantes_off(url)
-        candidato = Candidato(
-            url=variantes[0] if variantes else url,
-            fuente=fuente,
-            dominio=_dominio(url),
-            urls_alternas=variantes[1:],
-        )
-        candidatos.append(candidato)
-    return candidatos
-
-
-def _buscar_off_por_ean(ean):
-    campos = 'product_name,product_name_es,brands,quantity,image_front_url,image_url,images'
-    for host in (
-        'world.openfoodfacts.org',
-        'world.openbeautyfacts.org',
-        'world.openproductsfacts.org',
-    ):
-        datos = _get_json(
-            f'https://{host}/api/v2/product/{ean}.json',
-            params={'fields': campos},
-        )
-        if datos and datos.get('status') == 1 and datos.get('product'):
-            return _candidatos_desde_off(datos['product'], fuente=host.split('.')[1])
-    return []
-
-
-_OFF_HOSTS = (
-    'world.openfoodfacts.org',
-    'world.openbeautyfacts.org',
-    'world.openproductsfacts.org',
-)
-
-
-def _buscar_off_por_nombre(consulta, hosts=None, page_size=8):
-    """Búsqueda por nombre en los catálogos abiertos (OFF/OBF/OPF)."""
-    consulta = str(consulta or '').strip()
-    if not consulta:
-        return []
-    candidatos = []
-    for host in (hosts or _OFF_HOSTS):
-        datos = _get_json(
-            f'https://{host}/cgi/search.pl',
-            params={
-                'search_terms': consulta,
-                'search_simple': 1,
-                'action': 'process',
-                'json': 1,
-                'page_size': page_size,
-                'fields': 'product_name,product_name_es,brands,quantity,image_front_url,image_url',
-            },
-        )
-        if not datos:
-            continue
-        for producto in (datos.get('products') or [])[:page_size]:
-            candidatos.extend(
-                _candidatos_desde_off(producto, fuente=host.split('.')[1])
-            )
-    return candidatos
 
 
 def _clave_serpapi():
@@ -575,42 +454,53 @@ def _buscar_brave(consulta, limite=10):
     return candidatos
 
 
-def _clave_google_cse():
+def _clave_serper():
     try:
-        from backend.google_cse import clave_cse
+        from backend.serper_images import clave_serper
 
-        return clave_cse()
+        return clave_serper()
     except Exception:
-        key = (os.getenv('GOOGLE_CSE_KEY') or os.getenv('GOOGLE_API_KEY') or '').strip()
-        cx = (os.getenv('GOOGLE_CSE_CX') or os.getenv('GOOGLE_CSE_ID') or '').strip()
-        return key, cx
+        return (os.getenv('SERPER_API_KEY') or '').strip()
 
 
-def _buscar_google_cse(consulta, limite=10):
-    """Google Programmable Search (imágenes), opcional con clave + CX."""
-    key, cx = _clave_google_cse()
-    consulta = str(consulta or '').strip()
-    if not key or not cx or not consulta:
+def _buscar_serper(consulta, limite=10):
+    """Google Images vía Serper.dev (conector oficial del flujo).
+
+    Delega en ``backend.serper_images`` para heredar el control de cuota, el
+    cooldown por clave inválida y el límite de llamadas concurrentes. Nunca lanza.
+    """
+    consulta = ' '.join(str(consulta or '').split()).strip()
+    if not consulta:
         return []
-    datos = _get_json(
-        'https://www.googleapis.com/customsearch/v1',
-        params={
-            'key': key, 'cx': cx, 'q': consulta,
-            'searchType': 'image', 'num': min(10, limite),
-        },
-    )
-    if not datos:
+    try:
+        from backend import serper_images
+
+        if not serper_images.habilitado():
+            return []
+        if serper_images.cuota_agotada():
+            return []
+        if getattr(serper_images, 'api_invalida', lambda: False)():
+            return []
+        hallazgos = serper_images.buscar_imagenes(
+            consulta, limite=min(10, max(1, int(limite)))
+        )
+    except Exception:
         return []
+
     candidatos = []
-    for item in (datos.get('items') or [])[:limite]:
-        url = item.get('link') or (item.get('image') or {}).get('thumbnailLink')
+    for item in (hallazgos or [])[:limite]:
+        if not isinstance(item, dict):
+            continue
+        url = item.get('url')
         if _url_imagen_valida(url, confiable=True):
             candidatos.append(
                 Candidato(
                     url=url,
-                    fuente='google-cse',
+                    fuente='serper',
                     dominio=_dominio(url),
-                    titulo=str(item.get('title') or ''),
+                    titulo=str(item.get('titulo') or ''),
+                    ancho=item.get('ancho') or 0,
+                    alto=item.get('alto') or 0,
                     confiable=True,
                 )
             )
@@ -1166,7 +1056,7 @@ def _buscar_candidatos_impl(
         sector = 'local'
 
     # Tareas de red (I/O) en paralelo: variantes de búsqueda humana en varios
-    # motores, catálogos abiertos, site:host por sector y catálogos directos.
+    # motores, site:host por sector y catálogos directos.
     tareas = []
     if _BUSQUEDA_WEB:
         for consulta in ventana_web:
@@ -1182,9 +1072,9 @@ def _buscar_candidatos_impl(
         if _clave_brave():
             for consulta in ventana_web[:3]:
                 tareas.append((_buscar_brave, consulta))
-        if _clave_google_cse()[0] and _clave_google_cse()[1]:
+        if _clave_serper():
             for consulta in ventana_web[:3]:
-                tareas.append((_buscar_google_cse, consulta))
+                tareas.append((_buscar_serper, consulta))
         if _clave_bing_api():
             for consulta in ventana_web[:3]:
                 tareas.append((_buscar_bing_api, consulta))
@@ -1198,10 +1088,6 @@ def _buscar_candidatos_impl(
                 tareas.append((_buscar_web_bing, f'{base} site:{host}'))
         if base and _BING_OG:
             tareas.append((_buscar_bing_og, base))
-    for consulta in ventana_dos:
-        tareas.append((_buscar_off_por_nombre, consulta))
-    if ean:
-        tareas.append((_buscar_off_por_ean, ean))
     if sector != 'estructurado':
         # VTEX regional: solo para comida y retail local.
         for consulta in ventana_dos:
@@ -1234,7 +1120,7 @@ def _buscar_candidatos_impl(
     descartados_sector = {}
     fuentes_filtrables = (
         'bing-web', 'ddg-web', 'vtex', 'mercadolibre', 'serpapi', 'brave',
-        'brave-og', 'bing-og', 'google-cse', 'bing-api',
+        'brave-og', 'bing-og', 'serper', 'bing-api',
     )
     try:
         from backend.politica_imagenes import evaluar_candidato_por_sector
@@ -1920,8 +1806,8 @@ def procesar_producto(
     )
 
     # Paso automático prioritario: registro permanente (caché, sin costo) o
-    # Google Custom Search (Priority 1 EAN, Priority 2 nombre+descripción),
-    # ejecutado una sola vez por producto.
+    # Serper.dev (Priority 1 EAN, Priority 2 nombre+descripción), ejecutado una
+    # sola vez por producto.
     if producto_id:
         auto = _asegurar_automatica_cache(
             producto_id, categoria_efectiva, nombre, descripcion, ean or codigo_barras

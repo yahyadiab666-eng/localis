@@ -14,8 +14,8 @@ Módulo: `services/professional_image_pipeline.py`.
 
 Se activa **solo** cuando el producto queda sin foto definitiva (alta o CSV). El request HTTP no espera: corre en un hilo daemon.
 
-1. **EAN/UPC**: Open Food/Beauty/Products Facts (gratuitos, sin clave).
-2. **Búsqueda web**: `[Nombre] + [Marca] + [Presentación] + "venezuela"` (Bing/DuckDuckGo).
+1. **Registro automático / Serper.dev (Google Images)**: una sola consulta por producto (EAN primero; si no, nombre + descripción) con el conector oficial `backend/serper_images.py`.
+2. **Búsqueda web**: `[Nombre] + [Marca] + [Presentación] + "venezuela"` (Bing/DuckDuckGo + Serper).
 3. **Validación de fuente y calidad**: prioriza marcas oficiales, Farmatodo, Locatel y distribuidores nacionales; descarta imágenes pequeñas, borrosas, planas o con aspecto de logo/banner.
 4. **Procesamiento local (rembg)**: recorta el fondo y entrega un lienzo cuadrado **blanco puro (#FFFFFF)** de 800×800, estilo estudio.
 5. **Almacenamiento**: sube el WebP a Supabase Storage (`productos/auto_*.webp`) y actualiza `productos.imagen_url`.
@@ -108,10 +108,10 @@ Los productos que caen en el placeholder se procesan **en segundo plano** (hilo 
 
 ### Global (marcas internacionales) y registro modular
 
-- `backend/fuentes_imagenes.py`: **registro modular** con todas las fuentes (catálogo maestro, VTEX, Mercado Libre, Open Facts, Bing, DuckDuckGo, `site:` retail, favicon de marca, Simple Icons, monograma) y **112 dominios confiables** (Venezuela + marcas globales: Samsung, LG, Philips, Bosch, Makita, Nestlé, Coca-Cola, Altunsa…).
+- `backend/fuentes_imagenes.py`: **registro modular** con todas las fuentes (catálogo maestro, VTEX, Mercado Libre, Serper.dev, Bing, DuckDuckGo, `site:` retail, favicon de marca, Simple Icons, monograma) y **dominios confiables** (Venezuela + marcas globales: Samsung, LG, Philips, Bosch, Makita, Nestlé, Coca-Cola, Altunsa…).
 - **VTEX regional:** además de Locatel (VE), se consultan distribuidores regionales con API pública y **imagen directa** (Carulla, Olímpica, Plaza Vea, Jumbo AR), lo que cubre marcas globales y productos de importación que no están en catálogos venezolanos.
 - **Motor de búsqueda humana (`_consultas_busqueda`):** genera hasta 8 variantes combinando `[código]`, `[nombre]`, `[marca]`, `[categoría]`, `"venezuela"`, sinónimos locales y eliminando gramajes/unidades. Si una variante no rinde, se prueban las demás en paralelo.
-- **Buscadores API opcionales:** `SERPAPI_KEY` (Google Images), `BRAVE_SEARCH_API_KEY`, `GOOGLE_CSE_KEY`+`GOOGLE_CSE_CX` y `BING_SEARCH_V7_KEY` para replicar una búsqueda manual real desde el servidor; se activan solo si existen.
+- **Buscadores API:** `SERPER_API_KEY` (Serper.dev / Google Images, conector oficial) y opcionalmente `SERPAPI_KEY`, `BRAVE_SEARCH_API_KEY` y `BING_SEARCH_V7_KEY`; se activan solo si existen.
 - **Anti-bloqueo (`backend/http_client.py`):** rotación de User-Agents de navegadores reales, cabeceras completas (`Accept-Language`, `Sec-Fetch-*`…), reintentos con **backoff exponencial**, **proxy HTTP(S)** (`LOCALIS_HTTP_PROXY`) y **pool de proxies públicos dinámicos** opt-in (`LOCALIS_HTTP_PROXY_PUBLICO=1`) para saltar bloqueos de IP del datacenter.
 - **Motor secundario HTML (`_buscar_brave_html`):** cuando Bing/DuckDuckGo bloquean, se scrapea **Brave Search en HTML plano** y de cada ficha de producto se extrae el `og:image` (imagen de estudio).
 - **Logos oficiales vectoriales:** `logo_wikidata` obtiene el logo corporativo de **Wikidata/Wikimedia Commons** (SVG), con desambiguación por descripción; luego Simple Icons y favicon de alta resolución. El monograma limpio es el último recurso.

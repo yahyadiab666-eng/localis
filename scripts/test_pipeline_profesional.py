@@ -84,7 +84,8 @@ def main() -> int:
     print('\n=== Inferencias ===')
     _ok(P._inferir_presentacion('Coca-Cola 2L') == '2L', 'detecta presentación 2L')
     _ok(P._inferir_presentacion('Harina 1kg', None) == '1kg', 'detecta presentación 1kg')
-    _ok(P._off_url_alta_res('.../front.1.400.jpg') == '.../front.1.jpg', 'deriva variante de alta resolución')
+    _ok(not hasattr(P, '_off_url_alta_res'), 'Open Food Facts eliminado del pipeline')
+    _ok(callable(getattr(P, '_buscar_serper', None)), 'conector Serper.dev disponible')
 
     print('\n=== Validación de calidad ===')
     ok, motivo, meta = P.validar_calidad(_imagen_sintetica())
