@@ -296,28 +296,8 @@ def actualizar_datos_comercio(
     ubicacion_maps_url = datos_ubicacion['ubicacion_maps_url']
 
     try:
-        logo_anterior = None
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
-
-            if logo_url:
-                try:
-                    from backend.comercio_schema import normalizar_fila_comercio
-
-                    cursor.execute(
-                        'SELECT * FROM comercios WHERE id = ?', (comercio_id,)
-                    )
-                    fila_actual = cursor.fetchone()
-                    registro = (
-                        dict(fila_actual)
-                        if fila_actual is not None and not isinstance(fila_actual, dict)
-                        else fila_actual
-                    )
-                    logo_anterior = (normalizar_fila_comercio(registro) or {}).get(
-                        'logo_url'
-                    )
-                except Exception:
-                    logo_anterior = None
 
             campos = [
                 'nombre = ?',
@@ -372,14 +352,6 @@ def actualizar_datos_comercio(
             filas_afectadas = cursor.rowcount
             conexion.commit()
 
-        if filas_afectadas > 0 and logo_url and logo_anterior:
-            # Purga el logo anterior ya reemplazado (Storage + copia local).
-            from backend.storage_cleanup import limpiar_asset_anterior
-
-            try:
-                limpiar_asset_anterior(logo_anterior, logo_url)
-            except Exception as error:
-                print(f'[Localis Limpieza] aviso comercio={comercio_id}: {error}')
         return filas_afectadas > 0, 'Datos del comercio actualizados.'
     except Exception as e:
         return False, f'Error al actualizar comercio: {str(e)}'
@@ -901,16 +873,6 @@ def actualizar_producto(
 
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
-            imagen_anterior = None
-            if incluir_imagen:
-                cursor.execute(
-                    'SELECT imagen_url FROM productos WHERE id = ? AND comercio_id = ?',
-                    (producto_id, comercio_id),
-                )
-                fila = cursor.fetchone()
-                imagen_anterior = (
-                    fila[0] if not isinstance(fila, dict) else fila.get('imagen_url')
-                )
             cursor.execute(
                 f"""
                 UPDATE productos
@@ -923,14 +885,6 @@ def actualizar_producto(
             conexion.commit()
 
         if filas_afectadas > 0:
-            if incluir_imagen and imagen_anterior:
-                # Purga el asset anterior ya reemplazado (Storage + copia local).
-                from backend.storage_cleanup import limpiar_asset_anterior
-
-                try:
-                    limpiar_asset_anterior(imagen_anterior, campos.get('imagen_url'))
-                except Exception as error:
-                    print(f'[Localis Limpieza] aviso producto={producto_id}: {error}')
             return True, 'Producto actualizado correctamente.'
         return (
             False,
@@ -945,16 +899,6 @@ def eliminar_producto(producto_id, comercio_id):
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
             cursor.execute(
-                'SELECT imagen_url FROM productos WHERE id = ? AND comercio_id = ?',
-                (producto_id, comercio_id),
-            )
-            fila = cursor.fetchone()
-            imagen = (
-                None
-                if fila is None
-                else (fila[0] if not isinstance(fila, dict) else fila.get('imagen_url'))
-            )
-            cursor.execute(
                 'DELETE FROM productos WHERE id = ? AND comercio_id = ?',
                 (producto_id, comercio_id),
             )
@@ -962,14 +906,6 @@ def eliminar_producto(producto_id, comercio_id):
             conexion.commit()
 
         if filas_afectadas > 0:
-            # Purga la imagen del producto eliminado (huérfano inmediato).
-            if imagen:
-                from backend.storage_cleanup import eliminar_asset
-
-                try:
-                    eliminar_asset(imagen)
-                except Exception as error:
-                    print(f'[Localis Limpieza] aviso producto={producto_id}: {error}')
             return True, 'Producto eliminado con éxito.'
         return (
             False,

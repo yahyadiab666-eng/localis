@@ -214,71 +214,6 @@ def _url_real_es_valida(url, *, verificar_remotas=True):
     return False
 
 
-def reparar_imagenes_rotas(comercio_id=None, limite=400, *, verificar_remotas=True):
-    """Auto-reparación: vacía las fotos 'reales' cuyo asset ya no existe.
-
-    Nunca inventa un reemplazo: la URL rota se deja **nula** (estado neutro,
-    ``pendiente``) para no mostrar un asset falso y seguir reintentando la foto
-    real en segundo plano. Devuelve ``{'revisadas', 'reparadas', 'detalle'}``.
-    """
-    from backend.db import get_db_connection
-
-    sql = (
-        "SELECT id, nombre, imagen_url, imagen_fuente FROM productos "
-        "WHERE COALESCE(imagen_estado, 'pendiente') = 'real' "
-        "  AND imagen_url IS NOT NULL"
-    )
-    parametros = []
-    if comercio_id is not None:
-        sql += " AND comercio_id = ?"
-        parametros.append(int(comercio_id))
-    sql += " ORDER BY id LIMIT ?"
-    parametros.append(int(limite))
-
-    try:
-        with get_db_connection() as conexion:
-            cursor = conexion.cursor()
-            cursor.execute(sql, tuple(parametros))
-            filas = cursor.fetchall()
-    except Exception as error:
-        print(f'[Localis Cobertura] reparación no consultable: {type(error).__name__}: {error}')
-        return {'revisadas': 0, 'reparadas': 0, 'detalle': []}
-
-    resultado = {'revisadas': 0, 'reparadas': 0, 'detalle': []}
-    for fila in filas:
-        registro = fila if isinstance(fila, dict) else {
-            'id': fila[0], 'nombre': fila[1],
-            'imagen_url': fila[2], 'imagen_fuente': fila[3],
-        }
-        resultado['revisadas'] += 1
-        url = registro.get('imagen_url')
-        if _url_real_es_valida(url, verificar_remotas=verificar_remotas):
-            continue
-
-        try:
-            with get_db_connection() as conexion:
-                cursor = conexion.cursor()
-                cursor.execute(
-                    """
-                    UPDATE productos
-                    SET imagen_url = NULL, imagen_fuente = NULL,
-                        imagen_estado = 'pendiente', imagen_intentos = 0
-                    WHERE id = ?
-                    """,
-                    (int(registro.get('id')),),
-                )
-                conexion.commit()
-            resultado['reparadas'] += 1
-            resultado['detalle'].append(
-                f'producto={registro.get("id")} rota -> sin imagen (neutro)'
-            )
-        except Exception as error:
-            resultado['detalle'].append(
-                f'producto={registro.get("id")} no reparado: {type(error).__name__}'
-            )
-    return resultado
-
-
 def comercios_con_productos():
     from backend.db import get_db_connection
 
@@ -309,25 +244,13 @@ def main(argv=None):
     except Exception:
         pass
     verificar_storage = '--storage' in argv
-    reparar = '--reparar' in argv
-    argv = [a for a in argv if a not in ('--storage', '--reparar')]
+    argv = [a for a in argv if a != '--storage']
     minimo = float(argv[1]) if len(argv) > 1 else 0.0
     comercios = (
         [(int(argv[0]), None)]
         if argv and argv[0].isdigit()
         else comercios_con_productos()
     )
-    if reparar:
-        limite = int(argv[1]) if len(argv) > 1 and argv[1].isdigit() else 400
-        for comercio_id, _ in comercios:
-            resultado = reparar_imagenes_rotas(comercio_id, limite=limite)
-            print(
-                f'comercio={comercio_id} reparación: '
-                f'reparadas={resultado["reparadas"]}/{resultado["revisadas"]}'
-            )
-            for linea in resultado['detalle'][:10]:
-                print(f'   - {linea}')
-        return 0
     fallos = 0
     for comercio_id, _ in comercios:
         reporte = auditar_comercio(

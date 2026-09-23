@@ -118,8 +118,9 @@ def main() -> int:
         P, 'buscar_candidatos', return_value=[P.Candidato(url='https://fuente.test/x.jpg', fuente='test')]
     ), patch.object(P, '_evaluar_candidato', return_value=(_bytes_webp(), {'ancho': 800})), patch.object(
         P, '_almacenar_imagen', return_value=('/static/uploads/productos/auto_test.webp', 'local')
-    ), patch.object(
-        P, '_actualizar_imagen', side_effect=lambda pid, url, f: capturado.update(update=(pid, url, f)) or True
+    ), patch.object(P, '_asegurar_automatica_cache', return_value=None), patch.object(
+        P, '_registrar_automatica_producto',
+        side_effect=lambda pid, url, f, **k: capturado.update(update=(pid, url, f)) or True,
     ), patch.object(P, '_log_pipeline', lambda *a, **k: None):
         resultado = P.procesar_producto(7, categoria='Alimentos')
 
@@ -132,7 +133,10 @@ def main() -> int:
         'https://x.supabase.co/storage/v1/object/public/imagenes/productos/manual.webp'
     )
     with patch.object(P, '_leer_producto', return_value=dict(producto)), patch.object(
-        P, '_actualizar_imagen', side_effect=lambda *a: capturado.update(update=a) or True
+        P, '_asegurar_automatica_cache', return_value=None
+    ), patch.object(
+        P, '_registrar_automatica_producto',
+        side_effect=lambda *a, **k: capturado.update(update=a) or True,
     ):
         resultado = P.procesar_producto(7)
     _ok(not resultado.ok and resultado.motivo == 'imagen_manual_conservada', 'no pisa foto manual')

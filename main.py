@@ -554,6 +554,30 @@ def _sincronizar_foto_local_si_aplica(producto_id, imagen_url, carpeta='producto
         print(f'[Localis Imagen] descubrimiento no programado: {error}')
 
 
+def _registrar_imagen_manual(producto_id, imagen_url, fuente='manual'):
+    """Registra la subida manual y borra la manual anterior del producto."""
+    if not producto_id or not imagen_url:
+        return
+    try:
+        from backend.imagenes_producto import marcar_manual
+
+        marcar_manual(producto_id, imagen_url, fuente)
+    except Exception as error:
+        print(f'[Localis Imagen] no se registró la imagen manual: {error}')
+
+
+def _quitar_imagen_manual(producto_id):
+    """Descarta la manual (la borra) y revierte a la imagen automática."""
+    if not producto_id:
+        return
+    try:
+        from backend.imagenes_producto import eliminar_manual
+
+        eliminar_manual(producto_id)
+    except Exception as error:
+        print(f'[Localis Imagen] no se pudo quitar la imagen manual: {error}')
+
+
 def _comercio_sesion_validado():
     """Comercio activo validado contra PostgreSQL (HTML y API)."""
     usuario_id = session.get('usuario_id')
@@ -1357,6 +1381,7 @@ def nuevo_producto():
                 fila = cursor.fetchone()
                 producto_id = fila[0] if fila else None
             _sincronizar_foto_local_si_aplica(producto_id, imagen_url)
+            _registrar_imagen_manual(producto_id, imagen_url)
             flash('Producto agregado con éxito.', 'exito')
             return redirect(url_for('panel_comercio'))
         except Exception as e:
@@ -1385,6 +1410,9 @@ def editar_producto(producto_id):
         codigo_barras = normalizar_codigo_barras(request.form.get('codigo_barras'))
         imagen_archivo = request.files.get('imagen')
         imagen_url_form = request.form.get('imagen_url')
+        quitar_imagen = str(request.form.get('quitar_imagen') or '').strip().lower() in (
+            '1', 'on', 'true', 'si', 'sí', 'yes',
+        )
 
         precio_usd, error_precio = parsear_precio_form(precio_raw)
         if not nombre or not nombre.strip():
@@ -1428,6 +1456,10 @@ def editar_producto(producto_id):
             )
             if exito and incluir_imagen:
                 _sincronizar_foto_local_si_aplica(producto_id, imagen_url)
+                _registrar_imagen_manual(producto_id, imagen_url)
+            elif exito and quitar_imagen:
+                # Descarta la manual y revierte a la automática (si existe).
+                _quitar_imagen_manual(producto_id)
             flash(mensaje, 'exito' if exito else 'error')
             return redirect(url_for('panel_comercio'))
         except Exception as error:
@@ -1466,7 +1498,20 @@ def eliminar_producto_ruta(producto_id):
     if bloqueo:
         return bloqueo
 
+    try:
+        from backend.imagenes_producto import obtener_manual, purgar_manual
+
+        manual = obtener_manual(producto_id)
+    except Exception:
+        manual = None
+
     exito, mensaje = eliminar_producto(producto_id, comercio['id'])
+    if exito and manual:
+        # Ciclo de vida manual: al eliminar el producto se borra su manual.
+        try:
+            purgar_manual(manual)
+        except Exception as error:
+            print(f'[Localis Imagen] purga manual al eliminar producto: {error}')
     flash(mensaje, 'exito' if exito else 'error')
     return redirect(url_for('panel_comercio'))
 
@@ -1693,6 +1738,7 @@ def api_crear_producto():
         return jsonify({'error': f'Error al agregar producto: {error}'}), 500
 
     _sincronizar_foto_local_si_aplica(producto_id, imagen_url)
+    _registrar_imagen_manual(producto_id, imagen_url)
     return jsonify(
         {
             'ok': True,

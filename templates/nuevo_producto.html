@@ -162,6 +162,17 @@
               <input type="file" id="imagen" name="imagen" accept="image/*" class="w-full text-xs text-stone-500 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 cursor-pointer bg-stone-50 border border-stone-200 rounded-xl py-1.5 px-2 focus:outline-none focus:border-amber-500 transition">
             </div>
             <p class="text-[11px] text-stone-400 mt-1">El archivo se comprime al guardar. Si la nube no responde, la foto queda publicada igual en el catálogo.</p>
+
+            {% if producto %}
+            <label class="mt-3 flex items-start gap-2 text-[11px] text-stone-600 cursor-pointer">
+              <input type="checkbox" name="quitar_imagen" value="1"
+                     class="mt-0.5 accent-amber-500">
+              <span>
+                Quitar mi foto manual y volver a la imagen automática.
+                <span class="text-stone-400">La foto manual se borra del almacenamiento.</span>
+              </span>
+            </label>
+            {% endif %}
           </div>
 
           <!-- Botón de Envío -->

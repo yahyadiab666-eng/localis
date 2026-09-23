@@ -189,12 +189,65 @@ def _probar_ruta_beacon():
             )
 
 
+def _probar_motor_imagenes():
+    print('\n=== Motor de imágenes: sector, excepción segura y manuales ===')
+    from backend.motor_imagenes import (
+        es_imagen_manual,
+        evaluar_candidato,
+        puede_reemplazar,
+        resultado_neutro,
+        sector_de,
+    )
+
+    _ok(sector_de('Tecnología') == 'estructurado', 'tecnología -> fuentes globales')
+    _ok(sector_de('ferreteria') == 'estructurado', 'ferretería -> estructurado')
+    _ok(sector_de('Hogar') == 'estructurado', 'electrodomésticos (hogar) -> estructurado')
+    _ok(sector_de('alimentos') == 'local', 'alimentos -> fuentes locales')
+    _ok(sector_de('bebidas') == 'local', 'bebidas -> fuentes locales')
+
+    _ok(
+        evaluar_candidato(_cand('catalogo_maestro', 'x.com'), 'tecnologia')[0],
+        'catálogo verificado se acepta',
+    )
+    _ok(
+        evaluar_candidato(_cand('bing-web', 'sitio-ajeno-xyz.com'), 'tecnologia')[0] is False,
+        'dominio no verificado se descarta',
+    )
+    _ok(
+        evaluar_candidato(_cand('bing-web', 'samsung.com'), 'tecnologia', marca='Samsung')[0],
+        'dominio del fabricante se acepta',
+    )
+    neutro = resultado_neutro('sin_candidatos')
+    _ok(neutro['url'] is None and neutro['ok'] is False, 'estado neutro = imagen nula segura')
+
+    _ok(es_imagen_manual('/static/uploads/productos/manual_1_a.webp'), 'upload manual local protegido')
+    _ok(
+        es_imagen_manual('https://x.supabase.co/storage/v1/object/public/imagenes/comercios/logo_1.webp'),
+        'logo de tienda protegido',
+    )
+    _ok(es_imagen_manual('/static/uploads/productos/manual_1_a.webp', 'archivo'), 'fuente "archivo" = manual')
+    _ok(
+        not es_imagen_manual('https://x.supabase.co/storage/v1/object/public/imagenes/productos/auto_x.webp'),
+        'imagen automática NO es manual',
+    )
+    _ok(not puede_reemplazar('/static/uploads/productos/manual_1_a.webp'), 'no se reemplaza un manual')
+    _ok(
+        not puede_reemplazar(
+            'https://x.supabase.co/storage/v1/object/public/imagenes/productos/auto_x.webp', 'real'
+        ),
+        'no se reemplaza una foto ya almacenada',
+    )
+    _ok(puede_reemplazar(None), 'sin imagen se puede rellenar')
+    _ok(puede_reemplazar('/static/img/placeholder-otros.svg'), 'un placeholder es reemplazable')
+
+
 def main_test() -> int:
     _probar_apariencia()
     _probar_politica_por_sector()
     _probar_analitica_tipos()
     _probar_compresion()
     _probar_ruta_beacon()
+    _probar_motor_imagenes()
 
     print('\n=== RESULTADO ===')
     if _ERRORES:

@@ -419,10 +419,13 @@ def programar_sincronizacion_storage(producto_id, ruta_local, carpeta='productos
                 cursor.execute(
                     """
                     UPDATE productos
-                    SET imagen_url = ?
+                    SET imagen_url = ?,
+                        imagen_manual_url = CASE
+                            WHEN imagen_manual_url = ? THEN ?
+                            ELSE imagen_manual_url END
                     WHERE id = ? AND imagen_url = ?
                     """,
-                    (url, int(producto_id), ruta_local),
+                    (url, ruta_local, url, int(producto_id), ruta_local),
                 )
                 conexion.commit()
             print(

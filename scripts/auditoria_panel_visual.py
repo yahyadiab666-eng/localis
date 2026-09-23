@@ -127,10 +127,9 @@ def _auditar_importacion_instantanea():
     _ok('iniciar_backfill_periodico' in _leer('main.py'), 'el reintento arranca con la app')
 
     cobertura = _leer('backend/cobertura_visual.py')
-    _ok('def auditar_comercio' in cobertura, 'auditoría de assets por comercio')
+    _ok('def auditar_comercio' in cobertura, 'auditoría (solo lectura) de assets por comercio')
     _ok('class ErrorCoberturaVisual' in cobertura, 'error duro ante assets fabricados/rotos')
-    _ok('def reparar_imagenes_rotas' in cobertura, 'auto-reparación de imágenes rotas')
-    _ok('_reparar_si_toca' in backfill, 'la reparación corre en el reintento periódico')
+    _ok('def reparar_imagenes_rotas' not in cobertura, 'sin reparación destructiva automática')
     activos = _leer('backend/activos_verificados.py')
     _ok('def es_asset_generado' in activos, 'identifica assets fabricados (placeholder/monograma/tarjeta)')
     _ok('def es_asset_verificado' in activos, 'solo acepta assets verificados')
@@ -145,10 +144,6 @@ def _auditar_importacion_instantanea():
     _ok(
         'def consulta_estructurada' in _leer('backend/consulta_producto.py'),
         'consulta marca+modelo para productos estructurados',
-    )
-    _ok(
-        'def eliminar_assets_generados' in _leer('backend/storage_cleanup.py'),
-        'eliminación de assets fabricados en BD y Storage',
     )
     _ok('cobertura_visual' in _leer('backend/stores.py'), 'la importación valida los assets al cerrar')
 
@@ -179,7 +174,69 @@ def _auditar_importacion_instantanea():
     )
     _ok((RAIZ / 'backend' / 'politica_imagenes.py').is_file(), 'política de imágenes por sector')
 
-    # --- Consolidación de métricas y limpieza de assets ---
+    # --- Motor de imágenes: enrutamiento híbrido y excepción segura ---
+    motor = _leer('backend/motor_imagenes.py')
+    _ok('def sector_de' in motor, 'enrutamiento por sector (global vs local)')
+    _ok('def evaluar_candidato' in motor, 'whitelist de dominios verificados')
+    _ok('def resultado_neutro' in motor, 'excepción segura -> estado neutro')
+    _ok('def es_imagen_manual' in motor and 'def puede_reemplazar' in motor, 'protección de subidas manuales')
+    _ok('fuentes_site_global' in _leer('backend/fuentes_imagenes.py'), 'hosts globales para estructurados')
+    _ok(
+        'sector != ' in _leer('services/professional_image_pipeline.py')
+        or "sector == 'estructurado'" in _leer('services/professional_image_pipeline.py'),
+        'el pipeline enruta fuentes por sector',
+    )
+    _ok(
+        not (RAIZ / 'backend' / 'storage_cleanup.py').is_file(),
+        'sin módulo de purga de assets en el repositorio',
+    )
+    _ok(
+        'storage_cleanup' not in _leer('backend/stores.py'),
+        'la persistencia no invoca rutinas de purga',
+    )
+    _ok(
+        'purgar_urls_imagen_artificiales' not in _leer('backend/catalogo_maestro.py'),
+        'sin purga del catálogo maestro',
+    )
+
+    # --- Registro manual/automático y Google CSE ---
+    _ok(
+        (RAIZ / 'backend' / 'imagenes_producto.py').is_file(),
+        'registro permanente de imágenes automáticas y ciclo manual',
+    )
+    ip_src = _leer('backend/imagenes_producto.py')
+    _ok(
+        'def registrar_automatica' in ip_src and 'COALESCE(EXCLUDED.url_imagen' in ip_src,
+        'la automática nunca se degrada (COALESCE)',
+    )
+    _ok(
+        'def marcar_manual' in ip_src and 'def eliminar_manual' in ip_src,
+        'ciclo de vida de la imagen manual (reemplazo/borrado)',
+    )
+    _ok('def resolver_activa' in ip_src, 'vista activa = manual o automática')
+    _ok('def purgar_manual' in ip_src, 'purga acotada a assets manuales')
+    _ok('imagen_manual_url' in _leer('database.py'), 'columna de imagen manual migrada')
+    _ok(
+        'imagenes_automaticas' in _leer('database.py')
+        and 'def _crear_tabla_imagenes_automaticas' in _leer('database.py'),
+        'tabla permanente de imágenes automáticas',
+    )
+    cse = _leer('backend/google_cse.py')
+    _ok('GOOGLE_CSE_API_KEY' in cse, 'cliente Google CSE (GOOGLE_CSE_API_KEY)')
+    _ok(
+        'def buscar_por_codigo' in cse and 'def buscar_por_nombre_descripcion' in cse,
+        'EAN primero; nombre+descripción como respaldo',
+    )
+    _ok(
+        'buscar_o_cachear_automatica' in _leer('services/professional_image_pipeline.py'),
+        'el pipeline usa la caché permanente (una consulta por producto)',
+    )
+    _ok(
+        'quitar_imagen' in _leer('templates/nuevo_producto.html'),
+        'UI para revertir a la imagen automática',
+    )
+
+    # --- Consolidación de métricas ---
     analytics_src = _leer('backend/analytics.py')
     _ok('TIPOS_LEGADO' in analytics_src, 'los clics "Ir a la tienda" se consolidan en visitas')
     _ok('def normalizar_tipo' in analytics_src, 'normalización de tipos de evento')
@@ -187,16 +244,6 @@ def _auditar_importacion_instantanea():
         'def _crear_tabla_interacciones_comercio' in _leer('database.py'),
         'tabla de interacciones creada por init_db',
     )
-    limpieza = _leer('backend/storage_cleanup.py')
-    _ok('def eliminar_asset' in limpieza, 'purga de assets manuales')
-    _ok('def limpiar_asset_anterior' in limpieza, 'purga del asset reemplazado')
-    _ok('def limpiar_huerfanos' in limpieza, 'barrido de huérfanos')
-    _ok('.remove(' in limpieza, 'invoca la API de borrado de Supabase Storage')
-    _ok(
-        'limpiar_asset_anterior' in _leer('backend/stores.py'),
-        'la actualización de producto/logo purga el asset anterior',
-    )
-    _ok('_limpiar_si_toca' in backfill, 'la limpieza corre en el mantenimiento periódico')
 
     pipeline_src = _leer('services/professional_image_pipeline.py')
     _ok('def _buscar_vtex' in pipeline_src, 'fuente VTEX (catálogo local directo)')

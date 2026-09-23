@@ -109,6 +109,7 @@ TABLAS_PERMITIDAS = frozenset({
     'product_image_overrides',
     'image_pipeline_log',
     'interacciones_comercio',
+    'imagenes_automaticas',
 })
 
 # Columnas que deben existir en tablas ya creadas (ADD COLUMN IF NOT EXISTS).
@@ -177,8 +178,23 @@ COLUMNAS_ESQUEMA = {
         ('imagen_estado', "TEXT DEFAULT 'pendiente'"),
         ('imagen_intentos', 'INTEGER DEFAULT 0'),
         ('imagen_ultimo_intento', 'TIMESTAMPTZ'),
+        ('imagen_manual_url', 'TEXT'),
+        ('imagen_manual_fuente', 'TEXT'),
         ('stock', 'INTEGER DEFAULT 0'),
         ('codigo_barras', 'TEXT'),
+    ],
+    'imagenes_automaticas': [
+        ('clave', 'TEXT'),
+        ('codigo_barras', 'TEXT'),
+        ('nombre_normalizado', 'TEXT'),
+        ('producto_id', 'INTEGER'),
+        ('comercio_id', 'INTEGER'),
+        ('url_imagen', 'TEXT'),
+        ('fuente', 'TEXT'),
+        ('termino_busqueda', 'TEXT'),
+        ('encontrada', 'INTEGER DEFAULT 0'),
+        ('fecha_creacion', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+        ('fecha_actualizacion', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
     ],
     'product_image_overrides': [
         ('ean', 'TEXT'),
@@ -1066,8 +1082,37 @@ def _crear_tabla_productos(cursor):
             imagen_estado TEXT DEFAULT 'pendiente',
             imagen_intentos INTEGER DEFAULT 0,
             imagen_ultimo_intento TIMESTAMPTZ,
+            imagen_manual_url TEXT,
+            imagen_manual_fuente TEXT,
             stock INTEGER DEFAULT 0,
             codigo_barras TEXT
+        )
+        """
+    )
+
+
+def _crear_tabla_imagenes_automaticas(cursor):
+    """Registro **permanente** de imágenes automáticas (nunca se purga).
+
+    Una fila por clave de producto (EAN o nombre normalizado). Se conserva aun
+    cuando el comerciante sube una imagen manual, para reutilizarla sin volver a
+    gastar una consulta de la API.
+    """
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS imagenes_automaticas (
+            id SERIAL PRIMARY KEY,
+            clave TEXT NOT NULL,
+            codigo_barras TEXT,
+            nombre_normalizado TEXT,
+            producto_id INTEGER,
+            comercio_id INTEGER,
+            url_imagen TEXT,
+            fuente TEXT,
+            termino_busqueda TEXT,
+            encontrada INTEGER DEFAULT 0,
+            fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
@@ -1245,6 +1290,7 @@ def _crear_tablas(cursor):
         ('pagos', _crear_tabla_pagos),
         ('solicitudes_pago', _crear_tabla_solicitudes_pago),
         ('interacciones_comercio', _crear_tabla_interacciones_comercio),
+        ('imagenes_automaticas', _crear_tabla_imagenes_automaticas),
     )
     for nombre, fn in pares:
         if _tabla_existe(cursor, nombre):
@@ -1259,6 +1305,7 @@ def _asegurar_indices_unicos(cursor):
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_planes_codigo ON planes(codigo)',
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_catalogo_maestro_codigo ON catalogo_maestro_imagenes(codigo_barras)',
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_product_image_overrides_ean ON product_image_overrides(ean)',
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_imagenes_automaticas_clave ON imagenes_automaticas(clave)',
     ]
     for ddl in indices:
         _ejecutar_indice_si_falta(cursor, ddl)
@@ -1405,6 +1452,8 @@ def _crear_indices(cursor):
         'CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_estado ON solicitudes_pago(estado)',
         'CREATE INDEX IF NOT EXISTS idx_interacciones_comercio_fecha ON interacciones_comercio(comercio_id, fecha DESC)',
         'CREATE INDEX IF NOT EXISTS idx_interacciones_comercio_producto ON interacciones_comercio(producto_id)',
+        'CREATE INDEX IF NOT EXISTS idx_imagenes_automaticas_codigo ON imagenes_automaticas(codigo_barras)',
+        'CREATE INDEX IF NOT EXISTS idx_imagenes_automaticas_producto ON imagenes_automaticas(producto_id)',
     ]
     for ddl in indices:
         _ejecutar_indice_si_falta(cursor, ddl)

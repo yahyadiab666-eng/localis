@@ -145,13 +145,6 @@ def obtener_banner_principal():
 
 
 def actualizar_banner_principal(admin_id, banner_url):
-    anterior = None
-    try:
-        from backend.stores import obtener_config
-
-        anterior = obtener_config('banner_principal', '') or ''
-    except Exception:
-        anterior = ''
     try:
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
@@ -174,14 +167,6 @@ def actualizar_banner_principal(admin_id, banner_url):
         from backend.stores import invalidar_cache_configuracion
 
         invalidar_cache_configuracion()
-        if anterior:
-            # Purga el banner anterior ya reemplazado (Storage + copia local).
-            from backend.storage_cleanup import limpiar_asset_anterior
-
-            try:
-                limpiar_asset_anterior(anterior, banner_url)
-            except Exception as error:
-                print(f'[Localis Limpieza] aviso banner principal: {error}')
         return True, 'Banner promocional actualizado correctamente.'
     except Exception as e:
         return False, f'Error al actualizar banner: {str(e)}'

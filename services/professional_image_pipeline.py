@@ -137,6 +137,7 @@ from backend.fuentes_imagenes import (  # noqa: E402
     DOMINIOS_BLOQUEADOS as _DOMINIOS_BLOQUEADOS,
     dominios_confiables as _dominios_confiables,
     fuentes_site as _fuentes_site,
+    fuentes_site_global as _fuentes_site_global,
     fuentes_vtex as _fuentes_vtex,
 )
 
@@ -575,9 +576,14 @@ def _buscar_brave(consulta, limite=10):
 
 
 def _clave_google_cse():
-    key = (os.getenv('GOOGLE_CSE_KEY') or os.getenv('GOOGLE_API_KEY') or '').strip()
-    cx = (os.getenv('GOOGLE_CSE_CX') or os.getenv('GOOGLE_CSE_ID') or '').strip()
-    return key, cx
+    try:
+        from backend.google_cse import clave_cse
+
+        return clave_cse()
+    except Exception:
+        key = (os.getenv('GOOGLE_CSE_KEY') or os.getenv('GOOGLE_API_KEY') or '').strip()
+        cx = (os.getenv('GOOGLE_CSE_CX') or os.getenv('GOOGLE_CSE_ID') or '').strip()
+        return key, cx
 
 
 def _buscar_google_cse(consulta, limite=10):
@@ -1149,8 +1155,18 @@ def _buscar_candidatos_impl(
     ventana_dos = consultas[offset : offset + 2] or consultas[:2]
     base = ventana_web[0] if ventana_web else (consultas[0] if consultas else '')
 
+    # Enrutamiento híbrido por sector:
+    #   - estructurado (tecnología/electro/ferretería/automotriz) -> fuentes globales
+    #   - local (comida y retail de cercanía) -> fuentes locales/regionales
+    try:
+        from backend.motor_imagenes import sector_de
+
+        sector = sector_de(categoria)
+    except Exception:
+        sector = 'local'
+
     # Tareas de red (I/O) en paralelo: variantes de búsqueda humana en varios
-    # motores, catálogos abiertos, site:host locales y catálogos directos.
+    # motores, catálogos abiertos, site:host por sector y catálogos directos.
     tareas = []
     if _BUSQUEDA_WEB:
         for consulta in ventana_web:
@@ -1173,7 +1189,12 @@ def _buscar_candidatos_impl(
             for consulta in ventana_web[:3]:
                 tareas.append((_buscar_bing_api, consulta))
         if base and _MAX_SITIOS > 0:
-            for host in _fuentes_site()[:_MAX_SITIOS]:
+            hosts = (
+                _fuentes_site_global()
+                if sector == 'estructurado'
+                else _fuentes_site()
+            )
+            for host in hosts[:_MAX_SITIOS]:
                 tareas.append((_buscar_web_bing, f'{base} site:{host}'))
         if base and _BING_OG:
             tareas.append((_buscar_bing_og, base))
@@ -1181,8 +1202,10 @@ def _buscar_candidatos_impl(
         tareas.append((_buscar_off_por_nombre, consulta))
     if ean:
         tareas.append((_buscar_off_por_ean, ean))
-    for consulta in ventana_dos:
-        tareas.append((_buscar_vtex, consulta))
+    if sector != 'estructurado':
+        # VTEX regional: solo para comida y retail local.
+        for consulta in ventana_dos:
+            tareas.append((_buscar_vtex, consulta))
     if base and _token_mercadolibre():
         tareas.append((_buscar_mercadolibre, base))
 
@@ -1603,32 +1626,31 @@ def _guardar_en_catalogo_maestro(ean, url, *, nombre=None, marca=None, categoria
         _log(f'catálogo maestro no actualizado ({type(error).__name__}: {error})')
 
 
-def _imagen_puede_reemplazarse(imagen_actual, imagen_estado=None):
-    estado = str(imagen_estado or '').strip().lower()
-    if estado == 'real':
-        return False
-    if estado == 'logo':
-        # El logo/monograma es un respaldo: se sigue intentando la foto real.
-        return True
-    if not imagen_actual:
-        return True
+def _imagen_puede_reemplazarse(imagen_actual, imagen_estado=None, imagen_fuente=None):
+    """Protección de subidas manuales: delega en el motor de imágenes.
+
+    Garantiza que ninguna rutina automática reemplace un asset subido por el
+    comerciante.
+    """
     if isinstance(imagen_actual, memoryview):
         imagen_actual = bytes(imagen_actual)
-    texto = str(imagen_actual).strip()
-    if not texto:
-        return True
-    bajo = texto.lower()
-    if 'placeholder' in bajo:
-        return True
-    # Una imagen ya almacenada (Storage) o subida a mano (/static/uploads) no se toca.
-    if '/storage/v1/object/public/' in bajo:
+    try:
+        from backend.motor_imagenes import puede_reemplazar
+
+        return puede_reemplazar(imagen_actual, imagen_estado, imagen_fuente)
+    except Exception:
+        # Respaldo conservador si el motor no está disponible.
+        estado = str(imagen_estado or '').strip().lower()
+        if estado == 'real':
+            return False
+        if not imagen_actual:
+            return True
+        texto = str(imagen_actual).strip().lower()
+        if not texto:
+            return True
+        if 'placeholder' in texto or texto.startswith('/static/img/'):
+            return True
         return False
-    if bajo.startswith('/static/uploads/'):
-        return False
-    # URL externa del pipeline viejo (API): se puede reemplazar por la procesada.
-    if bajo.startswith(('http://', 'https://')):
-        return True
-    return False
 
 
 def _leer_producto(producto_id):
@@ -1639,7 +1661,7 @@ def _leer_producto(producto_id):
         cursor.execute(
             """
             SELECT id, nombre, descripcion, codigo_barras, imagen_url,
-                   imagen_estado, imagen_fuente
+                   imagen_estado, imagen_fuente, imagen_manual_url
             FROM productos
             WHERE id = ?
             """,
@@ -1658,6 +1680,7 @@ def _leer_producto(producto_id):
         'imagen_url': fila[4],
         'imagen_estado': fila[5] if len(fila) > 5 else None,
         'imagen_fuente': fila[6] if len(fila) > 6 else None,
+        'imagen_manual_url': fila[7] if len(fila) > 7 else None,
     }
 
 
@@ -1725,6 +1748,49 @@ def _actualizar_imagen(producto_id, url, fuente, estado='real'):
         actualizadas = cursor.rowcount
         conexion.commit()
     return bool(actualizadas)
+
+
+def _asegurar_automatica_cache(producto_id, categoria, nombre, descripcion, codigo_barras):
+    """Consulta/registra la imagen automática (caché o API) sin tocar la manual."""
+    try:
+        from backend.imagenes_producto import buscar_o_cachear_automatica
+
+        return buscar_o_cachear_automatica(
+            producto_id,
+            categoria=categoria,
+            nombre=nombre,
+            descripcion=descripcion,
+            codigo_barras=codigo_barras,
+        )
+    except Exception as error:
+        _log(f'registro automático producto={producto_id} fallo: {type(error).__name__}')
+        return None
+
+
+def _registrar_automatica_producto(
+    producto_id, url, fuente, *, codigo_barras, nombre, descripcion, termino=None
+):
+    """Persiste la imagen automática en el registro y resuelve la vista activa.
+
+    Nunca borra el registro; si el producto tiene manual, la manual sigue activa.
+    """
+    try:
+        from backend.imagenes_producto import registrar_automatica, resolver_activa
+
+        registrar_automatica(
+            url=url,
+            fuente=fuente,
+            termino=termino,
+            codigo_barras=codigo_barras,
+            nombre=nombre,
+            descripcion=descripcion,
+            producto_id=producto_id,
+            encontrada=bool(url),
+        )
+        return bool(resolver_activa(producto_id))
+    except Exception as error:
+        _log(f'no se pudo registrar automática producto={producto_id}: {type(error).__name__}')
+        return False
 
 
 def _marcar_estado_imagen(producto_id, estado):
@@ -1799,12 +1865,30 @@ def procesar_producto(
         codigo_barras = codigo_barras or fila.get('codigo_barras')
         imagen_actual = fila.get('imagen_url')
         estado_actual = fila.get('imagen_estado')
+        fuente_actual = fila.get('imagen_fuente')
     else:
         imagen_actual = None
+        fuente_actual = None
 
     if producto_id and not forzar and not _imagen_puede_reemplazarse(
-        imagen_actual, estado_actual
+        imagen_actual, estado_actual, fuente_actual
     ):
+        # Aunque el producto tenga manual/foto guardada, se asegura la imagen
+        # automática (una sola vez) para poder revertir sin costo ni tocar la
+        # manual: la automática queda en su registro permanente.
+        categoria_hint = categoria
+        if not categoria_hint:
+            try:
+                from backend.categorias_producto import clasificar_categoria as _clasificar
+
+                categoria_hint = _clasificar(
+                    nombre=nombre, descripcion=descripcion, marca=marca
+                )
+            except Exception:
+                categoria_hint = None
+        _asegurar_automatica_cache(
+            producto_id, categoria_hint, nombre, descripcion, codigo_barras
+        )
         return ResultadoProcesamiento(ok=False, motivo='imagen_manual_conservada')
 
     if producto_id:
@@ -1834,6 +1918,40 @@ def procesar_producto(
         f'producto={producto_id} inicio ean={ean!r} nombre={nombre!r} '
         f'marca={marca!r} presentacion={presentacion!r} categoria={categoria_efectiva!r}'
     )
+
+    # Paso automático prioritario: registro permanente (caché, sin costo) o
+    # Google Custom Search (Priority 1 EAN, Priority 2 nombre+descripción),
+    # ejecutado una sola vez por producto.
+    if producto_id:
+        auto = _asegurar_automatica_cache(
+            producto_id, categoria_efectiva, nombre, descripcion, ean or codigo_barras
+        )
+        if auto and auto.get('url'):
+            try:
+                _registrar_automatica_producto(
+                    producto_id,
+                    auto['url'],
+                    auto.get('fuente') or 'automatica',
+                    codigo_barras=ean or codigo_barras,
+                    nombre=nombre,
+                    descripcion=descripcion,
+                    termino=auto.get('termino'),
+                )
+            except Exception as error:
+                _log(f'producto={producto_id} no se pudo activar automática: {type(error).__name__}')
+            _guardar_en_catalogo_maestro(
+                ean, auto['url'], nombre=nombre, marca=marca, categoria=categoria_efectiva
+            )
+            _log(
+                f'producto={producto_id} imagen automática '
+                f'({auto.get("fuente")!r}, cache={auto.get("desde_cache")}) url={auto["url"]}'
+            )
+            return ResultadoProcesamiento(
+                ok=True,
+                url=auto['url'],
+                fuente=auto.get('fuente') or 'automatica',
+                detalle={'desde_cache': bool(auto.get('desde_cache'))},
+            )
 
     candidatos = buscar_candidatos(
         codigo_barras=ean,
@@ -1867,7 +1985,19 @@ def procesar_producto(
             continue
         fuente = f'profesional_{candidato.fuente}_{destino}'
         try:
-            actualizado = _actualizar_imagen(producto_id, url, fuente) if producto_id else True
+            actualizado = (
+                _registrar_automatica_producto(
+                    producto_id,
+                    url,
+                    fuente,
+                    codigo_barras=ean or codigo_barras,
+                    nombre=nombre,
+                    descripcion=descripcion,
+                    termino=candidato.fuente,
+                )
+                if producto_id
+                else True
+            )
         except Exception as error:
             _log(f'producto={producto_id} no se pudo actualizar la BD: {type(error).__name__}: {error}')
             actualizado = False
@@ -1929,6 +2059,20 @@ def procesar_producto(
                 )
         except Exception as error:
             _log(f'producto={producto_id} limpieza de generado fallo: {type(error).__name__}')
+
+        # Restaura la vista activa desde el registro (manual o automática) si
+        # quedó una imagen válida; si no, permanece el estado neutro.
+        try:
+            from backend.imagenes_producto import resolver_activa
+
+            resuelto = resolver_activa(producto_id) or {}
+            if resuelto.get('activa'):
+                _log(
+                    f'producto={producto_id} vista activa restaurada '
+                    f'({resuelto.get("fuente")!r})'
+                )
+        except Exception as error:
+            _log(f'producto={producto_id} resolución de imagen fallo: {type(error).__name__}')
 
         # Si hubo candidatas y todas se rechazaron, marcar 'rechazada' para
         # reintento con estrategia ampliada más adelante.

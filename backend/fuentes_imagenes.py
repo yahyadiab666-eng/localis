@@ -76,6 +76,14 @@ FUENTES_SITE_BASE = (
     'centralmadeirense.com.ve', 'plazas.com', 'multimax.com.ve',
 )
 
+# Retailers/fabricantes internacionales para sectores estructurados
+# (tecnología, electrodomésticos, ferretería). Evita ruido local.
+FUENTES_SITE_GLOBAL = (
+    'samsung.com', 'lg.com', 'philips.com', 'bosch.com', 'makita.com',
+    'dewalt.com', 'stanleytools.com', 'blackanddecker.com', 'oster.com',
+    'tefal.com',
+)
+
 FUENTES_VTEX_BASE = (
     # Venezuela (farmacia/cuidado/hogar/bebés)
     'www.locatel.com.ve',
@@ -171,6 +179,11 @@ def dominios_confiables():
 
 def fuentes_site():
     return FUENTES_SITE_BASE + _personalizados('LOCALIS_IMG_SITIOS_EXTRA')
+
+
+def fuentes_site_global():
+    """Hosts internacionales para sectores estructurados (fuentes globales)."""
+    return FUENTES_SITE_GLOBAL + _personalizados('LOCALIS_IMG_SITIOS_GLOBALES')
 
 
 def fuentes_vtex():
