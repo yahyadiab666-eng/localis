@@ -834,10 +834,15 @@ def index():
 
     hay_filtros = bool(palabra_clave or categoria)
 
+    try:
+        limite_inicio = max(1, int(os.getenv('LOCALIS_CATALOGO_INICIO_LIMITE', '30') or 30))
+    except (TypeError, ValueError):
+        limite_inicio = 30
+
     productos = buscar_y_filtrar_productos(
         palabra_clave=palabra_clave,
         categoria_nombre=categoria,
-        limit=None if hay_filtros else 30,
+        limit=None if hay_filtros else limite_inicio,
         orden_aleatorio=not hay_filtros,
     )
 

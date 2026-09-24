@@ -104,6 +104,34 @@ def main():
     hilo = programar_asociacion_imagenes_inventario(0)
     _ok(hilo.daemon, 'asociación de imágenes corre en hilo daemon')
 
+    from backend.inventory_import import _registro_sin_cambios
+
+    registro = {
+        'id': 1,
+        'nombre': 'Harina P.A.N. 1kg',
+        'descripcion': 'maíz',
+        'precio_usd': 1.5,
+        'stock': 10,
+        'codigo_barras': '7590000040110',
+        'imagen_url': '/static/uploads/productos/manual_1_a.webp',
+    }
+    identico = dict(registro, imagen_url=None)  # el CSV no trae imagen
+    _ok(_registro_sin_cambios(registro, identico), 'fila idéntica no requiere UPDATE')
+    cambiado = dict(identico, precio_usd=2.0)
+    _ok(not _registro_sin_cambios(registro, cambiado), 'precio distinto sí actualiza')
+    _ok(
+        not _registro_sin_cambios(registro, dict(identico, stock=11)),
+        'stock distinto sí actualiza',
+    )
+    _ok(
+        not _registro_sin_cambios(registro, dict(identico, imagen_url='https://x/nueva.webp')),
+        'imagen nueva sí actualiza',
+    )
+    _ok(
+        not _registro_sin_cambios(registro, dict(identico, nombre='Harina P.A.N. 2kg')),
+        'nombre distinto sí actualiza',
+    )
+
     print('Todas las pruebas de importación CSV pasaron.')
 
 

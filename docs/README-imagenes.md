@@ -42,6 +42,7 @@ La primera ejecución descarga el modelo de `rembg` (~176 MB) al disco del worke
 - **Una sola ruta gasta créditos**: el registro automático (`buscar_o_cachear_automatica`, caché de BD por EAN/nombre). La cascada paralela **no** consulta Serper por defecto (`LOCALIS_IMG_SERPER_CASCADA=0`).
 - **Guardado estricto**: si el producto ya tiene una imagen real, no se consulta ninguna API externa.
 - **Caché en memoria** de consultas repetidas + **tope diario duro** (`LOCALIS_SERPER_MAX_DIA`).
+- **Catálogo maestro global por EAN:** al resolver una imagen se publica `EAN -> URL`; cualquier otro comercio que venda el mismo EAN la reutiliza con **costo de API = 0** (stock y registros siguen separados por comercio).
 - El pipeline registra por lote: `caché_bd=… ya_tenian=… api_serper=… sin_imagen=…`.
 
 ```
@@ -49,6 +50,17 @@ SERPER_API_KEY=…
 LOCALIS_SERPER_MAX_DIA=90
 LOCALIS_SERPER_CACHE_TTL_SEC=86400
 LOCALIS_IMG_SERPER_CASCADA=0
+```
+
+### Feed público equitativo
+
+- La portada reparte los productos entre comercios (tope dinámico por tienda) para que ninguna monopolice el catálogo con una carga masiva.
+- Se excluyen sandboxes (`__`) y los comercios configurados en `LOCALIS_COMERCIOS_EXCLUIDOS`.
+- Tamaño de portada configurable con `LOCALIS_CATALOGO_INICIO_LIMITE` (la búsqueda con `q`/categoría sigue mostrando todo).
+
+```
+LOCALIS_CATALOGO_INICIO_LIMITE=30
+LOCALIS_COMERCIOS_EXCLUIDOS=
 ```
 
 ## 2.b Saneamiento de datos de prueba
@@ -60,6 +72,11 @@ python scripts/limpiar_datos_prueba.py                 # dry-run
 python scripts/limpiar_datos_prueba.py --apply
 python scripts/limpiar_datos_prueba.py --imagenes-invalidas --apply
 ```
+
+### Prioridad de búsqueda y re-subidas
+
+- **EAN-first estricto:** si el producto tiene código de barras, se consulta **solo** por EAN (sin caer a nombre). Sin código de barras, se busca por nombre con filtro anti falso positivo; si el nombre es ambiguo, se descarta (`None`).
+- **Re-subida del mismo CSV:** las filas idénticas a las ya guardadas se cuentan como `sin cambios`; no se actualizan ni relanzan el pipeline de imágenes. El mensaje pasa a ser `X nuevos, Y actualizados, Z sin cambios`.
 
 ## 3. Importación masiva asíncrona (CSV / Excel)
 

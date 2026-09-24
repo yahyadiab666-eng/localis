@@ -1816,6 +1816,17 @@ def procesar_producto(
         auto = _asegurar_automatica_cache(
             producto_id, categoria_efectiva, nombre, descripcion, ean or codigo_barras
         )
+        # Producto ya procesado (sin resultado en el registro automático): no se
+        # repite el pipeline en re-subidas ni en el backfill. Solo `forzar=True`
+        # relanza la búsqueda.
+        if auto and not auto.get('url') and auto.get('origen') == 'cache_bd' and not forzar:
+            _log(
+                f'producto={producto_id} ya procesado (caché negativa); '
+                'se omite el pipeline'
+            )
+            return ResultadoProcesamiento(
+                ok=False, motivo='ya_procesado', detalle={'origen': 'cache_bd'}
+            )
         if auto and auto.get('url'):
             try:
                 _registrar_automatica_producto(

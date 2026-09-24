@@ -151,28 +151,102 @@ def _probar_cache_automatica():
         _ok(res['url'] is None and not reg.called and res['fuente'] == 'api_no_configurada',
             'sin API configurada no se registra negativo')
 
-    # 5) EAN primero y registro positivo.
+    # 5) EAN primero y registro positivo (validación de host real).
     with patch.object(ip, '_producto_con_imagen_valida', return_value=False), patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
+        ip, '_imagen_maestra_por_ean', return_value=None
+    ), patch.object(
         ip, 'registrar_automatica'
     ) as reg, patch('backend.serper_images.habilitado', return_value=True), patch(
-        'backend.serper_images.buscar_por_codigo', return_value=[{'url': 'ean.webp'}]
+        'backend.serper_images.buscar_por_codigo',
+        return_value=[{'url': 'https://cdn.tienda.com/ean.webp', 'dominio': 'cdn.tienda.com', 'titulo': 'TV 759'}],
     ) as por_codigo, patch(
         'backend.serper_images.buscar_por_nombre_descripcion'
     ) as por_nombre:
         res = ip.buscar_o_cachear_automatica(4, categoria='tecnologia', nombre='TV', codigo_barras='759')
-        _ok(res['url'] == 'ean.webp' and por_codigo.called and not por_nombre.called,
+        _ok(res['url'] == 'https://cdn.tienda.com/ean.webp' and por_codigo.called and not por_nombre.called,
             'Priority 1: se usa el código de barras')
         _ok(reg.called, 'el acierto se registra de forma permanente')
 
-    # 6) Sin barcode: nombre+descripción, y negativo si no hay resultados.
+    # 5b) Con EAN y SIN resultados: no se cae a búsqueda por nombre.
+    with patch.object(ip, '_producto_con_imagen_valida', return_value=False), patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
+        ip, '_imagen_maestra_por_ean', return_value=None
+    ), patch.object(
+        ip, 'registrar_automatica'
+    ), patch('backend.serper_images.habilitado', return_value=True), patch(
+        'backend.serper_images.buscar_por_codigo', return_value=[]
+    ) as por_codigo, patch(
+        'backend.serper_images.buscar_por_nombre_descripcion'
+    ) as por_nombre:
+        res = ip.buscar_o_cachear_automatica(4, categoria='tecnologia', nombre='TV', codigo_barras='759')
+        _ok(res['url'] is None and por_codigo.called and not por_nombre.called,
+            'con EAN presente no se busca por nombre (sin falsos positivos)')
+
+    # 5c) EAN con resultado sin evidencia (falso positivo) -> se descarta.
+    with patch.object(ip, '_producto_con_imagen_valida', return_value=False), patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
+        ip, '_imagen_maestra_por_ean', return_value=None
+    ), patch.object(
+        ip, 'registrar_automatica'
+    ), patch('backend.serper_images.habilitado', return_value=True), patch(
+        'backend.serper_images.buscar_por_codigo',
+        return_value=[
+            {'url': 'https://cdn.tienda.com/cloro.webp', 'dominio': 'cdn.tienda.com',
+             'titulo': 'CLORO JABONOSOCALIDEX'}
+        ],
+    ) as por_codigo, patch(
+        'backend.serper_images.buscar_por_nombre_descripcion'
+    ) as por_nombre:
+        res = ip.buscar_o_cachear_automatica(
+            4, categoria='alimentos', nombre='ATUN ENTERO BUBBA 140G', codigo_barras='6912290003309'
+        )
+        _ok(res['url'] is None and por_codigo.called and not por_nombre.called,
+            'EAN sin evidencia (título/URL) se descarta sin caer a nombre')
+
+    # 5d) Catálogo maestro global: reutiliza el EAN sin llamar a Serper.
+    with patch.object(ip, '_producto_con_imagen_valida', return_value=False), patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
+        ip, '_imagen_maestra_por_ean', return_value='https://cdn.global.com/ean.webp'
+    ), patch.object(ip, 'registrar_automatica') as reg, patch(
+        'backend.serper_images.buscar_por_codigo'
+    ) as por_codigo, patch('backend.serper_images.buscar_por_nombre_descripcion') as por_nombre, patch(
+        'backend.serper_images.habilitado', return_value=True
+    ):
+        res = ip.buscar_o_cachear_automatica(4, categoria='tecnologia', nombre='TV', codigo_barras='759')
+        _ok(
+            res['url'] == 'https://cdn.global.com/ean.webp'
+            and res['origen'] == 'catalogo_maestro',
+            'reutiliza el catálogo global por EAN (costo de API = 0)',
+        )
+        _ok(
+            not por_codigo.called and not por_nombre.called and reg.called,
+            'no consulta Serper cuando el EAN ya está en el catálogo global',
+        )
+
+    # 6) Sin barcode: nombre+descripción con filtro estricto, y negativo si no hay.
     with patch.object(ip, '_producto_con_imagen_valida', return_value=False), patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
         ip, 'registrar_automatica'
     ) as reg, patch('backend.serper_images.habilitado', return_value=True), patch(
-        'backend.serper_images.buscar_por_nombre_descripcion', return_value=[{'url': 'nom.webp'}]
+        'backend.serper_images.buscar_por_nombre_descripcion',
+        return_value=[
+            {'url': 'https://cdn.tienda.com/nom.webp', 'dominio': 'cdn.tienda.com',
+             'titulo': 'Harina P.A.N. maíz blanco 1kg'}
+        ],
     ):
         res = ip.buscar_o_cachear_automatica(5, categoria='alimentos', nombre='Harina', descripcion='maíz')
-        _ok(res['url'] == 'nom.webp', 'Priority 2: nombre + descripción')
+        _ok(res['url'] == 'https://cdn.tienda.com/nom.webp', 'Priority 2: nombre + descripción')
         _ok(reg.call_args.kwargs.get('encontrada') is True, 'registra acierto')
+
+    # 6b) Falso positivo (caldo vs galletas): se descarta la foto errada.
+    with patch.object(ip, '_producto_con_imagen_valida', return_value=False), patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
+        ip, 'registrar_automatica'
+    ), patch('backend.serper_images.habilitado', return_value=True), patch(
+        'backend.serper_images.buscar_por_nombre_descripcion',
+        return_value=[
+            {'url': 'https://cdn.tienda.com/galletas.webp', 'dominio': 'cdn.tienda.com',
+             'titulo': 'Galletas de chocolate rellenas'}
+        ],
+    ) as por_nombre:
+        res = ip.buscar_o_cachear_automatica(7, categoria='alimentos', nombre='Cubitos de Caldo Knorr')
+        _ok(res['url'] is None and por_nombre.called,
+            'descarta falso positivo (no asigna galletas a cubitos de caldo)')
 
     with patch.object(ip, '_producto_con_imagen_valida', return_value=False), patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
         ip, 'registrar_automatica'

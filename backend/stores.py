@@ -60,6 +60,21 @@ def _sandbox_publico_permitido():
     return valor in ('1', 'true', 'yes', 'on')
 
 
+def _comercios_excluidos():
+    """IDs de comercios que NUNCA deben aparecer en la vista pública.
+
+    Se configura con ``LOCALIS_COMERCIOS_EXCLUIDOS=1,7`` (útil para ocultar una
+    tienda de pruebas concreta sin borrar sus datos ni tocar código).
+    """
+    valor = str(os.getenv('LOCALIS_COMERCIOS_EXCLUIDOS', '') or '')
+    ids = []
+    for parte in valor.replace(';', ',').split(','):
+        parte = parte.strip()
+        if parte.isdigit():
+            ids.append(str(int(parte)))
+    return ids
+
+
 def _filtro_comercio_publico():
     filtro = (
         " AND COALESCE(c.visible, 1) = 1"
@@ -67,6 +82,9 @@ def _filtro_comercio_publico():
     )
     if not _sandbox_publico_permitido():
         filtro += " AND LEFT(LOWER(TRIM(COALESCE(c.nombre, ''))), 2) <> '__'"
+    excluidos = _comercios_excluidos()
+    if excluidos:
+        filtro += f" AND c.id NOT IN ({', '.join(excluidos)})"
     return filtro
 
 
@@ -663,6 +681,32 @@ def buscar_y_filtrar_productos(
     return []
 
 
+def _cap_productos_por_comercio(cursor, limit):
+    """Tope de productos por comercio para un feed público equitativo.
+
+    Se calcula según el número de comercios visibles: con una sola tienda no
+    limita; con muchas, reparte para que ninguna monopolice la portada.
+    """
+    try:
+        cursor.execute(
+            "SELECT COUNT(*) FROM comercios c WHERE 1=1" + _filtro_comercio_publico()
+        )
+        fila = cursor.fetchone()
+        if isinstance(fila, dict):
+            total = int(next(iter(fila.values()), 0) or 0)
+        elif isinstance(fila, (list, tuple)):
+            total = int(fila[0] or 0)
+        else:
+            total = 0
+    except Exception:
+        total = 1
+    tope = max(1, int(limit))
+    if total <= 1:
+        return tope
+    # ceil(tope / total) + 2: cada tienda aporta su cuota justa y algo de margen.
+    return max(3, -(-tope // total) + 2)
+
+
 def _buscar_y_filtrar_productos_once(
     palabra_clave=None,
     categoria_nombre=None,
@@ -677,18 +721,31 @@ def _buscar_y_filtrar_productos_once(
 
         parametros = []
         if orden_aleatorio and limit and not palabra_clave and not categoria_nombre:
+            # Feed equitativo: se acota cuántos productos aporta cada comercio
+            # (ROW_NUMBER por comercio) y recién ahí se muestrea al azar, de modo
+            # que una tienda con muchas cargas no monopolice la portada.
+            cap = _cap_productos_por_comercio(cursor, limit)
             query_ids = """
-                SELECT p.id
-                FROM comercios c
-                JOIN productos p ON p.comercio_id = c.id
-                WHERE 1=1
+                SELECT id FROM (
+                    SELECT p.id AS id,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY p.comercio_id ORDER BY p.id DESC
+                           ) AS rn
+                    FROM comercios c
+                    JOIN productos p ON p.comercio_id = c.id
+                    WHERE 1=1
             """ + _filtro_comercio_publico() + _filtro_producto_publico()
             query_ids, params_ids = _aplicar_filtros_productos(
                 query_ids, [], palabra_clave, categoria_nombre, comercio_id
             )
-            pool_size = max(int(limit) * 10, min(_POOL_MUESTRA_ALEATORIA, 400))
-            query_ids += ' ORDER BY p.id DESC LIMIT ?'
-            params_ids.append(pool_size)
+            pool_size = max(int(limit), min(_POOL_MUESTRA_ALEATORIA, 400))
+            query_ids += """
+                    ) ranked
+                    WHERE rn <= ?
+                    ORDER BY random()
+                    LIMIT ?
+            """
+            params_ids.extend([cap, pool_size])
             cursor.execute(query_ids, params_ids)
             ids = [
                 _valor_fila(fila, 'id', 0)
@@ -1026,19 +1083,26 @@ def procesar_csv_productos(comercio_id, archivo_csv):
             }
 
         etapa = 'persistir_upsert'
-        insertados, actualizados = persistir_importacion_upsert(
+        insertados, actualizados, omitidos = persistir_importacion_upsert(
             comercio_id, productos, existentes=existentes
         )
 
         etapa = 'asociar_imagenes'
-        try:
-            programar_asociacion_imagenes_inventario(comercio_id)
-        except Exception as exc_img:
+        if insertados > 0:
+            try:
+                programar_asociacion_imagenes_inventario(comercio_id)
+            except Exception as exc_img:
+                print(
+                    f'{CSV_LOG} aviso etapa={etapa} {type(exc_img).__name__}: {exc_img} '
+                    '(el inventario ya se guardó; las fotos se completan en segundo plano)'
+                )
+                traceback.print_exc()
+        else:
+            # Re-subida idéntica: no se relanza el pipeline ni se consumen recursos.
             print(
-                f'{CSV_LOG} aviso etapa={etapa} {type(exc_img).__name__}: {exc_img} '
-                '(el inventario ya se guardó; las fotos se completan en segundo plano)'
+                f'{CSV_LOG} sin productos nuevos: pipeline de imágenes no relanzado '
+                f'(actualizados={actualizados} sin_cambios={omitidos})'
             )
-            traceback.print_exc()
 
         etapa = 'reporte'
         conteos = _contar_estados_imagenes(comercio_id)
@@ -1059,12 +1123,14 @@ def procesar_csv_productos(comercio_id, archivo_csv):
         )
         meta_imagenes['insertados'] = insertados
         meta_imagenes['actualizados'] = actualizados
+        meta_imagenes['omitidos'] = omitidos
         mensaje = (
-            f'{insertados} nuevos, {actualizados} actualizados. ' + mensaje
+            f'{insertados} nuevos, {actualizados} actualizados, '
+            f'{omitidos} sin cambios. ' + mensaje
         )
         print(
             f'{CSV_LOG} ok comercio={comercio_id} insertados={insertados} '
-            f'actualizados={actualizados} '
+            f'actualizados={actualizados} sin_cambios={omitidos} '
             f'estado_imagenes={meta_imagenes["estado_imagenes"]} '
             f'reales={meta_imagenes["imagenes_reales"]} '
             f'logos={meta_imagenes["imagenes_logos"]} '

@@ -1308,11 +1308,62 @@ def productos_nuevos(productos, existentes):
     return [p for p in productos if _buscar_existente(p, existentes) is None]
 
 
+def _texto_norm(valor):
+    return ' '.join(str(valor or '').split()).strip().lower()
+
+
+def _a_float(valor):
+    try:
+        return float(valor) if valor is not None and str(valor).strip() != '' else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _a_int(valor):
+    try:
+        return int(float(valor)) if valor is not None and str(valor).strip() != '' else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _difiere(nuevo, actual, normalizador=None):
+    """True si el valor del CSV viene informado y difiere del actual."""
+    if nuevo is None or (isinstance(nuevo, str) and not nuevo.strip()):
+        return False
+    norm = normalizador or _texto_norm
+    return norm(nuevo) != norm(actual)
+
+
+def _registro_sin_cambios(registro, prod):
+    """True si la fila del CSV es idéntica al producto ya guardado.
+
+    Evita recalcular/actualizar filas que no cambiaron al re-subir el mismo
+    catálogo (0 procesamiento de recursos innecesario).
+    """
+    from backend.utils import normalizar_codigo_barras
+
+    if _difiere(prod.get('nombre'), registro.get('nombre')):
+        return False
+    if _difiere(prod.get('descripcion'), registro.get('descripcion')):
+        return False
+    if _difiere(prod.get('precio_usd'), registro.get('precio_usd'), _a_float):
+        return False
+    if _difiere(prod.get('stock'), registro.get('stock'), _a_int):
+        return False
+    if _difiere(prod.get('codigo_barras'), registro.get('codigo_barras'), normalizar_codigo_barras):
+        return False
+    if _difiere(prod.get('imagen_url'), registro.get('imagen_url'), lambda v: str(v or '').strip()):
+        return False
+    return True
+
+
 def persistir_importacion_upsert(comercio_id, productos, categoria=None, existentes=None):
     """UPSERT: actualiza productos existentes (precio/stock/imagen) e inserta nuevos.
 
     Cero rechazos falsos: si el archivo solo trae existencias o precios, los
-    campos ausentes conservan su valor actual. Retorna (insertados, actualizados).
+    campos ausentes conservan su valor actual. Las filas **idénticas** ya
+    guardadas no se tocan (se cuentan como ``omitidos``). Retorna
+    ``(insertados, actualizados, omitidos)``.
     """
     from backend.db import ejecutar_con_reintentos_bd, get_db_connection
 
@@ -1360,7 +1411,12 @@ def persistir_importacion_upsert(comercio_id, productos, categoria=None, existen
             insertados += len(lote)
 
         filas_update = []
+        omitidos = 0
         for registro, prod in actualizaciones:
+            # Filas idénticas a lo ya guardado: no se tocan (ni UPDATE ni hash).
+            if _registro_sin_cambios(registro, prod):
+                omitidos += 1
+                continue
             precio = prod.get('precio_usd')
             if precio is None:
                 precio = registro.get('precio_usd')
@@ -1401,12 +1457,12 @@ def persistir_importacion_upsert(comercio_id, productos, categoria=None, existen
                     )
             actualizados += len(lote)
 
-        if insertados == 0 and actualizados == 0:
+        if insertados == 0 and actualizados == 0 and omitidos == 0:
             raise ErrorImportacionInventario(
                 'No se encontraron filas válidas para importar. '
                 'Revisa que el archivo tenga nombres/descripciones de producto.'
             )
-        return insertados, actualizados
+        return insertados, actualizados, omitidos
 
     return ejecutar_con_reintentos_bd(_operacion)
 

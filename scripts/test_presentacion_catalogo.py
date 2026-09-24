@@ -202,6 +202,33 @@ def _probar_sql_listado(errores):
         'vista pública aísla comercios/productos de prueba (prefijo __)',
         errores,
     )
+    _ok(
+        "def _cap_productos_por_comercio" in stores
+        and "ROW_NUMBER() OVER" in stores
+        and "PARTITION BY p.comercio_id" in stores,
+        'feed público equitativo (tope por comercio, sin monopolio)',
+        errores,
+    )
+    _ok('LOCALIS_COMERCIOS_EXCLUIDOS' in stores, 'permite ocultar tiendas por ID', errores)
+
+    import os as _os
+    from unittest.mock import patch as _patch
+
+    from backend import stores as _stores
+
+    with _patch.dict(
+        _os.environ, {'LOCALIS_COMERCIOS_EXCLUIDOS': '1, 7;x, 3'}, clear=False
+    ):
+        _ok(
+            _stores._comercios_excluidos() == ['1', '7', '3'],
+            'parsea IDs de tiendas excluidas',
+            errores,
+        )
+        _ok(
+            'c.id NOT IN (1, 7, 3)' in _stores._filtro_comercio_publico(),
+            'el filtro público excluye las tiendas indicadas',
+            errores,
+        )
 
     print('\n=== Arranque sin relleno de catálogo ===')
     init_src = (RAIZ / 'database.py').read_text(encoding='utf-8')

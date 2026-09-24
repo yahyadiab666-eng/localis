@@ -453,6 +453,102 @@ def eliminar_manual(producto_id, *, purgar=True):
 # ---------------------------------------------------------------------------
 # Orquestación API: una consulta por producto, con caché permanente
 # ---------------------------------------------------------------------------
+# Tokens que no aportan identidad al producto (unidades, conectores, genéricos).
+# Se usan para el filtro estricto de la búsqueda por nombre.
+_TOKENS_IGNORADOS = frozenset({
+    'de', 'del', 'la', 'el', 'los', 'las', 'un', 'una', 'unos', 'unas', 'y', 'o', 'u',
+    'con', 'sin', 'para', 'por', 'en', 'al', 'a', 'x', 'ml', 'l', 'lt', 'lts', 'g', 'gr',
+    'grs', 'kg', 'kgs', 'mg', 'cc', 'cm', 'mm', 'm', 'und', 'unid', 'unidades', 'pack',
+    'paquete', 'bolsa', 'caja', 'frasco', 'lata', 'botella', 'sabor', 'tipo', 'original',
+    'producto', 'marca', 'talla', 'color', 'contenido', 'neto', 'peso', 'medida',
+})
+
+# Dominios que nunca son una foto de producto válida (herramientas/buscadores).
+_HOSTS_NO_FOTO = ('google.', 'gstatic.', 'bing.', 'duckduckgo.', 'placeholder')
+
+
+def _log_busqueda(producto_id, estrategia, termino):
+    print(
+        f'{_LOG} búsqueda producto={producto_id} '
+        f'estrategia={estrategia} termino={str(termino or "")[:80]!r}'
+    )
+
+
+def _tokens_identidad(texto):
+    """Tokens distintivos de un nombre (sin acentos, unidades ni genéricos)."""
+    tokens = []
+    for bruto in _texto_plano(texto).split():
+        if not bruto or bruto in _TOKENS_IGNORADOS:
+            continue
+        if len(bruto) < 3 and not bruto.isdigit():
+            continue
+        if bruto not in tokens:
+            tokens.append(bruto)
+    return tokens
+
+
+def _candidato_ean_valido(candidato, ean='', tokens=None):
+    """Validación del acierto por EAN exacto.
+
+    Acepta si la URL/host son de foto válida y además hay **evidencia**: los
+    dígitos del EAN aparecen en el título/URL/contexto, o los tokens distintivos
+    del nombre coinciden. Así se evita el típico falso positivo de Serper al
+    interpretar un EAN como texto (p. ej. un atún con foto de cloro).
+    """
+    if not isinstance(candidato, dict):
+        return False
+    url = str(candidato.get('url') or '').strip()
+    if not url.lower().startswith(('http://', 'https://')):
+        return False
+    host = str(candidato.get('dominio') or '').lower()
+    if any(b in host for b in _HOSTS_NO_FOTO):
+        return False
+    texto = _texto_plano(
+        ' '.join(
+            str(candidato.get(campo) or '')
+            for campo in ('titulo', 'contexto', 'dominio', 'url')
+        )
+    )
+    import re as _re
+
+    digitos_texto = _re.sub(r'\D', '', texto)
+    digitos_ean = _re.sub(r'\D', '', str(ean or ''))
+    if digitos_ean and (
+        digitos_ean in digitos_texto
+        or (len(digitos_ean) > 8 and digitos_ean[-8:] in digitos_texto)
+    ):
+        return True
+    return _candidato_nombre_confiable(candidato, tokens or [])
+
+
+def _candidato_nombre_confiable(candidato, tokens):
+    """Filtro estricto anti falso positivo (p. ej. caldo != galletas).
+
+    Exige coincidencia real de los tokens distintivos del nombre con el título,
+    contexto, dominio o URL del candidato. Si el nombre es ambiguo o no hay
+    confianza suficiente, se descarta (``False``).
+    """
+    if not isinstance(candidato, dict) or not tokens:
+        return False
+    url = str(candidato.get('url') or '').strip()
+    if not url.lower().startswith(('http://', 'https://')):
+        return False
+    plano = _texto_plano(
+        ' '.join(
+            str(candidato.get(campo) or '')
+            for campo in ('titulo', 'contexto', 'dominio', 'url')
+        )
+    )
+    coincidencias = [token for token in tokens if token in plano]
+    if not coincidencias:
+        return False
+    if len(tokens) >= 2:
+        # Al menos 2 tokens distintivos y >= 50% de coincidencia.
+        return len(coincidencias) >= 2 and (len(coincidencias) / len(tokens)) >= 0.5
+    # Un único token: debe ser suficientemente específico.
+    return len(coincidencias[0]) >= 4
+
+
 def _producto_con_imagen_valida(producto_id):
     """True si el producto ya tiene una imagen real asignada.
 
@@ -483,6 +579,28 @@ def _producto_con_imagen_valida(producto_id):
         return estado == 'real'
     except Exception:
         return False
+
+
+def _imagen_maestra_por_ean(codigo_barras):
+    """URL de la imagen global ya resuelta para un EAN (catálogo compartido).
+
+    Cualquier comercio que venda el mismo EAN reutiliza la imagen sin gastar
+    créditos ni reprocesar. Devuelve ``None`` si no hay coincidencia.
+    """
+    try:
+        from backend.utils import normalizar_codigo_barras
+
+        ean = normalizar_codigo_barras(codigo_barras)
+    except Exception:
+        ean = str(codigo_barras or '').strip()
+    if not ean:
+        return None
+    try:
+        from backend.catalogo_maestro import imagen_maestro_por_codigo
+
+        return imagen_maestro_por_codigo(ean)
+    except Exception:
+        return None
 
 
 def buscar_o_cachear_automatica(
@@ -543,6 +661,32 @@ def buscar_o_cachear_automatica(
         resultado['origen'] = 'categoria_no_permitida'
         return resultado
 
+    # 3) Catálogo maestro global (EAN -> URL): reutiliza la imagen ya resuelta
+    # por CUALQUIER comercio antes de gastar créditos en Serper.
+    if codigo_barras:
+        url_maestra = _imagen_maestra_por_ean(codigo_barras)
+        if url_maestra:
+            registrar_automatica(
+                clave=clave,
+                url=url_maestra,
+                fuente='catalogo_maestro',
+                termino=str(codigo_barras),
+                codigo_barras=codigo_barras,
+                nombre=nombre,
+                producto_id=producto_id,
+                encontrada=True,
+            )
+            resultado.update(
+                {
+                    'url': url_maestra,
+                    'fuente': 'catalogo_maestro',
+                    'termino': str(codigo_barras),
+                    'encontrada': True,
+                    'origen': 'catalogo_maestro',
+                }
+            )
+            return resultado
+
     try:
         from backend import serper_images as proveedor
 
@@ -572,17 +716,46 @@ def buscar_o_cachear_automatica(
     resultado['origen'] = 'api'
     encontrado = None
     termino_usado = None
-    if codigo_barras:
-        hallazgos = proveedor.buscar_por_codigo(codigo_barras, limite=limite)
-        if hallazgos:
-            encontrado, termino_usado = hallazgos[0], str(codigo_barras)
-    if encontrado is None and not _no_disponible():
-        hallazgos = proveedor.buscar_por_nombre_descripcion(nombre, descripcion, limite=limite)
-        if hallazgos:
-            encontrado = hallazgos[0]
-            termino_usado = ' '.join(
-                p for p in [str(nombre or '').strip(), ' '.join(str(descripcion or '').split())[:80]] if p
+    ean_normalizado = str(codigo_barras or '').strip()
+    tokens = _tokens_identidad(nombre) or _tokens_identidad(descripcion)
+
+    if ean_normalizado:
+        # Prioridad estricta 1: SOLO EAN exacto. Sin fallback a nombre (evita
+        # asignar una foto aproximada cuando el código no tiene resultados).
+        _log_busqueda(producto_id, 'ean', ean_normalizado)
+        hallazgos = proveedor.buscar_por_codigo(ean_normalizado, limite=limite)
+        for candidato in hallazgos or []:
+            if _candidato_ean_valido(candidato, ean_normalizado, tokens):
+                encontrado, termino_usado = candidato, ean_normalizado
+                break
+    else:
+        # Prioridad estricta 2 (solo sin EAN): nombre + descripción con filtro
+        # anti falso positivo. Si el nombre es ambiguo, no se consulta la API.
+        if not tokens:
+            registrar_automatica(
+                clave=clave,
+                url=None,
+                fuente='serper',
+                termino=None,
+                codigo_barras=codigo_barras,
+                nombre=nombre,
+                producto_id=producto_id,
+                encontrada=False,
             )
+            resultado['fuente'] = 'nombre_ambiguo'
+            resultado['origen'] = 'nombre_ambiguo'
+            return resultado
+        consulta = ' '.join(
+            p for p in [str(nombre or '').strip(), ' '.join(str(descripcion or '').split())[:80]] if p
+        ).strip()
+        _log_busqueda(producto_id, 'nombre', consulta)
+        hallazgos = proveedor.buscar_por_nombre_descripcion(
+            nombre, descripcion, limite=max(limite, 5)
+        )
+        for candidato in hallazgos or []:
+            if _candidato_nombre_confiable(candidato, tokens):
+                encontrado, termino_usado = candidato, consulta
+                break
 
     motivo_final = _no_disponible()
     if encontrado is None and motivo_final:
@@ -601,6 +774,20 @@ def buscar_o_cachear_automatica(
             producto_id=producto_id,
             encontrada=True,
         )
+        # Publica la relación EAN -> URL en el catálogo global compartido para
+        # que otros comercios la reutilicen con costo de API = 0.
+        if codigo_barras and encontrado.get('url'):
+            try:
+                from backend.catalogo_maestro import guardar_imagen_maestro
+
+                guardar_imagen_maestro(
+                    codigo_barras,
+                    encontrado.get('url'),
+                    nombre=nombre,
+                    categoria=categoria,
+                )
+            except Exception as error:
+                print(f'{_LOG} no se pudo indexar EAN en catálogo global: {type(error).__name__}')
         resultado.update(
             {
                 'url': encontrado.get('url'),

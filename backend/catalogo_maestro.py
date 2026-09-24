@@ -23,6 +23,9 @@ from backend.utils import (
 TABLA_CATALOGO_MAESTRO = 'catalogo_maestro_imagenes'
 _LOTE_CONSULTA = 100
 _LOG = '[Localis Imagen]'
+# Advisory lock de escritura: serializa los upserts al catálogo global para
+# evitar deadlocks cuando varios workers resuelven EAN a la vez.
+_LOCK_ESCRITURA = 87261034
 # Timeout corto en lectura: si la tabla no responde, se pasa a la semilla.
 _TIMEOUT_LECTURA_MS = int(os.getenv('CATALOGO_IMAGEN_TIMEOUT_MS', '2000'))
 # Misma normalización que productos: recorta espacios y sufijo .0 de Excel.
@@ -281,6 +284,10 @@ def _guardar_imagen_maestro_postgres(codigo, url, nombre=None, marca=None, categ
 
     with get_db_connection() as conexion:
         cursor = conexion.cursor()
+        try:
+            cursor.execute('SELECT pg_advisory_xact_lock(%s)', (_LOCK_ESCRITURA,))
+        except Exception:
+            pass
         _asegurar_indice_unico_codigo(cursor)
         try:
             cursor.execute(
@@ -310,6 +317,10 @@ def _guardar_imagen_maestro_postgres(codigo, url, nombre=None, marca=None, categ
             )
             conexion.rollback()
             cursor = conexion.cursor()
+            try:
+                cursor.execute('SELECT pg_advisory_xact_lock(%s)', (_LOCK_ESCRITURA,))
+            except Exception:
+                pass
             _asegurar_indice_unico_codigo(cursor)
             cursor.execute(
                 f"""
