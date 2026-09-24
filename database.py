@@ -623,13 +623,22 @@ def get_db_connection(row_factory=None, read_only=False):
     corto para no competir con DDL (AccessExclusiveLock) hasta deadlock.
     """
     _require_database_url()
-    try:
-        pg_conn = _obtener_pool().getconn()
-    except PoolError as exc:
+    ultimo_error = None
+    pg_conn = None
+    for intento in range(3):
+        try:
+            pg_conn = _obtener_pool().getconn()
+            break
+        except PoolError as exc:
+            # Pico transitorio de concurrencia: se espera un poco y se reintenta
+            # en vez de devolver un error 5xx inmediato.
+            ultimo_error = exc
+            time.sleep(0.15 * (intento + 1))
+    if pg_conn is None:
         raise RuntimeError(
             'No hay conexiones de base de datos disponibles en este momento. '
             'Intenta de nuevo en unos segundos.'
-        ) from exc
+        ) from ultimo_error
     _preparar_conexion_pg(pg_conn, read_only=read_only)
     usar_dict = row_factory is not None
     return _PgConnection(pg_conn, dict_rows=usar_dict, from_pool=True)

@@ -12,6 +12,7 @@ Pruebas sin base de datos (se parchean las funciones de persistencia):
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -136,12 +137,35 @@ def _probar_cache_automatica():
         _ok(res['url'] is None and res['desde_cache'] and not reg.called and not por_codigo.called,
             'caché negativa: no se repite la consulta')
 
-    # 3) Categoría no permitida: no consulta ni registra.
-    with patch.object(ip, '_producto_con_imagen_valida', return_value=False), patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
+    # 3) Modo estricto (opt-in): categoría no permitida no consulta ni registra.
+    with patch.dict(os.environ, {'LOCALIS_IMG_CATEGORIAS_ESTRICTO': '1'}, clear=False), patch.object(
+        ip, '_producto_con_imagen_valida', return_value=False
+    ), patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
         ip, 'registrar_automatica'
     ) as reg, patch('backend.serper_images.habilitado', return_value=True):
         res = ip.buscar_o_cachear_automatica(2, categoria='ropa', nombre='Camisa')
-        _ok(res['url'] is None and not reg.called, 'categoría fuera de alcance: sin API')
+        _ok(
+            res['url'] is None and not reg.called and res['origen'] == 'categoria_no_permitida',
+            'modo estricto: categoría fuera de alcance sin API',
+        )
+
+    # 3b) Por defecto la pasarela está abierta: categorías no listadas SÍ buscan.
+    with patch.dict(os.environ, {'LOCALIS_IMG_CATEGORIAS_ESTRICTO': '0'}, clear=False), patch.object(
+        ip, '_producto_con_imagen_valida', return_value=False
+    ), patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
+        ip, 'registrar_automatica'
+    ) as reg, patch('backend.serper_images.habilitado', return_value=True), patch(
+        'backend.serper_images.buscar_por_nombre_descripcion',
+        return_value=[
+            {'url': 'https://cdn.tienda.com/camisa.webp', 'dominio': 'cdn.tienda.com',
+             'titulo': 'Camisa ropa manga larga'}
+        ],
+    ) as por_nombre:
+        res = ip.buscar_o_cachear_automatica(2, categoria='ropa', nombre='Camisa')
+        _ok(
+            res['url'] == 'https://cdn.tienda.com/camisa.webp' and por_nombre.called,
+            'pasarela abierta: categorías no listadas también resuelven imagen',
+        )
 
     # 4) API no configurada: no registra (no envenena el caché).
     with patch.object(ip, '_producto_con_imagen_valida', return_value=False), patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
@@ -317,6 +341,26 @@ def _probar_cache_serper():
     serper_images.reiniciar_estado()
 
 
+def _probar_conservacion_imagenes():
+    print('\n=== Nunca vaciar una imagen válida ===')
+    from backend import imagenes_producto as ip
+
+    _ok(ip._imagen_conservable('https://cdn.x/foto.webp', 'serper'), 'foto externa se conserva')
+    _ok(
+        ip._imagen_conservable('/static/uploads/productos/auto_x.webp', 'profesional'),
+        'subida automática se conserva',
+    )
+    _ok(
+        not ip._imagen_conservable('/static/img/placeholder-producto.svg'),
+        'placeholder no se conserva',
+    )
+    _ok(
+        not ip._imagen_conservable('/static/uploads/productos/manual_1_x.webp', 'manual'),
+        'la manual la gestiona su propio ciclo (marcar/eliminar)',
+    )
+    _ok(not ip._imagen_conservable(''), 'imagen vacía no se conserva')
+
+
 def _probar_registro_no_borra():
     print('\n=== El registro automático nunca se degrada ===')
     import inspect
@@ -460,6 +504,7 @@ def main() -> int:
     _probar_serper()
     _probar_cache_automatica()
     _probar_guardado_estricto()
+    _probar_conservacion_imagenes()
     _probar_registro_no_borra()
     _probar_purga_manual()
     _probar_proteccion_manual()

@@ -244,8 +244,9 @@ def _auditar_importacion_instantanea():
     )
     _ok(
         'LOCALIS_CATALOGO_PAGINA' in _leer('main.py')
-        and 'Ver más productos' in _leer('templates/cliente.html'),
-        'portada paginada y navegable',
+        and 'Anterior' in _leer('templates/cliente.html')
+        and 'Siguiente' in _leer('templates/cliente.html'),
+        'portada paginada y navegable (Anterior/Siguiente)',
     )
     _ok(
         'buscar_o_cachear_automatica' in _leer('services/professional_image_pipeline.py'),

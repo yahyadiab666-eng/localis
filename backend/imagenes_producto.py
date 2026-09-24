@@ -204,8 +204,31 @@ def registrar_automatica(
 # ---------------------------------------------------------------------------
 # Resolución de la imagen activa
 # ---------------------------------------------------------------------------
+def _imagen_conservable(url, fuente=None):
+    """True si una imagen ya guardada debe conservarse (nunca vaciarse).
+
+    Se conservan fotos reales (Storage, locales o externas) pero **no** assets
+    fabricados (placeholder/monograma/tarjeta) ni subidas manuales (su ciclo de
+    vida lo gestionan ``marcar_manual``/``eliminar_manual``).
+    """
+    texto = str(url or '').strip()
+    if not texto:
+        return False
+    try:
+        from backend.activos_verificados import es_asset_generado
+        from backend.motor_imagenes import es_imagen_manual
+
+        if es_asset_generado(texto, fuente):
+            return False
+        if es_imagen_manual(texto, fuente):
+            return False
+        return True
+    except Exception:
+        return False
+
+
 def resolver_activa(producto_id):
-    """Recalcula ``productos.imagen_url`` (manual si existe, si no automática)."""
+    """Recalcula ``productos.imagen_url`` (manual → automática → conserva la actual)."""
     try:
         from backend.db import get_db_connection
 
@@ -214,7 +237,8 @@ def resolver_activa(producto_id):
             cursor.execute(
                 """
                 SELECT nombre, descripcion, codigo_barras,
-                       imagen_manual_url, imagen_manual_fuente
+                       imagen_manual_url, imagen_manual_fuente,
+                       imagen_url, imagen_fuente, imagen_estado
                 FROM productos WHERE id = ?
                 """,
                 (int(producto_id),),
@@ -248,7 +272,17 @@ def resolver_activa(producto_id):
                 if url_auto:
                     activa, fuente, estado = url_auto, (registro.get('fuente') or 'automatica'), 'real'
                 else:
-                    activa, fuente, estado = None, None, 'pendiente'
+                    # Sin manual ni caché automática: NUNCA se vacía una imagen
+                    # ya válida. Se conserva la actual si es una foto real.
+                    actual = datos.get('imagen_url')
+                    actual_fuente = datos.get('imagen_fuente')
+                    actual_estado = str(datos.get('imagen_estado') or '').strip().lower()
+                    if _imagen_conservable(actual, actual_fuente):
+                        activa = actual
+                        fuente = actual_fuente
+                        estado = actual_estado or 'real'
+                    else:
+                        activa, fuente, estado = None, None, 'pendiente'
 
             cursor.execute(
                 """
@@ -581,6 +615,44 @@ def _producto_con_imagen_valida(producto_id):
         return False
 
 
+def _categorias_estrictas():
+    """Si es True, solo se busca API en categorías permitidas.
+
+    Por defecto **False**: la pasarela de imágenes está abierta para cualquier
+    categoría (el catálogo global por EAN y el tope diario controlan el gasto).
+    """
+    valor = str(os.getenv('LOCALIS_IMG_CATEGORIAS_ESTRICTO', '0')).strip().lower()
+    return valor in ('1', 'true', 'yes', 'on')
+
+
+def _negativo_vigente(cacheado):
+    """True si una caché negativa aún es válida (no reintentar todavía).
+
+    Los resultados positivos siempre sirven. Los negativos se reintentan tras
+    ``LOCALIS_SERPER_NEGATIVO_TTL_DIAS`` días para no congelar la pasarela.
+    """
+    if bool(cacheado.get('encontrada')) and cacheado.get('url_imagen'):
+        return True
+    if cacheado.get('url_imagen'):
+        return True
+    from datetime import datetime, timedelta
+
+    try:
+        dias = max(0, int(os.getenv('LOCALIS_SERPER_NEGATIVO_TTL_DIAS', '7') or 7))
+    except (TypeError, ValueError):
+        dias = 7
+    fecha = cacheado.get('fecha_actualizacion')
+    if not fecha:
+        return True
+    try:
+        valor = fecha
+        if isinstance(valor, str):
+            valor = datetime.fromisoformat(str(valor).replace('Z', '')[:19])
+        return (datetime.now() - valor) < timedelta(days=dias)
+    except Exception:
+        return True
+
+
 def _imagen_maestra_por_ean(codigo_barras):
     """URL de la imagen global ya resuelta para un EAN (catálogo compartido).
 
@@ -604,27 +676,29 @@ def _imagen_maestra_por_ean(codigo_barras):
 
 
 def reparar_imagenes_comercio(comercio_id, limite=40):
-    """Repara imágenes dudosas de un comercio sin gastar créditos.
+    """Repara imágenes **faltantes o inválidas** sin romper las buenas.
 
-    Para cada producto sin imagen persistida o con imagen dudosa:
-      1. Reutiliza la imagen global por EAN (catálogo maestro) si existe y es
-         persistida (Storage/local) → reemplaza la errónea.
-      2. Si no hay reemplazo, limpia la URL dudosa y lo deja ``pendiente`` para
-         que el pipeline lo reintente con una imagen correcta.
+    Reglas:
+      - Imagen válida (mostrable y no fabricada) → **nunca** se toca.
+      - Sin imagen o imagen objetivamente inválida (dominio bloqueado, asset
+        fabricado, host no persistible) → se rellena desde el catálogo global por
+        EAN; si no hay reemplazo, se marca ``pendiente`` para que el pipeline la
+        corrija (Serper/fuentes) en vez de mostrar una foto errónea.
 
-    Devuelve ``(reparadas, a_pendiente)``.
+    Devuelve ``(reparadas, marcadas)``.
     """
     from backend.activos_verificados import es_asset_generado
     from backend.db import get_db_connection
-    from backend.utils import url_imagen_local_valida, url_imagen_subida_storage_valida
+    from backend.utils import url_imagen_catalogo_valida
 
-    def _persistida(url):
-        return bool(
-            url_imagen_subida_storage_valida(url) or url_imagen_local_valida(url)
-        )
+    def _es_valida(url, fuente):
+        texto = str(url or '').strip()
+        if not texto or es_asset_generado(texto, fuente):
+            return False
+        return bool(url_imagen_catalogo_valida(texto) or texto.startswith('/static/uploads/'))
 
     reparadas = 0
-    a_pendiente = 0
+    marcadas = 0
     try:
         with get_db_connection(row_factory=True) as conexion:
             cursor = conexion.cursor()
@@ -634,28 +708,22 @@ def reparar_imagenes_comercio(comercio_id, limite=40):
                        COALESCE(imagen_estado, 'pendiente') AS estado
                 FROM productos
                 WHERE comercio_id = ?
-                  AND (
-                    imagen_url IS NULL
-                    OR TRIM(CAST(imagen_url AS TEXT)) = ''
-                    OR COALESCE(imagen_estado, 'pendiente') <> 'real'
-                  )
                 ORDER BY id DESC
-                LIMIT ?
                 """,
-                (int(comercio_id), int(limite)),
+                (int(comercio_id),),
             )
             filas = [dict(f) for f in cursor.fetchall()]
 
             for fila in filas:
+                if reparadas + marcadas >= int(limite):
+                    break
                 url = str(fila.get('imagen_url') or '').strip()
-                estado = str(fila.get('estado') or 'pendiente').strip().lower()
-                if estado == 'real' and _persistida(url):
-                    continue  # ya es una imagen real persistida
-                if url and es_asset_generado(url, fila.get('imagen_fuente')):
-                    url = ''  # asset fabricado: no cuenta como imagen
+                fuente = fila.get('imagen_fuente')
+                if _es_valida(url, fuente):
+                    continue  # imagen correcta: se respeta intacta
 
                 url_maestra = _imagen_maestra_por_ean(fila.get('codigo_barras'))
-                if url_maestra and _persistida(url_maestra):
+                if url_maestra and url_imagen_catalogo_valida(url_maestra):
                     cursor.execute(
                         """
                         UPDATE productos
@@ -666,9 +734,8 @@ def reparar_imagenes_comercio(comercio_id, limite=40):
                     )
                     reparadas += 1
                 elif url:
-                    # Imagen no persistida (externa/temporal): se descarta para
-                    # que el pipeline busque una correcta en vez de dar por buena
-                    # una foto errónea.
+                    # Objetivamente inválida y sin reemplazo: se marca pendiente
+                    # (nunca se muestra una foto errónea).
                     cursor.execute(
                         """
                         UPDATE productos
@@ -678,17 +745,17 @@ def reparar_imagenes_comercio(comercio_id, limite=40):
                         """,
                         (int(fila['id']),),
                     )
-                    a_pendiente += 1
+                    marcadas += 1
             conexion.commit()
     except Exception as error:
         print(f'{_LOG} reparación de imágenes fallo comercio={comercio_id}: {type(error).__name__}')
 
-    if reparadas or a_pendiente:
+    if reparadas or marcadas:
         print(
             f'{_LOG} reparación imágenes comercio={comercio_id} '
-            f'reparadas={reparadas} a_pendiente={a_pendiente}'
+            f'reparadas={reparadas} marcadas_pendiente={marcadas}'
         )
-    return reparadas, a_pendiente
+    return reparadas, marcadas
 
 
 def buscar_o_cachear_automatica(
@@ -733,9 +800,10 @@ def buscar_o_cachear_automatica(
         resultado.update({'fuente': 'imagen_existente', 'desde_cache': True, 'origen': 'imagen_existente'})
         return resultado
 
-    # 2) Caché permanente por producto (positiva o negativa): sin costo.
+    # 2) Caché permanente por producto: positivo sirve siempre; el negativo
+    # caduca (TTL) para no congelar la búsqueda para siempre.
     cacheado = obtener_automatica(clave)
-    if cacheado is not None:
+    if cacheado is not None and _negativo_vigente(cacheado):
         resultado['desde_cache'] = True
         resultado['url'] = cacheado.get('url_imagen')
         resultado['fuente'] = cacheado.get('fuente')
@@ -744,7 +812,7 @@ def buscar_o_cachear_automatica(
         resultado['origen'] = 'cache_bd'
         return resultado
 
-    if not categoria_permitida(categoria):
+    if _categorias_estrictas() and not categoria_permitida(categoria):
         resultado['fuente'] = 'categoria_no_permitida'
         resultado['origen'] = 'categoria_no_permitida'
         return resultado

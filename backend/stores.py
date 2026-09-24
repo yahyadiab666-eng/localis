@@ -1100,18 +1100,18 @@ def procesar_csv_productos(comercio_id, archivo_csv):
         # marca pendiente para reasignarla, en vez de darla por buena.
         etapa = 'reparar_imagenes'
         reparadas = 0
-        a_pendiente = 0
+        marcadas = 0
         try:
             from backend.imagenes_producto import reparar_imagenes_comercio
 
-            reparadas, a_pendiente = reparar_imagenes_comercio(
+            reparadas, marcadas = reparar_imagenes_comercio(
                 comercio_id, limite=_MAX_REPARAR_IMAGENES
             )
         except Exception as exc_rep:
             print(f'{CSV_LOG} aviso etapa={etapa}: {type(exc_rep).__name__}: {exc_rep}')
 
         etapa = 'asociar_imagenes'
-        if insertados > 0 or a_pendiente > 0:
+        if insertados > 0 or marcadas > 0:
             try:
                 programar_asociacion_imagenes_inventario(comercio_id)
             except Exception as exc_img:
@@ -1147,12 +1147,12 @@ def procesar_csv_productos(comercio_id, archivo_csv):
         meta_imagenes['actualizados'] = actualizados
         meta_imagenes['omitidos'] = omitidos
         meta_imagenes['imagenes_reparadas'] = reparadas
-        meta_imagenes['imagenes_revisar'] = a_pendiente
+        meta_imagenes['imagenes_a_revisar'] = marcadas
         extra_reparacion = ''
-        if reparadas or a_pendiente:
+        if reparadas or marcadas:
             extra_reparacion = (
                 f' Imágenes reparadas: {reparadas}. '
-                f'Marcadas para revisión: {a_pendiente}.'
+                f'Marcadas para revisión: {marcadas}.'
             )
         mensaje = (
             f'{insertados} nuevos, {actualizados} actualizados, '
@@ -1161,7 +1161,7 @@ def procesar_csv_productos(comercio_id, archivo_csv):
         print(
             f'{CSV_LOG} ok comercio={comercio_id} insertados={insertados} '
             f'actualizados={actualizados} sin_cambios={omitidos} '
-            f'reparadas={reparadas} a_revisar={a_pendiente} '
+            f'reparadas={reparadas} marcadas={marcadas} '
             f'estado_imagenes={meta_imagenes["estado_imagenes"]} '
             f'reales={meta_imagenes["imagenes_reales"]} '
             f'logos={meta_imagenes["imagenes_logos"]} '

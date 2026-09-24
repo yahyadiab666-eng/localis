@@ -54,7 +54,7 @@ LOCALIS_IMG_SERPER_CASCADA=0
 
 ### Feed público equitativo y paginado
 
-- La portada está **paginada y navegable** (`?pagina=N`, botón "Ver más"): se muestran **todos** los productos de los comercios legítimos, sin truncamientos.
+- La portada está **paginada y navegable** (`?pagina=N`, controles **Anterior/Siguiente**): se muestran **todos** los productos de los comercios legítimos, sin truncamientos.
 - Se excluyen sandboxes (`__`) y los comercios configurados en `LOCALIS_COMERCIOS_EXCLUIDOS`.
 - Búsqueda con `q`/categoría: devuelve **todos** los resultados.
 - El detalle de producto usa el índice en memoria del catálogo (sin N+1 a la BD).
@@ -66,11 +66,24 @@ LOCALIS_COMERCIOS_EXCLUIDOS=
 
 ### Autorreparación de imágenes al re-subir CSV
 
-- Filas idénticas no se actualizan (`sin cambios`), pero si la imagen es dudosa (pendiente, fabricada o externa no persistida) se **revalida contra el catálogo global por EAN** (costo 0) y, si no hay reemplazo, se marca pendiente para reasignarla.
+- Filas idénticas no se actualizan (`sin cambios`), pero si la imagen es **dudosa o inválida** (falta, fabricada o con dominio no persistible) se **revalida contra el catálogo global por EAN** (costo 0) y, si no hay reemplazo, se marca pendiente para reasignarla. Las imágenes **válidas nunca se tocan**.
+- Los negativos de Serper **caducan** (`LOCALIS_SERPER_NEGATIVO_TTL_DIAS`) para no congelar la pasarela.
 - `LOCALIS_IMG_REPARAR_MAX` acota cuántos productos se revisan por importación.
 
 ```
 LOCALIS_IMG_REPARAR_MAX=40
+LOCALIS_SERPER_NEGATIVO_TTL_DIAS=7
+```
+
+### Mantenimiento de infraestructura y seguridad
+
+```
+python scripts/limpiar_infraestructura.py            # índices duplicados, sandbox, logs
+python scripts/limpiar_infraestructura.py --apply
+python scripts/reparar_imagenes_rotas.py             # assets de Storage rotos (400/404)
+python scripts/reparar_imagenes_rotas.py --incluir-maestro --apply
+python scripts/auditar_seguridad_rls.py              # RLS de Supabase
+python scripts/auditar_seguridad_rls.py --apply
 ```
 
 ## 2.b Saneamiento de datos de prueba

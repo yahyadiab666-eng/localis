@@ -140,14 +140,31 @@
             </div>
           {% endfor %}
         </div>
-        {% if hay_mas %}
-          <div class="text-center mt-8">
-            <a href="{{ url_for('index', q=q or None, categoria=categoria_actual or None, pagina=(pagina or 1) + 1) }}"
-               class="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-amber-500 hover:bg-amber-600 text-white font-semibold shadow transition">
-              Ver más productos
+        <nav class="mt-8 flex flex-wrap items-center justify-center gap-3" aria-label="Paginación del catálogo">
+          {% if (pagina or 1) > 1 %}
+            <a href="{{ url_for('index', q=q or None, categoria=categoria_actual or None, pagina=(pagina or 1) - 1) }}"
+               class="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white border border-gray-200 text-gray-700 font-semibold shadow-sm hover:bg-amber-50 hover:border-amber-300 transition">
+              <i data-lucide="chevron-left" style="width:16px;height:16px;"></i> Anterior
             </a>
-          </div>
-        {% endif %}
+          {% else %}
+            <span class="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-gray-100 text-gray-400 font-semibold cursor-not-allowed select-none">
+              <i data-lucide="chevron-left" style="width:16px;height:16px;"></i> Anterior
+            </span>
+          {% endif %}
+
+          <span class="text-sm text-gray-500 font-semibold px-2">Página {{ pagina or 1 }}</span>
+
+          {% if hay_mas %}
+            <a href="{{ url_for('index', q=q or None, categoria=categoria_actual or None, pagina=(pagina or 1) + 1) }}"
+               class="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-amber-500 text-white font-semibold shadow hover:bg-amber-600 transition">
+              Siguiente <i data-lucide="chevron-right" style="width:16px;height:16px;"></i>
+            </a>
+          {% else %}
+            <span class="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-gray-100 text-gray-400 font-semibold cursor-not-allowed select-none">
+              Siguiente <i data-lucide="chevron-right" style="width:16px;height:16px;"></i>
+            </span>
+          {% endif %}
+        </nav>
       {% else %}
         <div class="text-center py-16 bg-white rounded-2xl p-8 shadow-sm border border-dashed border-gray-300">
           <p class="text-gray-500 text-sm font-medium">No se encontraron productos disponibles.</p>

@@ -221,6 +221,7 @@ def _probar_head_imagenes() -> tuple[bool, str]:
     from pathlib import Path
 
     fallos_head = []
+    bloqueadas = []
     remotas = []
     locales = 0
     for url in urls:
@@ -243,12 +244,19 @@ def _probar_head_imagenes() -> tuple[bool, str]:
                 if resp.status_code >= 400:
                     resp = http.get(url, headers={'Range': 'bytes=0-64'})
                 if resp.status_code >= 400:
-                    fallos_head.append(f'{resp.status_code} {url[:80]}')
+                    # 401/403/405/429: el host bloquea verificaciones automáticas
+                    # (bots), no implica que la imagen falte. Solo 404/410 o
+                    # errores de red cuentan como fallo real.
+                    if resp.status_code in (401, 403, 405, 429):
+                        bloqueadas.append(f'{resp.status_code} {url[:80]}')
+                    else:
+                        fallos_head.append(f'{resp.status_code} {url[:80]}')
             except Exception as error:
                 fallos_head.append(f'{type(error).__name__} {url[:80]}')
     if fallos_head:
         return False, f'{len(fallos_head)} URL(s) no responden: {fallos_head[:3]}'
-    return True, f'{locales} asset(s) local(es) en disco y {len(remotas)} URL(s) HTTP < 400'
+    extra = f' ({len(bloqueadas)} host(s) bloquean la verificación automática)' if bloqueadas else ''
+    return True, f'{locales} asset(s) local(es) en disco y {len(remotas)} URL(s) HTTP < 400{extra}'
 
 
 def _probar_integridad_sin_urls_quemadas() -> tuple[bool, str]:

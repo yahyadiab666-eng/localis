@@ -212,7 +212,7 @@ def _probar_sql_listado(errores):
     _ok('LOCALIS_COMERCIOS_EXCLUIDOS' in stores, 'permite ocultar tiendas por ID', errores)
     _ok('OFFSET ?' in stores and 'offset=0' in stores, 'listado soporta paginación (offset)', errores)
     cliente_html = (RAIZ / 'templates' / 'cliente.html').read_text(encoding='utf-8')
-    _ok('Ver más productos' in cliente_html, 'portada con enlace "Ver más"', errores)
+    _ok('Anterior' in cliente_html and 'Siguiente' in cliente_html, 'portada con paginación Anterior/Siguiente', errores)
 
     import os as _os
     from unittest.mock import patch as _patch
