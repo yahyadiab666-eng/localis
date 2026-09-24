@@ -140,6 +140,14 @@
             </div>
           {% endfor %}
         </div>
+        {% if hay_mas %}
+          <div class="text-center mt-8">
+            <a href="{{ url_for('index', q=q or None, categoria=categoria_actual or None, pagina=(pagina or 1) + 1) }}"
+               class="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-amber-500 hover:bg-amber-600 text-white font-semibold shadow transition">
+              Ver más productos
+            </a>
+          </div>
+        {% endif %}
       {% else %}
         <div class="text-center py-16 bg-white rounded-2xl p-8 shadow-sm border border-dashed border-gray-300">
           <p class="text-gray-500 text-sm font-medium">No se encontraron productos disponibles.</p>

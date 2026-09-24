@@ -603,6 +603,94 @@ def _imagen_maestra_por_ean(codigo_barras):
         return None
 
 
+def reparar_imagenes_comercio(comercio_id, limite=40):
+    """Repara imágenes dudosas de un comercio sin gastar créditos.
+
+    Para cada producto sin imagen persistida o con imagen dudosa:
+      1. Reutiliza la imagen global por EAN (catálogo maestro) si existe y es
+         persistida (Storage/local) → reemplaza la errónea.
+      2. Si no hay reemplazo, limpia la URL dudosa y lo deja ``pendiente`` para
+         que el pipeline lo reintente con una imagen correcta.
+
+    Devuelve ``(reparadas, a_pendiente)``.
+    """
+    from backend.activos_verificados import es_asset_generado
+    from backend.db import get_db_connection
+    from backend.utils import url_imagen_local_valida, url_imagen_subida_storage_valida
+
+    def _persistida(url):
+        return bool(
+            url_imagen_subida_storage_valida(url) or url_imagen_local_valida(url)
+        )
+
+    reparadas = 0
+    a_pendiente = 0
+    try:
+        with get_db_connection(row_factory=True) as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT id, codigo_barras, imagen_url, imagen_fuente,
+                       COALESCE(imagen_estado, 'pendiente') AS estado
+                FROM productos
+                WHERE comercio_id = ?
+                  AND (
+                    imagen_url IS NULL
+                    OR TRIM(CAST(imagen_url AS TEXT)) = ''
+                    OR COALESCE(imagen_estado, 'pendiente') <> 'real'
+                  )
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (int(comercio_id), int(limite)),
+            )
+            filas = [dict(f) for f in cursor.fetchall()]
+
+            for fila in filas:
+                url = str(fila.get('imagen_url') or '').strip()
+                estado = str(fila.get('estado') or 'pendiente').strip().lower()
+                if estado == 'real' and _persistida(url):
+                    continue  # ya es una imagen real persistida
+                if url and es_asset_generado(url, fila.get('imagen_fuente')):
+                    url = ''  # asset fabricado: no cuenta como imagen
+
+                url_maestra = _imagen_maestra_por_ean(fila.get('codigo_barras'))
+                if url_maestra and _persistida(url_maestra):
+                    cursor.execute(
+                        """
+                        UPDATE productos
+                        SET imagen_url = ?, imagen_fuente = ?, imagen_estado = 'real'
+                        WHERE id = ?
+                        """,
+                        (url_maestra, 'catalogo_maestro', int(fila['id'])),
+                    )
+                    reparadas += 1
+                elif url:
+                    # Imagen no persistida (externa/temporal): se descarta para
+                    # que el pipeline busque una correcta en vez de dar por buena
+                    # una foto errónea.
+                    cursor.execute(
+                        """
+                        UPDATE productos
+                        SET imagen_url = NULL, imagen_fuente = NULL,
+                            imagen_estado = 'pendiente'
+                        WHERE id = ?
+                        """,
+                        (int(fila['id']),),
+                    )
+                    a_pendiente += 1
+            conexion.commit()
+    except Exception as error:
+        print(f'{_LOG} reparación de imágenes fallo comercio={comercio_id}: {type(error).__name__}')
+
+    if reparadas or a_pendiente:
+        print(
+            f'{_LOG} reparación imágenes comercio={comercio_id} '
+            f'reparadas={reparadas} a_pendiente={a_pendiente}'
+        )
+    return reparadas, a_pendiente
+
+
 def buscar_o_cachear_automatica(
     producto_id,
     *,

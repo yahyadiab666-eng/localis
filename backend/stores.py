@@ -95,6 +95,8 @@ def _filtro_producto_publico():
 
 _CONFIG_TTL_SEG = 120
 _POOL_MUESTRA_ALEATORIA = 400
+# Autorreparación de imágenes por importación (0 desactiva).
+_MAX_REPARAR_IMAGENES = max(0, int(os.getenv('LOCALIS_IMG_REPARAR_MAX', '40') or 40))
 
 
 def _valor_fila(fila, clave, indice=0):
@@ -533,11 +535,11 @@ def _aplicar_url_imagen_producto(fila):
     return fila
 
 
-def _completar_imagenes_productos(productos):
-    """URL persistida o catálogo maestro por EAN. Sin OpenFoodFacts en el request."""
+def _completar_imagenes_productos(productos, con_maestro=True):
+    """URL persistida (y opcionalmente catálogo maestro). Sin red en el request."""
     if not productos:
         return productos
-    imagen_urls_para_catalogo(productos)
+    imagen_urls_para_catalogo(productos, con_maestro=con_maestro)
     for fila in productos:
         _aplicar_url_imagen_producto(fila)
     return productos
@@ -650,6 +652,7 @@ def buscar_y_filtrar_productos(
     comercio_id=None,
     limit=None,
     orden_aleatorio=False,
+    offset=0,
 ):
     ultimo_error = None
     for intento in range(_MAX_REINTENTOS_LISTADO):
@@ -661,6 +664,7 @@ def buscar_y_filtrar_productos(
                     comercio_id=comercio_id,
                     limit=limit,
                     orden_aleatorio=orden_aleatorio,
+                    offset=offset,
                 )
             )
         except Exception as e:
@@ -713,6 +717,7 @@ def _buscar_y_filtrar_productos_once(
     comercio_id=None,
     limit=None,
     orden_aleatorio=False,
+    offset=0,
 ):
     tasa = obtener_tasa_dolar() or 1.0
     con_categoria = bool(categoria_nombre)
@@ -769,6 +774,9 @@ def _buscar_y_filtrar_productos_once(
             if limit:
                 query += ' LIMIT ?'
                 parametros.append(int(limit))
+                if offset:
+                    query += ' OFFSET ?'
+                    parametros.append(int(offset))
             filas = _ejecutar_listado_productos(cursor, conexion, query, parametros)
 
         productos = []
@@ -901,7 +909,7 @@ def obtener_productos_comercio(comercio_id):
             for fila in cursor.fetchall():
                 d = dict(fila) if not isinstance(fila, dict) else fila
                 productos.append(d)
-        _completar_imagenes_productos(productos)
+        _completar_imagenes_productos(productos, con_maestro=False)
         return productos
     except Exception as e:
         print(f'Error al listar productos del comercio: {e}')
@@ -1087,8 +1095,23 @@ def procesar_csv_productos(comercio_id, archivo_csv):
             comercio_id, productos, existentes=existentes
         )
 
+        # Autorreparación: aunque la fila no cambie, si la imagen es dudosa o no
+        # está persistida se revalida contra el catálogo global (costo 0) o se
+        # marca pendiente para reasignarla, en vez de darla por buena.
+        etapa = 'reparar_imagenes'
+        reparadas = 0
+        a_pendiente = 0
+        try:
+            from backend.imagenes_producto import reparar_imagenes_comercio
+
+            reparadas, a_pendiente = reparar_imagenes_comercio(
+                comercio_id, limite=_MAX_REPARAR_IMAGENES
+            )
+        except Exception as exc_rep:
+            print(f'{CSV_LOG} aviso etapa={etapa}: {type(exc_rep).__name__}: {exc_rep}')
+
         etapa = 'asociar_imagenes'
-        if insertados > 0:
+        if insertados > 0 or a_pendiente > 0:
             try:
                 programar_asociacion_imagenes_inventario(comercio_id)
             except Exception as exc_img:
@@ -1098,10 +1121,9 @@ def procesar_csv_productos(comercio_id, archivo_csv):
                 )
                 traceback.print_exc()
         else:
-            # Re-subida idéntica: no se relanza el pipeline ni se consumen recursos.
             print(
-                f'{CSV_LOG} sin productos nuevos: pipeline de imágenes no relanzado '
-                f'(actualizados={actualizados} sin_cambios={omitidos})'
+                f'{CSV_LOG} sin cambios pendientes: pipeline de imágenes no relanzado '
+                f'(actualizados={actualizados} sin_cambios={omitidos} reparadas={reparadas})'
             )
 
         etapa = 'reporte'
@@ -1124,13 +1146,22 @@ def procesar_csv_productos(comercio_id, archivo_csv):
         meta_imagenes['insertados'] = insertados
         meta_imagenes['actualizados'] = actualizados
         meta_imagenes['omitidos'] = omitidos
+        meta_imagenes['imagenes_reparadas'] = reparadas
+        meta_imagenes['imagenes_revisar'] = a_pendiente
+        extra_reparacion = ''
+        if reparadas or a_pendiente:
+            extra_reparacion = (
+                f' Imágenes reparadas: {reparadas}. '
+                f'Marcadas para revisión: {a_pendiente}.'
+            )
         mensaje = (
             f'{insertados} nuevos, {actualizados} actualizados, '
-            f'{omitidos} sin cambios. ' + mensaje
+            f'{omitidos} sin cambios.{extra_reparacion} ' + mensaje
         )
         print(
             f'{CSV_LOG} ok comercio={comercio_id} insertados={insertados} '
             f'actualizados={actualizados} sin_cambios={omitidos} '
+            f'reparadas={reparadas} a_revisar={a_pendiente} '
             f'estado_imagenes={meta_imagenes["estado_imagenes"]} '
             f'reales={meta_imagenes["imagenes_reales"]} '
             f'logos={meta_imagenes["imagenes_logos"]} '

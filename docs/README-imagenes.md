@@ -52,15 +52,25 @@ LOCALIS_SERPER_CACHE_TTL_SEC=86400
 LOCALIS_IMG_SERPER_CASCADA=0
 ```
 
-### Feed público equitativo
+### Feed público equitativo y paginado
 
-- La portada reparte los productos entre comercios (tope dinámico por tienda) para que ninguna monopolice el catálogo con una carga masiva.
+- La portada está **paginada y navegable** (`?pagina=N`, botón "Ver más"): se muestran **todos** los productos de los comercios legítimos, sin truncamientos.
 - Se excluyen sandboxes (`__`) y los comercios configurados en `LOCALIS_COMERCIOS_EXCLUIDOS`.
-- Tamaño de portada configurable con `LOCALIS_CATALOGO_INICIO_LIMITE` (la búsqueda con `q`/categoría sigue mostrando todo).
+- Búsqueda con `q`/categoría: devuelve **todos** los resultados.
+- El detalle de producto usa el índice en memoria del catálogo (sin N+1 a la BD).
 
 ```
-LOCALIS_CATALOGO_INICIO_LIMITE=30
+LOCALIS_CATALOGO_PAGINA=60
 LOCALIS_COMERCIOS_EXCLUIDOS=
+```
+
+### Autorreparación de imágenes al re-subir CSV
+
+- Filas idénticas no se actualizan (`sin cambios`), pero si la imagen es dudosa (pendiente, fabricada o externa no persistida) se **revalida contra el catálogo global por EAN** (costo 0) y, si no hay reemplazo, se marca pendiente para reasignarla.
+- `LOCALIS_IMG_REPARAR_MAX` acota cuántos productos se revisan por importación.
+
+```
+LOCALIS_IMG_REPARAR_MAX=40
 ```
 
 ## 2.b Saneamiento de datos de prueba

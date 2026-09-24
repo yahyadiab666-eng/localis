@@ -36,6 +36,9 @@ _EXPR_CODIGO = (
 )
 _CANDIDATOS_COL_URL = ('url_imagen', 'imagen_url', 'url')
 _COL_URL_CACHE = None
+# El índice único se verifica una sola vez por proceso (evita DDL repetido que
+# toma locks y puede provocar timeouts de lectura en requests concurrentes).
+_INDICE_UNICO_VERIFICADO = False
 
 
 # Respaldo en memoria: vacío a propósito (sin URLs de prueba hardcodeadas).
@@ -262,12 +265,16 @@ def imagen_maestro_por_codigo(codigo_barras):
 
 def _asegurar_indice_unico_codigo(cursor):
     """En Supabase el PK es id (uuid); el upsert va por codigo_barras."""
+    global _INDICE_UNICO_VERIFICADO
+    if _INDICE_UNICO_VERIFICADO:
+        return
     cursor.execute(
         f"""
         CREATE UNIQUE INDEX IF NOT EXISTS idx_catalogo_maestro_codigo
         ON {TABLA_CATALOGO_MAESTRO} (codigo_barras)
         """
     )
+    _INDICE_UNICO_VERIFICADO = True
 
 
 def _guardar_imagen_maestro_postgres(codigo, url, nombre=None, marca=None, categoria=None):

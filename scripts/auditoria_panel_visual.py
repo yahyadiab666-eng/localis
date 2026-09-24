@@ -239,6 +239,15 @@ def _auditar_importacion_instantanea():
         'sin conector Google CSE (eliminado)',
     )
     _ok(
+        'def reparar_imagenes_comercio' in _leer('backend/imagenes_producto.py'),
+        'autorreparación de imágenes por importación (catálogo global)',
+    )
+    _ok(
+        'LOCALIS_CATALOGO_PAGINA' in _leer('main.py')
+        and 'Ver más productos' in _leer('templates/cliente.html'),
+        'portada paginada y navegable',
+    )
+    _ok(
         'buscar_o_cachear_automatica' in _leer('services/professional_image_pipeline.py'),
         'el pipeline usa la caché permanente (una consulta por producto)',
     )

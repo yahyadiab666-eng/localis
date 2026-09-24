@@ -835,16 +835,38 @@ def index():
     hay_filtros = bool(palabra_clave or categoria)
 
     try:
-        limite_inicio = max(1, int(os.getenv('LOCALIS_CATALOGO_INICIO_LIMITE', '30') or 30))
+        crudo_pagina = (
+            os.getenv('LOCALIS_CATALOGO_PAGINA')
+            or os.getenv('LOCALIS_CATALOGO_INICIO_LIMITE')
+            or '60'
+        )
+        por_pagina = max(1, int(crudo_pagina))
     except (TypeError, ValueError):
-        limite_inicio = 30
+        por_pagina = 60
+    try:
+        pagina = max(1, int(request.args.get('pagina', 1) or 1))
+    except (TypeError, ValueError):
+        pagina = 1
 
-    productos = buscar_y_filtrar_productos(
-        palabra_clave=palabra_clave,
-        categoria_nombre=categoria,
-        limit=None if hay_filtros else limite_inicio,
-        orden_aleatorio=not hay_filtros,
-    )
+    if hay_filtros:
+        # Búsqueda/filtro: se muestran TODOS los resultados (sin truncar).
+        productos = buscar_y_filtrar_productos(
+            palabra_clave=palabra_clave,
+            categoria_nombre=categoria,
+            limit=None,
+            orden_aleatorio=False,
+        )
+        hay_mas = False
+        pagina = 1
+    else:
+        # Portada paginada y navegable: se pide +1 para saber si hay más páginas.
+        lote = buscar_y_filtrar_productos(
+            limit=por_pagina + 1,
+            offset=(pagina - 1) * por_pagina,
+            orden_aleatorio=False,
+        )
+        hay_mas = len(lote) > por_pagina
+        productos = lote[:por_pagina]
 
     from backend.stores import obtener_configs
 
@@ -881,6 +903,8 @@ def index():
         default_banner=DEFAULT_BANNER_URL,
         whatsapp=whatsapp,
         whatsapp_url=WHATSAPP_SOPORTE_URL,
+        pagina=pagina,
+        hay_mas=hay_mas,
     )
 
 

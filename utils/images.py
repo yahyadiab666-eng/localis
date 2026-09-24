@@ -295,10 +295,17 @@ def url_imagen_producto(producto=None, imagen_url=None, codigo_barras=None):
     if directa:
         return directa
     try:
-        from backend.catalogo_maestro import imagen_maestro_por_codigo
-        from backend.utils import imagen_url_almacenada, url_imagen_api_oficial_valida
+        # Índice en memoria (O(1)): evita una consulta a BD por producto en el
+        # render de la plantilla (N+1 que ralentizaba el catálogo y el detalle).
+        from backend.catalogo_maestro_index import buscar_imagen_maestro
+        from backend.utils import (
+            imagen_url_almacenada,
+            normalizar_codigo_barras,
+            url_imagen_api_oficial_valida,
+        )
 
-        maestro = imagen_maestro_por_codigo(codigo_barras)
+        codigo = normalizar_codigo_barras(codigo_barras)
+        maestro, _origen = buscar_imagen_maestro(codigo=codigo) if codigo else (None, None)
         cached = imagen_url_almacenada(maestro) or url_imagen_api_oficial_valida(maestro)
     except Exception as error:
         logger.error('url_imagen_producto maestro: %s', error, exc_info=True)

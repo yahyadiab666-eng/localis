@@ -31,6 +31,7 @@ _MAX_CSV_API = int(
     os.getenv('LOCALIS_IMG_CSV_MAX', os.getenv('LOCALIS_CSV_API_MAX', '2000'))
 )
 _descubrimiento_en_vuelo = set()
+_asociacion_en_vuelo = set()
 _descubrimiento_lock = threading.Lock()
 
 
@@ -121,8 +122,8 @@ def persistir_imagen_producto_hibrida(
     return None, aviso
 
 
-def imagen_urls_para_catalogo(productos):
-    """Lectura: no llama APIs. Enriquece en memoria con la URL persistida o catálogo maestro."""
+def imagen_urls_para_catalogo(productos, con_maestro=True):
+    """Lectura: no llama APIs. Enriquece con la URL persistida (y opcionalmente maestro)."""
     if not productos:
         return productos
     try:
@@ -136,7 +137,7 @@ def imagen_urls_para_catalogo(productos):
                 if codigo:
                     codigos_faltantes.add(codigo)
 
-        if codigos_faltantes:
+        if codigos_faltantes and con_maestro:
             from backend.catalogo_maestro import mapa_imagenes_maestro
             mapa_maestro = mapa_imagenes_maestro(list(codigos_faltantes))
             for prod in productos:
@@ -209,6 +210,14 @@ def asociar_imagenes_inventario(comercio_id):
 
 
 def programar_asociacion_imagenes_inventario(comercio_id):
+    if comercio_id is None:
+        return None
+    with _descubrimiento_lock:
+        if comercio_id in _asociacion_en_vuelo:
+            print(f'{_LOG_CSV} pipeline ya en vuelo comercio={comercio_id}, omitido')
+            return None
+        _asociacion_en_vuelo.add(comercio_id)
+
     def _trabajo():
         try:
             print(f'{_LOG_CSV} pipeline profesional inicio comercio={comercio_id}')
@@ -222,6 +231,9 @@ def programar_asociacion_imagenes_inventario(comercio_id):
                 f'{_LOG_CSV} aviso pipeline diferido comercio={comercio_id}: '
                 f'{type(error).__name__}'
             )
+        finally:
+            with _descubrimiento_lock:
+                _asociacion_en_vuelo.discard(comercio_id)
 
     hilo = threading.Thread(
         target=_trabajo,
