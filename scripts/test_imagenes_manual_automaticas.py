@@ -121,7 +121,7 @@ def _probar_cache_automatica():
     from backend import imagenes_producto as ip
 
     # 1) Caché positiva: no consulta la API.
-    with patch.object(ip, 'obtener_automatica', return_value={'url_imagen': 'auto.webp', 'fuente': 'serper', 'encontrada': 1}), patch.object(
+    with patch.object(ip, '_producto_con_imagen_valida', return_value=False), patch.object(ip, 'obtener_automatica', return_value={'url_imagen': 'auto.webp', 'fuente': 'serper', 'encontrada': 1}), patch.object(
         ip, 'registrar_automatica'
     ) as reg:
         res = ip.buscar_o_cachear_automatica(1, categoria='tecnologia', nombre='X', codigo_barras='123')
@@ -129,7 +129,7 @@ def _probar_cache_automatica():
             'acierto en caché: no se gasta API')
 
     # 2) Caché negativa: tampoco consulta.
-    with patch.object(ip, 'obtener_automatica', return_value={'url_imagen': None, 'fuente': 'serper', 'encontrada': 0}), patch.object(
+    with patch.object(ip, '_producto_con_imagen_valida', return_value=False), patch.object(ip, 'obtener_automatica', return_value={'url_imagen': None, 'fuente': 'serper', 'encontrada': 0}), patch.object(
         ip, 'registrar_automatica'
     ) as reg, patch('backend.serper_images.buscar_por_codigo') as por_codigo:
         res = ip.buscar_o_cachear_automatica(1, categoria='salud', nombre='Y', codigo_barras='9')
@@ -137,14 +137,14 @@ def _probar_cache_automatica():
             'caché negativa: no se repite la consulta')
 
     # 3) Categoría no permitida: no consulta ni registra.
-    with patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
+    with patch.object(ip, '_producto_con_imagen_valida', return_value=False), patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
         ip, 'registrar_automatica'
     ) as reg, patch('backend.serper_images.habilitado', return_value=True):
         res = ip.buscar_o_cachear_automatica(2, categoria='ropa', nombre='Camisa')
         _ok(res['url'] is None and not reg.called, 'categoría fuera de alcance: sin API')
 
     # 4) API no configurada: no registra (no envenena el caché).
-    with patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
+    with patch.object(ip, '_producto_con_imagen_valida', return_value=False), patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
         ip, 'registrar_automatica'
     ) as reg, patch('backend.serper_images.habilitado', return_value=False):
         res = ip.buscar_o_cachear_automatica(3, categoria='tecnologia', nombre='TV')
@@ -152,7 +152,7 @@ def _probar_cache_automatica():
             'sin API configurada no se registra negativo')
 
     # 5) EAN primero y registro positivo.
-    with patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
+    with patch.object(ip, '_producto_con_imagen_valida', return_value=False), patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
         ip, 'registrar_automatica'
     ) as reg, patch('backend.serper_images.habilitado', return_value=True), patch(
         'backend.serper_images.buscar_por_codigo', return_value=[{'url': 'ean.webp'}]
@@ -165,7 +165,7 @@ def _probar_cache_automatica():
         _ok(reg.called, 'el acierto se registra de forma permanente')
 
     # 6) Sin barcode: nombre+descripción, y negativo si no hay resultados.
-    with patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
+    with patch.object(ip, '_producto_con_imagen_valida', return_value=False), patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
         ip, 'registrar_automatica'
     ) as reg, patch('backend.serper_images.habilitado', return_value=True), patch(
         'backend.serper_images.buscar_por_nombre_descripcion', return_value=[{'url': 'nom.webp'}]
@@ -174,7 +174,7 @@ def _probar_cache_automatica():
         _ok(res['url'] == 'nom.webp', 'Priority 2: nombre + descripción')
         _ok(reg.call_args.kwargs.get('encontrada') is True, 'registra acierto')
 
-    with patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
+    with patch.object(ip, '_producto_con_imagen_valida', return_value=False), patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
         ip, 'registrar_automatica'
     ) as reg, patch('backend.serper_images.habilitado', return_value=True), patch(
         'backend.serper_images.buscar_por_nombre_descripcion', return_value=[]
@@ -182,6 +182,65 @@ def _probar_cache_automatica():
         res = ip.buscar_o_cachear_automatica(6, categoria='alimentos', nombre='Nada')
         _ok(res['url'] is None and reg.call_args.kwargs.get('encontrada') is False,
             'sin resultados se registra caché negativo permanente')
+
+
+def _probar_guardado_estricto():
+    print('\n=== Guardado estricto: sin API si el producto ya tiene imagen ===')
+    from backend import imagenes_producto as ip
+
+    with patch.object(ip, '_producto_con_imagen_valida', return_value=True), patch.object(
+        ip, 'obtener_automatica'
+    ) as cache, patch('backend.serper_images.buscar_por_codigo') as por_codigo, patch(
+        'backend.serper_images.buscar_por_nombre_descripcion'
+    ) as por_nombre:
+        res = ip.buscar_o_cachear_automatica(
+            99, categoria='tecnologia', nombre='Laptop', codigo_barras='123'
+        )
+    _ok(
+        res['url'] is None and res['origen'] == 'imagen_existente',
+        'producto con foto: no se consulta ninguna API externa',
+    )
+    _ok(
+        not cache.called and not por_codigo.called and not por_nombre.called,
+        'no se toca caché ni Serper cuando ya hay imagen',
+    )
+
+
+def _probar_cache_serper():
+    print('\n=== Caché de consultas y tope diario (control de créditos) ===')
+    import os
+
+    from backend import serper_images
+
+    respuesta = SimpleNamespace(
+        status_code=200,
+        json=lambda: {
+            'images': [
+                {'imageUrl': 'https://x/a.webp', 'imageWidth': 800, 'imageHeight': 800}
+            ]
+        },
+    )
+    with patch.dict(
+        os.environ, {'SERPER_API_KEY': 'k', 'LOCALIS_SERPER_CACHE_TTL_SEC': '3600'}, clear=False
+    ), patch('backend.serper_images.requests.post', return_value=respuesta) as post:
+        serper_images.reiniciar_estado()
+        primera = serper_images.buscar_imagenes('misma consulta')
+        segunda = serper_images.buscar_imagenes('misma consulta')
+    _ok(post.call_count == 1, 'la misma consulta solo llama a la API una vez')
+    _ok(len(primera) == 1 and len(segunda) == 1, 'la segunda respuesta viene de caché')
+    _ok(serper_images.estado_cuota()['aciertos_cache'] >= 1, 'se contabiliza el acierto de caché')
+
+    # Tope diario: corta el consumo aunque cambien las consultas.
+    with patch.dict(
+        os.environ, {'SERPER_API_KEY': 'k', 'LOCALIS_SERPER_MAX_DIA': '1'}, clear=False
+    ), patch('backend.serper_images.requests.post', return_value=respuesta):
+        serper_images.reiniciar_estado()
+        serper_images.buscar_imagenes('consulta uno')
+        serper_images.buscar_imagenes('consulta dos')
+        estado = serper_images.estado_cuota()
+    _ok(estado['llamadas_api'] == 1, 'el tope diario limita a 1 llamada real')
+    _ok(estado['tope_dia_alcanzado'] is True, 'el tope diario queda marcado')
+    serper_images.reiniciar_estado()
 
 
 def _probar_registro_no_borra():
@@ -251,7 +310,7 @@ def _probar_cuota_y_parametros():
     _ok(serper_images.cuota_agotada(), 'HTTP 429 marca la cuota como agotada')
 
     # Con cuota agotada: el producto queda PENDIENTE, sin caché negativo.
-    with patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
+    with patch.object(ip, '_producto_con_imagen_valida', return_value=False), patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
         ip, 'registrar_automatica'
     ) as reg, patch('backend.serper_images.habilitado', return_value=True), patch(
         'backend.serper_images.cuota_agotada', return_value=True
@@ -272,7 +331,7 @@ def _probar_cuota_y_parametros():
     _ok(salida == [], 'HTTP 401 (clave inválida) devuelve [] sin lanzar')
     _ok(serper_images.api_invalida(), 'HTTP 401 marca la API como inválida')
 
-    with patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
+    with patch.object(ip, '_producto_con_imagen_valida', return_value=False), patch.object(ip, 'obtener_automatica', return_value=None), patch.object(
         ip, 'registrar_automatica'
     ) as reg, patch('backend.serper_images.habilitado', return_value=True), patch(
         'backend.serper_images.cuota_agotada', return_value=False
@@ -326,10 +385,12 @@ def main() -> int:
     _probar_clave_y_categorias()
     _probar_serper()
     _probar_cache_automatica()
+    _probar_guardado_estricto()
     _probar_registro_no_borra()
     _probar_purga_manual()
     _probar_proteccion_manual()
     _probar_cuota_y_parametros()
+    _probar_cache_serper()
 
     print('\n=== RESULTADO ===')
     if _ERRORES:

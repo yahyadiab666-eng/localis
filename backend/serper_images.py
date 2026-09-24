@@ -25,6 +25,9 @@ Variables de entorno::
     LOCALIS_SERPER_REINTENTOS=2
     LOCALIS_SERPER_LIMITE=10
     LOCALIS_SERPER_MIN_LADO=200      # lado mínimo de la imagen elegida
+    LOCALIS_SERPER_MAX_DIA=90        # tope duro diario de llamadas (0 = sin tope)
+    LOCALIS_SERPER_CACHE_TTL_SEC=86400  # caché en memoria por consulta
+    LOCALIS_SERPER_CACHE_MAX=2000
     LOCALIS_IMG_SERPER_PARALELO=2    # llamadas concurrentes máximas
     LOCALIS_SERPER_CONFIG_COOLDOWN_SEG=3600  # pausa tras 401/403
     LOCALIS_SERPER_CUOTA_COOLDOWN_SEG=3600   # pausa tras 429
@@ -77,8 +80,66 @@ _SEM = threading.Semaphore(_SERPER_PARALELO)
 _lock = threading.Lock()
 _config_invalida_hasta = 0.0
 _cuota_agotada_hasta = 0.0
-_llamadas = 0
+_llamadas = 0            # llamadas HTTP 200 reales (consumo de créditos)
+_aciertos_cache = 0      # consultas resueltas por caché en memoria (sin costo)
 _ultimo_error = {}
+
+# Caché en memoria de consultas (evita repetir la MISMA búsqueda entre
+# productos, reintentos del backfill y re-subidas del mismo CSV).
+_cache_consultas = {}
+_cache_lock = threading.Lock()
+_CACHE_TTL = max(0, _env_int('LOCALIS_SERPER_CACHE_TTL_SEC', 86400))
+_CACHE_MAX = max(50, _env_int('LOCALIS_SERPER_CACHE_MAX', 2000))
+
+# Tope diario duro: corta el consumo si un lote intenta disparar cientos de
+# consultas. 0 desactiva el tope.
+_dia_contable = None
+_tope_dia_alcanzado = False
+
+
+def _limite_diario():
+    return max(0, _env_int('LOCALIS_SERPER_MAX_DIA', 90))
+
+
+def _reiniciar_dia_si_aplica():
+    global _dia_contable, _llamadas, _tope_dia_alcanzado
+    from datetime import date
+
+    hoy = date.today()
+    if _dia_contable != hoy:
+        _dia_contable = hoy
+        _llamadas = 0
+        _tope_dia_alcanzado = False
+
+
+def _normalizar_consulta(consulta):
+    return ' '.join(str(consulta or '').split()).strip().lower()
+
+
+def _cache_get(clave):
+    if _CACHE_TTL <= 0 or not clave:
+        return None
+    with _cache_lock:
+        entrada = _cache_consultas.get(clave)
+        if not entrada:
+            return None
+        marca, valor = entrada
+        if time.time() - marca > _CACHE_TTL:
+            _cache_consultas.pop(clave, None)
+            return None
+        return valor
+
+
+def _cache_set(clave, valor):
+    if _CACHE_TTL <= 0 or not clave:
+        return
+    with _cache_lock:
+        if len(_cache_consultas) >= _CACHE_MAX:
+            # Purga simple del 20% más antiguo para acotar memoria.
+            ordenados = sorted(_cache_consultas.items(), key=lambda item: item[1][0])
+            for vieja, _ in ordenados[: max(1, _CACHE_MAX // 5)]:
+                _cache_consultas.pop(vieja, None)
+        _cache_consultas[clave] = (time.time(), valor)
 
 
 def require_clave():
@@ -165,7 +226,11 @@ def estado_cuota():
     with _lock:
         return {
             'configurada': configurada(),
-            'llamadas': _llamadas,
+            'llamadas_api': _llamadas,
+            'aciertos_cache': _aciertos_cache,
+            'cache_consultas': len(_cache_consultas),
+            'limite_diario': _limite_diario(),
+            'tope_dia_alcanzado': _tope_dia_alcanzado,
             'concurrentes_max': _SERPER_PARALELO,
             'agotada': _ahora() < _cuota_agotada_hasta,
             'api_invalida': _ahora() < _config_invalida_hasta,
@@ -196,12 +261,17 @@ def estado_configuracion():
 
 
 def reiniciar_estado():
-    """Reinicia contadores y banderas (uso en pruebas/diagnóstico)."""
+    """Reinicia contadores, caché y banderas (uso en pruebas/diagnóstico)."""
     global _config_invalida_hasta, _cuota_agotada_hasta, _llamadas
+    global _aciertos_cache, _tope_dia_alcanzado
     with _lock:
         _config_invalida_hasta = 0.0
         _cuota_agotada_hasta = 0.0
         _llamadas = 0
+        _aciertos_cache = 0
+        _tope_dia_alcanzado = False
+    with _cache_lock:
+        _cache_consultas.clear()
     _ultimo_error.clear()
 
 
@@ -284,7 +354,7 @@ def _post_imagenes(consulta, *, timeout=None, reintentos=None):
 
     Nunca lanza: los errores quedan en logs estructurados y se devuelve ``None``.
     """
-    global _llamadas
+    global _llamadas, _tope_dia_alcanzado
 
     try:
         clave = require_clave()
@@ -330,7 +400,17 @@ def _post_imagenes(consulta, *, timeout=None, reintentos=None):
 
         if status == 200:
             with _lock:
+                _reiniciar_dia_si_aplica()
                 _llamadas += 1
+                limite = _limite_diario()
+                if limite > 0 and _llamadas >= limite:
+                    _tope_dia_alcanzado = True
+            if _tope_dia_alcanzado:
+                print(
+                    f'{_LOG} evento=tope_diario alcanzado={_llamadas}/'
+                    f'{_limite_diario()} detalle=se detienen las consultas Serper',
+                    flush=True,
+                )
             return datos if isinstance(datos, dict) else None
 
         if status in (401, 403):
@@ -368,7 +448,14 @@ def buscar_imagenes(consulta, limite=None):
 
     Devuelve ``[{url, titulo, dominio, ancho, alto, contexto}]``. Ante cuota,
     clave inválida, error HTTP o JSON inválido devuelve ``[]`` (sin lanzar).
+
+    Control de créditos:
+      - Caché en memoria por consulta normalizada (TTL) → repetir la misma
+        búsqueda (re-subida del CSV, backfill, varios productos) no gasta.
+      - Tope diario duro (``LOCALIS_SERPER_MAX_DIA``) que corta el consumo.
     """
+    global _aciertos_cache, _tope_dia_alcanzado
+
     consulta = ' '.join(str(consulta or '').split()).strip()
     if not consulta or not habilitado():
         return []
@@ -376,6 +463,25 @@ def buscar_imagenes(consulta, limite=None):
         return []
 
     limite = max(1, min(20, int(limite or _limite_defecto())))
+    clave_cache = _normalizar_consulta(consulta)
+    almacenado = _cache_get(clave_cache)
+    if almacenado is not None:
+        with _lock:
+            _aciertos_cache += 1
+        return [dict(item) for item in almacenado[:limite]]
+
+    with _lock:
+        _reiniciar_dia_si_aplica()
+        limite_dia = _limite_diario()
+        if _tope_dia_alcanzado or (limite_dia > 0 and _llamadas >= limite_dia):
+            _tope_dia_alcanzado = True
+            tope = True
+        else:
+            tope = False
+    if tope:
+        _marcar_cuota_agotada(f'tope diario Serper {_limite_diario()}')
+        return []
+
     datos = _post_imagenes(consulta)
     if not datos:
         return []
@@ -401,6 +507,8 @@ def buscar_imagenes(consulta, limite=None):
         )
         if len(salida) >= limite:
             break
+    # Se cachea también el resultado vacío (negativo) para no repetir el gasto.
+    _cache_set(clave_cache, salida)
     return salida
 
 

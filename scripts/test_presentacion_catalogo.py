@@ -195,6 +195,13 @@ def _probar_sql_listado(errores):
         'JOIN categorias solo cuando hay filtro',
         errores,
     )
+    _ok(
+        "_filtro_producto_publico" in bloque_listado
+        and "def _filtro_comercio_publico" in stores
+        and "LOCALIS_PERMITIR_SANDBOX_PUBLICO" in stores,
+        'vista pública aísla comercios/productos de prueba (prefijo __)',
+        errores,
+    )
 
     print('\n=== Arranque sin relleno de catálogo ===')
     init_src = (RAIZ / 'database.py').read_text(encoding='utf-8')

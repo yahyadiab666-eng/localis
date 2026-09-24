@@ -26,9 +26,14 @@ MAX_API_MS = 5000
 
 
 def _cargar_entorno():
+    import os
+
     from dotenv import load_dotenv
 
     load_dotenv(RAIZ / '.env', override=True)
+    # El sandbox de QA debe ser visible para las pruebas públicas de este script;
+    # en producción el prefijo ``__`` queda aislado por defecto.
+    os.environ['LOCALIS_PERMITIR_SANDBOX_PUBLICO'] = '1'
 
 
 def _ok(condicion, mensaje, errores):

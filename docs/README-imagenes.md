@@ -36,6 +36,31 @@ LOCALIS_REMBG_MODEL=u2net
 
 La primera ejecución descarga el modelo de `rembg` (~176 MB) al disco del worker.
 
+### Control de créditos de Serper (anti-fugas)
+
+- `SERPER_API_KEY` es **obligatoria**; sin ella el pipeline queda en estado neutro.
+- **Una sola ruta gasta créditos**: el registro automático (`buscar_o_cachear_automatica`, caché de BD por EAN/nombre). La cascada paralela **no** consulta Serper por defecto (`LOCALIS_IMG_SERPER_CASCADA=0`).
+- **Guardado estricto**: si el producto ya tiene una imagen real, no se consulta ninguna API externa.
+- **Caché en memoria** de consultas repetidas + **tope diario duro** (`LOCALIS_SERPER_MAX_DIA`).
+- El pipeline registra por lote: `caché_bd=… ya_tenian=… api_serper=… sin_imagen=…`.
+
+```
+SERPER_API_KEY=…
+LOCALIS_SERPER_MAX_DIA=90
+LOCALIS_SERPER_CACHE_TTL_SEC=86400
+LOCALIS_IMG_SERPER_CASCADA=0
+```
+
+## 2.b Saneamiento de datos de prueba
+
+La vista pública (`/`) solo muestra comercios visibles/activos que **no** usan el prefijo de sandbox `__` (p. ej. `__localis_qa_e2e__`); los productos con nombre `__…` también quedan excluidos. Para borrarlos definitivamente de la base:
+
+```
+python scripts/limpiar_datos_prueba.py                 # dry-run
+python scripts/limpiar_datos_prueba.py --apply
+python scripts/limpiar_datos_prueba.py --imagenes-invalidas --apply
+```
+
 ## 3. Importación masiva asíncrona (CSV / Excel)
 
 Módulo: `backend/import_queue.py`.

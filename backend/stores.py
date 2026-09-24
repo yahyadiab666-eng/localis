@@ -48,10 +48,32 @@ from backend.subscriptions import (
     obtener_limite_productos_comercio,
 )
 
-_FILTRO_COMERCIO_PUBLICO = (
-    " AND COALESCE(c.visible, 1) = 1"
-    " AND LOWER(TRIM(c.estado_pago)) IN ('activo', 'gratis')"
-)
+# Un comercio solo es público si es visible, está activo y NO es un sandbox de
+# pruebas. El convenio del proyecto para datos de QA es el prefijo ``__``
+# (p. ej. ``__localis_qa_e2e__``), de modo que una corrida de pruebas fallida
+# nunca expone productos genéricos en la vista de clientes.
+#
+# El aislamiento se puede desactivar SOLO para pruebas con
+# ``LOCALIS_PERMITIR_SANDBOX_PUBLICO=1`` (nunca en producción).
+def _sandbox_publico_permitido():
+    valor = str(os.getenv('LOCALIS_PERMITIR_SANDBOX_PUBLICO', '0')).strip().lower()
+    return valor in ('1', 'true', 'yes', 'on')
+
+
+def _filtro_comercio_publico():
+    filtro = (
+        " AND COALESCE(c.visible, 1) = 1"
+        " AND LOWER(TRIM(c.estado_pago)) IN ('activo', 'gratis')"
+    )
+    if not _sandbox_publico_permitido():
+        filtro += " AND LEFT(LOWER(TRIM(COALESCE(c.nombre, ''))), 2) <> '__'"
+    return filtro
+
+
+def _filtro_producto_publico():
+    if _sandbox_publico_permitido():
+        return ''
+    return " AND LEFT(LOWER(TRIM(COALESCE(p.nombre, ''))), 2) <> '__'"
 
 _CONFIG_TTL_SEG = 120
 _POOL_MUESTRA_ALEATORIA = 400
@@ -369,7 +391,7 @@ def obtener_comercio_por_id(comercio_id, solo_visible=True):
                 WHERE c.id = ?
             """
             if solo_visible:
-                query += _FILTRO_COMERCIO_PUBLICO
+                query += _filtro_comercio_publico()
 
             cursor.execute(query, (comercio_id,))
             fila = cursor.fetchone()
@@ -454,7 +476,7 @@ def buscar_y_filtrar_comercios(
                 FROM comercios c
                 LEFT JOIN categorias cat ON c.categoria_id = cat.id
                 WHERE 1=1
-            """ + _FILTRO_COMERCIO_PUBLICO
+            """ + _filtro_comercio_publico()
             parametros = []
 
             if palabra_clave:
@@ -531,7 +553,7 @@ def _base_query_productos_publicos(con_maestro=True, con_categoria=False):
         JOIN productos p ON p.comercio_id = c.id
         {cat_join}
         WHERE 1=1
-    """ + _FILTRO_COMERCIO_PUBLICO
+    """ + _filtro_comercio_publico() + _filtro_producto_publico()
 
 
 def _es_columna_inexistente(error):
@@ -660,7 +682,7 @@ def _buscar_y_filtrar_productos_once(
                 FROM comercios c
                 JOIN productos p ON p.comercio_id = c.id
                 WHERE 1=1
-            """ + _FILTRO_COMERCIO_PUBLICO
+            """ + _filtro_comercio_publico() + _filtro_producto_publico()
             query_ids, params_ids = _aplicar_filtros_productos(
                 query_ids, [], palabra_clave, categoria_nombre, comercio_id
             )
@@ -727,8 +749,7 @@ def obtener_producto_publico(producto_id):
                     c.telefono AS comercio_telefono
                 FROM comercios c
                 JOIN productos p ON p.comercio_id = c.id
-                WHERE p.id = ? AND COALESCE(c.visible, 1) = 1
-                  AND LOWER(TRIM(c.estado_pago)) IN ('activo', 'gratis')
+                WHERE p.id = ?{_filtro_comercio_publico()}{_filtro_producto_publico()}
                 """,
                 (producto_id,),
             )

@@ -453,6 +453,38 @@ def eliminar_manual(producto_id, *, purgar=True):
 # ---------------------------------------------------------------------------
 # Orquestación API: una consulta por producto, con caché permanente
 # ---------------------------------------------------------------------------
+def _producto_con_imagen_valida(producto_id):
+    """True si el producto ya tiene una imagen real asignada.
+
+    Evita cualquier consulta externa (serper) cuando el producto ya posee foto:
+    Storage, subida local o URL externa ya registrada como ``real``. Se excluyen
+    assets generados (placeholder/monograma/tarjeta).
+    """
+    if not producto_id:
+        return False
+    try:
+        from backend.activos_verificados import es_asset_generado
+        from backend.db import get_db_connection
+
+        with get_db_connection(row_factory=True) as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                'SELECT imagen_url, imagen_estado FROM productos WHERE id = ?',
+                (int(producto_id),),
+            )
+            fila = cursor.fetchone()
+        if not fila:
+            return False
+        datos = _fila_dict(fila)
+        url = str(datos.get('imagen_url') or '').strip()
+        estado = str(datos.get('imagen_estado') or '').strip().lower()
+        if not url or es_asset_generado(url):
+            return False
+        return estado == 'real'
+    except Exception:
+        return False
+
+
 def buscar_o_cachear_automatica(
     producto_id,
     *,
@@ -464,12 +496,15 @@ def buscar_o_cachear_automatica(
 ):
     """Devuelve la imagen automática para el producto (cache o API).
 
-    - Si ya existe una fila en el registro, se usa (no gasta API).
+    - **Guardado estricto**: si el producto ya tiene una imagen real asignada,
+      no se consulta ninguna API externa (origen ``imagen_existente``).
+    - Si ya existe una fila en el registro, se usa (no gasta API) → ``cache_bd``.
     - Si no existe y la categoría está permitida y la API está configurada:
-      Priority 1 = código de barras; Priority 2 = nombre + descripción.
+      Priority 1 = código de barras; Priority 2 = nombre + descripción → ``api``.
     - El resultado (positivo o negativo) se registra de forma permanente.
 
-    Retorna ``{'clave', 'url', 'fuente', 'termino', 'desde_cache', 'encontrada'}``.
+    Retorna ``{'clave', 'url', 'fuente', 'termino', 'desde_cache',
+    'encontrada', 'origen'}``.
     """
     resultado = {
         'clave': None,
@@ -478,13 +513,21 @@ def buscar_o_cachear_automatica(
         'termino': None,
         'desde_cache': False,
         'encontrada': False,
+        'origen': None,
     }
 
     clave = normalizar_clave(codigo_barras, nombre, descripcion)
     resultado['clave'] = clave
     if not clave:
+        resultado['origen'] = 'sin_clave'
         return resultado
 
+    # 1) Guardado estricto por existencia: nunca gastar API si ya hay foto.
+    if producto_id and _producto_con_imagen_valida(producto_id):
+        resultado.update({'fuente': 'imagen_existente', 'desde_cache': True, 'origen': 'imagen_existente'})
+        return resultado
+
+    # 2) Caché permanente por producto (positiva o negativa): sin costo.
     cacheado = obtener_automatica(clave)
     if cacheado is not None:
         resultado['desde_cache'] = True
@@ -492,10 +535,12 @@ def buscar_o_cachear_automatica(
         resultado['fuente'] = cacheado.get('fuente')
         resultado['termino'] = cacheado.get('termino_busqueda')
         resultado['encontrada'] = bool(cacheado.get('encontrada')) and bool(resultado['url'])
+        resultado['origen'] = 'cache_bd'
         return resultado
 
     if not categoria_permitida(categoria):
         resultado['fuente'] = 'categoria_no_permitida'
+        resultado['origen'] = 'categoria_no_permitida'
         return resultado
 
     try:
@@ -503,6 +548,7 @@ def buscar_o_cachear_automatica(
 
         if not proveedor.habilitado():
             resultado['fuente'] = 'api_no_configurada'
+            resultado['origen'] = 'api_no_configurada'
             return resultado
 
         def _no_disponible():
@@ -516,11 +562,14 @@ def buscar_o_cachear_automatica(
         if motivo:
             # No se consulta ni se envenena el caché: queda pendiente.
             resultado['fuente'] = motivo
+            resultado['origen'] = motivo
             return resultado
     except Exception:
         resultado['fuente'] = 'api_no_disponible'
+        resultado['origen'] = 'api_no_disponible'
         return resultado
 
+    resultado['origen'] = 'api'
     encontrado = None
     termino_usado = None
     if codigo_barras:

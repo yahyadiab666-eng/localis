@@ -426,18 +426,49 @@ print(
 _ultima_verificacion_vencimientos_global = 0.0
 _INTERVALO_VENCIMIENTOS_SEG = 300
 _INTERVALO_VENCIMIENTO_COMERCIO_SEG = 600
+_vencimientos_lock = threading.Lock()
+_vencimientos_en_vuelo = False
+
+
+def _mantenimiento_vencimientos_async():
+    """Ejecuta la verificación global fuera del hilo de la petición HTTP.
+
+    Evita que un UPDATE lento (o un lock de BD) bloquee la primera carga de la
+    página mientras Render mantiene el puerto abierto ("healthy" pero sin servir).
+    """
+    global _vencimientos_en_vuelo
+    try:
+        verificar_vencimientos_comercios()
+    except Exception as error:
+        print(f'Aviso verificación vencimientos (async): {error}')
+    finally:
+        _vencimientos_en_vuelo = False
+        try:
+            _vencimientos_lock.release()
+        except RuntimeError:
+            pass
 
 
 @app.before_request
 def sincronizar_vencimientos_suscripcion():
     """Revisa vencimientos globalmente (cada 5 min) y por comercio en pagos (cada 10 min)."""
-    global _ultima_verificacion_vencimientos_global
+    global _ultima_verificacion_vencimientos_global, _vencimientos_en_vuelo
 
     try:
         ahora = time.time()
-        if ahora - _ultima_verificacion_vencimientos_global >= _INTERVALO_VENCIMIENTOS_SEG:
-            verificar_vencimientos_comercios()
+        if (
+            ahora - _ultima_verificacion_vencimientos_global >= _INTERVALO_VENCIMIENTOS_SEG
+            and not _vencimientos_en_vuelo
+            and _vencimientos_lock.acquire(blocking=False)
+        ):
+            # Nunca bloquea la petición: el mantenimiento corre en un hilo daemon.
             _ultima_verificacion_vencimientos_global = ahora
+            _vencimientos_en_vuelo = True
+            threading.Thread(
+                target=_mantenimiento_vencimientos_async,
+                name='localis-vencimientos',
+                daemon=True,
+            ).start()
 
         if 'usuario_id' not in session:
             return
@@ -761,10 +792,27 @@ def error_archivo_demasiado_grande(e):
 
 @app.route('/health')
 def health_check():
-    """Diagnóstico automático para monitoreo (Render, uptime, etc.)."""
+    """Estado consolidado (BD + Supabase) para monitoreo (Render, uptime, etc.)."""
     estado = obtener_estado_sistema()
     codigo = 200 if estado.get('ok') else 503
     return jsonify(estado), codigo
+
+
+@app.route('/health/live')
+def health_live():
+    """Liveness: responde 200 en cuanto el proceso está escuchando.
+
+    Es el endpoint recomendado para el *health check* de Render: no depende de
+    la base de datos y evita reinicios por un pico transitorio de PostgreSQL.
+    """
+    return jsonify({'ok': True, 'servicio': 'localis', 'tipo': 'liveness'}), 200
+
+
+@app.route('/health/ready')
+def health_ready():
+    """Readiness: 200 solo si la base de datos responde."""
+    estado = obtener_estado_sistema()
+    return jsonify(estado), (200 if estado.get('ok') else 503)
 
 
 def inicializar_base_de_datos():

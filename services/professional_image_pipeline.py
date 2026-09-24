@@ -463,6 +463,19 @@ def _clave_serper():
         return (os.getenv('SERPER_API_KEY') or '').strip()
 
 
+def _serper_en_cascada():
+    """Serper en la cascada paralela: DESACTIVADO por defecto.
+
+    El conector Serper se usa en el registro automático (una consulta por
+    producto, con caché de BD). Mantenerlo también aquí dispararía ~3 consultas
+    extra por producto y agotaría los créditos. Se puede reactivar de forma
+    explícita con ``LOCALIS_IMG_SERPER_CASCADA=1``.
+    """
+    return str(os.getenv('LOCALIS_IMG_SERPER_CASCADA', '0')).strip().lower() in (
+        '1', 'true', 'yes', 'on',
+    )
+
+
 def _buscar_serper(consulta, limite=10):
     """Google Images vía Serper.dev (conector oficial del flujo).
 
@@ -1072,7 +1085,7 @@ def _buscar_candidatos_impl(
         if _clave_brave():
             for consulta in ventana_web[:3]:
                 tareas.append((_buscar_brave, consulta))
-        if _clave_serper():
+        if _serper_en_cascada() and _clave_serper():
             for consulta in ventana_web[:3]:
                 tareas.append((_buscar_serper, consulta))
         if _clave_bing_api():
@@ -1759,21 +1772,12 @@ def procesar_producto(
     if producto_id and not forzar and not _imagen_puede_reemplazarse(
         imagen_actual, estado_actual, fuente_actual
     ):
-        # Aunque el producto tenga manual/foto guardada, se asegura la imagen
-        # automática (una sola vez) para poder revertir sin costo ni tocar la
-        # manual: la automática queda en su registro permanente.
-        categoria_hint = categoria
-        if not categoria_hint:
-            try:
-                from backend.categorias_producto import clasificar_categoria as _clasificar
-
-                categoria_hint = _clasificar(
-                    nombre=nombre, descripcion=descripcion, marca=marca
-                )
-            except Exception:
-                categoria_hint = None
-        _asegurar_automatica_cache(
-            producto_id, categoria_hint, nombre, descripcion, codigo_barras
+        # El producto ya tiene foto (manual/real): NO se consulta ninguna API
+        # externa (protección de créditos Serper). El registro automático se
+        # resolverá bajo demanda si el comerciante elimina la foto manual.
+        _log(
+            f'producto={producto_id} imagen existente conservada; '
+            'se omite la consulta externa (sin costo de API)'
         )
         return ResultadoProcesamiento(ok=False, motivo='imagen_manual_conservada')
 
@@ -1836,7 +1840,10 @@ def procesar_producto(
                 ok=True,
                 url=auto['url'],
                 fuente=auto.get('fuente') or 'automatica',
-                detalle={'desde_cache': bool(auto.get('desde_cache'))},
+                detalle={
+                    'desde_cache': bool(auto.get('desde_cache')),
+                    'origen': auto.get('origen'),
+                },
             )
 
     candidatos = buscar_candidatos(
@@ -2053,6 +2060,7 @@ def procesar_inventario(comercio_id, limite=None, presupuesto_seg=None):
 
     inicio = time.monotonic()
     actualizados = 0
+    conteo_origen = {'cache_bd': 0, 'imagen_existente': 0, 'api': 0, 'sin_imagen': 0}
     seleccion = pendientes[:limite]
     if not seleccion:
         _log(f'inventario comercio={comercio_id} sin pendientes')
@@ -2062,20 +2070,19 @@ def procesar_inventario(comercio_id, limite=None, presupuesto_seg=None):
 
     def _una(producto):
         if time.monotonic() - inicio > presupuesto:
-            return False
+            return None
         try:
             intentos = int(producto.get('imagen_intentos') or 0)
-            resultado = procesar_producto(
+            return procesar_producto(
                 producto.get('id'),
                 codigo_barras=producto.get('codigo_barras'),
                 nombre=producto.get('nombre'),
                 descripcion=producto.get('descripcion'),
                 nivel=min(intentos, 3),
             )
-            return bool(resultado.ok)
         except Exception as error:
             _log(f'inventario producto={producto.get("id")} fallo: {type(error).__name__}')
-            return False
+            return None
 
     # Búsqueda/descarga en paralelo (I/O); rembg queda serializado por semáforo.
     # Encolado acotado: nunca se registran los 2.000 productos de golpe, así el
@@ -2104,10 +2111,22 @@ def procesar_inventario(comercio_id, limite=None, presupuesto_seg=None):
             )
             for futuro in hechos:
                 try:
-                    if futuro.result():
-                        actualizados += 1
+                    resultado = futuro.result()
                 except Exception:
                     continue
+                if resultado is None:
+                    continue
+                if resultado.ok:
+                    actualizados += 1
+                origen = (resultado.detalle or {}).get('origen') or ''
+                if origen == 'cache_bd':
+                    conteo_origen['cache_bd'] += 1
+                elif origen == 'imagen_existente':
+                    conteo_origen['imagen_existente'] += 1
+                elif origen == 'api':
+                    conteo_origen['api'] += 1
+                elif not resultado.ok:
+                    conteo_origen['sin_imagen'] += 1
     finally:
         for futuro in en_vuelo:
             futuro.cancel()
@@ -2116,7 +2135,11 @@ def procesar_inventario(comercio_id, limite=None, presupuesto_seg=None):
     _log(
         f'inventario comercio={comercio_id} actualizados={actualizados}/'
         f'{len(pendientes)} (lote={len(seleccion)}, workers={trabajadores}, '
-        f'presupuesto={presupuesto:.0f}s)'
+        f'presupuesto={presupuesto:.0f}s) | imágenes: '
+        f'caché_bd={conteo_origen["cache_bd"]} '
+        f'ya_tenian={conteo_origen["imagen_existente"]} '
+        f'api_serper={conteo_origen["api"]} '
+        f'sin_imagen={conteo_origen["sin_imagen"]}'
     )
     return actualizados
 
