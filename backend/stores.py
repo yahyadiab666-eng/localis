@@ -88,13 +88,42 @@ def _filtro_comercio_publico():
     return filtro
 
 
+_ACTIVO_DISPONIBLE = None
+
+
+def _activo_disponible():
+    """True si ``productos.activo`` existe (cacheado). Degradación segura.
+
+    Evita que una base sin la migración aplicada rompa las consultas públicas con
+    ``UndefinedColumn`` (causa típica de 500/503 en el catálogo).
+    """
+    global _ACTIVO_DISPONIBLE
+    if _ACTIVO_DISPONIBLE is None:
+        try:
+            with get_db_connection() as conexion:
+                cursor = conexion.cursor()
+                cursor.execute(
+                    """
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'productos'
+                      AND column_name = 'activo'
+                    LIMIT 1
+                    """
+                )
+                _ACTIVO_DISPONIBLE = cursor.fetchone() is not None
+        except Exception:
+            _ACTIVO_DISPONIBLE = False
+    return _ACTIVO_DISPONIBLE
+
+
 def _filtro_producto_publico():
-    if _sandbox_publico_permitido():
-        return " AND COALESCE(p.activo, 1) = 1"
-    return (
-        " AND COALESCE(p.activo, 1) = 1"
-        " AND LEFT(LOWER(TRIM(COALESCE(p.nombre, ''))), 2) <> '__'"
-    )
+    filtro = ''
+    if _activo_disponible():
+        filtro += " AND COALESCE(p.activo, 1) = 1"
+    if not _sandbox_publico_permitido():
+        filtro += " AND LEFT(LOWER(TRIM(COALESCE(p.nombre, ''))), 2) <> '__'"
+    return filtro
 
 _CONFIG_TTL_SEG = 120
 _POOL_MUESTRA_ALEATORIA = 400

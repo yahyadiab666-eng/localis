@@ -1271,17 +1271,28 @@ UPSERT_PRODUCTO_VALUES_SQL = """
 """
 
 
+def _hay_columna_activo():
+    """True si ``productos.activo`` existe (cacheado). Aislamiento defensivo."""
+    try:
+        from backend.stores import _activo_disponible
+
+        return _activo_disponible()
+    except Exception:
+        return False
+
+
 def _cargar_existentes_comercio(comercio_id):
     """Productos actuales del comercio indexados por código y por nombre."""
     from backend.db import get_db_connection
     from backend.utils import normalizar_nombre_producto
 
+    col_activo = 'COALESCE(activo, 1) AS activo' if _hay_columna_activo() else '1 AS activo'
     with get_db_connection() as conexion:
         cursor = conexion.cursor()
         cursor.execute(
-            """
+            f"""
             SELECT id, codigo_barras, nombre, descripcion, precio_usd, stock,
-                   imagen_url, imagen_fuente, imagen_estado, COALESCE(activo, 1) AS activo
+                   imagen_url, imagen_fuente, imagen_estado, {col_activo}
             FROM productos
             WHERE comercio_id = ?
             """,
@@ -1430,6 +1441,10 @@ def persistir_importacion_upsert(comercio_id, productos, categoria=None, existen
         cursor = conexion.cursor()
         cursor.execute('SELECT pg_advisory_xact_lock(?)', (int(comercio_id),))
         ejecutar_lote = getattr(cursor, 'execute_values', None)
+        activo_ok = _hay_columna_activo()
+        sql_upsert = UPSERT_PRODUCTO_VALUES_SQL
+        if not activo_ok:
+            sql_upsert = sql_upsert.replace('        activo = 1\n', '')
 
         insertados = 0
         for inicio in range(0, len(nuevos), IMPORT_BATCH_SIZE):
@@ -1473,15 +1488,16 @@ def persistir_importacion_upsert(comercio_id, productos, categoria=None, existen
         for inicio in range(0, len(filas_update), IMPORT_BATCH_SIZE):
             lote = filas_update[inicio : inicio + IMPORT_BATCH_SIZE]
             if callable(ejecutar_lote):
-                ejecutar_lote(UPSERT_PRODUCTO_VALUES_SQL, lote, page_size=IMPORT_BATCH_SIZE)
+                ejecutar_lote(sql_upsert, lote, page_size=IMPORT_BATCH_SIZE)
             else:
+                set_activo = ', activo = 1' if activo_ok else ''
                 for fila in lote:
                     cursor.execute(
-                        """
+                        f"""
                         UPDATE productos
                         SET nombre = ?, descripcion = ?, precio_usd = ?,
                             codigo_barras = ?, imagen_url = ?, imagen_fuente = ?,
-                            imagen_estado = ?, stock = ?, activo = 1
+                            imagen_estado = ?, stock = ?{set_activo}
                         WHERE id = ?
                         """,
                         fila[1:] + (fila[0],),
@@ -1523,7 +1539,7 @@ def persistir_importacion_upsert(comercio_id, productos, categoria=None, existen
             and (reg.get('activo') is None or int(reg['activo']) == 1)
         ]
         modo_bajas = _modo_bajas()
-        if ids_baja and modo_bajas == 'desactivar':
+        if ids_baja and activo_ok and modo_bajas == 'desactivar':
             for inicio in range(0, len(ids_baja), IMPORT_BATCH_SIZE):
                 lote_ids = ids_baja[inicio : inicio + IMPORT_BATCH_SIZE]
                 placeholders = ', '.join('?' for _ in lote_ids)
@@ -1532,7 +1548,7 @@ def persistir_importacion_upsert(comercio_id, productos, categoria=None, existen
                     tuple(lote_ids),
                 )
                 bajas += len(lote_ids)
-        elif ids_baja and modo_bajas == 'eliminar':
+        elif ids_baja and activo_ok and modo_bajas == 'eliminar':
             for inicio in range(0, len(ids_baja), IMPORT_BATCH_SIZE):
                 lote_ids = ids_baja[inicio : inicio + IMPORT_BATCH_SIZE]
                 placeholders = ', '.join('?' for _ in lote_ids)

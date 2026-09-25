@@ -885,7 +885,22 @@ def _migrar_columnas(cursor):
         if not _tabla_existe(cursor, tabla):
             continue
         for nombre, tipo_sql in columnas:
-            _agregar_columna_si_falta(cursor, tabla, nombre, tipo_sql)
+            # Aislamiento por columna: un fallo en una columna no debe abortar el
+            # resto de migraciones (evita dejar el esquema a medias tras un error).
+            try:
+                cursor.execute('SAVEPOINT migrar_columna')
+                _agregar_columna_si_falta(cursor, tabla, nombre, tipo_sql)
+                cursor.execute('RELEASE SAVEPOINT migrar_columna')
+            except Exception as error:
+                try:
+                    cursor.execute('ROLLBACK TO SAVEPOINT migrar_columna')
+                except Exception:
+                    pass
+                print(
+                    f'[Localis] columna {tabla}.{nombre} no migrada: '
+                    f'{type(error).__name__}: {error}',
+                    flush=True,
+                )
     _asegurar_columnas_imagen_oficiales(cursor)
 
 
@@ -1099,7 +1114,8 @@ def _crear_tabla_productos(cursor):
             imagen_manual_url TEXT,
             imagen_manual_fuente TEXT,
             stock INTEGER DEFAULT 0,
-            codigo_barras TEXT
+            codigo_barras TEXT,
+            activo INTEGER DEFAULT 1
         )
         """
     )
