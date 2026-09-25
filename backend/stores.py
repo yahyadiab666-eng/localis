@@ -95,25 +95,43 @@ def _activo_disponible():
     """True si ``productos.activo`` existe (cacheado). Degradación segura.
 
     Evita que una base sin la migración aplicada rompa las consultas públicas con
-    ``UndefinedColumn`` (causa típica de 500/503 en el catálogo).
+    ``UndefinedColumn``. Si falta, intenta crearla de forma idempotente (auto-saneo).
     """
     global _ACTIVO_DISPONIBLE
-    if _ACTIVO_DISPONIBLE is None:
+    if _ACTIVO_DISPONIBLE is not None:
+        return _ACTIVO_DISPONIBLE
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'productos'
+                  AND column_name = 'activo'
+                LIMIT 1
+                """
+            )
+            existe = cursor.fetchone() is not None
+    except Exception:
+        _ACTIVO_DISPONIBLE = False
+        return False
+
+    if not existe:
+        # Auto-saneo: crea la columna si la migración no se aplicó aún.
         try:
             with get_db_connection() as conexion:
                 cursor = conexion.cursor()
                 cursor.execute(
-                    """
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_schema = 'public'
-                      AND table_name = 'productos'
-                      AND column_name = 'activo'
-                    LIMIT 1
-                    """
+                    'ALTER TABLE productos ADD COLUMN IF NOT EXISTS activo INTEGER DEFAULT 1'
                 )
-                _ACTIVO_DISPONIBLE = cursor.fetchone() is not None
-        except Exception:
-            _ACTIVO_DISPONIBLE = False
+                conexion.commit()
+            existe = True
+            print('[Localis] columna productos.activo creada (auto-saneo)', flush=True)
+        except Exception as error:
+            print(f'[Localis] no se pudo crear productos.activo: {type(error).__name__}')
+
+    _ACTIVO_DISPONIBLE = bool(existe)
     return _ACTIVO_DISPONIBLE
 
 

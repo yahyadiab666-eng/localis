@@ -216,6 +216,16 @@ def _probar_sql_listado(errores):
         'el catálogo público excluye productos inactivos (bajas)',
         errores,
     )
+    _ok(
+        'def _activo_disponible' in stores and 'ADD COLUMN IF NOT EXISTS activo' in stores,
+        'auto-saneo/defensa de la columna productos.activo',
+        errores,
+    )
+    _ok(
+        'def obtener_productos_comercio' in stores and 'except Exception' in stores,
+        'el panel carga productos de forma defensiva (sin colapsar)',
+        errores,
+    )
     inventario_src = (RAIZ / 'backend' / 'inventory_import.py').read_text(encoding='utf-8')
     _ok(
         'def _modo_bajas' in inventario_src and 'SET activo = 0' in inventario_src,
