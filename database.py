@@ -184,6 +184,7 @@ COLUMNAS_ESQUEMA = {
         ('imagen_manual_fuente', 'TEXT'),
         ('stock', 'INTEGER DEFAULT 0'),
         ('codigo_barras', 'TEXT'),
+        ('activo', 'INTEGER DEFAULT 1'),
     ],
     'imagenes_automaticas': [
         ('clave', 'TEXT'),

@@ -123,6 +123,20 @@ MAX_IMPORT_FILE_BYTES = min(
 )
 IMPORT_BATCH_SIZE = int(os.getenv('IMPORT_BATCH_SIZE', '500'))
 LOG_PREFIX = '[Localis CSV]'
+
+
+def _modo_bajas():
+    """Cómo tratar productos que ya no vienen en el archivo.
+
+    ``desactivar`` (por defecto): los marca inactivos (no aparecen en público).
+    ``eliminar``: los borra. ``off``: no hace nada.
+    """
+    valor = str(os.getenv('LOCALIS_CSV_BAJAS', 'desactivar') or 'desactivar').strip().lower()
+    if valor in ('eliminar', 'delete', 'borrar'):
+        return 'eliminar'
+    if valor in ('off', '0', 'no', 'nada', 'ninguno'):
+        return 'off'
+    return 'desactivar'
 _MAX_FLASH_CHARS = 1400
 
 INSERT_PRODUCTO_SQL = """
@@ -1247,7 +1261,8 @@ UPSERT_PRODUCTO_VALUES_SQL = """
         imagen_url = v.imagen_url,
         imagen_fuente = v.imagen_fuente,
         imagen_estado = v.imagen_estado,
-        stock = v.stock
+        stock = v.stock,
+        activo = 1
     FROM (VALUES %s) AS v(
         id, nombre, descripcion, precio_usd, codigo_barras,
         imagen_url, imagen_fuente, imagen_estado, stock
@@ -1266,7 +1281,7 @@ def _cargar_existentes_comercio(comercio_id):
         cursor.execute(
             """
             SELECT id, codigo_barras, nombre, descripcion, precio_usd, stock,
-                   imagen_url, imagen_fuente, imagen_estado
+                   imagen_url, imagen_fuente, imagen_estado, COALESCE(activo, 1) AS activo
             FROM productos
             WHERE comercio_id = ?
             """,
@@ -1276,19 +1291,28 @@ def _cargar_existentes_comercio(comercio_id):
 
     por_codigo = {}
     por_nombre = {}
+    todos = []
     for fila in filas:
         registro = fila if isinstance(fila, dict) else {
             'id': fila[0], 'codigo_barras': fila[1], 'nombre': fila[2],
             'descripcion': fila[3], 'precio_usd': fila[4], 'stock': fila[5],
             'imagen_url': fila[6], 'imagen_fuente': fila[7], 'imagen_estado': fila[8],
+            'activo': (fila[9] if len(fila) > 9 else 1),
         }
+        registro.setdefault('activo', 1)
+        todos.append(registro)
         codigo = normalizar_codigo_barras(registro.get('codigo_barras'))
         if codigo and codigo not in por_codigo:
             por_codigo[codigo] = registro
         nombre = normalizar_nombre_producto(registro.get('nombre'))
         if nombre and nombre not in por_nombre:
             por_nombre[nombre] = registro
-    return {'por_codigo': por_codigo, 'por_nombre': por_nombre, 'total': len(filas)}
+    return {
+        'por_codigo': por_codigo,
+        'por_nombre': por_nombre,
+        'todos': todos,
+        'total': len(filas),
+    }
 
 
 def _buscar_existente(prod, existentes):
@@ -1338,10 +1362,15 @@ def _registro_sin_cambios(registro, prod):
     """True si la fila del CSV es idéntica al producto ya guardado.
 
     Evita recalcular/actualizar filas que no cambiaron al re-subir el mismo
-    catálogo (0 procesamiento de recursos innecesario).
+    catálogo. Un producto **inactivo** que reaparece en el archivo siempre se
+    considera cambiado (para reactivarlo).
     """
     from backend.utils import normalizar_codigo_barras
 
+    activo = registro.get('activo')
+    activo = 1 if activo is None else int(activo)
+    if activo != 1:
+        return False
     if _difiere(prod.get('nombre'), registro.get('nombre')):
         return False
     if _difiere(prod.get('descripcion'), registro.get('descripcion')):
@@ -1362,8 +1391,10 @@ def persistir_importacion_upsert(comercio_id, productos, categoria=None, existen
 
     Cero rechazos falsos: si el archivo solo trae existencias o precios, los
     campos ausentes conservan su valor actual. Las filas **idénticas** ya
-    guardadas no se tocan (se cuentan como ``omitidos``). Retorna
-    ``(insertados, actualizados, omitidos)``.
+    guardadas no se tocan (se cuentan como ``omitidos``). Los productos del
+    comercio que ya **no vienen** en el archivo se dan de baja según
+    ``LOCALIS_CSV_BAJAS``. Retorna ``(insertados, actualizados, omitidos,
+    bajas)``.
     """
     from backend.db import ejecutar_con_reintentos_bd, get_db_connection
 
@@ -1450,19 +1481,73 @@ def persistir_importacion_upsert(comercio_id, productos, categoria=None, existen
                         UPDATE productos
                         SET nombre = ?, descripcion = ?, precio_usd = ?,
                             codigo_barras = ?, imagen_url = ?, imagen_fuente = ?,
-                            imagen_estado = ?, stock = ?
+                            imagen_estado = ?, stock = ?, activo = 1
                         WHERE id = ?
                         """,
                         fila[1:] + (fila[0],),
                     )
             actualizados += len(lote)
 
-        if insertados == 0 and actualizados == 0 and omitidos == 0:
+        # --- Bajas: productos del comercio que YA NO vienen en el archivo ---
+        bajas = 0
+        from backend.utils import normalizar_codigo_barras as _ncb
+        from backend.utils import normalizar_nombre_producto as _nnp
+
+        existentes_todos = existentes.get('todos') or []
+        por_codigo_ids = {}
+        por_nombre_ids = {}
+        for reg in existentes_todos:
+            if reg.get('id') is None:
+                continue
+            codigo_reg = _ncb(reg.get('codigo_barras'))
+            if codigo_reg:
+                por_codigo_ids.setdefault(codigo_reg, set()).add(int(reg['id']))
+            nombre_reg = _nnp(reg.get('nombre'))
+            if nombre_reg:
+                por_nombre_ids.setdefault(nombre_reg, set()).add(int(reg['id']))
+
+        ids_presentes = set()
+        for prod in productos:
+            codigo_prod = _ncb(prod.get('codigo_barras'))
+            if codigo_prod and codigo_prod in por_codigo_ids:
+                ids_presentes.update(por_codigo_ids[codigo_prod])
+            nombre_prod = _nnp(prod.get('nombre'))
+            if nombre_prod and nombre_prod in por_nombre_ids:
+                ids_presentes.update(por_nombre_ids[nombre_prod])
+
+        ids_baja = [
+            int(reg['id'])
+            for reg in existentes_todos
+            if reg.get('id') is not None
+            and int(reg['id']) not in ids_presentes
+            and (reg.get('activo') is None or int(reg['activo']) == 1)
+        ]
+        modo_bajas = _modo_bajas()
+        if ids_baja and modo_bajas == 'desactivar':
+            for inicio in range(0, len(ids_baja), IMPORT_BATCH_SIZE):
+                lote_ids = ids_baja[inicio : inicio + IMPORT_BATCH_SIZE]
+                placeholders = ', '.join('?' for _ in lote_ids)
+                cursor.execute(
+                    f'UPDATE productos SET activo = 0 WHERE id IN ({placeholders})',
+                    tuple(lote_ids),
+                )
+                bajas += len(lote_ids)
+        elif ids_baja and modo_bajas == 'eliminar':
+            for inicio in range(0, len(ids_baja), IMPORT_BATCH_SIZE):
+                lote_ids = ids_baja[inicio : inicio + IMPORT_BATCH_SIZE]
+                placeholders = ', '.join('?' for _ in lote_ids)
+                cursor.execute(
+                    f'DELETE FROM productos WHERE id IN ({placeholders})',
+                    tuple(lote_ids),
+                )
+                bajas += len(lote_ids)
+
+        if insertados == 0 and actualizados == 0 and omitidos == 0 and bajas == 0:
             raise ErrorImportacionInventario(
                 'No se encontraron filas válidas para importar. '
                 'Revisa que el archivo tenga nombres/descripciones de producto.'
             )
-        return insertados, actualizados, omitidos
+        return insertados, actualizados, omitidos, bajas
 
     return ejecutar_con_reintentos_bd(_operacion)
 

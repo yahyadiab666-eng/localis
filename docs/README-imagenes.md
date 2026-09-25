@@ -64,6 +64,21 @@ LOCALIS_CATALOGO_PAGINA=60
 LOCALIS_COMERCIOS_EXCLUIDOS=
 ```
 
+### Sincronización de inventario (CSV / XLS / XLSX)
+
+El archivo **siempre se procesa de principio a fin**; no hay bloqueos por nombre/tamaño ni "cero cambios" a nivel de archivo:
+
+- **Alta:** productos nuevos del archivo se crean.
+- **Modificación:** si cambia precio/nombre/etc., se actualiza.
+- **Sin cambios:** la fila idéntica no se reescribe (solo se cuenta).
+- **Baja:** los productos del comercio que **ya no vienen** en el archivo se dan de baja según `LOCALIS_CSV_BAJAS` (`desactivar` los oculta del público y es reversible; `eliminar` los borra; `off` no hace nada).
+- **Reaparición:** un producto inactivo que vuelve en el archivo se reactiva (no se duplica).
+- El pipeline de imágenes corre **siempre en segundo plano** (no bloquea la subida) y el ahorro por EAN es **por producto**, no por archivo.
+
+```
+LOCALIS_CSV_BAJAS=desactivar
+```
+
 ### Autorreparación de imágenes al re-subir CSV
 
 - Filas idénticas no se actualizan (`sin cambios`), pero si la imagen es **dudosa o inválida** (falta, fabricada o con dominio no persistible) se **revalida contra el catálogo global por EAN** (costo 0) y, si no hay reemplazo, se marca pendiente para reasignarla. Las imágenes **válidas nunca se tocan**.

@@ -90,8 +90,11 @@ def _filtro_comercio_publico():
 
 def _filtro_producto_publico():
     if _sandbox_publico_permitido():
-        return ''
-    return " AND LEFT(LOWER(TRIM(COALESCE(p.nombre, ''))), 2) <> '__'"
+        return " AND COALESCE(p.activo, 1) = 1"
+    return (
+        " AND COALESCE(p.activo, 1) = 1"
+        " AND LEFT(LOWER(TRIM(COALESCE(p.nombre, ''))), 2) <> '__'"
+    )
 
 _CONFIG_TTL_SEG = 120
 _POOL_MUESTRA_ALEATORIA = 400
@@ -1091,7 +1094,7 @@ def procesar_csv_productos(comercio_id, archivo_csv):
             }
 
         etapa = 'persistir_upsert'
-        insertados, actualizados, omitidos = persistir_importacion_upsert(
+        insertados, actualizados, omitidos, bajas = persistir_importacion_upsert(
             comercio_id, productos, existentes=existentes
         )
 
@@ -1110,21 +1113,17 @@ def procesar_csv_productos(comercio_id, archivo_csv):
         except Exception as exc_rep:
             print(f'{CSV_LOG} aviso etapa={etapa}: {type(exc_rep).__name__}: {exc_rep}')
 
+        # El pipeline de imágenes corre SIEMPRE en segundo plano (no bloquea la
+        # subida del archivo). El ahorro por EAN es por producto, no por archivo.
         etapa = 'asociar_imagenes'
-        if insertados > 0 or marcadas > 0:
-            try:
-                programar_asociacion_imagenes_inventario(comercio_id)
-            except Exception as exc_img:
-                print(
-                    f'{CSV_LOG} aviso etapa={etapa} {type(exc_img).__name__}: {exc_img} '
-                    '(el inventario ya se guardó; las fotos se completan en segundo plano)'
-                )
-                traceback.print_exc()
-        else:
+        try:
+            programar_asociacion_imagenes_inventario(comercio_id)
+        except Exception as exc_img:
             print(
-                f'{CSV_LOG} sin cambios pendientes: pipeline de imágenes no relanzado '
-                f'(actualizados={actualizados} sin_cambios={omitidos} reparadas={reparadas})'
+                f'{CSV_LOG} aviso etapa={etapa} {type(exc_img).__name__}: {exc_img} '
+                '(el inventario ya se guardó; las fotos se completan en segundo plano)'
             )
+            traceback.print_exc()
 
         etapa = 'reporte'
         conteos = _contar_estados_imagenes(comercio_id)
@@ -1146,8 +1145,10 @@ def procesar_csv_productos(comercio_id, archivo_csv):
         meta_imagenes['insertados'] = insertados
         meta_imagenes['actualizados'] = actualizados
         meta_imagenes['omitidos'] = omitidos
+        meta_imagenes['bajas'] = bajas
         meta_imagenes['imagenes_reparadas'] = reparadas
         meta_imagenes['imagenes_a_revisar'] = marcadas
+        extra_bajas = f' Bajas: {bajas}.' if bajas else ''
         extra_reparacion = ''
         if reparadas or marcadas:
             extra_reparacion = (
@@ -1156,11 +1157,11 @@ def procesar_csv_productos(comercio_id, archivo_csv):
             )
         mensaje = (
             f'{insertados} nuevos, {actualizados} actualizados, '
-            f'{omitidos} sin cambios.{extra_reparacion} ' + mensaje
+            f'{omitidos} sin cambios.{extra_bajas}{extra_reparacion} ' + mensaje
         )
         print(
             f'{CSV_LOG} ok comercio={comercio_id} insertados={insertados} '
-            f'actualizados={actualizados} sin_cambios={omitidos} '
+            f'actualizados={actualizados} sin_cambios={omitidos} bajas={bajas} '
             f'reparadas={reparadas} marcadas={marcadas} '
             f'estado_imagenes={meta_imagenes["estado_imagenes"]} '
             f'reales={meta_imagenes["imagenes_reales"]} '

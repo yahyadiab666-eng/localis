@@ -129,7 +129,7 @@ def main() -> int:
 
 
 def _limpiar_maestro_roto(get_db_connection, apply):
-    """Elimina del catálogo global las entradas Storage cuyo objeto no existe."""
+    """Elimina de los caches globales las URLs HTTP que no responden."""
     from concurrent.futures import ThreadPoolExecutor as _Pool
 
     with get_db_connection(row_factory=True) as conexion:
@@ -141,28 +141,56 @@ def _limpiar_maestro_roto(get_db_connection, apply):
             """
         )
         filas = [dict(f) for f in cursor.fetchall()]
-    if not filas:
-        print('Catálogo maestro: sin URLs HTTP que revisar.')
-        return
-    with _Pool(max_workers=8) as pool:
-        resultados = list(pool.map(_verificar, [f['url_imagen'] for f in filas]))
-    rotos = [
-        fila['codigo_barras']
-        for fila, (_u, status) in zip(filas, resultados)
-        if (isinstance(status, int) and status >= 400 and status not in _BLOQUEOS_BOT)
-        or (isinstance(status, str) and status in _ERRORES_RED_ROTA)
-    ]
-    print(f'Catálogo maestro: {len(rotos)} entrada(s) rota(s) de {len(filas)}')
-    if not apply or not rotos:
+        cursor.execute(
+            """
+            SELECT clave, url_imagen FROM imagenes_automaticas
+            WHERE POSITION('http' IN url_imagen) = 1
+            """
+        )
+        filas_cache = [dict(f) for f in cursor.fetchall()]
+
+    def _roto(status):
+        return (isinstance(status, int) and status >= 400 and status not in _BLOQUEOS_BOT) or (
+            isinstance(status, str) and status in _ERRORES_RED_ROTA
+        )
+
+    rotos_maestro = []
+    if filas:
+        with _Pool(max_workers=8) as pool:
+            resultados = list(pool.map(_verificar, [f['url_imagen'] for f in filas]))
+        rotos_maestro = [f['codigo_barras'] for f, (_u, st) in zip(filas, resultados) if _roto(st)]
+        print(f'Catálogo maestro: {len(rotos_maestro)} entrada(s) rota(s) de {len(filas)}')
+
+    rotos_cache = []
+    if filas_cache:
+        with _Pool(max_workers=8) as pool:
+            resultados = list(pool.map(_verificar, [f['url_imagen'] for f in filas_cache]))
+        rotos_cache = [f['clave'] for f, (_u, st) in zip(filas_cache, resultados) if _roto(st)]
+        print(f'imagenes_automaticas: {len(rotos_cache)} URL(s) rota(s) de {len(filas_cache)}')
+
+    if not apply or (not rotos_maestro and not rotos_cache):
         return
     with get_db_connection() as conexion:
         cursor = conexion.cursor()
-        placeholders = ', '.join('?' for _ in rotos)
-        cursor.execute(
-            f'DELETE FROM catalogo_maestro_imagenes WHERE codigo_barras IN ({placeholders})',
-            tuple(rotos),
-        )
-        print(f'Catálogo maestro: {cursor.rowcount or 0} entrada(s) rota(s) eliminada(s).')
+        if rotos_maestro:
+            for inicio in range(0, len(rotos_maestro), 200):
+                lote = rotos_maestro[inicio : inicio + 200]
+                ph = ', '.join('?' for _ in lote)
+                cursor.execute(
+                    f'DELETE FROM catalogo_maestro_imagenes WHERE codigo_barras IN ({ph})',
+                    tuple(lote),
+                )
+            print(f'Catálogo maestro: {len(rotos_maestro)} entrada(s) rota(s) eliminada(s).')
+        if rotos_cache:
+            for inicio in range(0, len(rotos_cache), 200):
+                lote = rotos_cache[inicio : inicio + 200]
+                ph = ', '.join('?' for _ in lote)
+                cursor.execute(
+                    f'UPDATE imagenes_automaticas SET url_imagen = NULL, encontrada = 0 '
+                    f'WHERE clave IN ({ph})',
+                    tuple(lote),
+                )
+            print(f'imagenes_automaticas: {len(rotos_cache)} URL(s) rota(s) limpiada(s).')
         conexion.commit()
 
 

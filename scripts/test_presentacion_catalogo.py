@@ -211,6 +211,22 @@ def _probar_sql_listado(errores):
     )
     _ok('LOCALIS_COMERCIOS_EXCLUIDOS' in stores, 'permite ocultar tiendas por ID', errores)
     _ok('OFFSET ?' in stores and 'offset=0' in stores, 'listado soporta paginación (offset)', errores)
+    _ok(
+        'COALESCE(p.activo, 1) = 1' in stores,
+        'el catálogo público excluye productos inactivos (bajas)',
+        errores,
+    )
+    inventario_src = (RAIZ / 'backend' / 'inventory_import.py').read_text(encoding='utf-8')
+    _ok(
+        'def _modo_bajas' in inventario_src and 'SET activo = 0' in inventario_src,
+        'el importador procesa bajas (desactivar/eliminar)',
+        errores,
+    )
+    _ok(
+        'def _registro_sin_cambios' in inventario_src and 'activo != 1' in inventario_src,
+        'un producto inactivo se reactiva al reaparecer',
+        errores,
+    )
     cliente_html = (RAIZ / 'templates' / 'cliente.html').read_text(encoding='utf-8')
     _ok('Anterior' in cliente_html and 'Siguiente' in cliente_html, 'portada con paginación Anterior/Siguiente', errores)
 
