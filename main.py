@@ -1161,32 +1161,77 @@ def _planes_beneficios_para_comercio(comercio, tasa_actual):
 
 
 def _cargar_datos_comercio_usuario(usuario_id):
-    """Carga comercio y productos del usuario autenticado."""
-    tasa_actual = obtener_tasa_dolar() or 1.0
-    with get_db_connection(row_factory=sqlite3.Row) as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            '''
-            SELECT c.*, cat.nombre as categoria
-            FROM comercios c
-            LEFT JOIN categorias cat ON c.categoria_id = cat.id
-            WHERE c.usuario_id = ?
-            ''',
-            (usuario_id,),
-        )
-        comercio_db = cursor.fetchone()
-        if not comercio_db:
-            cursor.execute('SELECT id, nombre FROM categorias')
-            categorias = [dict(c) for c in cursor.fetchall()]
-            return None, None, tasa_actual, categorias
+    """Carga comercio y productos del usuario autenticado (defensivo).
 
-        vincular_comercio_en_sesion(comercio_db['id'])
-        comercio_id = comercio_db['id']
-        comercio_raw = dict(comercio_db)
+    Si la consulta principal (con JOINs) falla, reintenta un SELECT simple de
+    ``comercios`` para que el panel siempre pueda renderizar (nunca 500/503).
+    """
+    try:
+        tasa_actual = obtener_tasa_dolar() or 1.0
+    except Exception:
+        tasa_actual = 1.0
 
-    productos_db = obtener_productos_comercio(comercio_id)
+    comercio_raw = None
+    try:
+        with get_db_connection(row_factory=sqlite3.Row) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                SELECT c.*, cat.nombre as categoria
+                FROM comercios c
+                LEFT JOIN categorias cat ON c.categoria_id = cat.id
+                WHERE c.usuario_id = ?
+                ''',
+                (usuario_id,),
+            )
+            comercio_db = cursor.fetchone()
+            if comercio_db:
+                comercio_raw = dict(comercio_db)
+    except Exception:
+        # Se registra el rastro real (antes se silenciaba -> 503 opaco).
+        print('[Localis] panel_comercio consulta principal fallo:', flush=True)
+        traceback.print_exc()
+        try:
+            with get_db_connection(row_factory=sqlite3.Row) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'SELECT * FROM comercios WHERE usuario_id = ? ORDER BY id ASC LIMIT 1',
+                    (usuario_id,),
+                )
+                fila = cursor.fetchone()
+                comercio_raw = dict(fila) if fila else None
+        except Exception:
+            traceback.print_exc()
+            comercio_raw = None
+
+    if not comercio_raw:
+        try:
+            with get_db_connection(row_factory=sqlite3.Row) as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT id, nombre FROM categorias')
+                categorias = [dict(c) for c in cursor.fetchall()]
+        except Exception:
+            traceback.print_exc()
+            categorias = []
+        return None, None, tasa_actual, categorias
+
+    comercio_id = comercio_raw['id']
+    try:
+        vincular_comercio_en_sesion(comercio_id)
+    except Exception:
+        pass
+
+    try:
+        productos_db = obtener_productos_comercio(comercio_id)
+    except Exception:
+        traceback.print_exc()
+        productos_db = []
+
     comercio = _normalizar_imagenes_comercio(comercio_raw)
-    comercio['maps_link'] = url_maps_comercio(comercio)
+    try:
+        comercio['maps_link'] = url_maps_comercio(comercio)
+    except Exception:
+        comercio['maps_link'] = None
     productos = _productos_desde_filas(productos_db, tasa_actual)
     return comercio, productos, tasa_actual, None
 
@@ -1212,6 +1257,10 @@ def panel_comercio():
             metricas = resumen_interacciones(comercio['id'], dias=30)
         except Exception:
             metricas = {'total': 0, 'detalle': [], 'productos_top': [], 'disponible': False}
+        try:
+            whatsapp = obtener_config('whatsapp_soporte', WHATSAPP_SOPORTE)
+        except Exception:
+            whatsapp = WHATSAPP_SOPORTE
 
         _debug_imagenes_antes_de_render(productos, 'panel_comercio')
         return render_template(
@@ -1219,15 +1268,22 @@ def panel_comercio():
             comercio=comercio,
             productos=productos,
             tasa=tasa_actual,
-            whatsapp=obtener_config('whatsapp_soporte', WHATSAPP_SOPORTE),
+            whatsapp=whatsapp,
             whatsapp_url=WHATSAPP_SOPORTE_URL,
             plan_info=plan_info,
             avisos=avisos,
             metricas=metricas,
             nav_activo='panel',
         )
-    except psycopg2.Error:
-        raise
+    except psycopg2.Error as error:
+        # Nunca tumbar el panel con 503: se registra el rastro real y se degrada.
+        print(f'Error de base de datos en panel de comercio: {error}')
+        traceback.print_exc()
+        flash(
+            'No se pudo cargar el panel del comercio. Intenta de nuevo en unos segundos.',
+            'error',
+        )
+        return redirect(url_for('index'))
     except Exception as error:
         print(f'Error al cargar panel de comercio: {error}')
         traceback.print_exc()
