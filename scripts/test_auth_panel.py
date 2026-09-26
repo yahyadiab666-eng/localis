@@ -98,6 +98,25 @@ def main() -> int:
                 traceback.print_exc()
                 _ok(False, f'GET {ruta} no lanzo excepcion')
 
+        print('\n=== Sin banner rojo ante fallos secundarios (ni redirect) ===')
+        from unittest.mock import patch
+
+        import psycopg2
+
+        import main as _main
+
+        for nombre, objetivo in (
+            ('metricas', 'resumen_interacciones'),
+            ('avisos', 'obtener_avisos_suscripcion'),
+            ('config', 'obtener_config'),
+        ):
+            with patch.object(_main, objetivo, side_effect=psycopg2.OperationalError('x')):
+                r = cliente.get('/comercio')
+                _ok(
+                    r.status_code == 200 and not r.headers.get('Location'),
+                    f'fallo de {nombre}: panel 200 sin banner rojo',
+                )
+
     print('\n=== RESULTADO ===')
     if _ERRORES:
         for item in _ERRORES:

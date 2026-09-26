@@ -1244,30 +1244,54 @@ def panel_comercio():
     if abrir_pago:
         return redirect(url_for('comercio_planes', abrir_pago=abrir_pago))
 
+    comercio = None
+    productos = []
+    tasa_actual = 1.0
+    categorias = None
     try:
         comercio, productos, tasa_actual, categorias = _cargar_datos_comercio_usuario(
             usuario_id
         )
-        if categorias is not None:
-            return render_template('registro_comercio.html', categorias=categorias)
+    except Exception as error:
+        # Trazabilidad total: nunca ocultar el error real.
+        print(f'[Localis] panel_comercio carga fallo: {type(error).__name__}: {error}')
+        traceback.print_exc()
+        comercio, productos, tasa_actual, categorias = None, [], 1.0, None
 
-        plan_info = PLANES.get(comercio.get('plan_tipo', 'gratis'), PLANES['gratis'])
-        avisos = obtener_avisos_suscripcion(comercio)
-        try:
-            metricas = resumen_interacciones(comercio['id'], dias=30)
-        except Exception:
-            metricas = {'total': 0, 'detalle': [], 'productos_top': [], 'disponible': False}
-        try:
-            whatsapp = obtener_config('whatsapp_soporte', WHATSAPP_SOPORTE)
-        except Exception:
-            whatsapp = WHATSAPP_SOPORTE
+    if categorias is not None:
+        return render_template('registro_comercio.html', categorias=categorias)
 
-        _debug_imagenes_antes_de_render(productos, 'panel_comercio')
+    # Cada dato secundario con valor por defecto: nunca dispara el banner rojo.
+    comercio = comercio or {}
+    try:
+        plan_info = PLANES.get(comercio.get('plan_tipo') or 'gratis', PLANES['gratis'])
+    except Exception:
+        plan_info = PLANES.get('gratis', {})
+    try:
+        avisos = obtener_avisos_suscripcion(comercio) or {}
+    except Exception as error:
+        print(f'[Localis] panel_comercio avisos fallo: {type(error).__name__}: {error}')
+        traceback.print_exc()
+        avisos = {}
+    try:
+        metricas = resumen_interacciones(comercio.get('id'), dias=30)
+    except Exception as error:
+        print(f'[Localis] panel_comercio metricas fallo: {type(error).__name__}: {error}')
+        traceback.print_exc()
+        metricas = {'total': 0, 'detalle': [], 'productos_top': [], 'disponible': False, 'dias': 30}
+    try:
+        whatsapp = obtener_config('whatsapp_soporte', WHATSAPP_SOPORTE)
+    except Exception:
+        whatsapp = WHATSAPP_SOPORTE
+
+    productos = productos or []
+    _debug_imagenes_antes_de_render(productos, 'panel_comercio')
+    try:
         return render_template(
             'comercio.html',
             comercio=comercio,
             productos=productos,
-            tasa=tasa_actual,
+            tasa=tasa_actual or 1.0,
             whatsapp=whatsapp,
             whatsapp_url=WHATSAPP_SOPORTE_URL,
             plan_info=plan_info,
@@ -1275,23 +1299,20 @@ def panel_comercio():
             metricas=metricas,
             nav_activo='panel',
         )
-    except psycopg2.Error as error:
-        # Nunca tumbar el panel con 503: se registra el rastro real y se degrada.
-        print(f'Error de base de datos en panel de comercio: {error}')
-        traceback.print_exc()
-        flash(
-            'No se pudo cargar el panel del comercio. Intenta de nuevo en unos segundos.',
-            'error',
-        )
-        return redirect(url_for('index'))
     except Exception as error:
-        print(f'Error al cargar panel de comercio: {error}')
+        print(f'[Localis] panel_comercio render fallo: {type(error).__name__}: {error}')
         traceback.print_exc()
-        flash(
-            'No se pudo cargar el panel del comercio. Intenta de nuevo en unos segundos.',
-            'error',
+        # Último recurso: página sin banner rojo (200) en lugar de redirect.
+        return (
+            render_template(
+                'error_servidor.html',
+                codigo=500,
+                titulo='Panel del comercio',
+                mensaje='El panel se cargó en modo seguro. Recarga en unos segundos.',
+                sesion_activa=True,
+            ),
+            200,
         )
-        return redirect(url_for('index'))
 
 
 @app.route('/comercio/planes')
