@@ -1283,10 +1283,25 @@ def _hay_columna_activo():
         return False
 
 
+def _clave_nombre(valor):
+    """Clave de comparación robusta para nombres de producto.
+
+    Ignora mayúsculas/minúsculas, acentos, espacios repetidos y signos de
+    puntuación, de modo que la sincronización espejo no borre por variaciones
+    de formato («Café  1kg» == «cafe-1kg»).
+    """
+    import re as _re
+    import unicodedata as _ud
+
+    texto = _ud.normalize('NFKD', str(valor or ''))
+    texto = ''.join(c for c in texto if not _ud.combining(c)).lower()
+    texto = _re.sub(r'[^a-z0-9]+', ' ', texto)
+    return ' '.join(texto.split()) or None
+
+
 def _cargar_existentes_comercio(comercio_id):
     """Productos actuales del comercio indexados por código y por nombre."""
     from backend.db import get_db_connection
-    from backend.utils import normalizar_nombre_producto
 
     col_activo = 'COALESCE(activo, 1) AS activo' if _hay_columna_activo() else '1 AS activo'
     with get_db_connection() as conexion:
@@ -1317,7 +1332,7 @@ def _cargar_existentes_comercio(comercio_id):
         codigo = normalizar_codigo_barras(registro.get('codigo_barras'))
         if codigo and codigo not in por_codigo:
             por_codigo[codigo] = registro
-        nombre = normalizar_nombre_producto(registro.get('nombre'))
+        nombre = _clave_nombre(registro.get('nombre'))
         if nombre and nombre not in por_nombre:
             por_nombre[nombre] = registro
     return {
@@ -1329,12 +1344,10 @@ def _cargar_existentes_comercio(comercio_id):
 
 
 def _buscar_existente(prod, existentes):
-    from backend.utils import normalizar_nombre_producto
-
     codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
     if codigo and codigo in existentes['por_codigo']:
         return existentes['por_codigo'][codigo]
-    nombre = normalizar_nombre_producto(prod.get('nombre'))
+    nombre = _clave_nombre(prod.get('nombre'))
     if nombre and nombre in existentes['por_nombre']:
         return existentes['por_nombre'][nombre]
     return None
@@ -1506,10 +1519,9 @@ def persistir_importacion_upsert(comercio_id, productos, categoria=None, existen
                     )
             actualizados += len(lote)
 
-        # --- Bajas: productos del comercio que YA NO vienen en el archivo ---
+        # --- Sincronización espejo: productos del comercio que YA NO vienen ---
         bajas = 0
         from backend.utils import normalizar_codigo_barras as _ncb
-        from backend.utils import normalizar_nombre_producto as _nnp
 
         existentes_todos = existentes.get('todos') or []
         por_codigo_ids = {}
@@ -1520,7 +1532,7 @@ def persistir_importacion_upsert(comercio_id, productos, categoria=None, existen
             codigo_reg = _ncb(reg.get('codigo_barras'))
             if codigo_reg:
                 por_codigo_ids.setdefault(codigo_reg, set()).add(int(reg['id']))
-            nombre_reg = _nnp(reg.get('nombre'))
+            nombre_reg = _clave_nombre(reg.get('nombre'))
             if nombre_reg:
                 por_nombre_ids.setdefault(nombre_reg, set()).add(int(reg['id']))
 
@@ -1529,7 +1541,7 @@ def persistir_importacion_upsert(comercio_id, productos, categoria=None, existen
             codigo_prod = _ncb(prod.get('codigo_barras'))
             if codigo_prod and codigo_prod in por_codigo_ids:
                 ids_presentes.update(por_codigo_ids[codigo_prod])
-            nombre_prod = _nnp(prod.get('nombre'))
+            nombre_prod = _clave_nombre(prod.get('nombre'))
             if nombre_prod and nombre_prod in por_nombre_ids:
                 ids_presentes.update(por_nombre_ids[nombre_prod])
 
@@ -1551,15 +1563,16 @@ def persistir_importacion_upsert(comercio_id, productos, categoria=None, existen
                 )
                 bajas += len(lote_ids)
         elif ids_baja and modo_bajas == 'eliminar':
-            # Sincronización espejo: se elimina de la tienda lo que no viene en
-            # el archivo (solo productos de ESTE comercio; la FK de
-            # interacciones_comercio es ON DELETE SET NULL).
+            # Sincronización espejo: se elimina PERMANENTEMENTE de la tienda lo
+            # que no viene en el archivo. Doble acotación: por id y por
+            # comercio_id (la FK de interacciones_comercio es ON DELETE SET NULL).
             for inicio in range(0, len(ids_baja), IMPORT_BATCH_SIZE):
                 lote_ids = ids_baja[inicio : inicio + IMPORT_BATCH_SIZE]
                 placeholders = ', '.join('?' for _ in lote_ids)
                 cursor.execute(
-                    f'DELETE FROM productos WHERE id IN ({placeholders})',
-                    tuple(lote_ids),
+                    f'DELETE FROM productos '
+                    f'WHERE comercio_id = ? AND id IN ({placeholders})',
+                    (int(comercio_id), *lote_ids),
                 )
                 bajas += len(lote_ids)
 

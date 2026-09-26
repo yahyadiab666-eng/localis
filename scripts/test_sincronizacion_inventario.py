@@ -134,6 +134,27 @@ def main() -> int:
             )
             fila = dict(cur.fetchone())
         _ok(int(fila['n']) == 1 and int(fila['activo']) == 1, 'C se reactivo sin duplicarse')
+
+        # 4) Coincidencia robusta por nombre: acentos/mayúsculas/espacios/puntuación
+        #    no deben provocar un borrado espejo erróneo.
+        persistir_importacion_upsert(
+            comercio_id, [_producto('Café  Especial', None, 5.0)]
+        )
+        persistir_importacion_upsert(
+            comercio_id, [_producto('cafe-especial', None, 5.0)]
+        )
+        with get_db_connection(row_factory=True) as c:
+            cur = c.cursor()
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM productos "
+                "WHERE comercio_id = ? AND POSITION('especial' IN LOWER(nombre)) > 0",
+                (comercio_id,),
+            )
+            n_especial = int(dict(cur.fetchone())['n'])
+        _ok(
+            n_especial == 1,
+            'el nombre con acentos/mayúsculas/espacios NO se borra (coincidencia robusta)',
+        )
     finally:
         _limpiar(get_db_connection)
 
