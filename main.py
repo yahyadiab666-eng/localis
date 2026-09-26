@@ -104,6 +104,7 @@ from config import (
 )
 from flask import (
     Flask,
+    Response,
     flash,
     jsonify,
     redirect,
@@ -1017,6 +1018,60 @@ def registro_legacy():
     return redirect(url_for('login'))
 
 
+def _oauth_debug_activo():
+    """Permite ver el traceback OAuth en la respuesta (LOCALIS_OAUTH_DEBUG=0 lo oculta)."""
+    valor = str(os.getenv('LOCALIS_OAUTH_DEBUG', '1')).strip().lower()
+    return valor not in ('0', 'false', 'no', 'off')
+
+
+def _oauth_error(etapa, error):
+    """Registra y (por defecto) devuelve el traceback exacto en texto plano.
+
+    Sustituye la página genérica de Error 500 por el detalle real de Python para
+    diagnosticar el callback de Google. Es aislado: solo se usa en estas rutas.
+    """
+    traza = traceback.format_exc()
+    print(f'[Localis OAuth] fallo en {etapa}: {type(error).__name__}: {error}', flush=True)
+    print(traza, flush=True)
+    logging.getLogger('localis.oauth').error(
+        'OAuth %s: %s', etapa, error, exc_info=True
+    )
+    if _oauth_debug_activo():
+        try:
+            from database import diagnosticar_postgresql
+
+            diag_bd = diagnosticar_postgresql()
+        except Exception as error_diag:
+            diag_bd = {'error': f'{type(error_diag).__name__}: {error_diag}'}
+        cuerpo = (
+            f'Localis · Error 500 en autenticación Google\n'
+            f'Etapa: {etapa}\n'
+            f'Tipo: {type(error).__name__}\n'
+            f'Mensaje: {error}\n\n'
+            f'===== TRACEBACK COMPLETO =====\n{traza}\n'
+            f'===== ESTADO DE BASE DE DATOS =====\n{diag_bd}\n'
+            '===== FIN =====\n'
+            'Para ocultar este detalle y volver a un mensaje amable: LOCALIS_OAUTH_DEBUG=0\n'
+        )
+        return Response(cuerpo, status=500, mimetype='text/plain; charset=utf-8')
+    flash('No se pudo iniciar sesión con Google. Intenta de nuevo.', 'error')
+    return redirect(url_for('login'))
+
+
+def _oauth_redirect_uri():
+    """Redirect URI correcto detrás del proxy de Render (https).
+
+    Sin esto, ``url_for(_external=True)`` puede devolver ``http://`` detrás del
+    proxy TLS, y la cookie de sesión ``Secure`` (que guarda el ``state``) no se
+    envía en el callback → ``MismatchingStateError``. Aislado al flujo OAuth.
+    """
+    uri = url_for('google_callback', _external=True)
+    proto = (request.headers.get('X-Forwarded-Proto') or '').split(',')[0].strip().lower()
+    if proto == 'https' and uri.startswith('http://'):
+        uri = 'https://' + uri[len('http://'):]
+    return uri
+
+
 @app.route('/login/google')
 def login_google():
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
@@ -1028,14 +1083,11 @@ def login_google():
         flash('No se pudo inicializar el cliente OAuth de Google.', 'error')
         return redirect(url_for('login'))
     try:
-        redirect_uri = url_for('google_callback', _external=True)
+        redirect_uri = _oauth_redirect_uri()
         print(f'[Localis OAuth] authorize_redirect uri={redirect_uri}', flush=True)
         return google.authorize_redirect(redirect_uri)
     except Exception as error:
-        print(f'[Localis OAuth] fallo authorize_redirect: {type(error).__name__}: {error}', flush=True)
-        traceback.print_exc()
-        flash('No se pudo iniciar sesión con Google. Intenta de nuevo.', 'error')
-        return redirect(url_for('login'))
+        return _oauth_error('authorize_redirect', error)
 
 
 @app.route('/login/google/callback')
@@ -1053,13 +1105,7 @@ def google_callback():
     try:
         token = google.authorize_access_token()
     except Exception as error:
-        print(
-            f'[Localis OAuth] authorize_access_token fallo: {type(error).__name__}: {error}',
-            flush=True,
-        )
-        traceback.print_exc()
-        flash('No se pudo validar la sesión con Google. Intenta de nuevo.', 'error')
-        return redirect(url_for('login'))
+        return _oauth_error('authorize_access_token', error)
 
     # 2) Perfil del usuario (con respaldo por si el token no trae ``userinfo``).
     try:
@@ -1079,22 +1125,16 @@ def google_callback():
             flash('No se recibió información de perfil desde Google.', 'error')
             return redirect(url_for('login'))
     except Exception as error:
-        print(f'[Localis OAuth] perfil fallo: {type(error).__name__}: {error}', flush=True)
-        traceback.print_exc()
-        flash('No se pudo leer tu perfil de Google. Intenta de nuevo.', 'error')
-        return redirect(url_for('login'))
+        return _oauth_error('userinfo', error)
 
     # 3) Alta/actualización del usuario y sesión.
     try:
         exito, usuario_o_error = obtener_o_crear_usuario_google(google_info)
 
         if not exito or not isinstance(usuario_o_error, dict) or not usuario_o_error.get('id'):
-            print(f'[Localis OAuth] usuario no resuelto: {usuario_o_error}', flush=True)
-            flash(
-                'No se pudo iniciar sesión con tu cuenta de Google. Intenta de nuevo.',
-                'error',
-            )
-            return redirect(url_for('login'))
+            # Se muestra el motivo real (p. ej. error de Supabase) en lugar de la
+            # página genérica: ayuda a diagnosticar la causa exacta.
+            return _oauth_error('usuario', RuntimeError(str(usuario_o_error)))
 
         session['usuario_id'] = usuario_o_error['id']
         session['username'] = usuario_o_error.get('nombre') or 'Usuario'
@@ -1123,10 +1163,7 @@ def google_callback():
 
         return redirect(url_for('index'))
     except Exception as error:
-        print(f'[Localis OAuth] sesión fallo: {type(error).__name__}: {error}', flush=True)
-        traceback.print_exc()
-        flash('Error al iniciar sesión con Google. Intenta de nuevo.', 'error')
-        return redirect(url_for('login'))
+        return _oauth_error('usuario/sesion', error)
 
 
 @app.route('/logout')
