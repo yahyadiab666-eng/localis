@@ -1133,13 +1133,14 @@ def _productos_desde_filas(productos_db, tasa_actual):
         except (TypeError, ValueError):
             precio_usd = 0.0
         productos.append({
-            'id': p['id'],
-            'nombre': p['nombre'],
-            'descripcion': p['descripcion'] or 'Sin descripción',
+            'id': p.get('id'),
+            'nombre': p.get('nombre') or '',
+            'descripcion': p.get('descripcion') or 'Sin descripción',
             'precio_usd': precio_usd,
             'precio_bs': round(precio_usd * tasa_actual, 2),
             'codigo_barras': '' if p.get('codigo_barras') is None else p.get('codigo_barras'),
             'imagen_url': p.get('imagen_url') or '',
+            'imagen_estado': (p.get('imagen_estado') or 'pendiente'),
         })
     return productos
 
@@ -1300,19 +1301,11 @@ def panel_comercio():
             nav_activo='panel',
         )
     except Exception as error:
+        # Sin pantallas artificiales: se registra el error real y se propaga al
+        # manejador global (que también deja el traceback en consola).
         print(f'[Localis] panel_comercio render fallo: {type(error).__name__}: {error}')
         traceback.print_exc()
-        # Último recurso: página sin banner rojo (200) en lugar de redirect.
-        return (
-            render_template(
-                'error_servidor.html',
-                codigo=500,
-                titulo='Panel del comercio',
-                mensaje='El panel se cargó en modo seguro. Recarga en unos segundos.',
-                sesion_activa=True,
-            ),
-            200,
-        )
+        raise
 
 
 @app.route('/comercio/planes')
