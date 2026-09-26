@@ -238,9 +238,33 @@ db_url = ''
 db = None
 csrf = None
 
+
+def _sqlalchemy_url(url):
+    """URI para SQLAlchemy forzando el driver instalado ``psycopg2``.
+
+    SQLAlchemy 2.x puede resolver el dialecto a ``psycopg`` (v3) si la URL trae
+    ``+psycopg`` o por su heurística, y el paquete no está instalado →
+    ``ModuleNotFoundError: No module named 'psycopg'``. Aquí se normaliza a
+    ``postgresql+psycopg2://``. No afecta a la conexión directa de psycopg2
+    (que sigue usando ``DATABASE_URL`` sin el sufijo ``+psycopg2``).
+    """
+    valor = (url or '').strip() or 'postgresql://localhost/localis'
+    if valor.startswith('postgresql+psycopg2://'):
+        return valor
+    for prefijo in (
+        'postgresql+psycopg://',
+        'postgresql+psycopg3://',
+        'postgresql://',
+        'postgres://',
+    ):
+        if valor.startswith(prefijo):
+            return 'postgresql+psycopg2://' + valor[len(prefijo):]
+    return valor
+
+
 try:
     db_url = normalize_database_url(os.environ.get('DATABASE_URL', ''))
-    app.config['SQLALCHEMY_DATABASE_URI'] = db_url or 'postgresql://localhost/localis'
+    app.config['SQLALCHEMY_DATABASE_URI'] = _sqlalchemy_url(db_url)
     db = SQLAlchemy(app)
     try:
         app.secret_key = obtener_secret_key()
