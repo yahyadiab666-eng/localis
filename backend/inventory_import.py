@@ -126,17 +126,19 @@ LOG_PREFIX = '[Localis CSV]'
 
 
 def _modo_bajas():
-    """Cómo tratar productos que ya no vienen en el archivo.
+    """Sincronización espejo: qué hacer con los productos que NO vienen en el archivo.
 
-    ``desactivar`` (por defecto): los marca inactivos (no aparecen en público).
-    ``eliminar``: los borra. ``off``: no hace nada.
+    ``eliminar`` (por defecto): el inventario queda **exactamente** como el
+    archivo (se borran de la tienda los productos ausentes).
+    ``desactivar``: los marca inactivos (no se borran).
+    ``off``/``upsert``: no toca los ausentes (solo altas/actualizaciones).
     """
-    valor = str(os.getenv('LOCALIS_CSV_BAJAS', 'desactivar') or 'desactivar').strip().lower()
-    if valor in ('eliminar', 'delete', 'borrar'):
-        return 'eliminar'
-    if valor in ('off', '0', 'no', 'nada', 'ninguno'):
+    valor = str(os.getenv('LOCALIS_CSV_BAJAS', 'eliminar') or 'eliminar').strip().lower()
+    if valor in ('desactivar', 'inactivar', 'ocultar'):
+        return 'desactivar'
+    if valor in ('off', '0', 'no', 'nada', 'ninguno', 'upsert'):
         return 'off'
-    return 'desactivar'
+    return 'eliminar'
 _MAX_FLASH_CHARS = 1400
 
 INSERT_PRODUCTO_SQL = """
@@ -1539,7 +1541,7 @@ def persistir_importacion_upsert(comercio_id, productos, categoria=None, existen
             and (reg.get('activo') is None or int(reg['activo']) == 1)
         ]
         modo_bajas = _modo_bajas()
-        if ids_baja and activo_ok and modo_bajas == 'desactivar':
+        if ids_baja and modo_bajas == 'desactivar' and activo_ok:
             for inicio in range(0, len(ids_baja), IMPORT_BATCH_SIZE):
                 lote_ids = ids_baja[inicio : inicio + IMPORT_BATCH_SIZE]
                 placeholders = ', '.join('?' for _ in lote_ids)
@@ -1548,7 +1550,10 @@ def persistir_importacion_upsert(comercio_id, productos, categoria=None, existen
                     tuple(lote_ids),
                 )
                 bajas += len(lote_ids)
-        elif ids_baja and activo_ok and modo_bajas == 'eliminar':
+        elif ids_baja and modo_bajas == 'eliminar':
+            # Sincronización espejo: se elimina de la tienda lo que no viene en
+            # el archivo (solo productos de ESTE comercio; la FK de
+            # interacciones_comercio es ON DELETE SET NULL).
             for inicio in range(0, len(ids_baja), IMPORT_BATCH_SIZE):
                 lote_ids = ids_baja[inicio : inicio + IMPORT_BATCH_SIZE]
                 placeholders = ', '.join('?' for _ in lote_ids)

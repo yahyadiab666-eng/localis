@@ -120,11 +120,11 @@ def main() -> int:
             )
             estado = {r['codigo_barras']: r for r in map(dict, cur.fetchall())}
         _ok(abs(float(estado[EANS[0]]['precio_usd']) - 1.5) < 1e-6, 'el precio de A se actualizo')
-        _ok(int(estado[EANS[2]]['activo']) == 0, 'C quedo inactivo (baja)')
+        _ok(EANS[2] not in estado, 'C se elimino del inventario (sincronizacion espejo)')
         _ok(int(estado[EANS[3]]['activo']) == 1, 'D quedo activo (alta)')
 
         ins, act, omi, baj = persistir_importacion_upsert(comercio_id, inicial)
-        _ok(ins == 0, 'C no se duplica al reaparecer')
+        _ok(ins == 1, 'C reaparece como alta nueva tras el borrado espejo')
         with get_db_connection(row_factory=True) as c:
             cur = c.cursor()
             cur.execute(
