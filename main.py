@@ -1019,62 +1019,113 @@ def registro_legacy():
 
 @app.route('/login/google')
 def login_google():
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        print('[Localis OAuth] GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET ausentes.', flush=True)
+        flash('Inicio de sesión con Google no está configurado.', 'error')
+        return redirect(url_for('login'))
+    if google is None:
+        print('[Localis OAuth] cliente OAuth no inicializado.', flush=True)
+        flash('No se pudo inicializar el cliente OAuth de Google.', 'error')
+        return redirect(url_for('login'))
     try:
-        if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-            flash('Inicio de sesión con Google no está configurado.', 'error')
-            return redirect(url_for('login'))
-        if not google:
-            flash('No se pudo inicializar el cliente OAuth de Google.', 'error')
-            return redirect(url_for('login'))
         redirect_uri = url_for('google_callback', _external=True)
+        print(f'[Localis OAuth] authorize_redirect uri={redirect_uri}', flush=True)
         return google.authorize_redirect(redirect_uri)
     except Exception as error:
-        flash(f'No se pudo iniciar sesión con Google: {error}', 'error')
+        print(f'[Localis OAuth] fallo authorize_redirect: {type(error).__name__}: {error}', flush=True)
+        traceback.print_exc()
+        flash('No se pudo iniciar sesión con Google. Intenta de nuevo.', 'error')
         return redirect(url_for('login'))
 
 
 @app.route('/login/google/callback')
 def google_callback():
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        print('[Localis OAuth] callback sin credenciales configuradas.', flush=True)
+        flash('Inicio de sesión con Google no está configurado.', 'error')
+        return redirect(url_for('login'))
+    if google is None:
+        print('[Localis OAuth] callback sin cliente OAuth.', flush=True)
+        flash('No se pudo inicializar el cliente OAuth de Google.', 'error')
+        return redirect(url_for('login'))
+
+    # 1) Intercambio del código por token (errores de red/estado/token).
     try:
-        if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-            flash('Inicio de sesión con Google no está configurado.', 'error')
-            return redirect(url_for('login'))
-        if not google:
-            flash('No se pudo inicializar el cliente OAuth de Google.', 'error')
-            return redirect(url_for('login'))
-
         token = google.authorize_access_token()
-        google_info = token.get('userinfo') if token else None
+    except Exception as error:
+        print(
+            f'[Localis OAuth] authorize_access_token fallo: {type(error).__name__}: {error}',
+            flush=True,
+        )
+        traceback.print_exc()
+        flash('No se pudo validar la sesión con Google. Intenta de nuevo.', 'error')
+        return redirect(url_for('login'))
 
+    # 2) Perfil del usuario (con respaldo por si el token no trae ``userinfo``).
+    try:
+        google_info = token.get('userinfo') if token else None
+        if not google_info:
+            try:
+                google_info = google.userinfo(token=token) if token else None
+            except Exception as error_perfil:
+                print(
+                    f'[Localis OAuth] userinfo fallback fallo: '
+                    f'{type(error_perfil).__name__}: {error_perfil}',
+                    flush=True,
+                )
+                traceback.print_exc()
+                google_info = None
+        if not google_info:
+            flash('No se recibió información de perfil desde Google.', 'error')
+            return redirect(url_for('login'))
+    except Exception as error:
+        print(f'[Localis OAuth] perfil fallo: {type(error).__name__}: {error}', flush=True)
+        traceback.print_exc()
+        flash('No se pudo leer tu perfil de Google. Intenta de nuevo.', 'error')
+        return redirect(url_for('login'))
+
+    # 3) Alta/actualización del usuario y sesión.
+    try:
         exito, usuario_o_error = obtener_o_crear_usuario_google(google_info)
 
         if not exito or not isinstance(usuario_o_error, dict) or not usuario_o_error.get('id'):
+            print(f'[Localis OAuth] usuario no resuelto: {usuario_o_error}', flush=True)
             flash(
-                f'Error en inicio de sesión con Google: {usuario_o_error}',
+                'No se pudo iniciar sesión con tu cuenta de Google. Intenta de nuevo.',
                 'error',
             )
             return redirect(url_for('login'))
 
         session['usuario_id'] = usuario_o_error['id']
-        session['username'] = usuario_o_error['nombre']
-        session['correo'] = usuario_o_error['correo']
-        session['foto_url'] = usuario_o_error.get('foto_url', '')
+        session['username'] = usuario_o_error.get('nombre') or 'Usuario'
+        session['correo'] = usuario_o_error.get('correo') or ''
+        session['foto_url'] = usuario_o_error.get('foto_url', '') or ''
         session['rol'] = usuario_o_error.get('rol', 'comerciante')
         session['es_admin'] = usuario_o_error.get('rol') == 'admin'
 
-        flash(f"¡Bienvenido, {usuario_o_error['nombre']}!", 'exito')
+        flash(f"¡Bienvenido, {session['username']}!", 'exito')
 
-        if usuario_o_error.get('rol') == 'admin':
+        if session['es_admin']:
             return redirect(url_for('panel_admin'))
-        if usuario_o_error.get('rol') == 'comerciante':
-            comercio = obtener_comercio_por_usuario(usuario_o_error['id'])
-            if comercio:
-                vincular_comercio_en_sesion(comercio['id'])
+        if session['rol'] == 'comerciante':
+            try:
+                comercio = obtener_comercio_por_usuario(usuario_o_error['id'])
+                if comercio:
+                    vincular_comercio_en_sesion(comercio['id'])
+            except Exception as error_comercio:
+                print(
+                    f'[Localis OAuth] comercio no resuelto: '
+                    f'{type(error_comercio).__name__}: {error_comercio}',
+                    flush=True,
+                )
+                traceback.print_exc()
             return redirect(url_for('panel_comercio'))
 
         return redirect(url_for('index'))
     except Exception as error:
-        flash(f'Error en inicio de sesión con Google: {error}', 'error')
+        print(f'[Localis OAuth] sesión fallo: {type(error).__name__}: {error}', flush=True)
+        traceback.print_exc()
+        flash('Error al iniciar sesión con Google. Intenta de nuevo.', 'error')
         return redirect(url_for('login'))
 
 
