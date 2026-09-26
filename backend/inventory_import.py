@@ -1550,7 +1550,6 @@ def persistir_importacion_upsert(comercio_id, productos, categoria=None, existen
             for reg in existentes_todos
             if reg.get('id') is not None
             and int(reg['id']) not in ids_presentes
-            and (reg.get('activo') is None or int(reg['activo']) == 1)
         ]
         modo_bajas = _modo_bajas()
         if ids_baja and modo_bajas == 'desactivar' and activo_ok:
