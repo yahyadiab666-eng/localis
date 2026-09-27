@@ -257,6 +257,9 @@ COLUMNAS_ESQUEMA = {
         ('telefono_pagador', 'TEXT'),
         ('estado', "TEXT DEFAULT 'pendiente'"),
         ('fecha_pago', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+        # Antifraude: trazabilidad del comprobante y bloqueo por imagen repetida.
+        ('comprobante_url', 'TEXT'),
+        ('comprobante_hash', 'TEXT'),
     ],
     'solicitudes_pago': [
         ('comercio_id', 'INTEGER'),
@@ -265,6 +268,9 @@ COLUMNAS_ESQUEMA = {
         ('fecha_transferencia', 'TEXT'),
         ('estado', "TEXT DEFAULT 'pendiente'"),
         ('fecha_registro', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+        # Antifraude: trazabilidad del comprobante y bloqueo por imagen repetida.
+        ('comprobante_url', 'TEXT'),
+        ('comprobante_hash', 'TEXT'),
     ],
     'interacciones_comercio': [
         ('comercio_id', 'INTEGER'),
@@ -1264,7 +1270,9 @@ def _crear_tabla_pagos(cursor):
             cedula_pagador TEXT,
             telefono_pagador TEXT,
             estado TEXT DEFAULT 'pendiente',
-            fecha_pago TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            fecha_pago TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            comprobante_url TEXT,
+            comprobante_hash TEXT
         )
         """
     )
@@ -1280,7 +1288,9 @@ def _crear_tabla_solicitudes_pago(cursor):
             referencia TEXT NOT NULL,
             fecha_transferencia TEXT NOT NULL,
             estado TEXT DEFAULT 'pendiente',
-            fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            comprobante_url TEXT,
+            comprobante_hash TEXT
         )
         """
     )
@@ -1460,6 +1470,7 @@ def _crear_indices(cursor):
         'CREATE INDEX IF NOT EXISTS idx_tiendas_estado ON comercios(estado_pago, plan_id)',
         'CREATE INDEX IF NOT EXISTS idx_pagos_tienda ON pagos(tienda_id)',
         'CREATE INDEX IF NOT EXISTS idx_pagos_referencia ON pagos(referencia)',
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_pagos_comprobante_hash ON pagos(comprobante_hash) WHERE comprobante_hash IS NOT NULL',
         'CREATE INDEX IF NOT EXISTS idx_pagos_estado ON pagos(estado)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_estado_plan ON comercios(estado_pago, plan_tipo)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_plan_id ON comercios(plan_id)',
@@ -1479,6 +1490,7 @@ def _crear_indices(cursor):
         'CREATE INDEX IF NOT EXISTS idx_soporte_estado ON soporte_y_reportes(estado)',
         'CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_comercio ON solicitudes_pago(comercio_id)',
         'CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_referencia ON solicitudes_pago(referencia)',
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_solicitudes_pago_comprobante_hash ON solicitudes_pago(comprobante_hash) WHERE comprobante_hash IS NOT NULL',
         'CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_estado ON solicitudes_pago(estado)',
         'CREATE INDEX IF NOT EXISTS idx_interacciones_comercio_fecha ON interacciones_comercio(comercio_id, fecha DESC)',
         'CREATE INDEX IF NOT EXISTS idx_interacciones_comercio_producto ON interacciones_comercio(producto_id)',

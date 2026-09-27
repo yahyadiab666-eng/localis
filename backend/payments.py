@@ -1,8 +1,24 @@
 """Confirmación atómica de pagos y activación de suscripciones."""
 
+import hashlib
 import sqlite3
 
 from backend.db import get_db_connection
+
+
+def calcular_hash_comprobante(data_bytes, algoritmo='sha256'):
+    """
+    Hash criptográfico de los bytes del comprobante (antifraude visual).
+
+    Permite detectar la reutilización del mismo archivo físico aunque cambie
+    la referencia reportada.
+    """
+    if not data_bytes:
+        return None
+    try:
+        return hashlib.new(algoritmo, data_bytes).hexdigest()
+    except ValueError:
+        return hashlib.sha256(data_bytes).hexdigest()
 
 
 def activar_suscripcion_con_pago(

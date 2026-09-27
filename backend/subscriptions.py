@@ -625,6 +625,37 @@ def _referencia_ya_usada(referencia, excluir_comercio_id=None):
         return cursor.fetchone() is not None
 
 
+def comprobante_ya_usado(comprobante_hash):
+    """
+    True si el hash de este comprobante ya fue registrado.
+
+    Bloquea la reutilización del mismo archivo físico (misma imagen) aunque el
+    comerciante cambie la referencia reportada.
+    """
+    if not comprobante_hash:
+        return False
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                'SELECT 1 FROM pagos WHERE comprobante_hash = ? LIMIT 1',
+                (comprobante_hash,),
+            )
+            if cursor.fetchone():
+                return True
+            cursor.execute(
+                'SELECT 1 FROM solicitudes_pago WHERE comprobante_hash = ? LIMIT 1',
+                (comprobante_hash,),
+            )
+            return cursor.fetchone() is not None
+    except Exception as error:
+        print(
+            f'[Localis] No se pudo verificar hash de comprobante: {error}',
+            flush=True,
+        )
+        return False
+
+
 def _resolver_fecha_y_montos_activacion(comercio, plan_tipo):
     """Calcula fecha de vencimiento y montos según tipo de cambio de plan."""
     cotizacion = calcular_cotizacion_cambio_plan(comercio, plan_tipo)
@@ -889,9 +920,13 @@ def activar_suscripcion_por_comprobante(
     referencia,
     comprobante_url=None,
     monto_ocr_bs=None,
+    comprobante_hash=None,
 ):
     """
     Valida referencia OCR, registra pago aprobado y renueva suscripción automáticamente.
+
+    Guarda ``comprobante_url`` (trazabilidad) y ``comprobante_hash`` (antifraude
+    de imagen repetida) en ``pagos`` y ``solicitudes_pago``.
     """
     plan_tipo = (plan_tipo or 'basica').lower()
     if plan_tipo not in PLANES or plan_tipo == 'gratis':
@@ -903,6 +938,9 @@ def activar_suscripcion_por_comprobante(
 
     if _referencia_ya_usada(referencia):
         return False, 'Esta referencia ya fue registrada en el sistema.', None
+
+    if comprobante_hash and comprobante_ya_usado(comprobante_hash):
+        return False, 'Este comprobante ya fue registrado en el sistema.', None
 
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
@@ -962,6 +1000,8 @@ def activar_suscripcion_por_comprobante(
                     'referencia',
                     'banco_origen',
                     'estado',
+                    'comprobante_url',
+                    'comprobante_hash',
                 ),
                 'valores': (
                     int(comercio_id),
@@ -971,6 +1011,8 @@ def activar_suscripcion_por_comprobante(
                     referencia,
                     'Banco Caribe',
                     'aprobado',
+                    comprobante_url,
+                    comprobante_hash,
                 ),
             },
             solicitud_registro={
@@ -980,6 +1022,8 @@ def activar_suscripcion_por_comprobante(
                     'referencia',
                     'fecha_transferencia',
                     'estado',
+                    'comprobante_url',
+                    'comprobante_hash',
                 ),
                 'valores': (
                     int(comercio_id),
@@ -987,6 +1031,8 @@ def activar_suscripcion_por_comprobante(
                     referencia,
                     datetime.now().date(),
                     'aprobado',
+                    comprobante_url,
+                    comprobante_hash,
                 ),
             },
         )

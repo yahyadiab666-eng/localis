@@ -1,8 +1,10 @@
 """Extracción y validación estricta de comprobantes de pago móvil con RapidOCR."""
 
+import os
 import re
 import time
 import unicodedata
+from datetime import date, datetime
 
 import cv2
 import numpy as np
@@ -14,6 +16,32 @@ REFERENCIA_RE = re.compile(r'\b(\d{6})\b')
 MONTO_RE = re.compile(
     r'(\d{1,3}(?:[.\s]\d{3})*[.,]\d{2}|\d+[.,]\d{2})'
 )
+# Fechas típicas de comprobantes bancarios: DD/MM/YYYY, YYYY-MM-DD y DD/MM/YY.
+FECHAS_RE = (
+    re.compile(r'\b(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})\b'),
+    re.compile(r'\b(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})\b'),
+    re.compile(r'\b(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2})\b'),
+)
+
+
+def _env_bool(nombre, default=True):
+    valor = os.environ.get(nombre)
+    if valor is None:
+        return default
+    return valor.strip().lower() not in ('0', 'false', 'no', 'off', '')
+
+
+def _env_int(nombre, default):
+    try:
+        return int(os.environ.get(nombre, default))
+    except (TypeError, ValueError):
+        return default
+
+
+# Por defecto se EXIGE fecha y se permite hoy o ayer (ventana ~24-48 h).
+EXIGIR_FECHA_COMPROBANTE = _env_bool('LOCALIS_COMPROBANTE_EXIGIR_FECHA', True)
+MAX_DIAS_COMPROBANTE = max(0, _env_int('LOCALIS_COMPROBANTE_MAX_DIAS', 1))
+
 
 BANCO_OFICIAL = PAGO_MOVIL_DEFAULT['banco']
 RIF_OFICIAL = re.sub(r'\D', '', PAGO_MOVIL_DEFAULT['cedula_rif'])
@@ -98,6 +126,44 @@ def _elegir_monto(candidatos, monto_esperado):
     return min(candidatos, key=lambda m: abs(m - monto_esperado))
 
 
+def _parse_fecha(anio, mes, dia):
+    try:
+        return date(int(anio), int(mes), int(dia))
+    except (TypeError, ValueError):
+        return None
+
+
+def _extraer_fechas(texto):
+    """Extrae fechas válidas del texto OCR (DD/MM/YYYY, YYYY-MM-DD, DD/MM/YY)."""
+    fechas = []
+    for patron in FECHAS_RE:
+        for a, b, c in patron.findall(texto or ''):
+            if len(a) == 4:  # YYYY-MM-DD
+                fecha = _parse_fecha(a, b, c)
+            else:  # DD/MM/YYYY o DD/MM/YY
+                anio = c
+                if len(anio) == 2:
+                    anio = ('20' if int(anio) < 70 else '19') + anio
+                fecha = _parse_fecha(anio, b, a)
+            if fecha:
+                fechas.append(fecha)
+    vistas = set()
+    unicas = []
+    for fecha in fechas:
+        if fecha not in vistas:
+            vistas.add(fecha)
+            unicas.append(fecha)
+    return unicas
+
+
+def _elegir_fecha(fechas, hoy):
+    """Fecha más cercana a hoy y su diferencia en días (hoy - fecha)."""
+    if not fechas:
+        return None, None
+    mejor = min(fechas, key=lambda f: abs((hoy - f).days))
+    return mejor, (hoy - mejor).days
+
+
 def _contiene_banco(texto_norm):
     return 'caribe' in texto_norm
 
@@ -125,10 +191,25 @@ def extraer_referencia_desde_bytes(data_bytes):
     return resultado.get('referencia'), resultado.get('ms', 0.0)
 
 
-def validar_comprobante_pago_movil(data_bytes, monto_esperado_bs):
+def validar_comprobante_pago_movil(
+    data_bytes,
+    monto_esperado_bs,
+    ahora=None,
+    exigir_fecha=None,
+    max_dias=None,
+):
     """
     OCR estricto del comprobante.
-    Retorna dict con: ok, referencia, monto_bs, errores, ms, texto_ocr.
+
+    ``ahora``: fecha de referencia (``datetime.date``) para validar la fecha
+    del comprobante; por defecto hoy.
+    ``exigir_fecha``: si es ``True`` y no hay fecha válida, se rechaza. Por
+    defecto toma ``LOCALIS_COMPROBANTE_EXIGIR_FECHA`` (1).
+    ``max_dias``: antigüedad máxima permitida en días. Por defecto
+    ``LOCALIS_COMPROBANTE_MAX_DIAS`` (1: hoy o ayer).
+
+    Retorna dict con: ok, referencia, monto_bs, fecha_comprobante, errores,
+    ms, texto_ocr.
     """
     inicio = time.perf_counter()
     errores = []
@@ -138,6 +219,7 @@ def validar_comprobante_pago_movil(data_bytes, monto_esperado_bs):
             'ok': False,
             'referencia': None,
             'monto_bs': None,
+            'fecha_comprobante': None,
             'errores': ['Comprobante vacío o ilegible.'],
             'ms': 0.0,
             'texto_ocr': '',
@@ -150,6 +232,7 @@ def validar_comprobante_pago_movil(data_bytes, monto_esperado_bs):
             'ok': False,
             'referencia': None,
             'monto_bs': None,
+            'fecha_comprobante': None,
             'errores': ['No se pudo leer la imagen del comprobante.'],
             'ms': (time.perf_counter() - inicio) * 1000,
             'texto_ocr': '',
@@ -188,6 +271,30 @@ def validar_comprobante_pago_movil(data_bytes, monto_esperado_bs):
                 f'con el esperado ({float(monto_esperado_bs):.2f} Bs).'
             )
 
+    # Antifraude: la fecha del comprobante debe ser reciente (hoy/ayer por defecto).
+    exigir_fecha = (
+        EXIGIR_FECHA_COMPROBANTE if exigir_fecha is None else bool(exigir_fecha)
+    )
+    max_dias = (
+        MAX_DIAS_COMPROBANTE
+        if max_dias is None
+        else max(0, int(max_dias))
+    )
+    hoy = ahora or datetime.now().date()
+    fecha_comprobante, delta_dias = _elegir_fecha(_extraer_fechas(texto_raw), hoy)
+
+    if exigir_fecha:
+        if fecha_comprobante is None:
+            errores.append(
+                'No se detectó la fecha del comprobante (se espera DD/MM/AAAA).'
+            )
+        elif not (-1 <= delta_dias <= max_dias):
+            errores.append(
+                f'La fecha del comprobante '
+                f'({fecha_comprobante.strftime("%d/%m/%Y")}) está fuera del rango '
+                f'permitido (máximo {max_dias} día(s) de antigüedad).'
+            )
+
     transcurrido_ms = (time.perf_counter() - inicio) * 1000
     ok = not errores and bool(referencia)
 
@@ -195,6 +302,7 @@ def validar_comprobante_pago_movil(data_bytes, monto_esperado_bs):
         'ok': ok,
         'referencia': referencia,
         'monto_bs': monto_detectado,
+        'fecha_comprobante': fecha_comprobante.strftime('%Y-%m-%d') if fecha_comprobante else None,
         'errores': errores,
         'ms': transcurrido_ms,
         'texto_ocr': texto_raw[:500],

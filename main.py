@@ -167,6 +167,7 @@ from backend.subscriptions import (
     calcular_cotizacion_cambio_plan,
     calcular_monto_pago_plan,
     comercio_puede_gestionar_inventario,
+    comprobante_ya_usado,
     contar_productos_comercio,
     marcar_bienvenida_vista,
     obtener_avisos_suscripcion,
@@ -178,6 +179,7 @@ from backend.subscriptions import (
     verificar_vencimiento_comercio,
     verificar_vencimientos_comercios,
 )
+from backend.payments import calcular_hash_comprobante
 from backend.utils import (
     formatear_fecha,
     imagen_url_para_persistir,
@@ -2110,6 +2112,12 @@ def api_verificar_pago():
     if error_lectura:
         return jsonify({'error': error_lectura}), 400
 
+    hash_comprobante = calcular_hash_comprobante(data_bytes)
+    if comprobante_ya_usado(hash_comprobante):
+        return jsonify(
+            {'error': 'Este comprobante ya fue registrado en el sistema.'}
+        ), 400
+
     montos = calcular_monto_pago_plan(plan_tipo, comercio)
     if not montos:
         return jsonify({'error': 'Plan no válido para pago.'}), 400
@@ -2152,6 +2160,7 @@ def api_verificar_pago():
         referencia,
         comprobante_url=comprobante_url,
         monto_ocr_bs=ocr.get('monto_bs'),
+        comprobante_hash=hash_comprobante,
     )
 
     if not exito:
@@ -2162,6 +2171,7 @@ def api_verificar_pago():
         'mensaje': mensaje,
         'referencia': referencia,
         'ocr_ms': round(ocr.get('ms', 0), 1),
+        'fecha_comprobante': ocr.get('fecha_comprobante'),
         'estado': datos.get('estado', 'activo'),
         'fecha_vencimiento': datos.get('fecha_vencimiento'),
         'plan_tipo': datos.get('plan_tipo', plan_tipo),
