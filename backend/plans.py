@@ -91,6 +91,25 @@ def puede_renovar_plan_actual(plan_actual, plan_destino, vencido=False):
     """
     return (plan_actual or 'gratis').lower() == (plan_destino or '').lower()
 
+
+def plan_change_requiere_programacion(plan_actual, plan_nuevo, vencido=False):
+    """True si el cambio debe programarse a fin de periodo.
+
+    Solo un **downgrade** con suscripción **no vencida** se programa. Si el
+    comercio está vencido (o su fecha ya pasó), cualquier cambio es inmediato.
+    """
+    if vencido:
+        return False
+    return clasificar_cambio_plan(plan_actual, plan_nuevo) == 'downgrade'
+
+
+def aplicacion_inmediata(plan_actual, plan_nuevo, vencido=False):
+    """True si el cambio se aplica de inmediato (no programado a fin de periodo)."""
+    return not plan_change_requiere_programacion(
+        plan_actual, plan_nuevo, vencido=vencido
+    )
+
+
 PLAN_BENEFICIOS = {
     'gratis': {
         'productos': 'Hasta 50 productos',

@@ -149,7 +149,7 @@
                            {% if codigo == 'pro' %}bg-violet-600 text-white hover:bg-violet-500
                            {% elif codigo == 'business' %}bg-stone-900 text-white hover:bg-stone-800
                            {% else %}border border-amber-400 text-amber-800 hover:bg-amber-50{% endif %}">
-              {% if info.tipo_cambio == 'downgrade' %}Programar cambio{% else %}Elegir {{ plan.nombre }}{% endif %}
+              {% if info.tipo_cambio == 'downgrade' and not vencido %}Programar cambio{% elif info.tipo_cambio == 'downgrade' %}Cambiar de plan{% else %}Elegir {{ plan.nombre }}{% endif %}
             </button>
             {% endif %}
           </div>
@@ -163,8 +163,8 @@
       </p>
       <ul class="list-disc list-inside space-y-1 text-xs sm:text-sm">
         <li><strong>Upgrade:</strong> se aplica de inmediato con ajuste prorrateado del periodo.</li>
-        <li><strong>Downgrade:</strong> se programa para el final de tu ciclo actual; conservas las funciones hasta entonces.</li>
-        <li><strong>Renovación:</strong> suma 30 días a tu fecha de vencimiento.</li>
+        <li><strong>Downgrade:</strong> con suscripción activa se programa para el final de tu ciclo; si tu suscripción está <strong>vencida</strong>, se aplica de inmediato.</li>
+        <li><strong>Renovación:</strong> suma 30 días a tu fecha de vencimiento; si está vencida, reactiva tu plan de inmediato.</li>
       </ul>
     </section>
   </main>
@@ -266,13 +266,21 @@
       const montoBs = cotizacion ? cotizacion.monto_bs : (plan.monto_bs != null ? plan.monto_bs : (plan.precio_usd * TASA_CAMBIO));
 
       if (tipo === 'downgrade' || !requierePago) {
-        montoBsEl.textContent = 'Sin pago ahora — cambio programado';
-        if (mensajeEl) mensajeEl.textContent = cotizacion?.mensaje || plan.mensaje_cambio || '';
-        if (ayudaEl) ayudaEl.textContent = 'Conservarás las funciones de tu plan actual hasta que finalice el periodo pagado.';
+        const inmediata = (cotizacion && cotizacion.aplicacion === 'inmediata') || (!cotizacion && PLAN_VENCIDO);
+        if (inmediata) {
+          montoBsEl.textContent = 'Sin pago ahora — se aplica de inmediato';
+          if (mensajeEl) mensajeEl.textContent = cotizacion?.mensaje || plan.mensaje_cambio || '';
+          if (ayudaEl) ayudaEl.textContent = 'Tu suscripción está vencida: el cambio se aplica de inmediato. Renueva para volver a quedar visible.';
+          if (btnTexto) btnTexto.textContent = 'Aplicar cambio de plan';
+        } else {
+          montoBsEl.textContent = 'Sin pago ahora — cambio programado';
+          if (mensajeEl) mensajeEl.textContent = cotizacion?.mensaje || plan.mensaje_cambio || '';
+          if (ayudaEl) ayudaEl.textContent = 'Conservarás las funciones de tu plan actual hasta que finalice el periodo pagado.';
+          if (btnTexto) btnTexto.textContent = 'Programar cambio de plan';
+        }
         if (bloqueComprobante) bloqueComprobante.classList.add('hidden');
         if (preview) preview.classList.add('hidden');
         if (inputComprobante) inputComprobante.removeAttribute('required');
-        if (btnTexto) btnTexto.textContent = 'Programar cambio de plan';
       } else {
         montoBsEl.textContent =
           'Monto a pagar: ' + Number(montoBs).toFixed(2) + ' Bs (' +

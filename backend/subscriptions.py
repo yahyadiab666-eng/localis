@@ -9,6 +9,7 @@ from backend.db import es_error_bd_transitorio, get_db_connection
 from backend.plans import (
     PLANES,
     MENSAJE_LIMITE_PRODUCTOS,
+    aplicacion_inmediata,
     clasificar_cambio_plan,
     es_downgrade,
     es_limite_ilimitado,
@@ -426,6 +427,23 @@ def _calcular_monto_upgrade(comercio, plan_destino):
     return round(max(0.0, precio_nuevo - credito), 2)
 
 
+def _comercio_vencido(comercio):
+    """True si el comercio está vencido: estado 'vencido' o fecha ya pasada."""
+    if not comercio:
+        return False
+    estado = (comercio.get('estado_pago') or '').strip().lower()
+    if estado in ('vencido', 'suspendido'):
+        return True
+    fecha = comercio.get('fecha_vencimiento')
+    if not fecha:
+        return False
+    try:
+        venc = datetime.strptime(formatear_fecha(fecha), '%Y-%m-%d').date()
+        return venc < datetime.now().date()
+    except (TypeError, ValueError):
+        return False
+
+
 def calcular_cotizacion_cambio_plan(comercio, plan_tipo_destino, tasa=None):
     """
     Cotiza un cambio de plan según upgrade, downgrade o renovación.
@@ -443,9 +461,9 @@ def calcular_cotizacion_cambio_plan(comercio, plan_tipo_destino, tasa=None):
 
     comercio = comercio or {}
     plan_actual = (comercio.get('plan_tipo') or 'gratis').lower()
-    estado_actual = (comercio.get('estado_pago') or '').strip().lower()
+    vencido = _comercio_vencido(comercio)
     tipo_cambio = clasificar_cambio_plan(
-        plan_actual, plan_tipo_destino, vencido=(estado_actual == 'vencido')
+        plan_actual, plan_tipo_destino, vencido=vencido
     )
     dias = int(plan.get('dias_duracion') or 30)
     if tasa is None:
@@ -454,11 +472,14 @@ def calcular_cotizacion_cambio_plan(comercio, plan_tipo_destino, tasa=None):
         tasa = float(tasa)
     precio_completo = _precio_usd_plan(plan)
 
+    inmediata = aplicacion_inmediata(plan_actual, plan_tipo_destino, vencido=vencido)
     resultado = {
         'plan_tipo': plan_tipo_destino,
         'plan_nombre': plan.get('nombre', plan_tipo_destino),
         'plan_actual': plan_actual,
         'tipo_cambio': tipo_cambio,
+        'vencido': vencido,
+        'aplicacion': 'inmediata' if inmediata else 'programada',
         'tasa': tasa,
         'precio_usd_completo': precio_completo,
         'requiere_pago': True,
@@ -466,19 +487,34 @@ def calcular_cotizacion_cambio_plan(comercio, plan_tipo_destino, tasa=None):
     }
 
     if tipo_cambio == 'downgrade':
-        fecha_aplicacion = formatear_fecha(comercio.get('fecha_vencimiento'))
-        if not fecha_aplicacion:
-            fecha_aplicacion = _calcular_fecha_fin_prueba(comercio)
+        if not inmediata:
+            # Suscripción activa con periodo restante: cambio programado a fin de periodo.
+            fecha_aplicacion = formatear_fecha(comercio.get('fecha_vencimiento'))
+            if not fecha_aplicacion:
+                fecha_aplicacion = _calcular_fecha_fin_prueba(comercio)
+            resultado.update({
+                'monto_usd': 0.0,
+                'monto_bs': 0.0,
+                'requiere_pago': False,
+                'fecha_vencimiento_estimada': fecha_aplicacion,
+                'fecha_aplicacion_downgrade': fecha_aplicacion,
+                'mensaje': (
+                    f'Mantendrás tu plan actual hasta el {fecha_aplicacion}. '
+                    f'El plan {plan.get("nombre")} se aplicará automáticamente '
+                    f' al iniciar el próximo ciclo.'
+                ),
+            })
+            return resultado
+        # Vencido: se aplica de inmediato (sin fechas pasadas).
         resultado.update({
             'monto_usd': 0.0,
             'monto_bs': 0.0,
             'requiere_pago': False,
-            'fecha_vencimiento_estimada': fecha_aplicacion,
-            'fecha_aplicacion_downgrade': fecha_aplicacion,
+            'fecha_vencimiento_estimada': _calcular_fecha_vencimiento_desde_hoy(dias),
+            'fecha_aplicacion_downgrade': _calcular_fecha_vencimiento_desde_hoy(0),
             'mensaje': (
-                f'Mantendrás tu plan actual hasta el {fecha_aplicacion}. '
-                f'El plan {plan.get("nombre")} se aplicará automáticamente '
-                f' al iniciar el próximo ciclo.'
+                f'Tu suscripción está vencida. El plan {plan.get("nombre")} '
+                f'se aplicará de inmediato al confirmar el cambio.'
             ),
         })
         return resultado
@@ -486,28 +522,44 @@ def calcular_cotizacion_cambio_plan(comercio, plan_tipo_destino, tasa=None):
     if tipo_cambio == 'upgrade':
         monto_usd = _calcular_monto_upgrade(comercio, plan_tipo_destino)
         nueva_fecha = _calcular_fecha_vencimiento_desde_hoy(dias)
+        if vencido:
+            mensaje = (
+                f'Tu suscripción está vencida. Al pagar ${monto_usd:.2f} USD '
+                f'({round(monto_usd * tasa, 2):.2f} Bs) el plan '
+                f'{plan.get("nombre")} se activa de inmediato y vence el {nueva_fecha}.'
+            )
+        else:
+            mensaje = (
+                f'Upgrade inmediato: pagas el ajuste de ${monto_usd:.2f} USD '
+                f'({round(monto_usd * tasa, 2):.2f} Bs) y tu nuevo ciclo vence el '
+                f'{nueva_fecha}.'
+            )
         resultado.update({
             'monto_usd': monto_usd,
             'monto_bs': round(monto_usd * tasa, 2),
             'fecha_vencimiento_estimada': nueva_fecha,
-            'mensaje': (
-                f'Upgrade inmediato: pagas el ajuste de ${monto_usd:.2f} USD '
-                f'({round(monto_usd * tasa, 2):.2f} Bs) y tu nuevo ciclo vence el '
-                f'{nueva_fecha}.'
-            ),
+            'mensaje': mensaje,
         })
         return resultado
 
     # Renovación (mismo plan)
     nueva_fecha = _calcular_nueva_fecha_vencimiento(comercio.get('fecha_vencimiento'), dias)
+    if vencido:
+        mensaje = (
+            f'Suscripción vencida. Al pagar ${precio_completo:.2f} USD '
+            f'({round(precio_completo * tasa, 2):.2f} Bs) tu plan se reactiva de '
+            f'inmediato y vence el {nueva_fecha}.'
+        )
+    else:
+        mensaje = (
+            f'Renovación: ${precio_completo:.2f} USD ({round(precio_completo * tasa, 2):.2f} Bs). '
+            f'Se suman {dias} días a tu vencimiento actual (hasta {nueva_fecha}).'
+        )
     resultado.update({
         'monto_usd': precio_completo,
         'monto_bs': round(precio_completo * tasa, 2),
         'fecha_vencimiento_estimada': nueva_fecha,
-        'mensaje': (
-            f'Renovación: ${precio_completo:.2f} USD ({round(precio_completo * tasa, 2):.2f} Bs). '
-            f'Se suman {dias} días a tu vencimiento actual (hasta {nueva_fecha}).'
-        ),
+        'mensaje': mensaje,
     })
     return resultado
 
@@ -624,6 +676,38 @@ def programar_downgrade_plan(comercio_id, plan_tipo):
             if not plan:
                 return False, 'Plan no encontrado.', None
 
+            vencido = _comercio_vencido(comercio_dict)
+            if vencido:
+                # Sin periodo activo: se aplica de inmediato (no se programa).
+                cursor.execute(
+                    """
+                    UPDATE comercios
+                    SET plan_id = ?, plan_tipo = ?, limite_productos = ?,
+                        plan_pendiente = NULL, plan_id_pendiente = NULL
+                    WHERE id = ?
+                    """,
+                    (
+                        plan.get('id'),
+                        plan_tipo,
+                        limite_para_plan(plan_tipo),
+                        int(comercio_id),
+                    ),
+                )
+                conexion.commit()
+                return (
+                    True,
+                    (
+                        f'Tu suscripción está vencida. El plan {plan.get("nombre")} '
+                        'se aplicó de inmediato. Renueva para volver a ser visible.'
+                    ),
+                    {
+                        'plan_tipo': plan_tipo,
+                        'plan_pendiente': None,
+                        'aplicacion': 'inmediata',
+                        'tipo_cambio': 'downgrade',
+                    },
+                )
+
             plan_id_pendiente = plan.get('id')
             cursor.execute(
                 """
@@ -647,6 +731,7 @@ def programar_downgrade_plan(comercio_id, plan_tipo):
                 'plan_tipo': plan_tipo,
                 'plan_pendiente': plan_tipo,
                 'fecha_aplicacion': fecha_aplicacion,
+                'aplicacion': 'programada',
                 'tipo_cambio': 'downgrade',
             },
         )
