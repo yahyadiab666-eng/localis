@@ -81,6 +81,20 @@
             {{ comercio.descripcion or 'Sin descripción registrada para tu comercio todavía.' }}
           </p>
 
+          {% if comercio.id %}
+          <div class="pt-1 flex flex-col sm:flex-row items-stretch sm:items-center justify-center md:justify-start gap-2">
+            <a href="{{ url_for('tienda_publica', comercio_id=comercio.id) }}" target="_blank" rel="noopener"
+               class="btn-touch inline-flex items-center justify-center gap-2 bg-stone-900 text-white font-bold px-4 py-2 rounded-full text-xs hover:bg-stone-800 transition">
+              <i data-lucide="external-link" style="width:14px;height:14px;"></i> Ver mi tienda
+            </a>
+            <button type="button" id="btn-compartir-tienda"
+                    data-share-path="{{ url_for('tienda_publica', comercio_id=comercio.id) }}"
+                    class="btn-touch inline-flex items-center justify-center gap-2 bg-amber-500 text-stone-900 font-bold px-4 py-2 rounded-full text-xs hover:bg-amber-400 transition shadow-sm">
+              <i data-lucide="share-2" style="width:14px;height:14px;"></i> Compartir tienda
+            </button>
+          </div>
+          {% endif %}
+
           <div class="pt-3 flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-center md:justify-start gap-2 sm:gap-4 text-xs font-medium text-stone-500 border-t border-stone-100 panel-comercio-meta">
             <div class="flex items-center justify-center sm:justify-start gap-1.5">
               <i data-lucide="phone" class="text-amber-600 shrink-0" style="width:15px;height:15px;"></i>
@@ -394,6 +408,44 @@
           document.getElementById('modal-vencido')?.classList.remove('activo');
         }
       } catch (e) {}
+    })();
+    // Compartir tienda: copia el enlace público o abre el selector nativo (WhatsApp).
+    (function () {
+      const boton = document.getElementById('btn-compartir-tienda');
+      if (!boton) return;
+      const ruta = boton.getAttribute('data-share-path') || '';
+      const enlace = ruta ? (window.location.origin + ruta) : '';
+      if (!enlace) return;
+
+      const copiar = function () {
+        const aviso = '¡Enlace copiado! Compártelo por WhatsApp.';
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(enlace).then(function () {
+            window.mostrarAlertaLocalis?.(aviso, 'exito');
+          }).catch(function () {
+            window.prompt('Copia el enlace de tu tienda:', enlace);
+          });
+        } else {
+          window.prompt('Copia el enlace de tu tienda:', enlace);
+        }
+      };
+
+      boton.addEventListener('click', function () {
+        if (navigator.share) {
+          navigator.share({
+            title: 'Mi tienda en Localis',
+            text: 'Mira mi tienda en Localis',
+            url: enlace,
+          }).then(function () {
+            window.mostrarAlertaLocalis?.('¡Enlace compartido!', 'exito');
+          }).catch(function (error) {
+            if (error && error.name === 'AbortError') return;
+            copiar();
+          });
+        } else {
+          copiar();
+        }
+      });
     })();
     lucide.createIcons();
   </script>

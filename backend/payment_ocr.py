@@ -268,7 +268,9 @@ def validar_comprobante_pago_movil(
         elif not _montos_coinciden(monto_detectado, monto_esperado_bs):
             errores.append(
                 f'El monto del comprobante ({monto_detectado:.2f} Bs) no coincide '
-                f'con el esperado ({float(monto_esperado_bs):.2f} Bs).'
+                f'con el esperado ({float(monto_esperado_bs):.2f} Bs). '
+                'Por favor, verifica la cantidad o contacta a soporte técnico '
+                'para recibir ayuda.'
             )
 
     # Antifraude: la fecha del comprobante debe ser reciente (hoy/ayer por defecto).
