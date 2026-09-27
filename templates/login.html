@@ -156,7 +156,7 @@
             {% endwith %}
 
             <!-- BOTÓN ÚNICO DE GOOGLE OAUTH -->
-            <a href="/login/google" class="btn-google">
+            <a href="/login/google" id="google-login-btn" class="btn-google">
                 <svg viewBox="0 0 24 24">
                     <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
                     <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
@@ -169,6 +169,54 @@
         </div>
     </div>
 
+    <script>
+      // Google OAuth en la app nativa (Capacitor/Android): el WebView embebido es
+      // bloqueado por Google (disallowed_useragent). Solo si estamos en nativo,
+      // abrimos el flujo en el navegador del sistema con @capacitor/browser.
+      // En navegadores web normales window.Capacitor no existe y NO se altera nada.
+      (function () {
+        var boton = document.getElementById('google-login-btn');
+        if (!boton) return;
+
+        function abrirEnNavegadorSistema(url) {
+          var cap = window.Capacitor;
+          if (!cap) return false;
+          var Browser = null;
+          try {
+            if (cap.Plugins && cap.Plugins.Browser) {
+              Browser = cap.Plugins.Browser;
+            } else if (typeof cap.registerPlugin === 'function') {
+              Browser = cap.registerPlugin('Browser');
+            }
+          } catch (e) {
+            Browser = null;
+          }
+          if (!Browser || typeof Browser.open !== 'function') return false;
+          try {
+            var resultado = Browser.open({ url: url });
+            if (resultado && typeof resultado.catch === 'function') {
+              resultado.catch(function () {});
+            }
+          } catch (e) {
+            return false;
+          }
+          return true;
+        }
+
+        boton.addEventListener('click', function (evento) {
+          var cap = window.Capacitor;
+          var esNativo = !!(cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform());
+          if (!esNativo) return; // Web: navegación natural intacta.
+
+          // Misma URL absoluta de producción que usaría el navegador.
+          var href = boton.getAttribute('href') || '/login/google';
+          var destino = new URL(href, window.location.origin).href;
+          if (abrirEnNavegadorSistema(destino)) {
+            evento.preventDefault();
+          }
+        });
+      })();
+    </script>
 </body>
 <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
 </html>
