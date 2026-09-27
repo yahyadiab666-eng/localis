@@ -84,6 +84,7 @@
     </section>
 
     <!-- Catálogo de planes -->
+    {% set vencido = (avisos and avisos.suscripcion_vencida) %}
     <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
       {% for codigo in ['gratis', 'basica', 'pro', 'business'] %}
         {% set plan = planes[codigo] %}
@@ -126,7 +127,12 @@
           </ul>
 
           <div class="mt-5 pt-4 border-t border-stone-100">
-            {% if es_actual %}
+            {% if es_actual and vencido %}
+            <button type="button" onclick="abrirModalPlan('{{ codigo }}')"
+                    class="btn-touch w-full py-2.5 rounded-full text-sm font-bold bg-amber-500 text-stone-900 hover:bg-amber-400 transition">
+              Renovar mi plan
+            </button>
+            {% elif es_actual %}
             <button type="button" disabled
                     class="w-full py-2.5 rounded-full text-sm font-bold bg-stone-100 text-stone-400 cursor-not-allowed">
               Plan activo
@@ -234,6 +240,7 @@
     const planesBeneficios = {{ planes_beneficios | tojson }};
     const TASA_CAMBIO = {{ tasa }};
     const PLAN_ACTUAL = {{ (comercio.plan_tipo or 'gratis') | tojson }};
+    const PLAN_VENCIDO = {{ 1 if vencido else 0 }};
     let cotizacionPlanActual = null;
 
     function cerrarModal(id) {
@@ -296,12 +303,13 @@
     function abrirModalPlan(codigo) {
       const plan = planesBeneficios[codigo];
       if (!plan) return;
-      if (codigo === PLAN_ACTUAL) {
+      if (codigo === PLAN_ACTUAL && !PLAN_VENCIDO) {
         window.mostrarAlertaLocalis?.('Ya tienes este plan activo.', 'info');
         return;
       }
       document.getElementById('input-plan-tipo').value = codigo;
-      document.getElementById('modal-plan-titulo').textContent = 'Cambiar a ' + plan.nombre;
+      document.getElementById('modal-plan-titulo').textContent =
+        (codigo === PLAN_ACTUAL ? 'Renovar ' : 'Cambiar a ') + plan.nombre;
       document.getElementById('modal-plan-precio').textContent =
         '$' + plan.precio_usd + ' USD / mes · ' + plan.limite_texto + ' productos';
       actualizarMontoPlan(codigo);

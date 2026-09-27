@@ -51,11 +51,18 @@ def indice_plan(codigo):
         return 0
 
 
-def clasificar_cambio_plan(plan_actual, plan_nuevo):
-    """Retorna 'renovacion', 'upgrade' o 'downgrade'."""
+def clasificar_cambio_plan(plan_actual, plan_nuevo, vencido=False):
+    """Retorna 'renovacion', 'upgrade' o 'downgrade'.
+
+    Un comercio **vencido** puede renovar directamente su plan actual: si el
+    destino es el mismo plan, siempre es ``'renovacion'`` (nunca downgrade ni
+    un estado bloqueado). ``vencido`` se mantiene por claridad de intención.
+    """
     actual = (plan_actual or 'gratis').lower()
     nuevo = (plan_nuevo or '').lower()
-    if actual == nuevo:
+    if vencido and (not nuevo or actual == nuevo):
+        return 'renovacion'
+    if not nuevo or actual == nuevo:
         return 'renovacion'
     if indice_plan(nuevo) > indice_plan(actual):
         return 'upgrade'
@@ -70,6 +77,19 @@ def es_upgrade(plan_actual, plan_nuevo):
 
 def es_downgrade(plan_actual, plan_nuevo):
     return clasificar_cambio_plan(plan_actual, plan_nuevo) == 'downgrade'
+
+
+def es_renovacion(plan_actual, plan_nuevo):
+    return clasificar_cambio_plan(plan_actual, plan_nuevo) == 'renovacion'
+
+
+def puede_renovar_plan_actual(plan_actual, plan_destino, vencido=False):
+    """True si el comercio puede renovar directamente ``plan_destino``.
+
+    Es su plan actual; se habilita explícitamente cuando está vencido para
+    permitir la renovación directa en lugar de deshabilitar el botón.
+    """
+    return (plan_actual or 'gratis').lower() == (plan_destino or '').lower()
 
 PLAN_BENEFICIOS = {
     'gratis': {

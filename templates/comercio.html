@@ -352,9 +352,9 @@
   {% endif %}
 
   {% if avisos.suscripcion_vencida %}
-  <div id="modal-vencido" class="modal-push activo" onclick="if(event.target===this)rechazarVencido()">
+  <div id="modal-vencido" class="modal-push activo" onclick="if(event.target===this)cerrarModalVencido()">
     <div class="panel p-6 space-y-4 relative">
-      <button type="button" onclick="rechazarVencido()" class="btn-touch absolute top-3 right-3 text-stone-400 hover:text-stone-700 text-xl">&times;</button>
+      <button type="button" onclick="cerrarModalVencido()" aria-label="Cerrar" class="btn-touch absolute top-3 right-3 text-stone-400 hover:text-stone-700 text-xl">&times;</button>
       <div class="text-center">
         <div class="w-14 h-14 bg-red-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
           <i data-lucide="alert-triangle" class="text-red-600" style="width:28px;height:28px;"></i>
@@ -363,9 +363,9 @@
         <p class="text-stone-600 text-sm mt-2">Tu plan venció el {{ avisos.fecha_vencimiento or '—' }}. Renueva para seguir visible en Localis.</p>
       </div>
       <div class="flex flex-col gap-2">
-        <a href="{{ url_for('comercio_planes', abrir_pago='pro') }}"
+        <a href="{{ url_for('comercio_planes', abrir_pago=(comercio.plan_tipo or 'pro')) }}"
            class="btn-touch w-full py-3 rounded-full font-bold text-sm bg-amber-500 text-stone-900 text-center">
-          Renovar / Ver planes
+          Renovar mi plan / Ver planes
         </a>
                 <form id="form-rechazar-vencido" action="{{ url_for('suscripcion_rechazar_vencido') }}" method="POST" data-loading="true" data-loading-texto="Procesando…">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -382,6 +382,19 @@
     function rechazarVencido() {
       document.getElementById('form-rechazar-vencido')?.submit();
     }
+    // Cerrar (X o clic en el fondo) solo oculta el modal; NO rechaza ni oculta la tienda.
+    function cerrarModalVencido() {
+      const modal = document.getElementById('modal-vencido');
+      if (modal) modal.classList.remove('activo');
+      try { sessionStorage.setItem('localis_vencido_cerrado', '1'); } catch (e) {}
+    }
+    (function () {
+      try {
+        if (sessionStorage.getItem('localis_vencido_cerrado') === '1') {
+          document.getElementById('modal-vencido')?.classList.remove('activo');
+        }
+      } catch (e) {}
+    })();
     lucide.createIcons();
   </script>
   <script src="{{ url_for('static', filename='js/flash.js') }}"></script>

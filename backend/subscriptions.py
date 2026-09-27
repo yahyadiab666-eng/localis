@@ -443,7 +443,10 @@ def calcular_cotizacion_cambio_plan(comercio, plan_tipo_destino, tasa=None):
 
     comercio = comercio or {}
     plan_actual = (comercio.get('plan_tipo') or 'gratis').lower()
-    tipo_cambio = clasificar_cambio_plan(plan_actual, plan_tipo_destino)
+    estado_actual = (comercio.get('estado_pago') or '').strip().lower()
+    tipo_cambio = clasificar_cambio_plan(
+        plan_actual, plan_tipo_destino, vencido=(estado_actual == 'vencido')
+    )
     dias = int(plan.get('dias_duracion') or 30)
     if tasa is None:
         tasa = float(obtener_tasa_dolar() or 1.0)
