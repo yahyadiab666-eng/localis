@@ -32,9 +32,14 @@
         </div>
         
         <!-- Enlaces -->
-        <a href="{{ url_for('index') }}" class="text-sm font-medium text-stone-300 hover:text-white transition flex items-center gap-1.5">
-          <i data-lucide="arrow-left" style="width:16px;height:16px;"></i> Volver al Inicio
-        </a>
+        <div class="flex items-center gap-4">
+          <a href="{{ url_for('index') }}" class="text-sm font-medium text-stone-300 hover:text-white transition flex items-center gap-1.5">
+            <i data-lucide="arrow-left" style="width:16px;height:16px;"></i> Volver al Inicio
+          </a>
+          <a href="{{ url_for('logout') }}" class="text-sm font-semibold text-amber-400 hover:text-amber-300 transition flex items-center gap-1.5">
+            <i data-lucide="log-out" style="width:16px;height:16px;"></i> Cerrar sesión
+          </a>
+        </div>
       </nav>
     </header>
 
@@ -171,6 +176,14 @@
             <i data-lucide="arrow-right" style="width:18px;height:18px;"></i>
           </button>
         </form>
+
+        <!-- Salida: permite cambiar de cuenta si eligió un correo incorrecto -->
+        <p class="text-center text-xs text-stone-500 pt-1">
+          ¿No es tu cuenta?
+          <a href="{{ url_for('logout') }}" class="font-bold text-amber-700 hover:text-amber-800 underline">
+            Cerrar sesión y usar otra cuenta
+          </a>
+        </p>
 
       </div>
 
