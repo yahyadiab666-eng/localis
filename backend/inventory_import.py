@@ -414,7 +414,7 @@ def leer_encabezados_inventario(data, extension):
                 io.BytesIO(data), read_only=True, data_only=True
             )
             try:
-                hoja = wb.active
+                hoja = _hoja_xlsx_de_libro(wb)
                 primera = next(hoja.iter_rows(min_row=1, max_row=1, values_only=True), None)
                 if not primera:
                     return None, 'El archivo Excel está vacío.'
@@ -504,7 +504,7 @@ def _matriz_inicial(data, extension, max_filas=_MAX_FILAS_CABECERA):
     if extension == 'xlsx':
         wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
         try:
-            hoja = wb.active
+            hoja = _hoja_xlsx_de_libro(wb)
             matriz = []
             for indice, fila in enumerate(hoja.iter_rows()):
                 if indice >= max_filas:
@@ -541,6 +541,58 @@ def _campos_en_fila(celdas):
             ):
                 campos.add(campo)
     return campos
+
+
+def _puntaje_hoja_xlsx(hoja, max_filas=_MAX_FILAS_CABECERA):
+    """Cantidad de columnas de producto detectadas en las primeras filas.
+
+    Sirve para distinguir una hoja de inventario real de una pestaña de
+    resumen/estadísticas que no debe romper la detección de cabeceras.
+    """
+    mejor = 0
+    try:
+        for fila in hoja.iter_rows(
+            min_row=1, max_row=max_filas, values_only=True
+        ):
+            campos = _campos_en_fila(list(fila or ()))
+            if len(campos) > mejor:
+                mejor = len(campos)
+    except Exception as exc:
+        print(
+            f'{LOG_PREFIX} no se pudo inspeccionar la hoja '
+            f'{getattr(hoja, "title", "?")!r}: {type(exc).__name__}: {exc}'
+        )
+    return mejor
+
+
+def _elegir_indice_hoja_xlsx(hojas):
+    """Índice (0-based) de la primera hoja con aspecto de inventario.
+
+    Es la única fuente de decisión: se usa tanto al abrir el libro nuevo como
+    al reutilizar uno ya abierto, garantizando que la hoja elegida sea la misma
+    en todas las fases (encabezados, cabecera dinámica y lectura de filas).
+    Si ninguna hoja parece de inventario, se devuelve la primera pestaña (no la
+    hoja ``active``, que puede ser un resumen/estadísticas).
+    """
+    for indice, hoja in enumerate(hojas or ()):
+        if _puntaje_hoja_xlsx(hoja) >= 2:
+            return indice
+    return 0
+
+
+def _hoja_xlsx_de_libro(wb):
+    """Devuelve la hoja de inventario del libro ``wb`` ya abierto.
+
+    Así un Excel con varias pestañas (Resumen + Inventario) ya no falla con
+    «No pudimos reconocer una fila de encabezados…».
+    """
+    hojas = list(getattr(wb, 'worksheets', []) or [])
+    if not hojas:
+        return wb.active
+    indice = _elegir_indice_hoja_xlsx(hojas)
+    if 0 <= indice < len(hojas):
+        return hojas[indice]
+    return hojas[0]
 
 
 def detectar_fila_cabecera(matriz):
@@ -669,7 +721,7 @@ def _iter_filas_valores(data, extension, inicio):
     if extension == 'xlsx':
         wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
         try:
-            hoja = wb.active
+            hoja = _hoja_xlsx_de_libro(wb)
             for indice, fila in enumerate(hoja.iter_rows()):
                 if indice < inicio:
                     continue
@@ -713,7 +765,7 @@ def iter_filas_inventario_enumeradas(data, extension, encabezados, columnas=None
             io.BytesIO(data), read_only=True, data_only=True
         )
         try:
-            hoja = wb.active
+            hoja = _hoja_xlsx_de_libro(wb)
             numero_fila = 1
             for row in hoja.iter_rows(min_row=2):
                 numero_fila += 1
