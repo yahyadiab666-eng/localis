@@ -79,6 +79,9 @@ def _filtro_comercio_publico():
     filtro = (
         " AND COALESCE(c.visible, 1) = 1"
         " AND LOWER(TRIM(c.estado_pago)) IN ('activo', 'gratis')"
+        # Blindaje: aunque el job de vencimientos aún no haya corrido, un comercio
+        # con fecha de vencimiento pasada no se muestra en la vista pública.
+        " AND (c.fecha_vencimiento IS NULL OR c.fecha_vencimiento >= CURRENT_DATE)"
     )
     if not _sandbox_publico_permitido():
         filtro += " AND LEFT(LOWER(TRIM(COALESCE(c.nombre, ''))), 2) <> '__'"
