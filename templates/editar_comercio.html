@@ -39,6 +39,9 @@
           {% endif %}
           <input type="file" name="logo" accept="image/*"
                  class="w-full text-xs file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-stone-100 file:text-stone-800">
+          <p class="text-[11px] leading-relaxed text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            ⚠️ Aviso sobre las imágenes: El sistema de asignación y subida de archivos puede presentar fallos ocasionales. Por favor, verifica que tus imágenes se hayan cargado correctamente, ya que no son 100% infalibles.
+          </p>
         </div>
 
         {% set color_actual = (paleta_banner | selectattr('id', 'equalto', banner_color_actual) | list | first) %}

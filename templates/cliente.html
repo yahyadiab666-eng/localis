@@ -99,10 +99,17 @@
   <!-- Botón sutil de instalación PWA (solo se muestra si el navegador lo permite) -->
   <div id="pwa-instalar-wrap" class="hidden max-w-6xl mx-auto px-6 mt-5 text-center">
     <button type="button" id="pwa-instalar-btn"
-            class="inline-flex items-center gap-2 text-xs font-semibold text-stone-600 bg-white border border-stone-200 rounded-full px-4 py-2 shadow-sm hover:border-amber-400 hover:text-amber-700 transition">
+            class="pwa-instalar-btn inline-flex items-center gap-2 text-xs font-semibold text-stone-600 bg-white border border-stone-200 rounded-full px-4 py-2 shadow-sm hover:border-amber-400 hover:text-amber-700 transition">
       <i data-lucide="download" style="width:15px;height:15px;"></i>
       Instalar aplicación
     </button>
+  </div>
+
+  <!-- Aviso para iPhone (oculto por defecto; se muestra solo en iOS + Safari sin app instalada) -->
+  <div id="pwa-ios-tip" class="hidden max-w-2xl mx-auto px-6 mt-3">
+    <p class="text-[12px] leading-relaxed text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-center">
+      📱 Tip para iPhone: Para una mejor experiencia, toca el botón de compartir ⎋ en Safari y selecciona 'Añadir a pantalla de inicio'.
+    </p>
   </div>
 
   <section class="max-w-6xl mx-auto px-6 my-8">
@@ -328,6 +335,19 @@
         deferredPrompt = null;
         ocultar();
       });
+
+      // Aviso iPhone: solo iOS + Safari y sin app instalada.
+      var ua = navigator.userAgent || '';
+      var esIOS = /iPad|iPhone|iPod/.test(ua) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      var esSafari = /safari/i.test(ua) &&
+        !/crios|fxios|edgios|chrome|android/i.test(ua);
+      var yaInstalada = window.navigator.standalone === true ||
+        (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+      if (esIOS && esSafari && !yaInstalada) {
+        var tip = document.getElementById('pwa-ios-tip');
+        if (tip) tip.classList.remove('hidden');
+      }
     })();
   </script>
 </body>

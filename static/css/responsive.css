@@ -406,3 +406,55 @@ img.localis-img-producto-thumb--vacio:not([src]) {
     animation-duration: 1.4s;
   }
 }
+
+/* =========================================================
+   Botón de instalación PWA — llamativo sutil (pulso + degradado)
+   ========================================================= */
+.pwa-instalar-btn {
+  background-image: linear-gradient(120deg, #fff7e6 0%, #ffffff 45%, #ffe9c2 100%);
+  border-color: #f5c877;
+  animation: localis-pulso 2.4s ease-in-out infinite;
+}
+
+.pwa-instalar-btn:hover {
+  border-color: #f59e0b;
+  color: #b45309;
+}
+
+@keyframes localis-pulso {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.38);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(245, 158, 11, 0);
+  }
+}
+
+/* =========================================================
+   Escritorio / laptop (>=768px): centrado y ancho cómodo
+   ========================================================= */
+@media (min-width: 768px) {
+  /* Formularios del comercio: lectura cómoda y centrada */
+  .panel-comercio-form {
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* Catálogo: más aire entre tarjetas en pantallas grandes */
+  .grid-productos-mobile {
+    gap: 1.5rem;
+  }
+
+  /* Avisos flotantes: legibles sin ocupar toda la pantalla */
+  .flash-mobile {
+    max-width: 480px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pwa-instalar-btn {
+    animation: none;
+  }
+}
