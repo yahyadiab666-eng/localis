@@ -285,6 +285,36 @@ def _registrar_fallo_importacion(etapa, exc):
     traceback.print_exc()
 
 
+def _abrir_libro_xlsx(data):
+    """Abre un libro ``.xlsx`` de forma robusta. Retorna ``(libro, error)``.
+
+    Primero intenta el modo ``read_only`` (bajo consumo de memoria). Algunos
+    libros (p. ej. con hojas de gráficos o estructuras heredadas) fallan al
+    leerse en ese modo; en tal caso se reintenta en modo normal para que una
+    peculiaridad del archivo **nunca** aborte la importación con una excepción
+    sin controlar. Si ambos modos fallan, se devuelve un mensaje amigable.
+    """
+    ultimo_error = None
+    for solo_lectura in (True, False):
+        try:
+            libro = openpyxl.load_workbook(
+                io.BytesIO(data), read_only=solo_lectura, data_only=True
+            )
+            return libro, None
+        except Exception as exc:
+            ultimo_error = exc
+            print(
+                f'{LOG_PREFIX} openpyxl read_only={solo_lectura} no pudo abrir '
+                f'el .xlsx: {type(exc).__name__}: {exc}'
+            )
+    if ultimo_error is not None:
+        _registrar_fallo_importacion('abrir_xlsx', ultimo_error)
+    return None, (
+        'El archivo Excel (.xlsx) no se pudo leer. Ábrelo y vuelve a guardarlo '
+        '(o expórtalo como CSV) e intenta de nuevo.'
+    )
+
+
 def _abrir_libro_xls(data):
     """Abre un libro .xls (formato binario viejo) con xlrd. Retorna (libro, error)."""
     try:
@@ -410,9 +440,9 @@ def leer_encabezados_inventario(data, extension):
     """Lee solo la primera fila de encabezados. Retorna (encabezados, error)."""
     try:
         if extension == 'xlsx':
-            wb = openpyxl.load_workbook(
-                io.BytesIO(data), read_only=True, data_only=True
-            )
+            wb, error_xlsx = _abrir_libro_xlsx(data)
+            if error_xlsx:
+                return None, error_xlsx
             try:
                 hoja = _hoja_xlsx_de_libro(wb)
                 primera = next(hoja.iter_rows(min_row=1, max_row=1, values_only=True), None)
@@ -502,7 +532,9 @@ def _matriz_inicial(data, extension, max_filas=_MAX_FILAS_CABECERA):
         hoja = libro.sheet_by_index(0)
         return [hoja.row_values(i) for i in range(min(hoja.nrows, max_filas))]
     if extension == 'xlsx':
-        wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        wb, error_xlsx = _abrir_libro_xlsx(data)
+        if error_xlsx:
+            return []
         try:
             hoja = _hoja_xlsx_de_libro(wb)
             matriz = []
@@ -719,7 +751,9 @@ def _iter_filas_valores(data, extension, inicio):
         return
 
     if extension == 'xlsx':
-        wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        wb, error_xlsx = _abrir_libro_xlsx(data)
+        if error_xlsx:
+            raise ErrorImportacionInventario(error_xlsx)
         try:
             hoja = _hoja_xlsx_de_libro(wb)
             for indice, fila in enumerate(hoja.iter_rows()):
@@ -761,9 +795,9 @@ def iter_filas_inventario_enumeradas(data, extension, encabezados, columnas=None
         return
 
     if extension == 'xlsx':
-        wb = openpyxl.load_workbook(
-            io.BytesIO(data), read_only=True, data_only=True
-        )
+        wb, error_xlsx = _abrir_libro_xlsx(data)
+        if error_xlsx:
+            raise ErrorImportacionInventario(error_xlsx)
         try:
             hoja = _hoja_xlsx_de_libro(wb)
             numero_fila = 1
@@ -1419,6 +1453,31 @@ def _buscar_existente(prod, existentes):
 def productos_nuevos(productos, existentes):
     """Subconjunto de productos que no existen aún en el comercio."""
     return [p for p in productos if _buscar_existente(p, existentes) is None]
+
+
+def total_productos_tras_sincronizacion(productos, existentes, modo_bajas=None):
+    """Productos que quedarán en el comercio tras aplicar la importación.
+
+    Importante para el tope del plan: con sincronización espejo
+    (``LOCALIS_CSV_BAJAS=eliminar``) los productos ausentes del archivo se
+    **borran**, así que el inventario final es igual al archivo. Evaluar el tope
+    como ``actuales + altas`` bloqueaba la sustitución de catálogo (p. ej. un
+    comercio en el límite no podía reemplazar sus 50 productos por otros 50).
+    Con ``desactivar``/``off`` nada se borra y el total sí es ``actuales+altas``.
+    """
+    modo = modo_bajas if modo_bajas is not None else _modo_bajas()
+    existentes = existentes or {}
+    if modo == 'eliminar':
+        claves = set()
+        for prod in productos or []:
+            codigo = normalizar_codigo_barras(prod.get('codigo_barras'))
+            nombre = _clave_nombre(prod.get('nombre'))
+            clave = codigo or nombre
+            if clave:
+                claves.add(clave)
+        return len(claves)
+    nuevos = productos_nuevos(productos or [], existentes)
+    return int(existentes.get('total') or 0) + len(nuevos)
 
 
 def _texto_norm(valor):

@@ -31,7 +31,7 @@ from backend.inventory_import import (
     mensaje_error_importacion,
     normalizar_encabezado,
     persistir_importacion_upsert,
-    productos_nuevos,
+    total_productos_tras_sincronizacion,
     _cargar_existentes_comercio,
     recortar_mensaje_importacion,
 )
@@ -1124,11 +1124,14 @@ def procesar_csv_productos(comercio_id, archivo_csv):
 
         etapa = 'existencia'
         existentes = _cargar_existentes_comercio(comercio_id)
-        nuevos = productos_nuevos(productos, existentes)
 
         etapa = 'limite_plan'
         limite = obtener_limite_productos_comercio(comercio_id)
-        if not es_limite_ilimitado(limite) and (existentes['total'] + len(nuevos)) > limite:
+        # Tope del plan según el inventario RESULTANTE: con sincronización espejo
+        # (eliminar) los ausentes del archivo se borran y el total final es el
+        # del archivo, no "actuales + altas".
+        total_resultante = total_productos_tras_sincronizacion(productos, existentes)
+        if not es_limite_ilimitado(limite) and total_resultante > limite:
             with get_db_connection(row_factory=sqlite3.Row) as conexion:
                 cursor = conexion.cursor()
                 cursor.execute(
@@ -1138,7 +1141,7 @@ def procesar_csv_productos(comercio_id, archivo_csv):
                 fila = cursor.fetchone()
             plan_tipo = (fila['plan_tipo'] if fila else 'gratis') or 'gratis'
             mensaje, plan_sugerido = mensaje_limite_importacion(
-                plan_tipo, len(nuevos), limite
+                plan_tipo, total_resultante, limite
             )
             return False, recortar_mensaje_importacion(mensaje), {
                 'plan_sugerido': plan_sugerido
