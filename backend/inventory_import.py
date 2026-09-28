@@ -1216,12 +1216,23 @@ def _tuplas_insercion(comercio_id, lote, snapshot_imagenes=None, mapa_maestro=No
     for prod in lote:
         url = prod.get('imagen_url')
         if not url:
-            url = _imagen_final_importacion(
-                prod.get('imagen_url'),
-                prod.get('codigo_barras'),
-                snapshot_imagenes,
-                mapa_maestro=mapa_maestro,
-            )
+            # La resolución de imagen es accesoria: si falla NO debe abortar la
+            # transacción ni impedir que el producto real se inserte. Ante
+            # cualquier error se deja sin foto (estado neutro) y el pipeline la
+            # completará en segundo plano.
+            try:
+                url = _imagen_final_importacion(
+                    prod.get('imagen_url'),
+                    prod.get('codigo_barras'),
+                    snapshot_imagenes,
+                    mapa_maestro=mapa_maestro,
+                )
+            except Exception as exc:
+                print(
+                    f'{LOG_PREFIX} imagen omitida (producto '
+                    f'{prod.get("nombre")!r}): {type(exc).__name__}: {exc}'
+                )
+                url = None
         estado = prod.get('imagen_estado')
         if not estado:
             estado = 'pendiente' if (not url or 'placeholder' in str(url).lower()) else 'real'
@@ -1452,11 +1463,15 @@ def persistir_importacion_upsert(comercio_id, productos, categoria=None, existen
         except Exception as exc:
             print(f'{LOG_PREFIX} aviso imágenes de productos nuevos: {exc}')
 
+    # Se resuelve ANTES de abrir la transacción: `_hay_columna_activo()` puede
+    # consultar/crear la columna con otra conexión del pool y no debe ejecutarse
+    # dentro de la transacción de inserción de productos.
+    activo_ok = _hay_columna_activo()
+
     def _operacion(conexion):
         cursor = conexion.cursor()
         cursor.execute('SELECT pg_advisory_xact_lock(?)', (int(comercio_id),))
         ejecutar_lote = getattr(cursor, 'execute_values', None)
-        activo_ok = _hay_columna_activo()
         sql_upsert = UPSERT_PRODUCTO_VALUES_SQL
         if not activo_ok:
             sql_upsert = sql_upsert.replace('        activo = 1\n', '')

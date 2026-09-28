@@ -309,17 +309,22 @@ def encolar_importacion(comercio_id, filename, data, usuario_id=None):
         'creado': ahora,
         'actualizado': ahora,
     }
+    # Registrar el job ANTES de encolarlo: un worker puede despertar en cuanto
+    # ``put_nowait`` suelta el ítem y buscar el job en ``_jobs``. Si aún no está
+    # registrado, lo descartaba en silencio y el catálogo nunca se insertaba
+    # (job eternamente en 'encolado'). Este orden elimina la carrera.
+    with _jobs_lock:
+        _jobs[job_id] = job
     try:
         cola.put_nowait(job_id)
     except queue.Full as error:
+        with _jobs_lock:
+            _jobs.pop(job_id, None)
         _borrar_spool(ruta_spool)
         raise ColaImportacionLlena(
             'El servidor está procesando varios catálogos a la vez. '
             'Espera unos segundos y vuelve a intentarlo.'
         ) from error
-
-    with _jobs_lock:
-        _jobs[job_id] = job
 
     _log(f'job={job_id} encolado comercio={comercio_id} archivo={filename!r}')
     return {

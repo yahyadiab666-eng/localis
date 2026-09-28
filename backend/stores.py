@@ -1064,6 +1064,7 @@ def procesar_csv_productos(comercio_id, archivo_csv):
       existencias, no se rechaza.
     """
     etapa = 'inicio'
+    persistido = False
     nombre_archivo = getattr(archivo_csv, 'filename', None)
     print(f'{CSV_LOG} inicio comercio={comercio_id} archivo={nombre_archivo!r}')
     try:
@@ -1147,6 +1148,10 @@ def procesar_csv_productos(comercio_id, archivo_csv):
         insertados, actualizados, omitidos, bajas = persistir_importacion_upsert(
             comercio_id, productos, existentes=existentes
         )
+        # Desde este punto el inventario YA quedó confirmado en la base de datos.
+        # Lo que sigue (imágenes, reporte, auditoría) es accesorio y nunca debe
+        # revertir ni declarar en error una importación ya guardada.
+        persistido = True
 
         # Autorreparación: aunque la fila no cambie, si la imagen es dudosa o no
         # está persistida se revalida contra el catálogo global (costo 0) o se
@@ -1254,6 +1259,23 @@ def procesar_csv_productos(comercio_id, archivo_csv):
     except Exception as exc:
         print(f'{CSV_LOG} FALLO etapa={etapa} {type(exc).__name__}: {exc}')
         traceback.print_exc()
+        if persistido:
+            # El inventario ya se guardó: no se reporta como error. Cualquier
+            # fallo posterior (imágenes/reporte) se informa como aviso y la
+            # tarjeta de éxito evita decirle al comercio que no se guardó nada.
+            mensaje_aviso = (
+                f'{insertados} nuevos, {actualizados} actualizados, '
+                f'{omitidos} sin cambios. Productos guardados correctamente; '
+                'las fotos se completan en segundo plano.'
+            )
+            meta_aviso = {
+                'insertados': insertados,
+                'actualizados': actualizados,
+                'omitidos': omitidos,
+                'bajas': bajas,
+                'aviso_imagenes': f'{type(exc).__name__}: {exc}',
+            }
+            return True, recortar_mensaje_importacion(mensaje_aviso), meta_aviso
         return False, recortar_mensaje_importacion(mensaje_error_importacion(exc)), None
 
 
