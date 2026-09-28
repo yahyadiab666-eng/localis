@@ -914,15 +914,19 @@ def _reconciliar_estados_imagenes(cursor):
     """Alinea ``imagen_estado`` con la URL persistida (idempotente).
 
     - Storage / ``/static/uploads/productos/`` (foto real) -> 'real'
-    - ``/static/uploads/marcas/`` (logo/monograma)          -> 'logo'
+    - ``/static/uploads/marcas/`` o ``…/imagenes/marcas/…`` (logo de marca) -> 'logo'
     - vacío / placeholder de categoría                      -> 'pendiente'
 
     Corrige filas importadas antes de existir la columna y evita reportar como
-    'real' un monograma (falso positivo de cobertura).
+    'real' un logo o monograma (falso positivo de cobertura). El caso de Storage
+    es clave: ``marca_logo`` sube los logos a ``…/imagenes/marcas/…`` y antes se
+    clasificaban como 'real', por lo que el pipeline ya no los corregía.
     """
     clasificacion = (
         "CASE "
         "WHEN imagen_url LIKE '/static/uploads/marcas/%' THEN 'logo' "
+        "WHEN imagen_url LIKE '%/imagenes/marcas/%' THEN 'logo' "
+        "WHEN imagen_url LIKE '%/public/marcas/%' THEN 'logo' "
         "WHEN imagen_url LIKE '%/storage/v1/object/public/%' "
         "     OR imagen_url LIKE '/static/uploads/productos/%' THEN 'real' "
         "ELSE 'pendiente' END"

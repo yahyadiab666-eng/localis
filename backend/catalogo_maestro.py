@@ -64,7 +64,18 @@ def _completar_con_semilla(mapa, codigos):
 
 
 def _url_maestro_valida(valor):
-    """Storage/local (manual) o URL HTTPS de API de catálogo."""
+    """Storage/local (manual) o URL HTTPS de API de catálogo.
+
+    Nunca acepta un logo de marca: el catálogo maestro indexa **fotografías de
+    producto** por EAN, y un logo corporativo no es una respuesta válida.
+    """
+    try:
+        from backend.activos_verificados import es_url_logo_marca
+
+        if es_url_logo_marca(valor):
+            return None
+    except Exception:
+        pass
     return (
         url_imagen_subida_storage_valida(valor)
         or url_imagen_local_valida(valor)
@@ -263,14 +274,37 @@ def imagen_maestro_por_codigo(codigo_barras):
             return None
 
 
+_NOMBRE_INDICE_UNICO = 'idx_catalogo_maestro_codigo'
+
+
+def _indice_unico_codigo_existe(cursor):
+    """True si el índice único ya existe (evita DDL/locks en el camino caliente)."""
+    try:
+        cursor.execute(
+            'SELECT 1 FROM pg_class WHERE relname = ? LIMIT 1',
+            (_NOMBRE_INDICE_UNICO,),
+        )
+        return cursor.fetchone() is not None
+    except Exception:
+        return False
+
+
 def _asegurar_indice_unico_codigo(cursor):
-    """En Supabase el PK es id (uuid); el upsert va por codigo_barras."""
+    """En Supabase el PK es id (uuid); el upsert va por codigo_barras.
+
+    Solo ejecuta ``CREATE UNIQUE INDEX`` si el índice **no existe**; en el caso
+    habitual (ya creado) se ahorra el DDL, que toma locks y bloquea escrituras
+    concurrentes al catálogo.
+    """
     global _INDICE_UNICO_VERIFICADO
     if _INDICE_UNICO_VERIFICADO:
         return
+    if _indice_unico_codigo_existe(cursor):
+        _INDICE_UNICO_VERIFICADO = True
+        return
     cursor.execute(
         f"""
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_catalogo_maestro_codigo
+        CREATE UNIQUE INDEX IF NOT EXISTS {_NOMBRE_INDICE_UNICO}
         ON {TABLA_CATALOGO_MAESTRO} (codigo_barras)
         """
     )

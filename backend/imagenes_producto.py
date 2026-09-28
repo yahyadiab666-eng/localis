@@ -521,6 +521,16 @@ def _tokens_identidad(texto):
     return tokens
 
 
+def _es_url_logo_marca(url):
+    """True si la URL es un logo de marca (no una foto de producto). Fail-safe."""
+    try:
+        from backend.activos_verificados import es_url_logo_marca
+
+        return es_url_logo_marca(url)
+    except Exception:
+        return '/marcas/' in str(url or '').lower()
+
+
 def _candidato_ean_valido(candidato, ean='', tokens=None):
     """Validación del acierto por EAN exacto.
 
@@ -533,6 +543,8 @@ def _candidato_ean_valido(candidato, ean='', tokens=None):
         return False
     url = str(candidato.get('url') or '').strip()
     if not url.lower().startswith(('http://', 'https://')):
+        return False
+    if _es_url_logo_marca(url):
         return False
     host = str(candidato.get('dominio') or '').lower()
     if any(b in host for b in _HOSTS_NO_FOTO):
@@ -566,6 +578,8 @@ def _candidato_nombre_confiable(candidato, tokens):
         return False
     url = str(candidato.get('url') or '').strip()
     if not url.lower().startswith(('http://', 'https://')):
+        return False
+    if _es_url_logo_marca(url):
         return False
     plano = _texto_plano(
         ' '.join(

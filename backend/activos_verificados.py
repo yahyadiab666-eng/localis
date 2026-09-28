@@ -31,9 +31,35 @@ FUENTES_LOGO_OFICIAL = frozenset(
 _PREFIJO_PLACEHOLDER = '/static/img/placeholder-'
 _GENERADOS_LOCALES = ('/static/uploads/genericos/', '/static/uploads/marcas/')
 
+# Rutas donde el sistema guarda logos de marca (nunca son foto de producto).
+_RUTAS_LOGO_MARCA = (
+    '/imagenes/marcas/',
+    '/public/marcas/',
+    '/static/uploads/marcas/',
+)
+# Prefijo de archivo con que ``marca_logo`` nombra los logos que sube.
+_PREFIJO_ARCHIVO_LOGO = 'marca_'
+
 
 def _texto(url):
     return str(url or '').strip()
+
+
+def es_url_logo_marca(url):
+    """True si la URL apunta a un logo/marca y NO a una fotografía de producto.
+
+    Cubre los tres formatos que usa el sistema:
+      - Storage: ``…/storage/v1/object/public/imagenes/marcas/…``
+      - respaldo local: ``/static/uploads/marcas/…``
+      - nombre de archivo con prefijo ``marca_`` (``logo_favicon``/Simple Icons).
+    """
+    texto = _texto(url).lower()
+    if not texto:
+        return False
+    if any(ruta in texto for ruta in _RUTAS_LOGO_MARCA):
+        return True
+    nombre = texto.split('?', 1)[0].rstrip('/').rsplit('/', 1)[-1]
+    return nombre.startswith(_PREFIJO_ARCHIVO_LOGO)
 
 
 def es_asset_generado(url, fuente=None):
@@ -58,6 +84,9 @@ def es_asset_verificado(url, fuente=None):
     if not texto:
         return False
     if es_asset_generado(texto, fuente):
+        return False
+    # Un logo de marca NUNCA es una fotografía de producto verificada.
+    if es_url_logo_marca(texto):
         return False
 
     fuente_norm = str(fuente or '').strip().lower()
