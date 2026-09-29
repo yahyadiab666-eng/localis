@@ -23,6 +23,8 @@ from __future__ import annotations
 import os
 import re
 
+from backend.activos_verificados import fuente_verificada
+
 _LOG = '[Localis Imágenes]'
 
 # Categorías donde se permite la búsqueda automática (Hardware, Technology,
@@ -271,7 +273,12 @@ def resolver_activa(producto_id):
                         registro = _fila_dict(fila_auto) or {}
                 url_auto = registro.get('url_imagen')
                 if url_auto:
-                    activa, fuente, estado = url_auto, (registro.get('fuente') or 'automatica'), 'real'
+                    fuente_auto = str(registro.get('fuente') or 'automatica')
+                    # Solo una fuente VERIFICADA (modelo/EAN/subida) se marca
+                    # 'real'. Una coincidencia débil u histórica ('serper') queda
+                    # 'pendiente' para que futuras ejecuciones la corrijan.
+                    estado_auto = 'real' if fuente_verificada(fuente_auto) else 'pendiente'
+                    activa, fuente, estado = url_auto, fuente_auto, estado_auto
                 else:
                     # Sin manual ni caché automática: NUNCA se vacía una imagen
                     # ya válida. Se conserva la actual si es una foto real.
@@ -509,19 +516,85 @@ _RE_CAPACIDAD_MODELO = re.compile(
 )
 
 
+# Palabras que, junto a un número, forman un modelo: "Note 12", "12 Pro",
+# "Galaxy 12" (el número es el modelo, no la capacidad).
+_PALABRAS_MODELO = frozenset({
+    'note', 'pro', 'plus', 'max', 'ultra', 'lite', 'mini', 'se', 'neo',
+    'galaxy', 'iphone', 'redmi', 'poco', 'zenfone', 'pixel', 'nord', 'mate',
+    'nova', 'magic', 'honor', 'rog', 'edge', 'prime', 'fold', 'flip', 'watch',
+    'tab', 'pad', 'book', 'thinkpad', 'ideapad', 'pavilion', 'aspire', 'nitro',
+    'predator', 'bravia', 'aquos', 'viera', 'eluga', 'xperia', 'zenbook',
+    'vivobook', 'redmi', 'moto', 'galaxy',
+})
+
+# Marcas y palabras genéricas de producto/línea: NO identifican el modelo.
+_PALABRAS_GENERICAS = frozenset({
+    'samsung', 'xiaomi', 'apple', 'iphone', 'huawei', 'honor', 'motorola',
+    'nokia', 'lg', 'sony', 'panasonic', 'philips', 'tcl', 'hisense', 'oster',
+    'bosch', 'daewoo', 'kalley', 'mabe', 'whirlpool', 'electrolux', 'haier',
+    'lenovo', 'hp', 'dell', 'asus', 'acer', 'toshiba', 'msi', 'canon', 'nikon',
+    'epson', 'kingston', 'sandisk', 'logitech', 'jbl', 'tefal', 'kenwood',
+    'galaxy', 'redmi', 'poco', 'zenfone', 'pixel', 'nord', 'mate', 'nova',
+    'magic', 'rog', 'celular', 'telefono', 'smartphone', 'movil', 'tablet',
+    'laptop', 'computadora', 'computador', 'monitor', 'television', 'televisor',
+    'nevera', 'refrigerador', 'lavadora', 'secadora', 'microondas', 'licuadora',
+    'batidora', 'audifonos', 'auriculares', 'parlante', 'bocina', 'camara',
+    'impresora', 'teclado', 'mouse', 'cargador', 'bateria', 'producto',
+    'articulo', 'combo', 'kit', 'pack', 'juego',
+})
+
+
 def _tokens_modelo(tokens):
-    """Tokens que identifican el MODELO (a15, s24, gsb550), no la capacidad.
+    """Tokens que identifican el MODELO, incluyendo patrones con espacio.
+
+    Reconoce:
+      - alfanumérico pegado: ``a15``, ``s24``, ``gsb550``;
+      - número suelto junto a una palabra de línea/modelo: ``Note 12``,
+        ``12 Pro``, ``Galaxy 12`` (pero NO ``128 GB``: la capacidad se excluye).
 
     Se usan para exigir el modelo en el matching y evitar mezclar variantes de
     una misma marca (p. ej. Samsung Galaxy A15 vs A25).
     """
-    return [
-        token
-        for token in (tokens or [])
-        if any(caracter.isdigit() for caracter in token)
-        and any(caracter.isalpha() for caracter in token)
-        and not _RE_CAPACIDAD_MODELO.match(token)
-    ]
+    lista = [str(t) for t in (tokens or []) if str(t or '').strip()]
+    modelos = []
+    for indice, token in enumerate(lista):
+        if _RE_CAPACIDAD_MODELO.match(token):
+            continue  # capacidad/unidad (128gb, 5g, 750ml…) nunca es modelo
+        tiene_digito = any(caracter.isdigit() for caracter in token)
+        tiene_letra = any(caracter.isalpha() for caracter in token)
+        if tiene_digito and tiene_letra:
+            if token not in modelos:
+                modelos.append(token)
+            continue
+        if token.isdigit():
+            vecinos = []
+            if indice > 0:
+                vecinos.append(lista[indice - 1])
+            if indice + 1 < len(lista):
+                vecinos.append(lista[indice + 1])
+            if any(vecino in _PALABRAS_MODELO for vecino in vecinos):
+                if token not in modelos:
+                    modelos.append(token)
+    return modelos
+
+
+def _modelo_presente(modelo, plano):
+    """True si el token de modelo aparece, tolerando variantes pegadas/separadas.
+
+    Permite que "note12" (pegado) case con "note 12" (con espacio) y viceversa,
+    evitando falsos negativos por nombres sin espacio o con guiones.
+    """
+    modelo = str(modelo or '').strip().lower()
+    if not modelo:
+        return False
+    if modelo in plano:
+        return True
+    coincidencia = re.match(r'^([a-z]+)(\d+)$', modelo)
+    if coincidencia:
+        letra, numero = coincidencia.group(1), coincidencia.group(2)
+        if f'{letra} {numero}' in plano or modelo in plano:
+            return True
+    return False
 
 
 def _log_busqueda(producto_id, estrategia, termino):
@@ -592,10 +665,46 @@ def _candidato_ean_valido(candidato, ean='', tokens=None):
     ):
         return True
     # Coherencia producto/modelo SIN exigir el EAN en el texto del motor.
+    # `_modelo_presente` tolera variantes pegadas/separadas ("note12" ~ "note 12").
     modelos = _tokens_modelo(tokens)
     if modelos:
-        return all(modelo in plano for modelo in modelos)
-    return any(token in plano for token in tokens)
+        return all(_modelo_presente(modelo, plano) for modelo in modelos)
+    # Sin modelo reconocible: NUNCA aceptar solo por una marca/palabra genérica.
+    # Se exigen >=2 coincidencias y al menos una distintiva (no genérica).
+    coincidencias = [token for token in tokens if token in plano]
+    if len(coincidencias) < 2:
+        return False
+    return any(token not in _PALABRAS_GENERICAS for token in coincidencias)
+
+
+def _aceptacion_fuerte(candidato, ean, tokens):
+    """True si la coincidencia es inequívoca (modelo o EAN en el texto).
+
+    Determina si una imagen puede canonizarse en el catálogo global y marcarse
+    como verificada. Una coincidencia débil/ambigua devuelve False.
+    """
+    if not isinstance(candidato, dict):
+        return False
+    plano = _texto_plano(
+        ' '.join(
+            str(candidato.get(campo) or '')
+            for campo in ('titulo', 'contexto', 'dominio', 'url')
+        )
+    )
+    modelos = _tokens_modelo(tokens or [])
+    if modelos and all(_modelo_presente(modelo, plano) for modelo in modelos):
+        return True
+    import re as _re
+
+    digitos_texto = _re.sub(r'\D', '', plano)
+    digitos_ean = _re.sub(r'\D', '', str(ean or ''))
+    return bool(
+        digitos_ean
+        and (
+            digitos_ean in digitos_texto
+            or (len(digitos_ean) > 8 and digitos_ean[-8:] in digitos_texto)
+        )
+    )
 
 
 def _candidato_nombre_confiable(candidato, tokens):
@@ -625,7 +734,11 @@ def _candidato_nombre_confiable(candidato, tokens):
     # TODOS deben aparecer en el candidato. Sin esto, un A25 pasaba por coincidir
     # en "samsung"+"galaxy" + capacidad aunque el modelo fuera otro.
     modelos = _tokens_modelo(tokens)
-    if modelos and not all(modelo in plano for modelo in modelos):
+    if modelos and not all(_modelo_presente(modelo, plano) for modelo in modelos):
+        return False
+    # Sin modelo, nunca aceptar solo por una marca/palabra genérica: se exige al
+    # menos una coincidencia distintiva (no genérica).
+    if not modelos and not any(t not in _PALABRAS_GENERICAS for t in coincidencias):
         return False
     if len(tokens) >= 2:
         # Al menos 2 tokens distintivos y >= 50% de coincidencia.
@@ -650,7 +763,8 @@ def _producto_con_imagen_valida(producto_id):
         with get_db_connection(row_factory=True) as conexion:
             cursor = conexion.cursor()
             cursor.execute(
-                'SELECT imagen_url, imagen_estado FROM productos WHERE id = ?',
+                'SELECT imagen_url, imagen_estado, imagen_fuente '
+                'FROM productos WHERE id = ?',
                 (int(producto_id),),
             )
             fila = cursor.fetchone()
@@ -661,7 +775,11 @@ def _producto_con_imagen_valida(producto_id):
         estado = str(datos.get('imagen_estado') or '').strip().lower()
         if not url or es_asset_generado(url):
             return False
-        return estado == 'real'
+        if estado != 'real':
+            return False
+        # Solo se considera "resuelta" una imagen real de fuente VERIFICADA; un
+        # 'real' histórico/débil se reevalúa.
+        return fuente_verificada(datos.get('imagen_fuente'))
     except Exception:
         return False
 
@@ -852,16 +970,17 @@ def buscar_o_cachear_automatica(
         resultado.update({'fuente': 'imagen_existente', 'desde_cache': True, 'origen': 'imagen_existente'})
         return resultado
 
-    # 2) Caché permanente por producto: positivo sirve siempre; el negativo
-    # caduca (TTL) para no congelar la búsqueda para siempre.
+    # 2) Caché permanente por producto.
+    #    - Positivo VERIFICADO (fuente fuerte): se reutiliza siempre.
+    #    - Positivo DÉBIL o negativo: NO bloquea los reintentos de fondo; si el
+    #      pipeline pide reintentar (nivel>0) se ignora y se vuelve a consultar
+    #      (maestro + Serper). Sin reintento se devuelve, pero el pipeline decide
+    #      si re-evaluarlo según `fuente_verificada`.
     cacheado = obtener_automatica(clave)
     if cacheado is not None and _negativo_vigente(cacheado):
         tiene_url = bool(cacheado.get('url_imagen'))
-        # Un resultado NEGATIVO no debe bloquear los reintentos de fondo: si el
-        # pipeline pide reintentar (nivel>0) se ignora el negativo y se vuelve a
-        # consultar catálogo maestro + Serper. Solo se devuelve la caché cuando
-        # es positiva o cuando no se está reintentando.
-        if tiene_url or not permitir_reintento:
+        verificada = fuente_verificada(cacheado.get('fuente'))
+        if (tiene_url and verificada) or not permitir_reintento:
             resultado['desde_cache'] = True
             resultado['url'] = cacheado.get('url_imagen')
             resultado['fuente'] = cacheado.get('fuente')
@@ -978,19 +1097,24 @@ def buscar_o_cachear_automatica(
         return resultado
 
     if encontrado:
+        # ¿La coincidencia es inequívoca (modelo/EAN) o solo débil/ambigua?
+        fuerte = _aceptacion_fuerte(encontrado, ean_normalizado, tokens)
         registrar_automatica(
             clave=clave,
             url=encontrado.get('url'),
-            fuente='serper',
+            # 'serper_verificado' = coincidencia fuerte (modelo/EAN); el valor
+            # histórico 'serper' queda como fuente DÉBIL para poder reevaluarse.
+            fuente=('serper_verificado' if fuerte else 'serper_sin_verificar'),
             termino=termino_usado,
             codigo_barras=codigo_barras,
             nombre=nombre,
             producto_id=producto_id,
             encontrada=True,
         )
-        # Publica la relación EAN -> URL en el catálogo global compartido para
-        # que otros comercios la reutilicen con costo de API = 0.
-        if codigo_barras and encontrado.get('url'):
+        # Publica la relación EAN -> URL en el catálogo global SOLO si la
+        # coincidencia es inequívoca: una débil no debe canonizarse para todos
+        # los comercios (evita propagar imágenes genéricas por EAN).
+        if fuerte and codigo_barras and encontrado.get('url'):
             try:
                 from backend.catalogo_maestro import guardar_imagen_maestro
 

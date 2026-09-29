@@ -78,6 +78,30 @@ def es_logo_oficial(fuente):
     return str(fuente or '').strip().lower() in FUENTES_LOGO_OFICIAL
 
 
+# Fuentes que acreditan una coincidencia FUERTE (modelo/EAN o subida del
+# comerciante). Cualquier otra (p. ej. 'serper' histórico o sin fuente) es
+# considerada DÉBIL y puede re-evaluarse en ciclos de fondo.
+FUENTES_VERIFICADAS = frozenset(
+    {'manual', 'archivo', 'comercio', 'catalogo_maestro', 'serper_verificado'}
+)
+
+
+def fuente_verificada(fuente):
+    """True si la procedencia acredita una coincidencia fuerte.
+
+    ``serper_verificado`` lo escribe el registro automático solo cuando la
+    coincidencia fue inequívoca (modelo presente o EAN en el texto). El valor
+    histórico 'serper' (sin marca de verificación) se considera DÉBIL a
+    propósito, para permitir reevaluar imágenes antiguas.
+    """
+    f = str(fuente or '').strip().lower()
+    if not f:
+        return False
+    if f in FUENTES_VERIFICADAS:
+        return True
+    return f.startswith('profesional_') or f.startswith('manual')
+
+
 def es_asset_verificado(url, fuente=None):
     """True solo si el asset es una foto real o un logo oficial verificable."""
     texto = _texto(url)

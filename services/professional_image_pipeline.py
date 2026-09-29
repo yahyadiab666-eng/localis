@@ -63,6 +63,7 @@ from urllib.parse import urlparse
 import requests
 
 from backend import http_client as _http
+from backend.activos_verificados import fuente_verificada
 
 _LOG = '[Localis Imagen Pro]'
 _UA = (
@@ -180,18 +181,20 @@ def _slug(valor, maximo=90) -> str:
 
 
 def _tokens_relevancia(nombre, marca, descripcion):
+    """Tokens de relevancia EN ORDEN (se conserva para detectar modelos con
+    espacio, p. ej. "Note 12"). Deduplicado."""
     texto = ' '.join(
         _texto_plano(v).lower() for v in (nombre, marca, descripcion) if v
     )
-    tokens = set()
+    tokens = []
     for t in re.split(r'[^a-z0-9]+', texto):
         if not t or t in _STOPWORDS:
             continue
         # Los tokens de MODELO se conservan aunque sean cortos (a15, s24, g5…).
         # Descartarlos por longitud dejaba el matching solo con la marca y
         # permitía mezclar variantes distintas de la misma línea.
-        if len(t) >= 4 or any(caracter.isdigit() for caracter in t):
-            tokens.add(t)
+        if (len(t) >= 4 or any(caracter.isdigit() for caracter in t)) and t not in tokens:
+            tokens.append(t)
     return tokens
 
 
@@ -209,15 +212,77 @@ _RE_CAPACIDAD_MODELO = re.compile(
 )
 
 
+# Palabras que, junto a un número, forman un modelo: "Note 12", "12 Pro",
+# "Galaxy 12" (el número es el modelo, no la capacidad).
+_PALABRAS_MODELO = frozenset({
+    'note', 'pro', 'plus', 'max', 'ultra', 'lite', 'mini', 'se', 'neo',
+    'galaxy', 'iphone', 'redmi', 'poco', 'zenfone', 'pixel', 'nord', 'mate',
+    'nova', 'magic', 'honor', 'rog', 'edge', 'prime', 'fold', 'flip', 'watch',
+    'tab', 'pad', 'book', 'thinkpad', 'ideapad', 'pavilion', 'aspire', 'nitro',
+    'predator', 'bravia', 'aquos', 'viera', 'eluga', 'xperia', 'zenbook',
+    'vivobook', 'moto',
+})
+
+# Marcas y palabras genéricas de producto/línea: NO identifican el modelo.
+_PALABRAS_GENERICAS = frozenset({
+    'samsung', 'xiaomi', 'apple', 'iphone', 'huawei', 'honor', 'motorola',
+    'nokia', 'lg', 'sony', 'panasonic', 'philips', 'tcl', 'hisense', 'oster',
+    'bosch', 'daewoo', 'kalley', 'mabe', 'whirlpool', 'electrolux', 'haier',
+    'lenovo', 'hp', 'dell', 'asus', 'acer', 'toshiba', 'msi', 'canon', 'nikon',
+    'epson', 'kingston', 'sandisk', 'logitech', 'jbl', 'tefal', 'kenwood',
+    'galaxy', 'redmi', 'poco', 'zenfone', 'pixel', 'nord', 'mate', 'nova',
+    'magic', 'rog', 'celular', 'telefono', 'smartphone', 'movil', 'tablet',
+    'laptop', 'computadora', 'computador', 'monitor', 'television', 'televisor',
+    'nevera', 'refrigerador', 'lavadora', 'secadora', 'microondas', 'licuadora',
+    'batidora', 'audifonos', 'auriculares', 'parlante', 'bocina', 'camara',
+    'impresora', 'teclado', 'mouse', 'cargador', 'bateria', 'producto',
+    'articulo', 'combo', 'kit', 'pack', 'juego',
+})
+
+
 def _tokens_modelo(tokens):
-    """Tokens que identifican el MODELO (a15, s24, gsb550), no la capacidad."""
-    return {
-        token
-        for token in (tokens or ())
-        if any(caracter.isdigit() for caracter in token)
-        and any(caracter.isalpha() for caracter in token)
-        and not _RE_CAPACIDAD_MODELO.match(token)
-    }
+    """Tokens que identifican el MODELO, incluyendo patrones con espacio.
+
+    Reconoce ``a15``/``s24`` pegados y números junto a una palabra de modelo
+    (``Note 12``, ``12 Pro``, ``Galaxy 12``); excluye capacidades (``128 GB``).
+    """
+    lista = [str(t) for t in (tokens or ()) if str(t or '').strip()]
+    modelos = set()
+    for indice, token in enumerate(lista):
+        if _RE_CAPACIDAD_MODELO.match(token):
+            continue
+        if any(caracter.isdigit() for caracter in token) and any(
+            caracter.isalpha() for caracter in token
+        ):
+            modelos.add(token)
+            continue
+        if token.isdigit():
+            vecinos = []
+            if indice > 0:
+                vecinos.append(lista[indice - 1])
+            if indice + 1 < len(lista):
+                vecinos.append(lista[indice + 1])
+            if any(vecino in _PALABRAS_MODELO for vecino in vecinos):
+                modelos.add(token)
+    return modelos
+
+
+def _modelo_presente(modelo, plano):
+    """True si el modelo aparece, tolerando variantes pegadas/separadas.
+
+    Permite que "note12" (pegado) case con "note 12" (con espacio) y viceversa.
+    """
+    modelo = str(modelo or '').strip().lower()
+    if not modelo:
+        return False
+    if modelo in plano:
+        return True
+    coincidencia = re.match(r'^([a-z]+)(\d+)$', modelo)
+    if coincidencia:
+        letra, numero = coincidencia.group(1), coincidencia.group(2)
+        if f'{letra} {numero}' in plano:
+            return True
+    return False
 
 
 def _inferir_marca(nombre, descripcion=None, marca=None):
@@ -386,22 +451,24 @@ def _puntuar(candidato: Candidato, marca=None):
 def _relevante_web(candidato: Candidato, tokens):
     """Evita asignar fotos que no tienen relación con el producto.
 
-    Si el producto tiene tokens de MODELO (a15, s24…), TODOS son obligatorios
-    aunque el dominio sea de marca o confiable: sin evidencia del modelo no se
-    acepta (evita logos e imágenes institucionales de la marca).
+    Reglas estrictas:
+      - Si el producto tiene token(s) de MODELO (a15, s24, "Note 12"…), TODOS
+        son obligatorios, aunque el dominio sea de marca o confiable.
+      - Si NO hay modelo reconocible, nunca se acepta solo por una marca o
+        palabra genérica: se exigen >=2 coincidencias y al menos una distintiva.
     """
-    tokens = set(tokens or ())
+    lista = [str(t) for t in (tokens or ())]
     host_path = f'{candidato.dominio}{urlparse(candidato.url).path}'.lower()
     texto = f'{candidato.titulo} {host_path}'.lower()
-    modelos = _tokens_modelo(tokens)
+    modelos = _tokens_modelo(lista)
     if modelos:
-        return all(modelo in texto for modelo in modelos)
-    if any(d in host_path for d in _dominios_confiables()):
+        return all(_modelo_presente(modelo, texto) for modelo in modelos)
+    coincidencias = [t for t in lista if t in texto]
+    if len(coincidencias) >= 2 and any(
+        t not in _PALABRAS_GENERICAS for t in coincidencias
+    ):
         return True
-    if not tokens:
-        # Sin tokens fiables solo confiamos en fuentes explícitamente confiables.
-        return False
-    return any(token in texto for token in tokens)
+    return False
 
 
 def _get_json(url, *, params=None, headers=None):
@@ -897,18 +964,29 @@ _SINONIMOS_LOCALES = {
 
 
 def _tokens_consulta(nombre, marca=None):
+    """Tokens para consultas. Conserva el NÚMERO de modelo ("Note 12") cuando
+    está junto a una palabra de línea/modelo, y descarta capacidades (128GB)."""
     texto = _texto_plano(f'{nombre or ""} {marca or ""}').lower()
     texto = re.sub(r'[^a-z0-9]+', ' ', texto)
+    crudos = texto.split()
     tokens = []
     vistos = set()
-    for token in texto.split():
+    for indice, token in enumerate(crudos):
         if token in vistos:
             continue
-        if token in _STOPWORDS or _RE_TOKEN_NUM.match(token):
+        if token in _STOPWORDS or _RE_TOKEN_UNIDAD.match(token):
             continue
-        if _RE_TOKEN_UNIDAD.match(token):
-            continue
-        if len(token) < 3:
+        if _RE_TOKEN_NUM.match(token):
+            # Número suelto: solo es identificador de modelo si su vecino es una
+            # palabra de línea (Note 12, 12 Pro, Galaxy 12); si no, se descarta.
+            vecinos = []
+            if indice > 0:
+                vecinos.append(crudos[indice - 1])
+            if indice + 1 < len(crudos):
+                vecinos.append(crudos[indice + 1])
+            if not any(vecino in _PALABRAS_MODELO for vecino in vecinos):
+                continue
+        if len(token) < 3 and not token.isdigit():
             continue
         vistos.add(token)
         tokens.append(token)
@@ -1165,6 +1243,9 @@ def _buscar_candidatos_impl(
     fuentes_filtrables = (
         'bing-web', 'ddg-web', 'vtex', 'mercadolibre', 'serpapi', 'brave',
         'brave-og', 'bing-og', 'serper', 'bing-api',
+        # El catálogo maestro ya NO se acepta a ciegas: debe pasar también por
+        # `_relevante_web` (evidencia de modelo/marca), igual que el resto.
+        'catalogo_maestro',
     )
     try:
         from backend.politica_imagenes import evaluar_candidato_por_sector
@@ -1775,6 +1856,42 @@ def _marcar_intento(producto_id):
         _log(f'contar intento producto={producto_id} falló: {type(error).__name__}: {error}')
 
 
+def _degradar_real_para_reevaluar(producto_id):
+    """Baja a `pendiente` un `real` sin evidencia, para reintentar la búsqueda.
+
+    No borra la imagen: solo cambia el estado a `pendiente`, de modo que el
+    pipeline (o una ejecución futura) pueda reemplazarla si encuentra una
+    coincidencia mejor.
+    """
+    from backend.db import get_db_connection
+
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                "UPDATE productos SET imagen_estado = 'pendiente' "
+                "WHERE id = ? AND COALESCE(imagen_estado, '') = 'real'",
+                (int(producto_id),),
+            )
+            conexion.commit()
+        return True
+    except Exception as error:
+        _log(f'degradar real producto={producto_id} falló: {type(error).__name__}: {error}')
+        return False
+
+
+def _auto_verificado(auto):
+    """True si el registro automático devolvió una coincidencia FUERTE.
+
+    Se usa para decidir el corte por `ya_procesado`: un resultado débil o un
+    negativo no debe detener para siempre los reintentos de fondo.
+    """
+    try:
+        return bool(auto and auto.get('url') and fuente_verificada(auto.get('fuente')))
+    except Exception:
+        return bool(auto and auto.get('url'))
+
+
 # ---------------------------------------------------------------------------
 # Orquestación
 # ---------------------------------------------------------------------------
@@ -1806,6 +1923,19 @@ def procesar_producto(
     else:
         imagen_actual = None
         fuente_actual = None
+
+    # Re-evaluación de históricos: un `real` de fuente NO verificada (p. ej.
+    # 'serper' antiguo) se degrada a `pendiente` para que los filtros estrictos
+    # lo corrijan. El presupuesto de reintentos (nivel) acota el esfuerzo.
+    if (
+        producto_id
+        and not forzar
+        and str(estado_actual or '').strip().lower() == 'real'
+        and not fuente_verificada(fuente_actual)
+    ):
+        _degradar_real_para_reevaluar(producto_id)
+        imagen_actual = None
+        estado_actual = 'pendiente'
 
     if producto_id and not forzar and not _imagen_puede_reemplazarse(
         imagen_actual, estado_actual, fuente_actual
@@ -1862,14 +1992,14 @@ def procesar_producto(
             ean or codigo_barras,
             permitir_reintento=(0 < nivel_actual < 3),
         )
-        # Solo se cortocircuita cuando se AGOTÓ el presupuesto de reintentos: un
-        # resultado vacío o no concluyente NO bloquea el pipeline 7 días.
+        # Solo se cortocircuita cuando se AGOTÓ el presupuesto de reintentos y el
+        # resultado NO es una coincidencia fuerte. Un negativo, o un positivo
+        # débil/histórico, NO bloquea el pipeline para siempre.
         if (
             auto
-            and not auto.get('url')
-            and auto.get('origen') == 'cache_bd'
             and not forzar
             and nivel_actual >= 3
+            and not _auto_verificado(auto)
         ):
             _log(
                 f'producto={producto_id} ya procesado tras {nivel_actual} intentos; '
@@ -2073,7 +2203,7 @@ def _productos_pendientes(comercio_id):
         cursor.execute(
             """
             SELECT id, nombre, descripcion, codigo_barras, imagen_url,
-                   imagen_estado, imagen_intentos
+                   imagen_fuente, imagen_estado, imagen_intentos
             FROM productos
             WHERE comercio_id = ?
             ORDER BY imagen_ultimo_intento ASC NULLS FIRST,
@@ -2091,15 +2221,19 @@ def _productos_pendientes(comercio_id):
             'descripcion': fila[2],
             'codigo_barras': fila[3],
             'imagen_url': fila[4],
-            'imagen_estado': fila[5] if len(fila) > 5 else None,
-            'imagen_intentos': fila[6] if len(fila) > 6 else 0,
+            'imagen_fuente': fila[5] if len(fila) > 5 else None,
+            'imagen_estado': fila[6] if len(fila) > 6 else None,
+            'imagen_intentos': fila[7] if len(fila) > 7 else 0,
         }
         estado = str(registro.get('imagen_estado') or '').strip().lower()
-        if estado == 'real':
+        if estado == 'real' and fuente_verificada(registro.get('imagen_fuente')):
+            # 'real' con fuente VERIFICADA: se respeta y no se reencola.
             continue
-        # Pendiente/rechazada/logo o URL reemplazable (placeholder/vacía/externa).
-        if estado in ('pendiente', 'rechazada', 'logo') or _imagen_puede_reemplazarse(
-            registro.get('imagen_url')
+        # Pendiente/rechazada/logo, 'real' débil/histórico, o URL reemplazable.
+        if (
+            estado in ('pendiente', 'rechazada', 'logo')
+            or not fuente_verificada(registro.get('imagen_fuente'))
+            or _imagen_puede_reemplazarse(registro.get('imagen_url'))
         ):
             pendientes.append(registro)
     return pendientes

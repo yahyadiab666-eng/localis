@@ -402,11 +402,14 @@ def _probar_proteccion_manual():
         'manual en Storage detectada',
     )
     _ok(not puede_reemplazar('/static/uploads/productos/manual_9_x.webp'), 'no se pisa la manual')
+    auto_url = 'https://x.supabase.co/storage/v1/object/public/imagenes/productos/auto_x.webp'
     _ok(
-        not puede_reemplazar(
-            'https://x.supabase.co/storage/v1/object/public/imagenes/productos/auto_x.webp', 'real'
-        ),
-        'no se pisa una automática ya asignada',
+        not puede_reemplazar(auto_url, 'real', 'serper_verificado'),
+        'no se pisa una automática VERIFICADA (coincidencia fuerte)',
+    )
+    _ok(
+        puede_reemplazar(auto_url, 'real', 'serper'),
+        "un 'real' de fuente débil/histórica es reevaluable",
     )
 
 

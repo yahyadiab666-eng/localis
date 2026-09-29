@@ -49,6 +49,16 @@ _UNIDAD_RE = re.compile(
     r'sobres|rollo|rollos|x\d*)$'
 )
 
+# Palabras de línea/modelo que dan contexto a un número suelto ("Note 12").
+_PALABRAS_MODELO = frozenset({
+    'note', 'pro', 'plus', 'max', 'ultra', 'lite', 'mini', 'se', 'neo',
+    'galaxy', 'iphone', 'redmi', 'poco', 'zenfone', 'pixel', 'nord', 'mate',
+    'nova', 'magic', 'honor', 'rog', 'edge', 'prime', 'fold', 'flip', 'watch',
+    'tab', 'pad', 'book', 'thinkpad', 'ideapad', 'pavilion', 'aspire', 'nitro',
+    'predator', 'bravia', 'aquos', 'viera', 'eluga', 'xperia', 'zenbook',
+    'vivobook', 'moto',
+})
+
 
 @dataclass
 class IndiceMaestro:
@@ -125,27 +135,39 @@ def _texto_plano(valor):
 def normalizar_clave_producto(nombre, marca=None):
     """Clave de coincidencia: tokens útiles de nombre + marca, ordenados.
 
+    Conserva el NÚMERO de modelo cuando tiene contexto de línea ("Note 12"),
+    descartando capacidades por vecindad ("128 GB"). Antes se descartaba TODO
+    `isdigit()`, lo que colapsaba "Note 12" y "Note 13" a la misma clave.
+
     Ej.: "Harina de Maíz P.A.N. 1kg" + marca "PAN" → "harina maiz pan".
-    "Pepsi Cola 2L" → "cola pepsi".
+    "Redmi Note 12" → "12 note redmi".
     """
-    partes = []
+    orden = []
     for valor in (nombre, marca):
         if not valor:
             continue
         texto = _texto_plano(valor)
         texto = re.sub(r'[^a-z0-9]+', ' ', texto)
-        partes.append(texto)
+        orden.extend(texto.split())
 
     tokens = set()
-    for bloque in partes:
-        for token in bloque.split():
-            if not token or token in _PALABRAS_VACIAS:
+    for indice, token in enumerate(orden):
+        if not token or token in _PALABRAS_VACIAS:
+            continue
+        if _UNIDAD_RE.match(token):
+            continue  # capacidad/unidad (128gb, 5g, 1l…)
+        if token.isdigit():
+            # Número suelto: solo es modelo si su vecino es una palabra de línea.
+            vecinos = []
+            if indice > 0:
+                vecinos.append(orden[indice - 1])
+            if indice + 1 < len(orden):
+                vecinos.append(orden[indice + 1])
+            if not any(vecino in _PALABRAS_MODELO for vecino in vecinos):
                 continue
-            if token.isdigit() or _UNIDAD_RE.match(token):
-                continue
-            if len(token) < 2:
-                continue
-            tokens.add(token)
+        if len(token) < 2:
+            continue
+        tokens.add(token)
     return ' '.join(sorted(tokens))
 
 

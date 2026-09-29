@@ -164,7 +164,14 @@ def puede_reemplazar(imagen_url, estado=None, fuente=None):
     if not imagen_url:
         return True
     if estado == 'real':
-        return False
+        # Un 'real' de fuente NO verificada (p. ej. 'serper' histórico o sin
+        # fuente) es reevaluable; solo se protege una coincidencia fuerte.
+        try:
+            from backend.activos_verificados import fuente_verificada
+
+            return not fuente_verificada(fuente)
+        except Exception:
+            return False
     if estado == 'logo':
         return True
     texto = str(imagen_url).strip()
