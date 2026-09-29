@@ -89,9 +89,17 @@ class IndiceMaestro:
         return None
 
     def buscar(self, *, codigo=None, nombre=None, marca=None):
-        """(url, origen) en O(1) (con respaldo de similitud de tokens)."""
-        if codigo and codigo in self.por_codigo:
-            return self.por_codigo[codigo], 'codigo'
+        """(url, origen) en O(1) (con respaldo de similitud de tokens).
+
+        Importante: si el producto trae **código (EAN/UPC)**, SOLO se acepta una
+        coincidencia exacta de código. No se cae a nombre ni a similitud, porque
+        eso asignaba a un EAN la imagen de OTRO producto con nombre parecido y la
+        canonizaba como ``real``.
+        """
+        if codigo:
+            if codigo in self.por_codigo:
+                return self.por_codigo[codigo], 'codigo'
+            return None, None
         if nombre:
             clave = normalizar_clave_producto(nombre, marca)
             if clave and clave in self.por_nombre:

@@ -183,11 +183,15 @@ def _tokens_relevancia(nombre, marca, descripcion):
     texto = ' '.join(
         _texto_plano(v).lower() for v in (nombre, marca, descripcion) if v
     )
-    tokens = {
-        t
-        for t in re.split(r'[^a-z0-9]+', texto)
-        if len(t) >= 4 and t not in _STOPWORDS
-    }
+    tokens = set()
+    for t in re.split(r'[^a-z0-9]+', texto):
+        if not t or t in _STOPWORDS:
+            continue
+        # Los tokens de MODELO se conservan aunque sean cortos (a15, s24, g5…).
+        # Descartarlos por longitud dejaba el matching solo con la marca y
+        # permitía mezclar variantes distintas de la misma línea.
+        if len(t) >= 4 or any(caracter.isdigit() for caracter in t):
+            tokens.add(t)
     return tokens
 
 
@@ -196,6 +200,24 @@ _STOPWORDS = frozenset({
     'producto', 'articulo', 'presentacion', 'unidad', 'unidades', 'color',
     'tamano', 'tipo', 'marca', 'contenido', 'original', 'nuevo', 'nueva',
 })
+
+# Capacidades/unidades: NO son tokens de modelo (128gb, 5g, 750ml, 55w…).
+_RE_CAPACIDAD_MODELO = re.compile(
+    r'^\d+(?:[.,]\d+)?(?:kg|kgs|g|gr|grs|gramos|mg|l|lt|lts|litro|litros|ml|cc|'
+    r'oz|lb|lbs|gb|tb|mb|mah|wh|w|kw|v|hz|rpm|mm|cm|m|in|pulg|un|und|unid|'
+    r'unidad|unidades|%|x\d*)$'
+)
+
+
+def _tokens_modelo(tokens):
+    """Tokens que identifican el MODELO (a15, s24, gsb550), no la capacidad."""
+    return {
+        token
+        for token in (tokens or ())
+        if any(caracter.isdigit() for caracter in token)
+        and any(caracter.isalpha() for caracter in token)
+        and not _RE_CAPACIDAD_MODELO.match(token)
+    }
 
 
 def _inferir_marca(nombre, descripcion=None, marca=None):
@@ -362,14 +384,23 @@ def _puntuar(candidato: Candidato, marca=None):
 
 
 def _relevante_web(candidato: Candidato, tokens):
-    """Evita asignar fotos que no tienen relación con el producto."""
+    """Evita asignar fotos que no tienen relación con el producto.
+
+    Si el producto tiene tokens de MODELO (a15, s24…), TODOS son obligatorios
+    aunque el dominio sea de marca o confiable: sin evidencia del modelo no se
+    acepta (evita logos e imágenes institucionales de la marca).
+    """
+    tokens = set(tokens or ())
     host_path = f'{candidato.dominio}{urlparse(candidato.url).path}'.lower()
+    texto = f'{candidato.titulo} {host_path}'.lower()
+    modelos = _tokens_modelo(tokens)
+    if modelos:
+        return all(modelo in texto for modelo in modelos)
     if any(d in host_path for d in _dominios_confiables()):
         return True
     if not tokens:
         # Sin tokens fiables solo confiamos en fuentes explícitamente confiables.
         return False
-    texto = f'{candidato.titulo} {host_path}'.lower()
     return any(token in texto for token in tokens)
 
 
@@ -1153,11 +1184,11 @@ def _buscar_candidatos_impl(
         # Un dominio confiable/marca ya está verificado: no exige coincidencia
         # de tokens. Los buscadores abiertos sí deben ser relevantes.
         verificado_por_dominio = motivo in ('dominio_confiable', 'dominio_marca')
+        # Ni el dominio de marca ni un catálogo "genérico" habilitan la
+        # aceptación ciega: el recurso debe evidenciar marca/modelo del producto.
         if (
-            fuente_base in fuentes_filtrables
-            and not verificado_por_dominio
-            and not _relevante_web(candidato, tokens)
-        ):
+            fuente_base in fuentes_filtrables or verificado_por_dominio
+        ) and not _relevante_web(candidato, tokens):
             continue
         _puntuar(candidato, marca=marca)
         puntuados.append(candidato)
@@ -1649,8 +1680,14 @@ def _actualizar_imagen(producto_id, url, fuente, estado='real'):
     return bool(actualizadas)
 
 
-def _asegurar_automatica_cache(producto_id, categoria, nombre, descripcion, codigo_barras):
-    """Consulta/registra la imagen automática (caché o API) sin tocar la manual."""
+def _asegurar_automatica_cache(
+    producto_id, categoria, nombre, descripcion, codigo_barras, permitir_reintento=False
+):
+    """Consulta/registra la imagen automática (caché o API) sin tocar la manual.
+
+    ``permitir_reintento`` deja que los ciclos de fondo (nivel>0) ignoren un
+    negativo previo y vuelvan a consultar en lugar de quedar bloqueados.
+    """
     try:
         from backend.imagenes_producto import buscar_o_cachear_automatica
 
@@ -1660,6 +1697,7 @@ def _asegurar_automatica_cache(producto_id, categoria, nombre, descripcion, codi
             nombre=nombre,
             descripcion=descripcion,
             codigo_barras=codigo_barras,
+            permitir_reintento=permitir_reintento,
         )
     except Exception as error:
         _log(f'registro automático producto={producto_id} fallo: {type(error).__name__}')
@@ -1813,15 +1851,28 @@ def procesar_producto(
     # Serper.dev (Priority 1 EAN, Priority 2 nombre+descripción), ejecutado una
     # sola vez por producto.
     if producto_id:
+        # Presupuesto de reintentos del fondo: 0 = primer intento, 1..2 = reintentos
+        # que SÍ vuelven a consultar la web, >=3 = se deja de insistir.
+        nivel_actual = int(nivel or 0)
         auto = _asegurar_automatica_cache(
-            producto_id, categoria_efectiva, nombre, descripcion, ean or codigo_barras
+            producto_id,
+            categoria_efectiva,
+            nombre,
+            descripcion,
+            ean or codigo_barras,
+            permitir_reintento=(0 < nivel_actual < 3),
         )
-        # Producto ya procesado (sin resultado en el registro automático): no se
-        # repite el pipeline en re-subidas ni en el backfill. Solo `forzar=True`
-        # relanza la búsqueda.
-        if auto and not auto.get('url') and auto.get('origen') == 'cache_bd' and not forzar:
+        # Solo se cortocircuita cuando se AGOTÓ el presupuesto de reintentos: un
+        # resultado vacío o no concluyente NO bloquea el pipeline 7 días.
+        if (
+            auto
+            and not auto.get('url')
+            and auto.get('origen') == 'cache_bd'
+            and not forzar
+            and nivel_actual >= 3
+        ):
             _log(
-                f'producto={producto_id} ya procesado (caché negativa); '
+                f'producto={producto_id} ya procesado tras {nivel_actual} intentos; '
                 'se omite el pipeline'
             )
             return ResultadoProcesamiento(

@@ -1262,6 +1262,11 @@ def asignar_imagenes_instantaneas(productos, snapshot_imagenes=None, categoria=N
                 nombre=prod.get('nombre'),
                 marca=prod.get('marca'),
             )
+            # Nunca canonizar una coincidencia débil (similitud Jaccard): solo
+            # un código exacto o un nombre exacto pueden marcar 'real' aquí, para
+            # no asignar la misma imagen genérica a productos distintos.
+            if origen == 'nombre_similar':
+                url_maestro = None
             if url_maestro and es_asset_verificado(url_maestro):
                 prod['imagen_url'] = url_maestro
                 prod['imagen_fuente'] = f'maestro_{origen}'

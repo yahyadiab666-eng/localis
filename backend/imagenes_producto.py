@@ -21,6 +21,7 @@ por clave y su resultado (positivo o negativo) queda registrado.
 from __future__ import annotations
 
 import os
+import re
 
 _LOG = '[Localis Imágenes]'
 
@@ -500,6 +501,28 @@ _TOKENS_IGNORADOS = frozenset({
 # Dominios que nunca son una foto de producto válida (herramientas/buscadores).
 _HOSTS_NO_FOTO = ('google.', 'gstatic.', 'bing.', 'duckduckgo.', 'placeholder')
 
+# Capacidades/unidades: NO son tokens de modelo (128gb, 5g, 750ml, 55w…).
+_RE_CAPACIDAD_MODELO = re.compile(
+    r'^\d+(?:[.,]\d+)?(?:kg|kgs|g|gr|grs|gramos|mg|l|lt|lts|litro|litros|ml|cc|'
+    r'oz|lb|lbs|gb|tb|mb|mah|wh|w|kw|v|hz|rpm|mm|cm|m|in|pulg|un|und|unid|'
+    r'unidad|unidades|%|x\d*)$'
+)
+
+
+def _tokens_modelo(tokens):
+    """Tokens que identifican el MODELO (a15, s24, gsb550), no la capacidad.
+
+    Se usan para exigir el modelo en el matching y evitar mezclar variantes de
+    una misma marca (p. ej. Samsung Galaxy A15 vs A25).
+    """
+    return [
+        token
+        for token in (tokens or [])
+        if any(caracter.isdigit() for caracter in token)
+        and any(caracter.isalpha() for caracter in token)
+        and not _RE_CAPACIDAD_MODELO.match(token)
+    ]
+
 
 def _log_busqueda(producto_id, estrategia, termino):
     print(
@@ -532,12 +555,14 @@ def _es_url_logo_marca(url):
 
 
 def _candidato_ean_valido(candidato, ean='', tokens=None):
-    """Validación del acierto por EAN exacto.
+    """Validación del acierto cuando la búsqueda se hizo por EAN exacto.
 
-    Acepta si la URL/host son de foto válida y además hay **evidencia**: los
-    dígitos del EAN aparecen en el título/URL/contexto, o los tokens distintivos
-    del nombre coinciden. Así se evita el típico falso positivo de Serper al
-    interpretar un EAN como texto (p. ej. un atún con foto de cloro).
+    Los motores de imágenes (p. ej. Serper) **no** devuelven el código de barras
+    en el título/contexto, por lo que NO se exige que los dígitos aparezcan en la
+    página destino. El candidato se valida por **coherencia producto/modelo**:
+      - si el nombre trae token(s) de modelo (a15, s24…), deben aparecer TODOS;
+      - si no hay modelo, basta al menos un token distintivo del nombre.
+    Si el EAN sí aparece en el texto, se acepta como evidencia fuerte (bonus).
     """
     if not isinstance(candidato, dict):
         return False
@@ -549,22 +574,28 @@ def _candidato_ean_valido(candidato, ean='', tokens=None):
     host = str(candidato.get('dominio') or '').lower()
     if any(b in host for b in _HOSTS_NO_FOTO):
         return False
-    texto = _texto_plano(
+    tokens = tokens or []
+    plano = _texto_plano(
         ' '.join(
             str(candidato.get(campo) or '')
             for campo in ('titulo', 'contexto', 'dominio', 'url')
         )
     )
+    # Evidencia fuerte opcional: el código de barras escrito en el texto.
     import re as _re
 
-    digitos_texto = _re.sub(r'\D', '', texto)
+    digitos_texto = _re.sub(r'\D', '', plano)
     digitos_ean = _re.sub(r'\D', '', str(ean or ''))
     if digitos_ean and (
         digitos_ean in digitos_texto
         or (len(digitos_ean) > 8 and digitos_ean[-8:] in digitos_texto)
     ):
         return True
-    return _candidato_nombre_confiable(candidato, tokens or [])
+    # Coherencia producto/modelo SIN exigir el EAN en el texto del motor.
+    modelos = _tokens_modelo(tokens)
+    if modelos:
+        return all(modelo in plano for modelo in modelos)
+    return any(token in plano for token in tokens)
 
 
 def _candidato_nombre_confiable(candidato, tokens):
@@ -589,6 +620,12 @@ def _candidato_nombre_confiable(candidato, tokens):
     )
     coincidencias = [token for token in tokens if token in plano]
     if not coincidencias:
+        return False
+    # El MODELO es OBLIGATORIO: si el nombre trae tokens de modelo (a15, s24…),
+    # TODOS deben aparecer en el candidato. Sin esto, un A25 pasaba por coincidir
+    # en "samsung"+"galaxy" + capacidad aunque el modelo fuera otro.
+    modelos = _tokens_modelo(tokens)
+    if modelos and not all(modelo in plano for modelo in modelos):
         return False
     if len(tokens) >= 2:
         # Al menos 2 tokens distintivos y >= 50% de coincidencia.
@@ -780,6 +817,7 @@ def buscar_o_cachear_automatica(
     descripcion=None,
     codigo_barras=None,
     limite=8,
+    permitir_reintento=False,
 ):
     """Devuelve la imagen automática para el producto (cache o API).
 
@@ -818,13 +856,19 @@ def buscar_o_cachear_automatica(
     # caduca (TTL) para no congelar la búsqueda para siempre.
     cacheado = obtener_automatica(clave)
     if cacheado is not None and _negativo_vigente(cacheado):
-        resultado['desde_cache'] = True
-        resultado['url'] = cacheado.get('url_imagen')
-        resultado['fuente'] = cacheado.get('fuente')
-        resultado['termino'] = cacheado.get('termino_busqueda')
-        resultado['encontrada'] = bool(cacheado.get('encontrada')) and bool(resultado['url'])
-        resultado['origen'] = 'cache_bd'
-        return resultado
+        tiene_url = bool(cacheado.get('url_imagen'))
+        # Un resultado NEGATIVO no debe bloquear los reintentos de fondo: si el
+        # pipeline pide reintentar (nivel>0) se ignora el negativo y se vuelve a
+        # consultar catálogo maestro + Serper. Solo se devuelve la caché cuando
+        # es positiva o cuando no se está reintentando.
+        if tiene_url or not permitir_reintento:
+            resultado['desde_cache'] = True
+            resultado['url'] = cacheado.get('url_imagen')
+            resultado['fuente'] = cacheado.get('fuente')
+            resultado['termino'] = cacheado.get('termino_busqueda')
+            resultado['encontrada'] = bool(cacheado.get('encontrada')) and bool(resultado['url'])
+            resultado['origen'] = 'cache_bd'
+            return resultado
 
     if _categorias_estrictas() and not categoria_permitida(categoria):
         resultado['fuente'] = 'categoria_no_permitida'
