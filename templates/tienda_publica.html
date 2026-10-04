@@ -146,6 +146,7 @@
       <div class="grid grid-cols-2 md:grid-cols-4 gap-5 grid-productos-mobile">
         {% for producto in productos %}
           <div class="card-hover card-producto-mobile rounded-xl overflow-hidden bg-white shadow border border-stone-100 flex flex-col h-full cursor-pointer"
+               id="producto-{{ producto.id }}"
                role="button" tabindex="0"
                data-interaccion="clic_producto" data-interaccion-comercio="{{ comercio.id }}"
                data-interaccion-producto="{{ producto.id }}">
@@ -174,6 +175,15 @@
                 <i data-lucide="message-circle" style="width:12px;height:12px;"></i> Consultar por WhatsApp
               </a>
               {% endif %}
+              <button type="button"
+                      data-producto-id="{{ producto.id }}"
+                      data-producto-nombre="{{ producto.nombre }}"
+                      data-producto-precio-usd="{{ producto.precio_usd }}"
+                      data-producto-precio-bs="{{ producto.precio_bs }}"
+                      onclick="event.stopPropagation(); window.compartirProductoDesdeBoton(this);"
+                      class="mt-2 inline-flex items-center justify-center gap-1 text-[11px] font-bold text-stone-700 bg-stone-100 hover:bg-stone-200 px-2.5 py-1.5 rounded-full transition">
+                <i data-lucide="share-2" style="width:12px;height:12px;"></i> Compartir producto
+              </button>
             </div>
           </div>
         {% endfor %}
@@ -353,6 +363,17 @@
         cerrarModalCompartir();
       }
     });
+
+    // Enlace directo al producto: /tienda/<id>?producto=<pid> resalta la ficha.
+    (function () {
+      var pid = new URLSearchParams(window.location.search).get('producto');
+      if (!pid) return;
+      var card = document.getElementById('producto-' + pid);
+      if (!card) return;
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      card.classList.add('ring-2', 'ring-amber-500');
+      setTimeout(function () { card.classList.remove('ring-2', 'ring-amber-500'); }, 3000);
+    })();
   </script>
   <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
   <script src="{{ url_for('static', filename='js/localis.js') }}"></script>

@@ -242,6 +242,108 @@
     modal.classList.add('activo');
   };
 
+  // ---------------------------------------------------------------------------
+  // Compartir producto individual (enlace directo + WhatsApp)
+  // ---------------------------------------------------------------------------
+  window.compartirProducto = function compartirProducto(opciones) {
+    opciones = opciones || {};
+    var nombre = opciones.nombre || 'Producto';
+    var precioUsd = Number(opciones.precio_usd || 0);
+    var precioBs = Number(opciones.precio_bs || 0);
+    var enlace = opciones.enlace || (window.location.origin + window.location.pathname);
+
+    var precioTexto = '$' + precioUsd.toFixed(2) + ' USD';
+    if (precioBs) precioTexto += ' (' + precioBs.toFixed(2) + ' Bs)';
+    var mensaje =
+      'Mira este producto en Localis: ' + nombre + ' — ' + precioTexto + ' · ' + enlace;
+    var waUrl = 'https://wa.me/?text=' + encodeURIComponent(mensaje);
+
+    var modal = document.getElementById('localis-modal-compartir-producto');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'localis-modal-compartir-producto';
+      modal.style.cssText =
+        'position:fixed;inset:0;z-index:300;display:none;align-items:center;' +
+        'justify-content:center;background:rgba(0,0,0,.6);padding:1rem;';
+      modal.innerHTML =
+        '<div style="background:#fff;border-radius:1rem;max-width:520px;width:100%;' +
+        'padding:1.5rem;box-shadow:0 25px 50px rgba(0,0,0,.25);">' +
+        '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.75rem;">' +
+        '<div><h3 style="font-size:1.25rem;font-weight:800;color:#111;margin:0;">Compartir producto</h3>' +
+        '<p id="localis-compartir-nombre" style="color:#78716c;font-size:0.75rem;margin-top:0.25rem;"></p></div>' +
+        '<button type="button" data-cerrar="1" aria-label="Cerrar" ' +
+        'style="background:none;border:none;color:#a8a29e;font-size:1.5rem;line-height:1;cursor:pointer;">&times;</button>' +
+        '</div>' +
+        '<input id="localis-compartir-enlace" type="text" readonly ' +
+        'style="width:100%;margin-top:1rem;padding:0.65rem 1rem;border:1px solid #e7e5e4;border-radius:999px;' +
+        'background:#fafaf9;font-size:0.75rem;color:#57534e;">' +
+        '<div style="display:grid;gap:0.5rem;margin-top:0.75rem;">' +
+        '<a id="localis-compartir-whatsapp" href="#" target="_blank" rel="noopener" ' +
+        'style="display:inline-flex;align-items:center;justify-content:center;gap:0.5rem;padding:0.75rem;' +
+        'border-radius:999px;background:rgb(16,185,129);color:#fff;font-weight:700;font-size:0.875rem;text-decoration:none;">' +
+        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" ' +
+        'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>' +
+        'Compartir por WhatsApp</a>' +
+        '<button type="button" id="localis-compartir-copiar" ' +
+        'style="display:inline-flex;align-items:center;justify-content:center;gap:0.5rem;padding:0.75rem;' +
+        'border-radius:999px;background:#1c1917;color:#fff;font-weight:700;font-size:0.875rem;border:none;cursor:pointer;">' +
+        'Copiar enlace</button>' +
+        '</div></div>';
+      document.body.appendChild(modal);
+      modal.addEventListener('click', function (evento) {
+        if (evento.target === modal || (evento.target.closest && evento.target.closest('[data-cerrar="1"]'))) {
+          modal.style.display = 'none';
+        }
+      });
+    }
+
+    var nombreEl = modal.querySelector('#localis-compartir-nombre');
+    var enlaceEl = modal.querySelector('#localis-compartir-enlace');
+    var waEl = modal.querySelector('#localis-compartir-whatsapp');
+    var copiarEl = modal.querySelector('#localis-compartir-copiar');
+    if (nombreEl) nombreEl.textContent = nombre + ' — ' + precioTexto;
+    if (enlaceEl) enlaceEl.value = enlace;
+    if (waEl) waEl.href = waUrl;
+    if (copiarEl) {
+      copiarEl.onclick = function () {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(enlace).then(function () {
+            if (typeof window.mostrarAlertaLocalis === 'function') {
+              window.mostrarAlertaLocalis('¡Enlace del producto copiado!', 'exito');
+            }
+          }).catch(function () {
+            window.prompt('Copia el enlace del producto:', enlace);
+          });
+        } else {
+          window.prompt('Copia el enlace del producto:', enlace);
+        }
+      };
+    }
+
+    modal.style.display = 'flex';
+  };
+
+  window.compartirProductoDesdeBoton = function compartirProductoDesdeBoton(boton) {
+    if (!boton) return;
+    var nombre = boton.getAttribute('data-producto-nombre') || 'Producto';
+    var id = boton.getAttribute('data-producto-id') || '';
+    var precioUsd = parseFloat(boton.getAttribute('data-producto-precio-usd') || '0');
+    var precioBs = parseFloat(boton.getAttribute('data-producto-precio-bs') || '0');
+    var enlace = boton.getAttribute('data-producto-enlace');
+    if (!enlace) {
+      enlace =
+        window.location.origin + window.location.pathname.split('?')[0] +
+        (id ? '?producto=' + encodeURIComponent(id) : '');
+    }
+    window.compartirProducto({
+      nombre: nombre,
+      precio_usd: precioUsd,
+      precio_bs: precioBs,
+      enlace: enlace,
+    });
+  };
+
   function inicializarAlertasFlash() {
     if (typeof window.inicializarAlertasAutoOcultas === 'function') {
       window.inicializarAlertasAutoOcultas();
