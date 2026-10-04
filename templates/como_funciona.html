@@ -105,7 +105,7 @@
         </div>
         <div class="space-y-1 min-w-0">
           <h2 class="font-display text-xl sm:text-2xl font-bold text-gray-900">Para comercios (dueños de locales)</h2>
-          <p class="text-stone-500 text-sm">Administra tu tienda, tu plan y tu inventario desde el panel.</p>
+          <p class="text-stone-500 text-sm">Administra tu tienda y tu inventario desde el panel.</p>
         </div>
       </div>
 
@@ -118,12 +118,16 @@
             </span>
             <p class="text-stone-600 mt-1.5 leading-relaxed">Vista general de tu comercio: perfil, inventario, importador CSV y accesos rápidos.</p>
           </li>
+          <!-- RESTAURAR_PAGOS_INICIO -->
+          {% if not pagos_congelados %}
           <li class="guia-ayuda-item rounded-xl border border-stone-100 p-4">
             <span class="inline-flex items-center gap-2 font-bold text-gray-900">
               <i data-lucide="credit-card" class="text-amber-600" style="width:16px;height:16px;"></i> Planes
             </span>
             <p class="text-stone-600 mt-1.5 leading-relaxed">Consulta tu plan de pago, elige otro nivel, renueva la suscripción y verifica comprobantes de pago móvil.</p>
           </li>
+          {% endif %}
+          <!-- RESTAURAR_PAGOS_FIN -->
           <li class="guia-ayuda-item rounded-xl border border-stone-100 p-4">
             <span class="inline-flex items-center gap-2 font-bold text-gray-900">
               <i data-lucide="settings" class="text-amber-600" style="width:16px;height:16px;"></i> Editar
@@ -136,12 +140,16 @@
             </span>
             <p class="text-stone-600 mt-1.5 leading-relaxed">Abre la vitrina pública tal como la ven tus clientes en Localis.</p>
           </li>
+          <!-- RESTAURAR_PAGOS_INICIO -->
+          {% if not pagos_congelados %}
           <li class="guia-ayuda-item rounded-xl border border-stone-100 p-4 sm:col-span-2">
             <span class="inline-flex items-center gap-2 font-bold text-gray-900">
               <i data-lucide="wallet" class="text-amber-600" style="width:16px;height:16px;"></i> Gestionar plan
             </span>
             <p class="text-stone-600 mt-1.5 leading-relaxed">Enlace dentro del perfil del comercio en el panel que lleva directamente a la sección de planes y pagos.</p>
           </li>
+          {% endif %}
+          <!-- RESTAURAR_PAGOS_FIN -->
         </ul>
       </div>
 

@@ -34,11 +34,16 @@
               <i data-lucide="alert-triangle" class="text-amber-600 shrink-0" style="width:20px;height:20px;"></i>
               <div class="space-y-3">
                 <p class="leading-relaxed">{{ mensaje }}</p>
+                <!-- RESTAURAR_PAGOS_INICIO -->
+                {# CTA de planes oculto en la fase gratuita. #}
+                {% if not pagos_congelados %}
                 <a href="{{ url_for('comercio_planes', abrir_pago='pro') }}"
                    class="btn-touch inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-stone-900 font-bold px-4 py-2 rounded-full text-xs transition shadow-sm">
                   <i data-lucide="credit-card" style="width:14px;height:14px;"></i>
                   Ver planes y actualizar
                 </a>
+                {% endif %}
+                <!-- RESTAURAR_PAGOS_FIN -->
               </div>
             </div>
           </div>
@@ -117,6 +122,9 @@
               {% endif %}
             </div>
             <div class="flex items-center justify-center sm:justify-start gap-1.5 flex-wrap">
+              <!-- RESTAURAR_PAGOS_INICIO -->
+              {# Plan actual y acceso a gestión de suscripción: ocultos. #}
+              {% if not pagos_congelados %}
               <i data-lucide="credit-card" class="text-amber-600 shrink-0" style="width:15px;height:15px;"></i>
               <span>Plan {{ plan_info.nombre }}</span>
               <a href="{{ url_for('comercio_planes') }}"
@@ -124,17 +132,22 @@
                 Gestionar plan
               </a>
               <span class="hidden sm:inline text-stone-300">·</span>
+              {% endif %}
+              <!-- RESTAURAR_PAGOS_FIN -->
               <a href="{{ url_for('como_funciona') }}"
                  class="btn-touch inline-flex items-center gap-1 text-stone-500 hover:text-amber-800 font-medium underline">
                 Guía de uso
               </a>
             </div>
-            {% if comercio.fecha_vencimiento %}
+            <!-- RESTAURAR_PAGOS_INICIO -->
+            {# Fecha de vencimiento de la suscripción: oculta. #}
+            {% if not pagos_congelados and comercio.fecha_vencimiento %}
             <div class="flex items-center justify-center sm:justify-start gap-1.5">
               <i data-lucide="calendar" class="text-amber-600 shrink-0" style="width:15px;height:15px;"></i>
               <span>Vence: <span data-fecha-vencimiento>{{ comercio.fecha_vencimiento|fecha_corta }}</span></span>
             </div>
             {% endif %}
+            <!-- RESTAURAR_PAGOS_FIN -->
             <div class="flex items-center justify-center sm:justify-start gap-1.5">
               {% if comercio.visible == 1 %}
                 <span class="inline-flex items-center gap-1 text-emerald-600 font-bold bg-emerald-50 px-2.5 py-0.5 rounded-md">
@@ -351,7 +364,9 @@
     </div>
   </footer>
 
-  {% if avisos.bienvenida_prueba %}
+  <!-- RESTAURAR_PAGOS_INICIO -->
+  {# Modales de suscripción (bienvenida con mes gratis y vencimiento): ocultos. #}
+  {% if not pagos_congelados and avisos.bienvenida_prueba %}
   <div id="modal-bienvenida" class="modal-push activo">
     <div class="panel p-6 space-y-4">
       <div class="text-center">
@@ -370,7 +385,7 @@
   </div>
   {% endif %}
 
-  {% if avisos.suscripcion_vencida %}
+  {% if not pagos_congelados and avisos.suscripcion_vencida %}
   <div id="modal-vencido" class="modal-push activo" onclick="if(event.target===this)cerrarModalVencido()">
     <div class="panel p-6 space-y-4 relative">
       <button type="button" onclick="cerrarModalVencido()" aria-label="Cerrar" class="btn-touch absolute top-3 right-3 text-stone-400 hover:text-stone-700 text-xl">&times;</button>
@@ -396,8 +411,12 @@
     </div>
   </div>
   {% endif %}
+  <!-- RESTAURAR_PAGOS_FIN -->
 
   <script>
+    // --- RESTAURAR_PAGOS_INICIO ---
+    // Lógica JS de los modales de suscripción (vencido): oculta en la fase gratuita.
+    {% if not pagos_congelados %}
     function rechazarVencido() {
       document.getElementById('form-rechazar-vencido')?.submit();
     }
@@ -414,6 +433,8 @@
         }
       } catch (e) {}
     })();
+    {% endif %}
+    // --- RESTAURAR_PAGOS_FIN ---
     // Compartir tienda: copia el enlace público o abre el selector nativo (WhatsApp).
     (function () {
       const boton = document.getElementById('btn-compartir-tienda');

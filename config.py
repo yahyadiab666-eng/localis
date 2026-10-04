@@ -29,6 +29,28 @@ def url_banner_por_defecto():
     """Hero aprobado. No depende de Storage ni de valores nulos."""
     return DEFAULT_BANNER_URL
 
+# ==========================================
+# INTERRUPTOR DE PAGOS (CONGELAMIENTO TEMPORAL)
+# ==========================================
+# Localis entra en fase de lanzamiento 100% gratuita. Mientras
+# ``LOCALIS_PAGOS_HABILITADOS`` esté en 0 (por defecto), el panel del comerciante
+# muestra un banner informativo y no se permite cobrar ni activar planes de pago.
+# La lógica, las tablas, los endpoints y las plantillas de pago permanecen
+# FÍSICAMENTE INTACTOS en el repositorio: solo se congelan mediante este flag.
+# Para reactivar la monetización en el futuro basta con definir
+# ``LOCALIS_PAGOS_HABILITADOS=1`` en el entorno (sin tocar el código).
+def pagos_habilitados():
+    """True si el sistema de pagos está activo. Por defecto: congelado (gratis)."""
+    valor = str(os.environ.get('LOCALIS_PAGOS_HABILITADOS', '0')).strip().lower()
+    return valor in ('1', 'true', 'yes', 'on')
+
+
+MENSAJE_PAGOS_CONGELADOS = (
+    'Localis es 100% gratuito por fase de lanzamiento. '
+    'No necesitas pagar ni renovar: tu tienda y tu catálogo siguen activos.'
+)
+
+
 # Diagnóstico y alertas de errores críticos
 ERROR_REPORT_EMAIL = os.environ.get('ERROR_REPORT_EMAIL', 'ydiab.t@gmail.com')
 ENABLE_ERROR_EMAILS = os.environ.get('ENABLE_ERROR_EMAILS', 'true').lower() in (

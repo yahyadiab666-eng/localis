@@ -417,3 +417,176 @@ def confirmar_pago_suscripcion(comercio_id, plan_tipo, meses=1):
         return False, mensaje
     except Exception as e:
         return False, f'Error al confirmar pago: {str(e)}'
+
+
+# ==========================================
+# ACCESO TOTAL DEL ADMINISTRADOR
+# ==========================================
+# El administrador puede visualizar, auditar y gestionar directamente cualquier
+# tienda, perfil y catálogo sin depender del comerciante. Todo es de solo
+# lectura salvo las acciones explícitas que ya registran auditoría.
+
+
+def obtener_comercio_admin(comercio_id):
+    """Ficha completa de un comercio (tienda + propietario + otros comercios).
+
+    Devuelve un dict plano o ``None`` si el comercio no existe. Nunca lanza.
+    """
+    try:
+        with get_db_connection(row_factory=sqlite3.Row) as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT c.*,
+                       cat.nombre AS categoria,
+                       u.id AS propietario_id,
+                       u.nombre AS propietario_nombre,
+                       u.correo AS propietario_correo,
+                       u.foto_url AS propietario_foto,
+                       u.rol AS propietario_rol,
+                       COALESCE(p.nombre, c.plan_tipo) AS plan_nombre,
+                       (
+                           SELECT COUNT(*) FROM productos
+                           WHERE comercio_id = c.id
+                       ) AS total_productos
+                FROM comercios c
+                LEFT JOIN categorias cat ON c.categoria_id = cat.id
+                LEFT JOIN usuarios u ON c.usuario_id = u.id
+                LEFT JOIN planes p ON c.plan_id = p.id
+                WHERE c.id = ?
+                """,
+                (int(comercio_id),),
+            )
+            fila = cursor.fetchone()
+            if not fila:
+                return None
+            comercio = dict(fila)
+
+            propietario_id = comercio.get('propietario_id')
+            if propietario_id:
+                cursor.execute(
+                    """
+                    SELECT id, nombre, visible, estado_pago, plan_tipo
+                    FROM comercios
+                    WHERE usuario_id = ? AND id <> ?
+                    ORDER BY id DESC
+                    """,
+                    (propietario_id, int(comercio_id)),
+                )
+                comercio['otros_comercios'] = [dict(f) for f in cursor.fetchall()]
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) AS n
+                    FROM comercios WHERE usuario_id = ?
+                    """,
+                    (propietario_id,),
+                )
+                conteo = cursor.fetchone()
+                comercio['total_comercios_dueno'] = int(
+                    (conteo['n'] if isinstance(conteo, dict) else conteo[0]) or 0
+                )
+            else:
+                comercio['otros_comercios'] = []
+                comercio['total_comercios_dueno'] = 0
+            return comercio
+    except Exception as e:
+        print(f'Error al obtener comercio admin (id={comercio_id}): {e}')
+        return None
+
+
+def obtener_productos_admin(comercio_id):
+    """Catálogo completo de un comercio para auditoría del administrador."""
+    try:
+        with get_db_connection(row_factory=sqlite3.Row) as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT id, nombre, descripcion, precio_usd, codigo_barras, stock,
+                       imagen_url, imagen_estado, activo
+                FROM productos
+                WHERE comercio_id = ?
+                ORDER BY id DESC
+                """,
+                (int(comercio_id),),
+            )
+            return [dict(f) for f in cursor.fetchall()]
+    except Exception as e:
+        print(f'Error al listar productos admin (comercio={comercio_id}): {e}')
+        return []
+
+
+def eliminar_producto_admin(producto_id, admin_id, comercio_id=None):
+    """Elimina un producto desde el panel admin y registra auditoría."""
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            if comercio_id:
+                cursor.execute(
+                    'DELETE FROM productos WHERE id = ? AND comercio_id = ?',
+                    (int(producto_id), int(comercio_id)),
+                )
+            else:
+                cursor.execute(
+                    'DELETE FROM productos WHERE id = ?', (int(producto_id),)
+                )
+            if cursor.rowcount == 0:
+                conexion.rollback()
+                return False, 'Producto no encontrado.'
+
+            cursor.execute(
+                """
+                INSERT INTO logs_auditoria (usuario_id, accion, detalles)
+                VALUES (?, 'Eliminación de producto (admin)', ?)
+                """,
+                (
+                    admin_id,
+                    f'Producto ID {int(producto_id)} eliminado por el administrador '
+                    f'(comercio {comercio_id or "desconocido"}).',
+                ),
+            )
+            conexion.commit()
+        return True, 'Producto eliminado por el administrador.'
+    except Exception as e:
+        return False, f'Error al eliminar producto: {str(e)}'
+
+
+def obtener_usuarios_admin(busqueda=None):
+    """Lista todos los usuarios registrados con el conteo de sus comercios.
+
+    Permite al administrador auditar cualquier perfil, tenga o no una tienda.
+    """
+    try:
+        with get_db_connection(row_factory=sqlite3.Row) as conexion:
+            cursor = conexion.cursor()
+            query = """
+                SELECT u.id, u.nombre, u.correo, u.rol, u.foto_url,
+                       (
+                           SELECT COUNT(*) FROM comercios c WHERE c.usuario_id = u.id
+                       ) AS total_comercios
+                FROM usuarios u
+            """
+            parametros = []
+            if busqueda:
+                termino = f'%{busqueda.strip()}%'
+                query += ' WHERE u.nombre ILIKE ? OR u.correo ILIKE ?'
+                parametros.extend([termino, termino])
+            query += ' ORDER BY u.id DESC'
+            cursor.execute(query, parametros)
+            usuarios = [dict(f) for f in cursor.fetchall()]
+
+            # Se adjuntan los comercios de cada usuario (para enlazar a su ficha).
+            for usuario in usuarios:
+                cursor.execute(
+                    """
+                    SELECT id, nombre, visible, estado_pago
+                    FROM comercios
+                    WHERE usuario_id = ?
+                    ORDER BY id DESC
+                    """,
+                    (usuario['id'],),
+                )
+                usuario['comercios'] = [dict(f) for f in cursor.fetchall()]
+            return usuarios
+    except Exception as e:
+        print(f'Error al listar usuarios admin: {e}')
+        return []

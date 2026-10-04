@@ -96,10 +96,12 @@ from authlib.integrations.flask_client import OAuth
 from config import (
     DEFAULT_BANNER_URL,
     MAX_UPLOAD_BYTES,
+    MENSAJE_PAGOS_CONGELADOS,
     WHATSAPP_SOPORTE,
     WHATSAPP_SOPORTE_URL,
     aplicar_config_sesion_flask,
     obtener_secret_key,
+    pagos_habilitados,
     validar_config_arranque,
 )
 from flask import (
@@ -127,9 +129,13 @@ from backend.admin import (
     cambiar_visibilidad_comercio,
     confirmar_pago_suscripcion,
     eliminar_comercio_definitivo,
+    eliminar_producto_admin,
     obtener_banner_principal,
     obtener_bandeja_tecnica,
+    obtener_comercio_admin,
+    obtener_productos_admin,
     obtener_todos_comercios_admin,
+    obtener_usuarios_admin,
     reactivar_comercio,
     resolver_ticket_soporte,
     suspender_comercio_temporal,
@@ -341,6 +347,25 @@ def _injectar_placeholders_imagen():
     }
 
 
+@app.context_processor
+def _injectar_estado_pagos():
+    """Disponible en todas las plantillas: congelamiento temporal de pagos.
+
+    Localis es 100% gratuito en fase de lanzamiento. El flag de entorno
+    ``LOCALIS_PAGOS_HABILITADOS`` permite reactivar la monetización sin tocar
+    plantillas ni rutas (todo el código de pago permanece intacto).
+    """
+    try:
+        habilitados = pagos_habilitados()
+    except Exception:
+        habilitados = False
+    return {
+        'pagos_habilitados': habilitados,
+        'pagos_congelados': not habilitados,
+        'mensaje_pagos_congelados': MENSAJE_PAGOS_CONGELADOS,
+    }
+
+
 def _debug_imagenes_antes_de_render(productos, origen):
     """Print de control: URL persistida vs URL que verá la plantilla (sin I/O)."""
     if os.getenv('LOCALIS_DEBUG_IMAGENES', '').strip().lower() not in (
@@ -426,7 +451,11 @@ def _inicializar_aplicacion():
             traceback.print_exc()
         ejecutar_diagnostico_inicio()
         _diagnosticar_serper()
-        verificar_vencimientos_comercios()
+        # --- RESTAURAR_PAGOS_INICIO ---
+        # En la fase gratuita no se expiran tiendas por suscripción al arrancar.
+        if pagos_habilitados():
+            verificar_vencimientos_comercios()
+        # --- RESTAURAR_PAGOS_FIN ---
         print('[Localis] Inicialización completada.', flush=True)
     except Exception as error:
         print(f'[Localis] Error al inicializar la aplicación: {error}', flush=True)
@@ -465,7 +494,10 @@ def _mantenimiento_vencimientos_async():
     """
     global _vencimientos_en_vuelo
     try:
-        verificar_vencimientos_comercios()
+        # --- RESTAURAR_PAGOS_INICIO ---
+        if pagos_habilitados():
+            verificar_vencimientos_comercios()
+        # --- RESTAURAR_PAGOS_FIN ---
     except Exception as error:
         print(f'Aviso verificación vencimientos (async): {error}')
     finally:
@@ -480,6 +512,13 @@ def _mantenimiento_vencimientos_async():
 def sincronizar_vencimientos_suscripcion():
     """Revisa vencimientos globalmente (cada 5 min) y por comercio en pagos (cada 10 min)."""
     global _ultima_verificacion_vencimientos_global, _vencimientos_en_vuelo
+
+    # --- RESTAURAR_PAGOS_INICIO ---
+    # Con los pagos ocultos la app es nativamente gratuita: no se expiran ni
+    # ocultan tiendas por suscripción.
+    if not pagos_habilitados():
+        return
+    # --- RESTAURAR_PAGOS_FIN ---
 
     try:
         ahora = time.time()
@@ -771,6 +810,11 @@ def admin_requerido_api(f):
 
 
 def _bloquear_gestion_inventario(comercio, redirect_url='panel_comercio'):
+    # --- RESTAURAR_PAGOS_INICIO ---
+    # En la fase gratuita el inventario nunca se bloquea por plan/suscripción.
+    if not pagos_habilitados():
+        return None
+    # --- RESTAURAR_PAGOS_FIN ---
     ok, mensaje = comercio_puede_gestionar_inventario(comercio['id'])
     if ok:
         return None
@@ -970,6 +1014,16 @@ def api_producto(producto_id):
     except Exception:
         traceback.print_exc()
         producto['imagen_url'] = PLACEHOLDER_PRODUCTO
+    # Enlace de contacto directo al WhatsApp del comercio con el producto en el
+    # mensaje. Solo se expone si el comercio tiene teléfono configurado.
+    try:
+        nombre_producto = (producto.get('nombre') or 'un producto').strip()
+        producto['comercio_whatsapp_url'] = url_whatsapp_comercio(
+            producto.get('comercio_telefono'),
+            f'¡Hola! Vi "{nombre_producto}" en Localis y me interesa.',
+        )
+    except Exception:
+        producto['comercio_whatsapp_url'] = None
     return jsonify(producto)
 
 
@@ -1018,6 +1072,23 @@ def tienda_publica(comercio_id):
     comercio['banner_color_hex'] = color['hex']
     comercio['banner_color_texto'] = color['texto']
     comercio['banner_gradiente'] = gradiente_banner(comercio.get('banner_color'))
+
+    # Enlace de contacto por ficha: cada producto puede iniciar un WhatsApp al
+    # comercio con el nombre del artículo en el mensaje. Solo si hay teléfono.
+    if telefono:
+        for producto in productos:
+            nombre_producto = (producto.get('nombre') or '').strip()
+            if nombre_producto:
+                texto_producto = (
+                    f'¡Hola! Vi "{nombre_producto}" en tu tienda de Localis '
+                    'y me interesa. ¿Está disponible?'
+                )
+            else:
+                texto_producto = '¡Hola! Vi tu tienda en Localis y me interesa.'
+            producto['whatsapp_url'] = url_whatsapp_comercio(telefono, texto_producto)
+    else:
+        for producto in productos:
+            producto['whatsapp_url'] = None
 
     _debug_imagenes_antes_de_render(productos, 'tienda_publica')
     return render_template(
@@ -1356,8 +1427,11 @@ def _cargar_datos_comercio_usuario(usuario_id):
 def panel_comercio():
     usuario_id = session.get('usuario_id')
     abrir_pago = request.args.get('abrir_pago')
-    if abrir_pago:
+    # --- RESTAURAR_PAGOS_INICIO ---
+    # Con los pagos ocultos se ignora ``abrir_pago`` para no redirigir a Planes.
+    if abrir_pago and pagos_habilitados():
         return redirect(url_for('comercio_planes', abrir_pago=abrir_pago))
+    # --- RESTAURAR_PAGOS_FIN ---
 
     comercio = None
     productos = []
@@ -1426,6 +1500,12 @@ def panel_comercio():
 @login_requerido
 def comercio_planes():
     usuario_id = session.get('usuario_id')
+    # --- RESTAURAR_PAGOS_INICIO ---
+    # Vista de Planes/Suscripción/Pagos oculta: se redirige limpiamente al panel
+    # sin romper la navegación del comerciante.
+    if not pagos_habilitados():
+        return redirect(url_for('panel_comercio'))
+    # --- RESTAURAR_PAGOS_FIN ---
     try:
         comercio, productos, tasa_actual, categorias = _cargar_datos_comercio_usuario(
             usuario_id
@@ -1438,6 +1518,13 @@ def comercio_planes():
         pago_movil = obtener_datos_pago_movil()
         planes_beneficios = _planes_beneficios_para_comercio(comercio, tasa_actual)
 
+        # Congelamiento temporal: en fase de lanzamiento no se abre el modal de
+        # pago aunque el enlace traiga ``abrir_pago``. El código de pago sigue
+        # intacto y se reactiva con LOCALIS_PAGOS_HABILITADOS=1.
+        abrir_pago = request.args.get('abrir_pago')
+        if not pagos_habilitados():
+            abrir_pago = None
+
         return render_template(
             'comercio_planes.html',
             comercio=comercio,
@@ -1448,7 +1535,7 @@ def comercio_planes():
             pago_movil=pago_movil,
             planes=PLANES,
             planes_beneficios=planes_beneficios,
-            abrir_pago=request.args.get('abrir_pago'),
+            abrir_pago=abrir_pago,
             nav_activo='planes',
         )
     except psycopg2.Error:
@@ -1629,13 +1716,17 @@ def nuevo_producto():
             flash(error_precio, 'error')
             return redirect(url_for('nuevo_producto'))
 
-        ok, msg_limite = puede_agregar_producto(comercio['id'])
-        if not ok:
-            flash(msg_limite, 'error')
-            destino = url_for('panel_comercio')
-            if 'vencido' in msg_limite.lower() or 'límite' in msg_limite.lower():
-                destino = url_for('comercio_planes', abrir_pago='pro')
-            return redirect(destino)
+        # --- RESTAURAR_PAGOS_INICIO ---
+        # En la fase gratuita no se aplican límites de plan al crear productos.
+        if pagos_habilitados():
+            ok, msg_limite = puede_agregar_producto(comercio['id'])
+            if not ok:
+                flash(msg_limite, 'error')
+                destino = url_for('panel_comercio')
+                if 'vencido' in msg_limite.lower() or 'límite' in msg_limite.lower():
+                    destino = url_for('comercio_planes', abrir_pago='pro')
+                return redirect(destino)
+        # --- RESTAURAR_PAGOS_FIN ---
 
         try:
             imagen_url, aviso_img = persistir_imagen_producto_hibrida(
@@ -1825,15 +1916,19 @@ def cargar_csv():
 
     respuesta_json = _peticion_acepta_json()
 
-    ok_gestion, mensaje_gestion = comercio_puede_gestionar_inventario(comercio['id'])
-    if not ok_gestion:
-        if respuesta_json:
-            return (
-                jsonify({'ok': False, 'error': mensaje_gestion, 'plan_sugerido': 'pro'}),
-                403,
-            )
-        flash(mensaje_gestion, 'error')
-        return redirect(url_for('comercio_planes', abrir_pago='pro'))
+    # --- RESTAURAR_PAGOS_INICIO ---
+    # En la fase gratuita la importación nunca se bloquea por plan/suscripción.
+    if pagos_habilitados():
+        ok_gestion, mensaje_gestion = comercio_puede_gestionar_inventario(comercio['id'])
+        if not ok_gestion:
+            if respuesta_json:
+                return (
+                    jsonify({'ok': False, 'error': mensaje_gestion, 'plan_sugerido': 'pro'}),
+                    403,
+                )
+            flash(mensaje_gestion, 'error')
+            return redirect(url_for('comercio_planes', abrir_pago='pro'))
+    # --- RESTAURAR_PAGOS_FIN ---
 
     archivo = request.files.get('archivo_csv')
     print(
@@ -1910,6 +2005,10 @@ def cargar_csv_get():
 @app.route('/comercio/suscripcion/marcar-bienvenida', methods=['POST'])
 @login_requerido
 def suscripcion_marcar_bienvenida():
+    # --- RESTAURAR_PAGOS_INICIO ---
+    if not pagos_habilitados():
+        return redirect(url_for('panel_comercio'))
+    # --- RESTAURAR_PAGOS_FIN ---
     comercio = _comercio_sesion_validado()
     if comercio:
         marcar_bienvenida_vista(comercio['id'])
@@ -1919,6 +2018,10 @@ def suscripcion_marcar_bienvenida():
 @app.route('/comercio/suscripcion/rechazar-vencido', methods=['POST'])
 @login_requerido
 def suscripcion_rechazar_vencido():
+    # --- RESTAURAR_PAGOS_INICIO ---
+    if not pagos_habilitados():
+        return redirect(url_for('panel_comercio'))
+    # --- RESTAURAR_PAGOS_FIN ---
     comercio, redireccion = _requiere_comercio()
     if redireccion:
         return redireccion
@@ -1935,6 +2038,10 @@ def suscripcion_solicitar_pago():
     Ruta legacy conservada por compatibilidad.
     Redirige al panel de comercio y abre el modal de pago OCR automático.
     """
+    # --- RESTAURAR_PAGOS_INICIO ---
+    if not pagos_habilitados():
+        return redirect(url_for('panel_comercio'))
+    # --- RESTAURAR_PAGOS_FIN ---
     comercio, redireccion = _requiere_comercio()
     if redireccion:
         return redireccion
@@ -1968,15 +2075,19 @@ def api_crear_producto():
         return jsonify({'error': 'Selecciona un comercio válido en tu cuenta.'}), 403
 
     tienda_id = comercio['id']
-    limite = obtener_limite_productos_comercio(tienda_id)
-    total_productos = contar_productos_comercio(tienda_id)
+    # --- RESTAURAR_PAGOS_INICIO ---
+    # Sin límites de plan durante la fase gratuita.
+    if pagos_habilitados():
+        limite = obtener_limite_productos_comercio(tienda_id)
+        total_productos = contar_productos_comercio(tienda_id)
 
-    if not es_limite_ilimitado(limite) and total_productos >= limite:
-        return jsonify({'error': MENSAJE_LIMITE_PRODUCTOS}), 400
+        if not es_limite_ilimitado(limite) and total_productos >= limite:
+            return jsonify({'error': MENSAJE_LIMITE_PRODUCTOS}), 400
 
-    ok_estado, msg_estado = puede_agregar_producto(tienda_id)
-    if not ok_estado:
-        return jsonify({'error': msg_estado}), 400
+        ok_estado, msg_estado = puede_agregar_producto(tienda_id)
+        if not ok_estado:
+            return jsonify({'error': msg_estado}), 400
+    # --- RESTAURAR_PAGOS_FIN ---
 
     nombre = (request.form.get('nombre') or '').strip()
     descripcion = (request.form.get('descripcion') or '').strip()
@@ -2069,6 +2180,12 @@ def api_programar_cambio_plan():
     if not comercio:
         return jsonify({'error': 'Selecciona un comercio válido en tu cuenta.'}), 403
 
+    # --- RESTAURAR_PAGOS_INICIO ---
+    # Los cambios de plan quedan en pausa; la lógica de abajo permanece intacta.
+    if not pagos_habilitados():
+        return jsonify({'error': MENSAJE_PAGOS_CONGELADOS}), 400
+    # --- RESTAURAR_PAGOS_FIN ---
+
     plan_tipo = (request.form.get('plan_tipo') or (request.get_json(silent=True) or {}).get('plan_tipo') or '').lower()
     cotizacion = calcular_cotizacion_cambio_plan(comercio, plan_tipo)
     if not cotizacion:
@@ -2089,6 +2206,20 @@ def api_verificar_pago():
     comercio = _comercio_sesion_validado()
     if not comercio:
         return jsonify({'error': 'Selecciona un comercio válido en tu cuenta.'}), 403
+
+    # --- RESTAURAR_PAGOS_INICIO ---
+    # No se activan planes de pago. El flujo de comprobante (OCR) permanece
+    # intacto en el código de abajo.
+    if not pagos_habilitados():
+        return jsonify(
+            {
+                'error': (
+                    MENSAJE_PAGOS_CONGELADOS
+                    + ' No necesitas subir ningún comprobante de pago.'
+                )
+            }
+        ), 400
+    # --- RESTAURAR_PAGOS_FIN ---
 
     plan_tipo = (request.form.get('plan_tipo') or 'basica').lower()
     cotizacion = calcular_cotizacion_cambio_plan(comercio, plan_tipo)
@@ -2213,6 +2344,19 @@ def panel_admin():
     )
 
 
+@app.route('/admin/usuarios')
+@admin_requerido
+def admin_usuarios():
+    """Listado de todos los usuarios registrados (auditoría de perfiles)."""
+    busqueda = request.args.get('q', '').strip()
+    usuarios = obtener_usuarios_admin(busqueda=busqueda or None)
+    return render_template(
+        'admin_usuarios.html',
+        usuarios=usuarios,
+        q=busqueda,
+    )
+
+
 @app.route('/admin/tasa', methods=['POST'])
 @admin_requerido
 def actualizar_tasa():
@@ -2291,6 +2435,58 @@ def admin_eliminar_comercio(comercio_id):
         session.get('usuario_id'), comercio_id
     )
     flash(mensaje, 'exito' if exito else 'error')
+    return redirect(url_for('panel_admin'))
+
+
+@app.route('/admin/comercio/<int:comercio_id>')
+@admin_requerido
+def admin_comercio_detalle(comercio_id):
+    """Ficha de acceso total: tienda + perfil del dueño + catálogo.
+
+    Permite al administrador visualizar y auditar cualquier comercio registrado
+    y gestionar su estado, plan y productos sin depender del comerciante.
+    """
+    comercio = obtener_comercio_admin(comercio_id)
+    if not comercio:
+        flash('Comercio no encontrado.', 'error')
+        return redirect(url_for('panel_admin'))
+
+    productos = obtener_productos_admin(comercio_id)
+    comercio = _normalizar_imagenes_comercio(comercio)
+    try:
+        comercio['maps_link'] = url_maps_comercio(comercio)
+    except Exception:
+        comercio['maps_link'] = None
+    try:
+        comercio['telefono_whatsapp_url'] = url_whatsapp_comercio(
+            comercio.get('telefono'), 'Hola, te escribimos desde Localis.'
+        )
+    except Exception:
+        comercio['telefono_whatsapp_url'] = None
+
+    tasa_actual = obtener_tasa_dolar()
+    return render_template(
+        'admin_comercio.html',
+        comercio=comercio,
+        productos=productos,
+        tasa=tasa_actual,
+        planes=PLANES,
+    )
+
+
+@app.route('/admin/producto/eliminar/<int:producto_id>', methods=['POST'])
+@admin_requerido
+def admin_eliminar_producto_ruta(producto_id):
+    """Elimina un producto de cualquier comercio desde el panel admin."""
+    comercio_id = request.form.get('comercio_id', type=int)
+    exito, mensaje = eliminar_producto_admin(
+        producto_id, session.get('usuario_id'), comercio_id=comercio_id
+    )
+    flash(mensaje, 'exito' if exito else 'error')
+    if comercio_id:
+        return redirect(
+            url_for('admin_comercio_detalle', comercio_id=comercio_id)
+        )
     return redirect(url_for('panel_admin'))
 
 

@@ -116,6 +116,11 @@
               {{ comercio.direccion }}{% if comercio.ciudad %}, {{ comercio.ciudad }}{% endif %}{% if comercio.zona %} ({{ comercio.zona }}){% endif %}
             </span>
           {% endif %}
+
+          <button type="button" onclick="abrirModalCompartir()"
+                  class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-stone-900 text-white font-semibold hover:bg-stone-800 transition btn-touch">
+            <i data-lucide="share-2" style="width:16px;height:16px;"></i> Compartir tienda
+          </button>
         </div>
 
         {% if comercio.descripcion %}
@@ -160,6 +165,15 @@
                 <span class="text-sm font-bold text-amber-600">${{ "%.2f"|format(producto.precio_usd) }}</span>
                 <span class="text-[10px] text-gray-400">{{ "%.2f"|format(producto.precio_bs) }} Bs</span>
               </div>
+              {% if producto.whatsapp_url %}
+              <a href="{{ producto.whatsapp_url }}" target="_blank" rel="noopener"
+                 data-interaccion="clic_whatsapp" data-interaccion-comercio="{{ comercio.id }}"
+                 data-interaccion-producto="{{ producto.id }}"
+                 class="mt-2 inline-flex items-center justify-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1.5 rounded-full transition"
+                 onclick="event.stopPropagation();">
+                <i data-lucide="message-circle" style="width:12px;height:12px;"></i> Consultar por WhatsApp
+              </a>
+              {% endif %}
             </div>
           </div>
         {% endfor %}
@@ -170,6 +184,54 @@
       </div>
     {% endif %}
   </section>
+
+  <div id="modal-compartir" class="hidden fixed inset-0 z-[200] items-center justify-center bg-black/60 p-4"
+       onclick="if(event.target===this)cerrarModalCompartir()">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <h3 class="font-display text-xl font-bold text-gray-900">Compartir tienda</h3>
+          <p class="text-stone-500 text-xs mt-1">Comparte {{ comercio.nombre }} con tus contactos.</p>
+        </div>
+        <button type="button" onclick="cerrarModalCompartir()" aria-label="Cerrar"
+                class="text-stone-400 hover:text-stone-700 text-2xl leading-none btn-touch">&times;</button>
+      </div>
+
+      <div class="mt-5 grid grid-cols-2 gap-2 text-sm font-bold">
+        <a id="compartir-whatsapp" href="#" target="_blank" rel="noopener"
+           data-interaccion="clic_whatsapp" data-interaccion-comercio="{{ comercio.id }}"
+           class="inline-flex items-center justify-center gap-2 py-3 rounded-full bg-emerald-500 text-white hover:bg-emerald-400 transition">
+          <i data-lucide="message-circle" style="width:16px;height:16px;"></i> WhatsApp
+        </a>
+        <a id="compartir-facebook" href="#" target="_blank" rel="noopener"
+           class="inline-flex items-center justify-center gap-2 py-3 rounded-full bg-blue-600 text-white hover:bg-blue-500 transition">
+          <i data-lucide="facebook" style="width:16px;height:16px;"></i> Facebook
+        </a>
+        <a id="compartir-telegram" href="#" target="_blank" rel="noopener"
+           class="inline-flex items-center justify-center gap-2 py-3 rounded-full bg-sky-500 text-white hover:bg-sky-400 transition">
+          <i data-lucide="send" style="width:16px;height:16px;"></i> Telegram
+        </a>
+        <button type="button" id="compartir-nativo" onclick="compartirNativo()"
+                class="hidden inline-flex items-center justify-center gap-2 py-3 rounded-full border border-stone-300 text-stone-700 hover:bg-stone-50 transition btn-touch">
+          <i data-lucide="share-2" style="width:16px;height:16px;"></i> Más opciones
+        </button>
+      </div>
+
+      <div class="mt-4 flex gap-2">
+        <input id="compartir-enlace" type="text" readonly
+               class="flex-1 min-w-0 px-3 py-2.5 rounded-full border border-stone-200 bg-stone-50 text-xs text-stone-600"
+               value="">
+        <button type="button" onclick="copiarEnlaceTienda()"
+                data-interaccion="clic_copiar" data-interaccion-comercio="{{ comercio.id }}"
+                class="btn-touch inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-amber-500 text-stone-900 text-xs font-bold hover:bg-amber-400 transition shrink-0">
+          <i data-lucide="copy" style="width:14px;height:14px;"></i> Copiar
+        </button>
+      </div>
+      <p class="text-[11px] text-stone-400 mt-3 text-center">
+        Ideal para estados de WhatsApp, redes sociales o compartir con un toque.
+      </p>
+    </div>
+  </div>
 
   <div id="modal-sin-telefono" class="hidden fixed inset-0 z-[200] items-center justify-center bg-black/60 p-4"
        onclick="if(event.target===this)cerrarModalSinTelefono()">
@@ -200,6 +262,77 @@
       });
     }
 
+    // --- Compartir tienda (WhatsApp, redes, nativo y portapapeles) ---
+    const TIENDA_NOMBRE = {{ comercio.nombre | tojson }};
+    const TIENDA_ENLACE = (function () {
+      var base = window.location.origin + window.location.pathname;
+      return base;
+    })();
+    const TIENDA_MENSAJE = 'Mira ' + TIENDA_NOMBRE + ' en Localis: ' + TIENDA_ENLACE;
+
+    function abrirModalCompartir() {
+      const modal = document.getElementById('modal-compartir');
+      if (!modal) return;
+      const enlace = document.getElementById('compartir-enlace');
+      if (enlace) enlace.value = TIENDA_ENLACE;
+
+      const wa = document.getElementById('compartir-whatsapp');
+      if (wa) {
+        wa.href = 'https://wa.me/?text=' + encodeURIComponent(TIENDA_MENSAJE);
+      }
+      const fb = document.getElementById('compartir-facebook');
+      if (fb) {
+        fb.href =
+          'https://www.facebook.com/sharer/sharer.php?u=' +
+          encodeURIComponent(TIENDA_ENLACE);
+      }
+      const tg = document.getElementById('compartir-telegram');
+      if (tg) {
+        tg.href =
+          'https://t.me/share/url?url=' +
+          encodeURIComponent(TIENDA_ENLACE) +
+          '&text=' +
+          encodeURIComponent(TIENDA_NOMBRE + ' en Localis');
+      }
+      const nativo = document.getElementById('compartir-nativo');
+      if (nativo && navigator.share) nativo.classList.remove('hidden');
+
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    function cerrarModalCompartir() {
+      const modal = document.getElementById('modal-compartir');
+      if (!modal) return;
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    function compartirNativo() {
+      if (!navigator.share) return;
+      navigator.share({
+        title: TIENDA_NOMBRE,
+        text: 'Mira ' + TIENDA_NOMBRE + ' en Localis',
+        url: TIENDA_ENLACE,
+      }).then(function () {
+        cerrarModalCompartir();
+      }).catch(function () {});
+    }
+
+    function copiarEnlaceTienda() {
+      const aviso = '¡Enlace de la tienda copiado!';
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(TIENDA_ENLACE).then(function () {
+          window.mostrarAlertaLocalis?.(aviso, 'exito');
+        }).catch(function () {
+          window.prompt('Copia el enlace de la tienda:', TIENDA_ENLACE);
+        });
+      } else {
+        window.prompt('Copia el enlace de la tienda:', TIENDA_ENLACE);
+      }
+    }
+
     function abrirModalSinTelefono() {
       const modal = document.getElementById('modal-sin-telefono');
       if (!modal) return;
@@ -215,7 +348,10 @@
     }
 
     document.addEventListener('keydown', (evento) => {
-      if (evento.key === 'Escape') cerrarModalSinTelefono();
+      if (evento.key === 'Escape') {
+        cerrarModalSinTelefono();
+        cerrarModalCompartir();
+      }
     });
   </script>
   <script src="{{ url_for('static', filename='js/flash.js') }}"></script>

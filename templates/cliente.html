@@ -217,6 +217,11 @@
             <span id="modal-precio-bs" class="text-xs text-gray-400 ml-2"></span>
           </div>
         </div>
+        <a id="modal-btn-whatsapp" href="#" target="_blank" rel="noopener"
+           class="btn-touch w-full text-center py-3 rounded-full font-bold text-sm transition items-center justify-center gap-2"
+           style="display: none; background: rgb(16, 185, 129); color: #fff;">
+          <i data-lucide="message-circle" style="width:16px;height:16px;"></i> Consultar por WhatsApp
+        </a>
         <a id="modal-btn-tienda" href="#"
            class="btn-touch block w-full text-center py-3 rounded-full font-bold text-sm transition" style="background: rgb(245, 158, 11); color: rgb(26, 26, 26);">
           Ir a la Tienda
@@ -272,6 +277,18 @@
         document.getElementById('modal-precio-usd').textContent = `$${Number(p.precio_usd).toFixed(2)}`;
         document.getElementById('modal-precio-bs').textContent = `${Number(p.precio_bs).toFixed(2)} Bs`;
         document.getElementById('modal-btn-tienda').href = `/tienda/${p.comercio_id}`;
+
+        // Contacto directo por WhatsApp con el comercio (si tiene teléfono).
+        const btnWhatsApp = document.getElementById('modal-btn-whatsapp');
+        if (btnWhatsApp) {
+          if (p.comercio_whatsapp_url) {
+            btnWhatsApp.href = p.comercio_whatsapp_url;
+            btnWhatsApp.style.display = 'inline-flex';
+          } else {
+            btnWhatsApp.removeAttribute('href');
+            btnWhatsApp.style.display = 'none';
+          }
+        }
 
         document.getElementById('modal-producto').classList.add('activo');
         lucide.createIcons();

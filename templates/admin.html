@@ -83,6 +83,7 @@
     <header class="admin-header-mobile">
         <h1>Localis | Panel Admin</h1>
         <div class="nav-links admin-nav-mobile">
+            <a href="{{ url_for('admin_usuarios') }}">Usuarios</a>
             <a href="https://wa.me/584125970507" target="_blank" class="wa-link">WhatsApp Soporte</a>
             <a href="{{ url_for('index') }}">Ver Sitio Público</a>
             <a href="{{ url_for('logout') }}" style="color: #ffc107;">Cerrar Sesión</a>
@@ -154,10 +155,14 @@
 
         <main class="tabla-box">
             <div style="padding: 1.5rem; border-bottom: 1px solid #e1e4e8;">
-                <h2 style="font-size:1.3rem;">Control de Comercios y Planes</h2>
+                <h2 style="font-size:1.3rem;">Control de Comercios</h2>
+                <!-- RESTAURAR_PAGOS_INICIO -->
+                {% if not pagos_congelados %}
                 <p style="font-size:0.85rem;color:#666;margin-top:0.5rem;">
                     Planes: Gratis (30 días, 50 prod.) · Básico ${{ planes.basica.precio_usd }} (100 prod.) · Pro ${{ planes.pro.precio_usd }} (300) · Business ${{ planes.business.precio_usd }} (ilimitado)
                 </p>
+                {% endif %}
+                <!-- RESTAURAR_PAGOS_FIN -->
                 <form action="{{ url_for('panel_admin') }}" method="GET" class="busqueda-admin">
                     <input type="text" name="q" value="{{ q or '' }}" placeholder="Buscar por nombre, correo del dueño, RIF/Cédula o teléfono...">
                     <button type="submit">Buscar</button>
@@ -174,8 +179,12 @@
                             <th>Comercio</th>
                             <th>Dueño / Doc.</th>
                             <th>Categoría</th>
+                            <!-- RESTAURAR_PAGOS_INICIO -->
+                            {% if not pagos_congelados %}
                             <th>Plan / Pago</th>
                             <th>Vencimiento</th>
+                            {% endif %}
+                            <!-- RESTAURAR_PAGOS_FIN -->
                             <th>Visibilidad</th>
                             <th>Acciones</th>
                         </tr>
@@ -184,14 +193,24 @@
                         {% for comercio in comercios %}
                         <tr>
                             <td>{{ comercio.id }}</td>
-                            <td><strong>{{ comercio.nombre }}</strong><br><small>{{ comercio.telefono or '' }}</small></td>
+                            <td>
+                                <a href="{{ url_for('admin_comercio_detalle', comercio_id=comercio.id) }}"
+                                   style="color:#0d6efd;font-weight:700;text-decoration:none;">
+                                    {{ comercio.nombre }}
+                                </a>
+                                <br><small>{{ comercio.telefono or '' }}</small>
+                            </td>
                             <td><small>{{ comercio.correo_dueno or '—' }}</small><br><small>{{ comercio.documento_identidad or '' }}</small></td>
                             <td>{{ comercio.categoria or '—' }}</td>
+                            <!-- RESTAURAR_PAGOS_INICIO -->
+                            {% if not pagos_congelados %}
                             <td>
                                 <span class="badge badge-{{ comercio.estado_pago or 'gratis' }}">{{ comercio.plan_nombre or comercio.plan_tipo or 'gratis' }}</span>
                                 <br><small>Pago: {{ comercio.estado_pago or 'gratis' }}</small>
                             </td>
                             <td><small>{{ comercio.fecha_vencimiento|fecha_corta }}</small></td>
+                            {% endif %}
+                            <!-- RESTAURAR_PAGOS_FIN -->
                             <td>
                                 {% if comercio.visible == 1 %}
                                     <span class="badge badge-visible">Visible</span>
@@ -201,6 +220,10 @@
                             </td>
                             <td>
                                 <div class="acciones-comercio">
+                                <a href="{{ url_for('admin_comercio_detalle', comercio_id=comercio.id) }}"
+                                   class="btn-accion-tabla btn-resolver"
+                                   style="text-decoration:none;display:inline-block;"
+                                   title="Ver perfil, catálogo y gestionar">Gestionar</a>
                                 {% if comercio.visible == 1 and comercio.estado_pago != 'suspendido' %}
                                     <form action="{{ url_for('admin_suspender_comercio', comercio_id=comercio.id) }}" method="POST" style="display:inline;">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -220,6 +243,8 @@
                                 </form>
                                 </div>
 
+                                <!-- RESTAURAR_PAGOS_INICIO -->
+                                {% if not pagos_congelados %}
                                 <form action="{{ url_for('admin_cambiar_plan', comercio_id=comercio.id) }}" method="POST" class="plan-form">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <select name="plan_tipo">
@@ -236,6 +261,8 @@
                                     </select>
                                     <button type="submit" class="btn-accion-tabla btn-resolver">Plan</button>
                                 </form>
+                                {% endif %}
+                                <!-- RESTAURAR_PAGOS_FIN -->
                             </td>
                         </tr>
                         {% else %}

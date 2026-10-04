@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Localis - Gestión de {{ comercio.nombre }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: #f4f6f9; color: #333; }
+        header {
+            background-color: #212529; color: white; padding: 1rem 2rem;
+            display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        header h1 { font-size: 1.4rem; color: #ffc107; }
+        .nav-links a { color: white; text-decoration: none; margin-left: 15px; font-weight: 600; }
+        .nav-links .wa-link { color: #25d366; }
+        .alertas-contenedor { max-width: 1200px; margin: 1.5rem auto 0; padding: 0 1rem; }
+        .alerta { padding: 0.75rem 1rem; border-radius: 6px; font-size: 0.95rem; margin-bottom: 10px; border-left: 5px solid; }
+        .alerta-error { background: #fde8e8; color: #9b1c1c; border-color: #f05252; }
+        .alerta-exito { background: #def7ec; color: #03543f; border-color: #31c48d; }
+        .alerta-info { background: #e1effe; color: #1e429f; border-color: #3f83f8; }
+        .container { max-width: 1200px; margin: 2rem auto; padding: 0 1rem; display: grid; grid-template-columns: 1fr 2fr; gap: 2rem; }
+        @media (max-width: 992px) { .container { grid-template-columns: 1fr; } }
+        .col-izquierda { display: flex; flex-direction: column; gap: 2rem; }
+        .card { background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border: 1px solid #e1e4e8; }
+        .card h2 { font-size: 1.2rem; color: #212529; margin-bottom: 1.25rem; border-bottom: 2px solid #f4f6f9; padding-bottom: 0.5rem; }
+        .dato { display: flex; justify-content: space-between; gap: 12px; font-size: 0.9rem; padding: 0.35rem 0; border-bottom: 1px dashed #eef0f2; }
+        .dato span:first-child { color: #6b7280; font-weight: 600; }
+        .dato span:last-child { text-align: right; word-break: break-word; }
+        .badge { padding: 3px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; display: inline-block; }
+        .badge-visible, .badge-activo { background: #d4edda; color: #155724; }
+        .badge-oculto, .badge-suspendido { background: #f8d7da; color: #721c24; }
+        .badge-gratis { background: #fff3cd; color: #856404; }
+        .badge-vencido { background: #e2e3e5; color: #383d41; }
+        .avatar { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; background: #e9ecef; }
+        .tabla-box { background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border: 1px solid #e1e4e8; overflow: hidden; }
+        .tabla-contenedor { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; text-align: left; }
+        th, td { padding: 0.65rem 0.9rem; border-bottom: 1px solid #e1e4e8; font-size: 0.88rem; vertical-align: middle; }
+        th { background: #f8f9fa; font-weight: 600; color: #555; }
+        .thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; border: 1px solid #e1e4e8; background: #fafafa; }
+        .btn-primario { background: #212529; color: white; border: none; padding: 0.6rem 1.2rem; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .btn-primario:hover { background: #343a40; }
+        .btn-accion-tabla { padding: 5px 9px; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem; font-weight: bold; text-decoration: none; display: inline-block; }
+        .btn-suspender { background: #dc3545; color: white; }
+        .btn-activar { background: #28a745; color: white; }
+        .btn-eliminar { background: #6c757d; color: white; }
+        .btn-resolver { background: #007bff; color: white; }
+        .acciones-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+        .plan-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+        .plan-form select { padding: 5px; font-size: 0.82rem; border: 1px solid #ccc; border-radius: 4px; }
+        .avatar-encabezado { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+        .avatar-encabezado h3 { font-size: 1.05rem; }
+        .avatar-encabezado p { font-size: 0.82rem; color: #6b7280; }
+        .banner-mini { width: 100%; max-height: 110px; object-fit: cover; border-radius: 6px; margin-bottom: 12px; }
+        .logo-mini { width: 42px; height: 42px; object-fit: cover; border-radius: 8px; border: 1px solid #e1e4e8; }
+        .muted { color: #6b7280; font-size: 0.82rem; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Localis | Gestión de comercio</h1>
+        <div class="nav-links">
+            <a href="{{ url_for('panel_admin') }}">&larr; Volver al panel</a>
+            <a href="{{ url_for('admin_usuarios') }}">Usuarios</a>
+            {% if comercio.id %}
+            <a href="{{ url_for('tienda_publica', comercio_id=comercio.id) }}" target="_blank" rel="noopener">Ver tienda pública</a>
+            {% endif %}
+            <a href="{{ url_for('logout') }}" style="color:#ffc107;">Cerrar Sesión</a>
+        </div>
+    </header>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="alertas-contenedor">
+          {% for category, message in messages %}
+            <div class="alerta flash-auto-dismiss alerta-{{ 'exito' if category == 'exito' else ('error' if category == 'error' else 'info') }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <div class="container">
+        <div class="col-izquierda">
+
+            <!-- Perfil del propietario -->
+            <aside class="card">
+                <h2>Perfil del propietario</h2>
+                <div class="avatar-encabezado">
+                    {% if comercio.propietario_foto %}
+                        <img class="avatar" src="{{ comercio.propietario_foto }}" alt="Foto del propietario"
+                             onerror="this.onerror=null;this.style.visibility='hidden';">
+                    {% else %}
+                        <div class="avatar"></div>
+                    {% endif %}
+                    <div>
+                        <h3>{{ comercio.propietario_nombre or '—' }}</h3>
+                        <p>{{ comercio.propietario_correo or 'Sin correo' }}</p>
+                    </div>
+                </div>
+                <div class="dato"><span>Usuario ID</span><span>{{ comercio.propietario_id or '—' }}</span></div>
+                <div class="dato"><span>Rol</span><span>{{ comercio.propietario_rol or '—' }}</span></div>
+                <div class="dato"><span>Comercios del dueño</span><span>{{ comercio.total_comercios_dueno or 0 }}</span></div>
+
+                {% if comercio.otros_comercios %}
+                <p style="margin-top:12px;font-weight:700;font-size:0.85rem;">Otros comercios del mismo perfil</p>
+                <ul style="margin-top:6px;padding-left:18px;font-size:0.85rem;">
+                    {% for otro in comercio.otros_comercios %}
+                    <li style="margin-bottom:4px;">
+                        <a href="{{ url_for('admin_comercio_detalle', comercio_id=otro.id) }}" style="color:#0d6efd;">
+                            {{ otro.nombre }} (#{{ otro.id }})
+                        </a>
+                        <span class="badge badge-{{ 'visible' if otro.visible == 1 else 'oculto' }}">{{ 'Visible' if otro.visible == 1 else 'Oculto' }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </aside>
+
+            <!-- Acciones de gestión -->
+            <aside class="card">
+                <h2>Acciones de gestión</h2>
+                <div class="acciones-grid">
+                    {% if comercio.visible == 1 and comercio.estado_pago != 'suspendido' %}
+                        <form action="{{ url_for('admin_suspender_comercio', comercio_id=comercio.id) }}" method="POST">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn-accion-tabla btn-suspender" title="Suspensión temporal">Suspender</button>
+                        </form>
+                    {% else %}
+                        <form action="{{ url_for('admin_reactivar_comercio', comercio_id=comercio.id) }}" method="POST">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn-accion-tabla btn-activar" title="Reactivar cuenta">Reactivar</button>
+                        </form>
+                    {% endif %}
+
+                    <form action="{{ url_for('admin_eliminar_comercio', comercio_id=comercio.id) }}" method="POST"
+                          onsubmit="return confirm('¿Eliminar definitivamente el comercio {{ comercio.nombre }}? Esta acción no se puede deshacer.');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn-accion-tabla btn-eliminar" title="Eliminación permanente">Eliminar tienda</button>
+                    </form>
+                </div>
+
+                <!-- RESTAURAR_PAGOS_INICIO -->
+                {% if not pagos_congelados %}
+                <form action="{{ url_for('admin_cambiar_plan', comercio_id=comercio.id) }}" method="POST" class="plan-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <select name="plan_tipo">
+                        <option value="gratis" {% if comercio.plan_tipo == 'gratis' %}selected{% endif %}>Gratis / Prueba</option>
+                        <option value="basica" {% if comercio.plan_tipo == 'basica' %}selected{% endif %}>Básico</option>
+                        <option value="pro" {% if comercio.plan_tipo == 'pro' %}selected{% endif %}>Pro</option>
+                        <option value="business" {% if comercio.plan_tipo == 'business' %}selected{% endif %}>Business</option>
+                    </select>
+                    <select name="estado_pago">
+                        <option value="activo" {% if comercio.estado_pago == 'activo' %}selected{% endif %}>Activo</option>
+                        <option value="vencido" {% if comercio.estado_pago == 'vencido' %}selected{% endif %}>Vencido</option>
+                        <option value="suspendido" {% if comercio.estado_pago == 'suspendido' %}selected{% endif %}>Suspendido</option>
+                        <option value="gratis" {% if comercio.estado_pago == 'gratis' %}selected{% endif %}>Gratis</option>
+                    </select>
+                    <button type="submit" class="btn-accion-tabla btn-resolver">Aplicar plan</button>
+                </form>
+                {% endif %}
+                <!-- RESTAURAR_PAGOS_FIN -->
+            </aside>
+        </div>
+
+        <main style="display:flex;flex-direction:column;gap:2rem;">
+            <!-- Datos de la tienda -->
+            <section class="card">
+                {% if comercio.banner_completo %}
+                    <img class="banner-mini" src="{{ comercio.banner_completo }}" alt="Banner de la tienda"
+                         onerror="this.onerror=null;this.style.display='none';">
+                {% endif %}
+                <div class="avatar-encabezado">
+                    {% if comercio.logo_completo %}
+                        <img class="logo-mini" src="{{ comercio.logo_completo }}" alt="Logo"
+                             onerror="this.onerror=null;this.style.display='none';">
+                    {% endif %}
+                    <div>
+                        <h2 style="border:none;padding:0;margin:0;">{{ comercio.nombre }} <span class="muted">#{{ comercio.id }}</span></h2>
+                        <p class="muted">{{ comercio.categoria or 'Sin categoría' }}</p>
+                    </div>
+                </div>
+
+                <div class="dato"><span>Descripción</span><span>{{ comercio.descripcion or '—' }}</span></div>
+                <div class="dato"><span>Teléfono</span>
+                    <span>
+                        {{ comercio.telefono or '—' }}
+                        {% if comercio.telefono_whatsapp_url %}
+                            &nbsp;<a href="{{ comercio.telefono_whatsapp_url }}" target="_blank" rel="noopener" style="color:#25d366;font-weight:700;">WhatsApp</a>
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="dato"><span>Documento / RIF</span><span>{{ comercio.documento_identidad or '—' }}</span></div>
+                <div class="dato"><span>Dirección</span><span>{{ comercio.direccion or '—' }}{% if comercio.ciudad %}, {{ comercio.ciudad }}{% endif %}{% if comercio.zona %} ({{ comercio.zona }}){% endif %}</span></div>
+                <div class="dato"><span>Google Maps</span>
+                    <span>
+                        {% if comercio.maps_link %}
+                            <a href="{{ comercio.maps_link }}" target="_blank" rel="noopener" style="color:#0d6efd;">Abrir ubicación</a>
+                        {% else %}—{% endif %}
+                    </span>
+                </div>
+                <!-- RESTAURAR_PAGOS_INICIO -->
+                {% if not pagos_congelados %}
+                <div class="dato"><span>Plan</span><span>{{ comercio.plan_nombre or comercio.plan_tipo or 'gratis' }}</span></div>
+                <div class="dato"><span>Estado de pago</span><span class="badge badge-{{ comercio.estado_pago or 'gratis' }}">{{ comercio.estado_pago or 'gratis' }}</span></div>
+                {% endif %}
+                <!-- RESTAURAR_PAGOS_FIN -->
+                <div class="dato"><span>Visibilidad</span>
+                    <span>
+                        {% if comercio.visible == 1 %}
+                            <span class="badge badge-visible">Visible</span>
+                        {% else %}
+                            <span class="badge badge-oculto">Oculto</span>
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="dato"><span>Registro</span><span>{{ comercio.fecha_registro|fecha_corta }}</span></div>
+                <!-- RESTAURAR_PAGOS_INICIO -->
+                {% if not pagos_congelados %}
+                <div class="dato"><span>Vencimiento</span><span>{{ comercio.fecha_vencimiento|fecha_corta }}</span></div>
+                {% endif %}
+                <!-- RESTAURAR_PAGOS_FIN -->
+                <div class="dato"><span>Total productos</span><span>{{ comercio.total_productos or 0 }}</span></div>
+            </section>
+
+            <!-- Catálogo -->
+            <section class="tabla-box">
+                <div style="padding:1.25rem;border-bottom:1px solid #e1e4e8;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+                    <h2 style="font-size:1.15rem;">Catálogo del comercio ({{ productos|length }})</h2>
+                    <span class="muted">Tasa de referencia: {{ tasa }} Bs/USD</span>
+                </div>
+                <div class="tabla-contenedor">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Imagen</th>
+                                <th>Producto</th>
+                                <th>Precio USD</th>
+                                <th>Precio Bs</th>
+                                <th>Código</th>
+                                <th>Estado</th>
+                                <th>Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for producto in productos %}
+                            {% set img = producto|url_imagen_producto %}
+                            <tr>
+                                <td>{{ producto.id }}</td>
+                                <td>
+                                    <img class="thumb" src="{{ img or placeholder_producto }}" alt="{{ producto.nombre }}"
+                                         onerror="window.rescatarImagenProducto ? window.rescatarImagenProducto(this) : (this.onerror=null, this.src='{{ placeholder_producto }}');">
+                                </td>
+                                <td>
+                                    <strong>{{ producto.nombre }}</strong>
+                                    {% if producto.descripcion %}<br><small class="muted">{{ producto.descripcion }}</small>{% endif %}
+                                </td>
+                                <td>${{ "%.2f"|format(producto.precio_usd or 0) }}</td>
+                                <td>{{ "%.2f"|format((producto.precio_usd or 0) * (tasa or 1)) }} Bs</td>
+                                <td><small>{{ producto.codigo_barras or '—' }}</small></td>
+                                <td>
+                                    <span class="badge badge-{{ 'activo' if producto.activo == 1 else 'vencido' }}">{{ 'Activo' if producto.activo == 1 else 'Inactivo' }}</span>
+                                    <br><small class="muted">{{ producto.imagen_estado or 'pendiente' }}</small>
+                                </td>
+                                <td>
+                                    <form action="{{ url_for('admin_eliminar_producto_ruta', producto_id=producto.id) }}" method="POST"
+                                          onsubmit="return confirm('¿Eliminar el producto {{ producto.nombre }}? Esta acción no se puede deshacer.');">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="comercio_id" value="{{ comercio.id }}">
+                                        <button type="submit" class="btn-accion-tabla btn-eliminar" title="Eliminar producto">Eliminar</button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="8" style="text-align:center;padding:2rem;color:#666;">Este comercio no tiene productos en su catálogo.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+    </div>
+
+<script src="{{ url_for('static', filename='js/flash.js') }}"></script>
+</body>
+</html>

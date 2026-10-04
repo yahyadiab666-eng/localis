@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Localis - Usuarios registrados</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: #f4f6f9; color: #333; }
+        header {
+            background-color: #212529; color: white; padding: 1rem 2rem;
+            display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        header h1 { font-size: 1.4rem; color: #ffc107; }
+        .nav-links a { color: white; text-decoration: none; margin-left: 15px; font-weight: 600; }
+        .container { max-width: 1100px; margin: 2rem auto; padding: 0 1rem; }
+        .filtro { display: flex; gap: 8px; margin-bottom: 1.25rem; }
+        .filtro input { flex: 1; padding: 0.7rem; border: 1px solid #ccc; border-radius: 6px; }
+        .filtro button { padding: 0.7rem 1.2rem; border: none; background: #212529; color: white; border-radius: 6px; cursor: pointer; font-weight: 700; }
+        .tabla-box { background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border: 1px solid #e1e4e8; overflow: hidden; }
+        .tabla-contenedor { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; text-align: left; }
+        th, td { padding: 0.75rem 1rem; border-bottom: 1px solid #e1e4e8; font-size: 0.9rem; vertical-align: top; }
+        th { background: #f8f9fa; font-weight: 600; color: #555; }
+        .avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background: #e9ecef; }
+        .badge { padding: 3px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; display: inline-block; }
+        .badge-admin { background: #fff3cd; color: #856404; }
+        .badge-comerciante { background: #d4edda; color: #155724; }
+        .badge-cliente { background: #e2e3e5; color: #383d41; }
+        .badge-visible { background: #d4edda; color: #155724; }
+        .badge-oculto { background: #f8d7da; color: #721c24; }
+        .muted { color: #6b7280; font-size: 0.82rem; }
+        a.enlace { color: #0d6efd; font-weight: 600; text-decoration: none; }
+        ul.lista-comercios { list-style: none; padding: 0; margin: 0; }
+        ul.lista-comercios li { margin-bottom: 3px; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Localis | Usuarios registrados</h1>
+        <div class="nav-links">
+            <a href="{{ url_for('panel_admin') }}">&larr; Volver al panel</a>
+            <a href="{{ url_for('logout') }}" style="color:#ffc107;">Cerrar Sesión</a>
+        </div>
+    </header>
+
+    <div class="container">
+        <form action="{{ url_for('admin_usuarios') }}" method="GET" class="filtro">
+            <input type="text" name="q" value="{{ q or '' }}" placeholder="Buscar por nombre o correo...">
+            <button type="submit">Buscar</button>
+            {% if q %}
+                <a href="{{ url_for('admin_usuarios') }}" style="align-self:center;font-size:0.85rem;color:#666;">Limpiar</a>
+            {% endif %}
+        </form>
+
+        <div class="tabla-box">
+            <div class="tabla-contenedor">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Perfil</th>
+                            <th>Rol</th>
+                            <th>Comercios</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for usuario in usuarios %}
+                        <tr>
+                            <td>{{ usuario.id }}</td>
+                            <td>
+                                <div style="display:flex;align-items:center;gap:10px;">
+                                    {% if usuario.foto_url %}
+                                        <img class="avatar" src="{{ usuario.foto_url }}" alt=""
+                                             onerror="this.onerror=null;this.style.visibility='hidden';">
+                                    {% else %}
+                                        <div class="avatar"></div>
+                                    {% endif %}
+                                    <div>
+                                        <strong>{{ usuario.nombre or '—' }}</strong><br>
+                                        <small class="muted">{{ usuario.correo or 'Sin correo' }}</small>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
+                                <span class="badge badge-{{ usuario.rol or 'cliente' }}">{{ usuario.rol or 'cliente' }}</span>
+                            </td>
+                            <td>
+                                {% if usuario.comercios %}
+                                    <ul class="lista-comercios">
+                                        {% for comercio in usuario.comercios %}
+                                        <li>
+                                            <a class="enlace" href="{{ url_for('admin_comercio_detalle', comercio_id=comercio.id) }}">
+                                                {{ comercio.nombre }} (#{{ comercio.id }})
+                                            </a>
+                                            <span class="badge badge-{{ 'visible' if comercio.visible == 1 else 'oculto' }}">{{ 'Visible' if comercio.visible == 1 else 'Oculto' }}</span>
+                                        </li>
+                                        {% endfor %}
+                                    </ul>
+                                {% else %}
+                                    <span class="muted">Sin comercios registrados</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="4" style="text-align:center;padding:2rem;color:#666;">No hay usuarios registrados.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+<script src="{{ url_for('static', filename='js/flash.js') }}"></script>
+</body>
+</html>
