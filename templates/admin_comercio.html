@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>Localis - Gestión de {{ comercio.nombre }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}">
@@ -231,6 +232,31 @@
                 <div class="dato"><span>Total productos</span><span>{{ comercio.total_productos or 0 }}</span></div>
             </section>
 
+            <!-- Onboarding asistido: importación masiva CSV/Excel -->
+            <section class="card">
+                <h2>Importador masivo (CSV / Excel)</h2>
+                <p class="muted">
+                    Carga el inventario inicial de <strong>{{ comercio.nombre }}</strong> desde un archivo
+                    <code>.csv</code>, <code>.xlsx</code> o <code>.xls</code>. Se procesa en segundo plano,
+                    exactamente como el importador del comerciante.
+                </p>
+                <form id="form-admin-csv"
+                      action="{{ url_for('admin_cargar_csv', comercio_id=comercio.id) }}"
+                      method="POST" enctype="multipart/form-data"
+                      data-estado-url="{{ url_for('admin_estado_importacion', comercio_id=comercio.id, job_id='__JOB__') }}"
+                      style="display:flex;flex-direction:column;gap:10px;margin-top:12px;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="file" name="archivo_csv" accept=".csv,.xlsx,.xls" required
+                           style="padding:10px;border:1px solid #ccc;border-radius:6px;background:#fff;">
+                    <div>
+                        <button type="submit" class="btn-accion-tabla btn-resolver" id="btn-admin-csv">
+                            Subir catálogo
+                        </button>
+                    </div>
+                </form>
+                <div id="admin-csv-estado" class="alerta alerta-info" style="display:none;margin-top:12px;"></div>
+            </section>
+
             <!-- Catálogo -->
             <section class="tabla-box">
                 <div style="padding:1.25rem;border-bottom:1px solid #e1e4e8;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -301,5 +327,121 @@
     </div>
 
 <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
+<script>
+  // Onboarding asistido: importación CSV asíncrona con sondeo de estado.
+  (function () {
+    var form = document.getElementById('form-admin-csv');
+    if (!form || !window.fetch || !window.FormData) return;
+
+    var estadoBox = document.getElementById('admin-csv-estado');
+    var boton = document.getElementById('btn-admin-csv');
+
+    function csrfToken() {
+      var meta = document.querySelector('meta[name="csrf-token"]');
+      return meta ? meta.getAttribute('content') : '';
+    }
+
+    function pintarEstado(mensaje, tipo) {
+      if (!estadoBox) return;
+      estadoBox.textContent = mensaje;
+      estadoBox.className = 'alerta alerta-' + (tipo || 'info');
+      estadoBox.style.display = 'block';
+    }
+
+    function reactivarBoton() {
+      if (boton) {
+        boton.disabled = false;
+        boton.textContent = 'Subir catálogo';
+      }
+    }
+
+    function seguirImportacion(jobId) {
+      var plantilla = form.getAttribute('data-estado-url') || '';
+      var url = plantilla.replace('__JOB__', encodeURIComponent(jobId));
+      var intentos = 0;
+      function tick() {
+        intentos += 1;
+        fetch(url, {
+          headers: { 'X-Requested-With': 'fetch', Accept: 'application/json' },
+          credentials: 'same-origin',
+        })
+          .then(function (r) { return r.json().catch(function () { return null; }); })
+          .then(function (d) {
+            if (!d) {
+              if (intentos < 200) setTimeout(tick, 3500);
+              return;
+            }
+            if (d.estado === 'completado' || d.estado === 'parcial') {
+              pintarEstado(
+                d.mensaje || 'Importación completada.',
+                d.estado === 'parcial' ? 'info' : 'exito'
+              );
+              setTimeout(function () { window.location.reload(); }, 1600);
+              return;
+            }
+            if (d.estado === 'error') {
+              pintarEstado(d.mensaje || 'No se pudo completar la importación.', 'error');
+              reactivarBoton();
+              return;
+            }
+            if (intentos >= 200) {
+              pintarEstado('El catálogo sigue procesándose. Recarga la página en un momento.', 'info');
+              reactivarBoton();
+              return;
+            }
+            setTimeout(tick, 3000);
+          })
+          .catch(function () {
+            if (intentos < 200) setTimeout(tick, 4000);
+            else reactivarBoton();
+          });
+      }
+      setTimeout(tick, 1200);
+    }
+
+    form.addEventListener('submit', function (evento) {
+      var input = form.querySelector('input[type="file"]');
+      var archivo = input && input.files && input.files[0];
+      if (!archivo) return; // deja que el navegador aplique "required"
+
+      evento.preventDefault();
+      if (boton) {
+        boton.disabled = true;
+        boton.textContent = 'Subiendo…';
+      }
+      pintarEstado('Subiendo el catálogo…', 'info');
+
+      fetch(form.action, {
+        method: 'POST',
+        headers: {
+          'X-CSRFToken': csrfToken(),
+          'X-Requested-With': 'fetch',
+          Accept: 'application/json',
+        },
+        body: new FormData(form),
+        credentials: 'same-origin',
+      })
+        .then(function (r) {
+          return r.json().then(function (d) {
+            return { ok: r.ok, datos: d || {} };
+          });
+        })
+        .then(function (res) {
+          var datos = res.datos || {};
+          if (!res.ok || !datos.ok) {
+            pintarEstado(datos.error || 'No se pudo iniciar la importación.', 'error');
+            reactivarBoton();
+            return;
+          }
+          pintarEstado(datos.mensaje || 'Catálogo en proceso…', 'info');
+          seguirImportacion(datos.job_id);
+        })
+        .catch(function () {
+          pintarEstado('Error de conexión al subir el catálogo.', 'error');
+          reactivarBoton();
+        });
+    });
+  })();
+</script>
 </body>
 </html>

@@ -2729,6 +2729,86 @@ def admin_editar_producto(comercio_id, producto_id):
     )
 
 
+@app.route(
+    '/admin/comercio/<int:comercio_id>/productos/cargar-csv', methods=['POST']
+)
+@admin_requerido
+def admin_cargar_csv(comercio_id):
+    """Onboarding asistido: importación masiva CSV/Excel en cualquier comercio.
+
+    Reutiliza exactamente el mismo pipeline asíncrono del comerciante
+    (``cargar_archivo_inventario`` + ``encolar_importacion``) sin tocar su lógica.
+    """
+    comercio = obtener_comercio_admin(comercio_id)
+    if not comercio:
+        if _peticion_acepta_json():
+            return jsonify({'ok': False, 'error': 'Comercio no encontrado.'}), 404
+        flash('Comercio no encontrado.', 'error')
+        return redirect(url_for('panel_admin'))
+
+    respuesta_json = _peticion_acepta_json()
+    archivo = request.files.get('archivo_csv')
+
+    data, _extension, error_lectura = cargar_archivo_inventario(archivo)
+    if error_lectura:
+        if respuesta_json:
+            return jsonify({'ok': False, 'error': error_lectura}), 400
+        flash(error_lectura, 'error')
+        return redirect(url_for('admin_comercio_detalle', comercio_id=comercio_id))
+
+    try:
+        job = encolar_importacion(
+            comercio_id,
+            getattr(archivo, 'filename', 'inventario.csv'),
+            data,
+            usuario_id=session.get('usuario_id'),
+        )
+    except ColaImportacionLlena as error:
+        if respuesta_json:
+            return jsonify({'ok': False, 'error': str(error)}), 503
+        flash(str(error), 'error')
+        return redirect(url_for('admin_comercio_detalle', comercio_id=comercio_id))
+    except ValueError as error:
+        if respuesta_json:
+            return jsonify({'ok': False, 'error': str(error)}), 400
+        flash(str(error), 'error')
+        return redirect(url_for('admin_comercio_detalle', comercio_id=comercio_id))
+
+    mensaje = 'El catálogo de esta tienda se está procesando en segundo plano.'
+    if respuesta_json:
+        return (
+            jsonify(
+                {
+                    'ok': True,
+                    'job_id': job['job_id'],
+                    'estado': job['estado'],
+                    'mensaje': mensaje,
+                    'estado_url': url_for(
+                        'admin_estado_importacion',
+                        comercio_id=comercio_id,
+                        job_id=job['job_id'],
+                    ),
+                }
+            ),
+            202,
+        )
+
+    flash(mensaje, 'info')
+    return redirect(url_for('admin_comercio_detalle', comercio_id=comercio_id))
+
+
+@app.route(
+    '/admin/comercio/<int:comercio_id>/productos/importacion/<job_id>'
+)
+@admin_requerido
+def admin_estado_importacion(comercio_id, job_id):
+    """Estado de un job de importación lanzado desde el panel admin."""
+    estado = obtener_estado_job(job_id, comercio_id=comercio_id)
+    if not estado:
+        return jsonify({'ok': False, 'error': 'Trabajo no encontrado o expirado.'}), 404
+    return jsonify({'ok': True, **estado}), 200
+
+
 @app.route('/admin/producto/eliminar/<int:producto_id>', methods=['POST'])
 @admin_requerido
 def admin_eliminar_producto_ruta(producto_id):
