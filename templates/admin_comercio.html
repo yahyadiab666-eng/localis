@@ -125,6 +125,10 @@
             <aside class="card">
                 <h2>Acciones de gestión</h2>
                 <div class="acciones-grid">
+                    <a href="{{ url_for('admin_editar_comercio', comercio_id=comercio.id) }}"
+                       class="btn-accion-tabla btn-resolver"
+                       style="text-decoration:none;display:inline-block;"
+                       title="Editar perfil, contacto, categoría y visibilidad">Editar tienda</a>
                     {% if comercio.visible == 1 and comercio.estado_pago != 'suspendido' %}
                         <form action="{{ url_for('admin_suspender_comercio', comercio_id=comercio.id) }}" method="POST">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -231,7 +235,12 @@
             <section class="tabla-box">
                 <div style="padding:1.25rem;border-bottom:1px solid #e1e4e8;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
                     <h2 style="font-size:1.15rem;">Catálogo del comercio ({{ productos|length }})</h2>
-                    <span class="muted">Tasa de referencia: {{ tasa }} Bs/USD</span>
+                    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                        <span class="muted">Tasa de referencia: {{ tasa }} Bs/USD</span>
+                        <a href="{{ url_for('admin_nuevo_producto', comercio_id=comercio.id) }}"
+                           class="btn-accion-tabla btn-activar" style="text-decoration:none;display:inline-block;"
+                           title="Cargar un producto en este comercio">+ Añadir producto</a>
+                    </div>
                 </div>
                 <div class="tabla-contenedor">
                     <table>
@@ -268,6 +277,9 @@
                                     <br><small class="muted">{{ producto.imagen_estado or 'pendiente' }}</small>
                                 </td>
                                 <td>
+                                    <a href="{{ url_for('admin_editar_producto', comercio_id=comercio.id, producto_id=producto.id) }}"
+                                       class="btn-accion-tabla btn-resolver" style="text-decoration:none;display:inline-block;margin-bottom:4px;"
+                                       title="Editar producto">Editar</a>
                                     <form action="{{ url_for('admin_eliminar_producto_ruta', producto_id=producto.id) }}" method="POST"
                                           onsubmit="return confirm('¿Eliminar el producto {{ producto.nombre }}? Esta acción no se puede deshacer.');">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

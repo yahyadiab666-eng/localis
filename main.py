@@ -124,15 +124,20 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 from backend.admin import (
     actualizar_banner_principal,
+    actualizar_comercio_admin,
+    actualizar_producto_admin,
     actualizar_tasa_dolar,
     cambiar_plan_comercio,
     cambiar_visibilidad_comercio,
     confirmar_pago_suscripcion,
+    crear_producto_admin,
     eliminar_comercio_definitivo,
     eliminar_producto_admin,
     obtener_banner_principal,
     obtener_bandeja_tecnica,
+    obtener_categorias_admin,
     obtener_comercio_admin,
+    obtener_producto_admin,
     obtener_productos_admin,
     obtener_todos_comercios_admin,
     obtener_usuarios_admin,
@@ -2471,6 +2476,256 @@ def admin_comercio_detalle(comercio_id):
         productos=productos,
         tasa=tasa_actual,
         planes=PLANES,
+    )
+
+
+@app.route('/admin/comercio/<int:comercio_id>/editar', methods=['GET', 'POST'])
+@admin_requerido
+def admin_editar_comercio(comercio_id):
+    """Onboarding asistido: el admin edita el perfil de cualquier tienda.
+
+    Permite ajustar nombre, descripción, banner, logo, teléfono, categoría y
+    visibilidad como si fuera el dueño, sin depender del comerciante.
+    """
+    comercio = obtener_comercio_admin(comercio_id)
+    if not comercio:
+        flash('Comercio no encontrado.', 'error')
+        return redirect(url_for('panel_admin'))
+
+    categorias = obtener_categorias_admin()
+
+    if request.method == 'POST':
+        nombre = (request.form.get('nombre') or '').strip()
+        if not nombre:
+            flash('El nombre del comercio es obligatorio.', 'error')
+            return redirect(url_for('admin_editar_comercio', comercio_id=comercio_id))
+
+        logo_url = None
+        banner_url = None
+        logo_archivo = request.files.get('logo')
+        banner_archivo = request.files.get('banner')
+
+        if logo_archivo and logo_archivo.filename:
+            logo_url, aviso_logo = procesar_imagen_subida(
+                logo_archivo,
+                prefijo=f'logo_admin_{comercio_id}',
+                carpeta='comercios',
+            )
+            if aviso_logo:
+                flash(aviso_logo, 'info')
+
+        if banner_archivo and banner_archivo.filename:
+            banner_url, aviso_banner = procesar_imagen_subida(
+                banner_archivo,
+                prefijo=f'banner_admin_{comercio_id}',
+                carpeta='comercios',
+                max_dimension=1920,
+            )
+            if aviso_banner:
+                flash(aviso_banner, 'info')
+
+        categoria_raw = request.form.get('categoria_id')
+        categoria_id = (
+            int(categoria_raw)
+            if categoria_raw and str(categoria_raw).strip().isdigit()
+            else None
+        )
+
+        exito, mensaje = actualizar_comercio_admin(
+            session.get('usuario_id'),
+            comercio_id,
+            {
+                'nombre': nombre,
+                'descripcion': request.form.get('descripcion', '').strip(),
+                'telefono': request.form.get('telefono', '').strip(),
+                'documento_identidad': request.form.get('documento_identidad', '').strip(),
+                'direccion': request.form.get('direccion', '').strip(),
+                'ciudad': request.form.get('ciudad', '').strip(),
+                'zona': request.form.get('zona', '').strip(),
+                'maps_url': request.form.get('maps_url', '').strip(),
+                'categoria_id': categoria_id,
+                'visible': request.form.get('visible'),
+                'banner_color': request.form.get('banner_color'),
+            },
+            logo_url=logo_url,
+            banner_url=banner_url,
+        )
+        flash(mensaje, 'exito' if exito else 'error')
+        return redirect(url_for('admin_comercio_detalle', comercio_id=comercio_id))
+
+    comercio = _normalizar_imagenes_comercio(comercio)
+    return render_template(
+        'admin_editar_comercio.html',
+        comercio=comercio,
+        categorias=categorias,
+        banner_color_actual=normalizar_color_banner(comercio.get('banner_color')),
+        nav_activo='admin',
+    )
+
+
+@app.route('/admin/comercio/<int:comercio_id>/producto/nuevo', methods=['GET', 'POST'])
+@admin_requerido
+def admin_nuevo_producto(comercio_id):
+    """Onboarding asistido: el admin carga productos en cualquier comercio."""
+    comercio = obtener_comercio_admin(comercio_id)
+    if not comercio:
+        flash('Comercio no encontrado.', 'error')
+        return redirect(url_for('panel_admin'))
+
+    if request.method == 'POST':
+        nombre = (request.form.get('nombre') or '').strip()
+        descripcion = (request.form.get('descripcion') or '').strip()
+        precio_raw = request.form.get('precio_usd')
+        codigo_barras = normalizar_codigo_barras(request.form.get('codigo_barras'))
+        imagen_archivo = request.files.get('imagen')
+        imagen_url_form = request.form.get('imagen_url')
+
+        if not nombre:
+            flash('El nombre es obligatorio.', 'error')
+            return redirect(url_for('admin_nuevo_producto', comercio_id=comercio_id))
+
+        precio_usd, error_precio = parsear_precio_form(precio_raw)
+        if error_precio:
+            flash(error_precio, 'error')
+            return redirect(url_for('admin_nuevo_producto', comercio_id=comercio_id))
+
+        imagen_url = None
+        try:
+            imagen_url, aviso_img = persistir_imagen_producto_hibrida(
+                file_storage=imagen_archivo,
+                codigo_barras=codigo_barras,
+                nombre=nombre,
+                descripcion=descripcion,
+                comercio_id=comercio_id,
+                imagen_url_form=imagen_url_form,
+            )
+            if aviso_img:
+                flash(aviso_img, 'info')
+        except Exception as error:
+            print(f'[Localis Admin Imagen] alta producto: {error}')
+            traceback.print_exc()
+            imagen_url = imagen_url_para_persistir(imagen_url_form)
+
+        exito, mensaje, producto_id = crear_producto_admin(
+            session.get('usuario_id'),
+            comercio_id,
+            nombre,
+            descripcion,
+            precio_usd,
+            codigo_barras=codigo_barras,
+            imagen_url=imagen_url,
+        )
+        if exito:
+            _sincronizar_foto_local_si_aplica(producto_id, imagen_url)
+            _registrar_imagen_manual(producto_id, imagen_url)
+        flash(mensaje, 'exito' if exito else 'error')
+        return redirect(url_for('admin_comercio_detalle', comercio_id=comercio_id))
+
+    return render_template(
+        'admin_producto.html',
+        comercio=comercio,
+        producto=None,
+        nav_activo='admin',
+    )
+
+
+@app.route(
+    '/admin/comercio/<int:comercio_id>/producto/<int:producto_id>/editar',
+    methods=['GET', 'POST'],
+)
+@admin_requerido
+def admin_editar_producto(comercio_id, producto_id):
+    """Onboarding asistido: el admin edita productos de cualquier comercio."""
+    comercio = obtener_comercio_admin(comercio_id)
+    if not comercio:
+        flash('Comercio no encontrado.', 'error')
+        return redirect(url_for('panel_admin'))
+
+    producto = obtener_producto_admin(producto_id, comercio_id=comercio_id)
+    if not producto:
+        flash('El producto no existe para este comercio.', 'error')
+        return redirect(url_for('admin_comercio_detalle', comercio_id=comercio_id))
+
+    if request.method == 'POST':
+        nombre = (request.form.get('nombre') or '').strip()
+        descripcion = (request.form.get('descripcion') or '').strip()
+        precio_raw = request.form.get('precio_usd')
+        codigo_barras = normalizar_codigo_barras(request.form.get('codigo_barras'))
+        imagen_archivo = request.files.get('imagen')
+        imagen_url_form = request.form.get('imagen_url')
+        quitar_imagen = str(request.form.get('quitar_imagen') or '').strip().lower() in (
+            '1', 'on', 'true', 'si', 'sí', 'yes',
+        )
+
+        if not nombre:
+            flash('El nombre es obligatorio.', 'error')
+            return redirect(
+                url_for(
+                    'admin_editar_producto',
+                    comercio_id=comercio_id,
+                    producto_id=producto_id,
+                )
+            )
+
+        precio_usd, error_precio = parsear_precio_form(precio_raw)
+        if error_precio:
+            flash(error_precio, 'error')
+            return redirect(
+                url_for(
+                    'admin_editar_producto',
+                    comercio_id=comercio_id,
+                    producto_id=producto_id,
+                )
+            )
+
+        imagen_url = None
+        incluir_imagen = False
+        try:
+            hay_archivo = bool(
+                imagen_archivo and getattr(imagen_archivo, 'filename', '')
+            )
+            if hay_archivo:
+                imagen_url, aviso_img = persistir_imagen_producto_hibrida(
+                    file_storage=imagen_archivo,
+                    codigo_barras=codigo_barras,
+                    nombre=nombre,
+                    descripcion=descripcion,
+                    comercio_id=comercio_id,
+                    imagen_url_form=imagen_url_form,
+                )
+                if aviso_img:
+                    flash(aviso_img, 'info')
+                incluir_imagen = bool(imagen_url)
+            elif imagen_url_form:
+                imagen_url = imagen_url_para_persistir(imagen_url_form)
+                incluir_imagen = bool(imagen_url)
+
+            exito, mensaje = actualizar_producto_admin(
+                session.get('usuario_id'),
+                producto_id,
+                comercio_id,
+                nombre,
+                descripcion,
+                precio_usd,
+                codigo_barras=codigo_barras,
+                imagen_url=imagen_url,
+                incluir_imagen=incluir_imagen,
+            )
+            if exito and incluir_imagen:
+                _sincronizar_foto_local_si_aplica(producto_id, imagen_url)
+                _registrar_imagen_manual(producto_id, imagen_url)
+            elif exito and quitar_imagen:
+                _quitar_imagen_manual(producto_id)
+            flash(mensaje, 'exito' if exito else 'error')
+        except Exception as error:
+            flash(f'Error al actualizar producto: {error}', 'error')
+        return redirect(url_for('admin_comercio_detalle', comercio_id=comercio_id))
+
+    return render_template(
+        'admin_producto.html',
+        comercio=comercio,
+        producto=producto,
+        nav_activo='admin',
     )
 
 

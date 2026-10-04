@@ -1,6 +1,7 @@
 import re
 import sqlite3
 
+from backend.comercio_schema import sql_set_imagenes
 from backend.db import get_db_connection
 from backend.plans import PLANES, limite_para_plan, obtener_plan_por_codigo
 from backend.utils import parsear_visible_form, url_banner_principal
@@ -590,3 +591,261 @@ def obtener_usuarios_admin(busqueda=None):
     except Exception as e:
         print(f'Error al listar usuarios admin: {e}')
         return []
+
+
+# ==========================================
+# ONBOARDING ASISTIDO (ADMIN)
+# ==========================================
+# El administrador opera la tienda como si fuera el dueño para la carga inicial.
+# Solo se apoya en las tablas/columnas existentes; no altera planes ni pagos.
+
+ESTADOS_PAGO_VALIDOS = ('activo', 'vencido', 'suspendido', 'gratis')
+
+
+def _registrar_auditoria_admin(cursor, admin_id, accion, detalles):
+    """Inserta una fila de auditoría reutilizando el cursor de la transacción."""
+    cursor.execute(
+        """
+        INSERT INTO logs_auditoria (usuario_id, accion, detalles)
+        VALUES (?, ?, ?)
+        """,
+        (admin_id, accion, detalles),
+    )
+
+
+def obtener_categorias_admin():
+    """Categorías disponibles para el formulario de edición de tienda."""
+    try:
+        with get_db_connection(row_factory=sqlite3.Row) as conexion:
+            cursor = conexion.cursor()
+            cursor.execute('SELECT id, nombre FROM categorias ORDER BY nombre ASC')
+            return [dict(f) for f in cursor.fetchall()]
+    except Exception as e:
+        print(f'Error al listar categorias admin: {e}')
+        return []
+
+
+def actualizar_comercio_admin(
+    admin_id, comercio_id, datos, logo_url=None, banner_url=None
+):
+    """Edita el perfil de cualquier tienda desde el panel admin.
+
+    ``datos`` admite: nombre, descripcion, telefono, documento_identidad,
+    direccion, ciudad, zona, maps_url, categoria_id, visible, estado_pago,
+    banner_color. Registra auditoría. Retorna ``(exito, mensaje)``.
+    """
+    datos = datos or {}
+    nombre = (datos.get('nombre') or '').strip()
+    if not nombre:
+        return False, 'El nombre del comercio es obligatorio.'
+
+    categoria_id = datos.get('categoria_id')
+    estado_pago = (datos.get('estado_pago') or '').strip().lower()
+
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+
+            if categoria_id:
+                cursor.execute(
+                    'SELECT 1 FROM categorias WHERE id = ?', (int(categoria_id),)
+                )
+                if not cursor.fetchone():
+                    return False, 'La categoría seleccionada no es válida.'
+
+            campos = []
+            valores = []
+            columnas_simples = (
+                ('nombre', nombre),
+                ('descripcion', datos.get('descripcion')),
+                ('telefono', datos.get('telefono')),
+                ('documento_identidad', datos.get('documento_identidad')),
+                ('direccion', datos.get('direccion')),
+                ('ciudad', datos.get('ciudad')),
+                ('zona', datos.get('zona')),
+                ('maps_url', datos.get('maps_url')),
+                ('ubicacion_maps_url', datos.get('maps_url')),
+            )
+            for columna, valor in columnas_simples:
+                if valor is None:
+                    continue
+                valor_limpio = str(valor).strip()
+                campos.append(f'{columna} = ?')
+                valores.append(valor_limpio or None)
+
+            if categoria_id:
+                campos.append('categoria_id = ?')
+                valores.append(int(categoria_id))
+
+            if datos.get('visible') is not None:
+                campos.append('visible = ?')
+                valores.append(int(parsear_visible_form(datos.get('visible'))))
+
+            if estado_pago in ESTADOS_PAGO_VALIDOS:
+                campos.append('estado_pago = ?')
+                valores.append(estado_pago)
+
+            if datos.get('banner_color') is not None:
+                from backend.apariencia import normalizar_color_banner
+
+                campos.append('banner_color = ?')
+                valores.append(normalizar_color_banner(datos.get('banner_color')))
+
+            if logo_url:
+                frag, vals = sql_set_imagenes(cursor, logo_url=logo_url)
+                campos.extend(frag)
+                valores.extend(vals)
+            if banner_url:
+                frag, vals = sql_set_imagenes(cursor, banner_url=banner_url)
+                campos.extend(frag)
+                valores.extend(vals)
+
+            if not campos:
+                return False, 'No hay cambios para guardar.'
+
+            valores.append(int(comercio_id))
+            cursor.execute(
+                f"UPDATE comercios SET {', '.join(campos)} WHERE id = ?",
+                tuple(valores),
+            )
+            if cursor.rowcount == 0:
+                conexion.rollback()
+                return False, 'Comercio no encontrado.'
+
+            _registrar_auditoria_admin(
+                cursor,
+                admin_id,
+                'Edición de tienda (admin)',
+                f'Comercio ID {int(comercio_id)} editado por el administrador.',
+            )
+            conexion.commit()
+        return True, 'Datos de la tienda actualizados por el administrador.'
+    except Exception as e:
+        return False, f'Error al actualizar la tienda: {str(e)}'
+
+
+def obtener_producto_admin(producto_id, comercio_id=None):
+    """Producto de cualquier comercio para el formulario de edición admin."""
+    try:
+        with get_db_connection(row_factory=sqlite3.Row) as conexion:
+            cursor = conexion.cursor()
+            if comercio_id:
+                cursor.execute(
+                    'SELECT * FROM productos WHERE id = ? AND comercio_id = ?',
+                    (int(producto_id), int(comercio_id)),
+                )
+            else:
+                cursor.execute(
+                    'SELECT * FROM productos WHERE id = ?', (int(producto_id),)
+                )
+            fila = cursor.fetchone()
+            return dict(fila) if fila else None
+    except Exception as e:
+        print(f'Error al obtener producto admin: {e}')
+        return None
+
+
+def crear_producto_admin(
+    admin_id,
+    comercio_id,
+    nombre,
+    descripcion,
+    precio_usd,
+    codigo_barras=None,
+    imagen_url=None,
+):
+    """Crea un producto en cualquier comercio desde el panel admin.
+
+    Retorna ``(exito, mensaje, producto_id)``.
+    """
+    if not (nombre or '').strip():
+        return False, 'El nombre es obligatorio.', None
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                'SELECT 1 FROM comercios WHERE id = ?', (int(comercio_id),)
+            )
+            if not cursor.fetchone():
+                return False, 'Comercio no encontrado.', None
+
+            cursor.execute(
+                """
+                INSERT INTO productos
+                    (comercio_id, nombre, descripcion, precio_usd,
+                     codigo_barras, imagen_url)
+                VALUES (?, ?, ?, ?, ?, ?)
+                RETURNING id
+                """,
+                (
+                    int(comercio_id),
+                    nombre.strip(),
+                    descripcion,
+                    float(precio_usd),
+                    codigo_barras,
+                    imagen_url,
+                ),
+            )
+            fila = cursor.fetchone()
+            if isinstance(fila, dict):
+                producto_id = fila.get('id')
+            else:
+                producto_id = fila[0] if fila else None
+
+            _registrar_auditoria_admin(
+                cursor,
+                admin_id,
+                'Alta de producto (admin)',
+                f'Producto {producto_id} creado en comercio {int(comercio_id)}.',
+            )
+            conexion.commit()
+        return True, 'Producto creado por el administrador.', producto_id
+    except Exception as e:
+        return False, f'Error al crear producto: {str(e)}', None
+
+
+def actualizar_producto_admin(
+    admin_id,
+    producto_id,
+    comercio_id,
+    nombre,
+    descripcion,
+    precio_usd,
+    codigo_barras=None,
+    imagen_url=None,
+    incluir_imagen=False,
+):
+    """Edita un producto de cualquier comercio desde el panel admin.
+
+    Reutiliza ``backend.stores.actualizar_producto`` para la actualización
+    parcial segura y agrega la trazabilidad en ``logs_auditoria``.
+    """
+    from backend.stores import actualizar_producto
+
+    exito, mensaje = actualizar_producto(
+        producto_id,
+        comercio_id,
+        nombre,
+        descripcion,
+        precio_usd,
+        codigo_barras=codigo_barras,
+        imagen_url=imagen_url,
+        incluir_imagen=incluir_imagen,
+    )
+    if not exito:
+        return False, mensaje
+
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            _registrar_auditoria_admin(
+                cursor,
+                admin_id,
+                'Edición de producto (admin)',
+                f'Producto {int(producto_id)} del comercio {int(comercio_id)} editado.',
+            )
+            conexion.commit()
+    except Exception as e:
+        print(f'[Localis Admin] aviso auditoría edición producto: {e}')
+
+    return True, 'Producto actualizado por el administrador.'

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ 'Editar producto' if producto else 'Añadir producto' }} (admin) - Localis</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: #f4f6f9; color: #333; }
+        header {
+            background-color: #212529; color: white; padding: 1rem 2rem;
+            display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        header h1 { font-size: 1.4rem; color: #ffc107; }
+        .nav-links a { color: white; text-decoration: none; margin-left: 15px; font-weight: 600; }
+        .alertas-contenedor { max-width: 760px; margin: 1.5rem auto 0; padding: 0 1rem; }
+        .alerta { padding: 0.75rem 1rem; border-radius: 6px; font-size: 0.95rem; margin-bottom: 10px; border-left: 5px solid; }
+        .alerta-error { background: #fde8e8; color: #9b1c1c; border-color: #f05252; }
+        .alerta-exito { background: #def7ec; color: #03543f; border-color: #31c48d; }
+        .alerta-info { background: #e1effe; color: #1e429f; border-color: #3f83f8; }
+        .wrap { max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
+        .card { background: white; padding: 1.75rem; border-radius: 10px; box-shadow: 0 2px 6px rgba(0,0,0,0.06); border: 1px solid #e1e4e8; }
+        .card h2 { font-size: 1.25rem; margin-bottom: 0.35rem; }
+        .muted { color: #6b7280; font-size: 0.85rem; }
+        .campo { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 1rem; }
+        .campo label { font-weight: 700; font-size: 0.82rem; text-transform: uppercase; color: #555; letter-spacing: 0.03em; }
+        .campo input, .campo textarea { padding: 0.65rem; border: 1px solid #ccc; border-radius: 6px; font-size: 0.92rem; background: #fff; }
+        .campo textarea { resize: vertical; min-height: 80px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+        .preview-wrap { display: flex; gap: 14px; align-items: center; margin-bottom: 8px; padding: 8px; background: #fafafa; border: 1px solid #e1e4e8; border-radius: 8px; }
+        .preview-img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 1px solid #e1e4e8; background: #fff; }
+        .acciones { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1.5rem; }
+        .btn { padding: 0.75rem 1.4rem; border: none; border-radius: 8px; cursor: pointer; font-weight: 700; font-size: 0.9rem; text-decoration: none; display: inline-block; }
+        .btn-primario { background: #212529; color: white; }
+        .btn-primario:hover { background: #343a40; }
+        .btn-secundario { background: #e9ecef; color: #212529; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Localis | {{ 'Editar producto' if producto else 'Añadir producto' }} (admin)</h1>
+        <div class="nav-links">
+            <a href="{{ url_for('admin_comercio_detalle', comercio_id=comercio.id) }}">&larr; Volver a la ficha</a>
+            <a href="{{ url_for('panel_admin') }}">Panel admin</a>
+            <a href="{{ url_for('logout') }}" style="color:#ffc107;">Cerrar Sesión</a>
+        </div>
+    </header>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="alertas-contenedor">
+          {% for category, message in messages %}
+            <div class="alerta flash-auto-dismiss alerta-{{ 'exito' if category == 'exito' else ('error' if category == 'error' else 'info') }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <div class="wrap">
+        <div class="card">
+            <h2>{{ 'Editar producto' if producto else 'Nuevo producto' }}</h2>
+            <p class="muted">Comercio: <strong>{{ comercio.nombre }}</strong> (#{{ comercio.id }}) · carga asistida de inventario.</p>
+
+            {% set img_producto = (producto|url_imagen_producto) if producto else placeholder_producto %}
+            <form action="{% if producto %}{{ url_for('admin_editar_producto', comercio_id=comercio.id, producto_id=producto.id) }}{% else %}{{ url_for('admin_nuevo_producto', comercio_id=comercio.id) }}{% endif %}"
+                  method="POST" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                <div class="campo">
+                    <label for="nombre">Nombre del producto *</label>
+                    <input type="text" id="nombre" name="nombre" value="{{ producto.nombre if producto else '' }}" required>
+                </div>
+
+                <div class="grid">
+                    <div class="campo">
+                        <label for="precio_usd">Precio (USD) *</label>
+                        <input type="number" step="0.01" min="0" id="precio_usd" name="precio_usd" value="{{ producto.precio_usd if producto else '' }}" required>
+                    </div>
+                    <div class="campo">
+                        <label for="codigo_barras">Código de barras</label>
+                        <input type="text" id="codigo_barras" name="codigo_barras" value="{{ producto.codigo_barras if producto and producto.codigo_barras else '' }}">
+                    </div>
+                </div>
+
+                <div class="campo">
+                    <label for="descripcion">Descripción</label>
+                    <textarea id="descripcion" name="descripcion">{{ producto.descripcion if producto else '' }}</textarea>
+                </div>
+
+                <div class="campo">
+                    <label for="imagen">Imagen del producto</label>
+                    <div class="preview-wrap">
+                        <img id="preview-img" class="preview-img" src="{{ img_producto }}"
+                             alt="Vista previa" loading="lazy" decoding="async"
+                             onerror="window.rescatarImagenProducto ? window.rescatarImagenProducto(this) : (this.onerror=null, this.src='{{ placeholder_producto }}');">
+                        <p class="muted">Se comprime al guardar. Si la nube no responde, la foto queda publicada igual.</p>
+                    </div>
+                    <input type="url" id="imagen_url" name="imagen_url"
+                           value="{{ producto.imagen_url if producto and producto.imagen_url else '' }}"
+                           placeholder="https://… (URL de la imagen)">
+                    <input type="file" id="imagen" name="imagen" accept="image/*" style="margin-top:6px;">
+                    {% if producto %}
+                    <label class="muted" style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;">
+                        <input type="checkbox" name="quitar_imagen" value="1">
+                        <span>Quitar la foto manual y volver a la imagen automática.</span>
+                    </label>
+                    {% endif %}
+                </div>
+
+                <div class="acciones">
+                    <button type="submit" class="btn btn-primario">{{ 'Guardar cambios' if producto else 'Crear producto' }}</button>
+                    <a href="{{ url_for('admin_comercio_detalle', comercio_id=comercio.id) }}" class="btn btn-secundario">Cancelar</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/localis.js') }}"></script>
+    <script>
+        (function () {
+            var input = document.getElementById('imagen');
+            var preview = document.getElementById('preview-img');
+            if (!input || !preview) return;
+            input.addEventListener('change', function () {
+                var archivo = input.files && input.files[0];
+                if (!archivo) return;
+                var url = URL.createObjectURL(archivo);
+                preview.src = url;
+                preview.onload = function () { URL.revokeObjectURL(url); };
+            });
+        })();
+    </script>
+    <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
+</body>
+</html>

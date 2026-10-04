@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Localis - Editar tienda (admin)</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: #f4f6f9; color: #333; }
+        header {
+            background-color: #212529; color: white; padding: 1rem 2rem;
+            display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        header h1 { font-size: 1.4rem; color: #ffc107; }
+        .nav-links a { color: white; text-decoration: none; margin-left: 15px; font-weight: 600; }
+        .alertas-contenedor { max-width: 900px; margin: 1.5rem auto 0; padding: 0 1rem; }
+        .alerta { padding: 0.75rem 1rem; border-radius: 6px; font-size: 0.95rem; margin-bottom: 10px; border-left: 5px solid; }
+        .alerta-error { background: #fde8e8; color: #9b1c1c; border-color: #f05252; }
+        .alerta-exito { background: #def7ec; color: #03543f; border-color: #31c48d; }
+        .alerta-info { background: #e1effe; color: #1e429f; border-color: #3f83f8; }
+        .wrap { max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+        .card { background: white; padding: 1.75rem; border-radius: 10px; box-shadow: 0 2px 6px rgba(0,0,0,0.06); border: 1px solid #e1e4e8; }
+        .card h2 { font-size: 1.25rem; margin-bottom: 0.35rem; }
+        .muted { color: #6b7280; font-size: 0.85rem; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+        .campo { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 1rem; }
+        .campo label { font-weight: 700; font-size: 0.82rem; text-transform: uppercase; color: #555; letter-spacing: 0.03em; }
+        .campo input, .campo select, .campo textarea {
+            padding: 0.65rem; border: 1px solid #ccc; border-radius: 6px; font-size: 0.92rem; background: #fff;
+        }
+        .campo textarea { resize: vertical; min-height: 80px; }
+        .imagenes { display: flex; gap: 1.25rem; flex-wrap: wrap; margin-top: 1rem; }
+        .imagenes .bloque { flex: 1; min-width: 220px; }
+        .preview { width: 100%; max-height: 120px; object-fit: cover; border-radius: 8px; border: 1px solid #e1e4e8; background: #fafafa; margin-bottom: 6px; }
+        .preview-logo { width: 72px; height: 72px; object-fit: cover; border-radius: 10px; border: 1px solid #e1e4e8; background: #fafafa; margin-bottom: 6px; }
+        .paleta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.6rem; margin-top: 0.5rem; }
+        .paleta-color { height: 42px; border-radius: 8px; border: 3px solid transparent; cursor: pointer; }
+        .paleta-color.activo { border-color: #212529; }
+        .acciones { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1.5rem; }
+        .btn { padding: 0.75rem 1.4rem; border: none; border-radius: 8px; cursor: pointer; font-weight: 700; font-size: 0.9rem; text-decoration: none; display: inline-block; }
+        .btn-primario { background: #212529; color: white; }
+        .btn-primario:hover { background: #343a40; }
+        .btn-secundario { background: #e9ecef; color: #212529; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Localis | Editar tienda (admin)</h1>
+        <div class="nav-links">
+            <a href="{{ url_for('admin_comercio_detalle', comercio_id=comercio.id) }}">&larr; Volver a la ficha</a>
+            <a href="{{ url_for('panel_admin') }}">Panel admin</a>
+            <a href="{{ url_for('logout') }}" style="color:#ffc107;">Cerrar Sesión</a>
+        </div>
+    </header>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="alertas-contenedor">
+          {% for category, message in messages %}
+            <div class="alerta flash-auto-dismiss alerta-{{ 'exito' if category == 'exito' else ('error' if category == 'error' else 'info') }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <div class="wrap">
+        <div class="card">
+            <h2>Onboarding asistido · {{ comercio.nombre }}</h2>
+            <p class="muted">Edita el perfil de esta tienda tal como lo haría el comerciante.</p>
+
+            <form action="{{ url_for('admin_editar_comercio', comercio_id=comercio.id) }}"
+                  method="POST" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                <div class="imagenes">
+                    <div class="bloque">
+                        <label class="muted" style="font-weight:700;">Logo actual</label><br>
+                        {% if comercio.logo_completo %}
+                            <img class="preview-logo" src="{{ comercio.logo_completo }}" alt="Logo"
+                                 onerror="this.onerror=null;this.style.display='none';">
+                        {% else %}
+                            <div class="preview-logo"></div>
+                        {% endif %}
+                        <input type="file" name="logo" accept="image/*">
+                    </div>
+                    <div class="bloque">
+                        <label class="muted" style="font-weight:700;">Banner actual</label><br>
+                        {% if comercio.banner_completo %}
+                            <img class="preview" src="{{ comercio.banner_completo }}" alt="Banner"
+                                 onerror="this.onerror=null;this.style.display='none';">
+                        {% else %}
+                            <div class="preview"></div>
+                        {% endif %}
+                        <input type="file" name="banner" accept="image/*">
+                    </div>
+                </div>
+
+                <div class="campo">
+                    <label for="nombre">Nombre del comercio *</label>
+                    <input type="text" id="nombre" name="nombre" value="{{ comercio.nombre or '' }}" required>
+                </div>
+
+                <div class="grid">
+                    <div class="campo">
+                        <label for="telefono">Teléfono / WhatsApp</label>
+                        <input type="text" id="telefono" name="telefono" value="{{ comercio.telefono or '' }}" placeholder="Ej: 04141234567">
+                    </div>
+                    <div class="campo">
+                        <label for="documento_identidad">Documento / RIF</label>
+                        <input type="text" id="documento_identidad" name="documento_identidad" value="{{ comercio.documento_identidad or '' }}">
+                    </div>
+                </div>
+
+                <div class="campo">
+                    <label for="descripcion">Descripción</label>
+                    <textarea id="descripcion" name="descripcion">{{ comercio.descripcion or '' }}</textarea>
+                </div>
+
+                <div class="campo">
+                    <label for="direccion">Dirección</label>
+                    <input type="text" id="direccion" name="direccion" value="{{ comercio.direccion or '' }}">
+                </div>
+
+                <div class="grid">
+                    <div class="campo">
+                        <label for="ciudad">Ciudad</label>
+                        <input type="text" id="ciudad" name="ciudad" value="{{ comercio.ciudad or '' }}">
+                    </div>
+                    <div class="campo">
+                        <label for="zona">Zona</label>
+                        <input type="text" id="zona" name="zona" value="{{ comercio.zona or '' }}">
+                    </div>
+                </div>
+
+                <div class="campo">
+                    <label for="maps_url">Enlace de Google Maps</label>
+                    <input type="url" id="maps_url" name="maps_url" value="{{ comercio.maps_url or comercio.ubicacion_maps_url or '' }}" placeholder="https://maps.google.com/...">
+                </div>
+
+                <div class="grid">
+                    <div class="campo">
+                        <label for="categoria_id">Categoría</label>
+                        <select id="categoria_id" name="categoria_id">
+                            <option value="">— Sin categoría —</option>
+                            {% for categoria in categorias %}
+                            <option value="{{ categoria.id }}" {% if comercio.categoria_id == categoria.id %}selected{% endif %}>{{ categoria.nombre }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="campo">
+                        <label for="visible">Estado de visibilidad</label>
+                        <select id="visible" name="visible">
+                            <option value="1" {% if comercio.visible == 1 %}selected{% endif %}>Visible</option>
+                            <option value="0" {% if comercio.visible != 1 %}selected{% endif %}>Oculto</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="campo">
+                    <label>Color del banner</label>
+                    <div class="paleta" id="paleta-banner" role="radiogroup" aria-label="Color del banner">
+                        {% for color in paleta_banner %}
+                        <button type="button"
+                                class="paleta-color {% if color.id == banner_color_actual %}activo{% endif %}"
+                                data-color-id="{{ color.id }}"
+                                style="background: {{ color.hex }};"
+                                title="{{ color.nombre }}" aria-label="{{ color.nombre }}"></button>
+                        {% endfor %}
+                    </div>
+                    <input type="hidden" name="banner_color" id="banner_color" value="{{ banner_color_actual }}">
+                </div>
+
+                <div class="acciones">
+                    <button type="submit" class="btn btn-primario">Guardar cambios</button>
+                    <a href="{{ url_for('admin_comercio_detalle', comercio_id=comercio.id) }}" class="btn btn-secundario">Cancelar</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            var contenedor = document.getElementById('paleta-banner');
+            var input = document.getElementById('banner_color');
+            if (!contenedor || !input) return;
+            contenedor.addEventListener('click', function (evento) {
+                var boton = evento.target.closest('.paleta-color');
+                if (!boton) return;
+                input.value = boton.getAttribute('data-color-id');
+                contenedor.querySelectorAll('.paleta-color').forEach(function (b) {
+                    b.classList.toggle('activo', b === boton);
+                });
+            });
+        })();
+    </script>
+    <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
+</body>
+</html>
