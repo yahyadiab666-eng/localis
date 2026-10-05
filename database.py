@@ -112,6 +112,7 @@ TABLAS_PERMITIDAS = frozenset({
     'image_pipeline_log',
     'interacciones_comercio',
     'imagenes_automaticas',
+    'boosts',
 })
 
 # Columnas que deben existir en tablas ya creadas (ADD COLUMN IF NOT EXISTS).
@@ -164,6 +165,9 @@ COLUMNAS_ESQUEMA = {
         ('plan_pendiente', 'TEXT'),
         ('plan_id_pendiente', 'INTEGER'),
         ('banner_color', "TEXT DEFAULT 'ambar'"),
+        # Destacados / Boosts (micro-pago): fecha de inicio y fin del destaque.
+        ('boost_inicio', 'TIMESTAMP'),
+        ('boost_fin', 'TIMESTAMP'),
     ],
     'sucursales': [
         ('comercio_id', 'INTEGER'),
@@ -185,6 +189,20 @@ COLUMNAS_ESQUEMA = {
         ('stock', 'INTEGER DEFAULT 0'),
         ('codigo_barras', 'TEXT'),
         ('activo', 'INTEGER DEFAULT 1'),
+        # Destacados / Boosts (micro-pago) a nivel de producto.
+        ('boost_inicio', 'TIMESTAMP'),
+        ('boost_fin', 'TIMESTAMP'),
+    ],
+    'boosts': [
+        ('comercio_id', 'INTEGER'),
+        ('tipo', 'TEXT'),
+        ('objetivo_id', 'INTEGER'),
+        ('precio_usd', 'DOUBLE PRECISION DEFAULT 0'),
+        ('dias_duracion', 'INTEGER DEFAULT 7'),
+        ('estado', "TEXT DEFAULT 'activo'"),
+        ('fecha_inicio', 'TIMESTAMP'),
+        ('fecha_fin', 'TIMESTAMP'),
+        ('fecha_registro', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
     ],
     'imagenes_automaticas': [
         ('clave', 'TEXT'),
@@ -1315,6 +1333,25 @@ def _crear_tabla_interacciones_comercio(cursor):
     )
 
 
+def _crear_tabla_boosts(cursor):
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS boosts (
+            id SERIAL PRIMARY KEY,
+            comercio_id INTEGER REFERENCES comercios(id) ON DELETE CASCADE,
+            tipo TEXT NOT NULL,
+            objetivo_id INTEGER,
+            precio_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+            dias_duracion INTEGER DEFAULT 7,
+            estado TEXT DEFAULT 'activo',
+            fecha_inicio TIMESTAMP,
+            fecha_fin TIMESTAMP,
+            fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
 def _crear_tablas(cursor):
     """Crea tablas faltantes. No reejecuta CREATE TABLE si ya existen (AccessExclusiveLock)."""
     pares = (
@@ -1335,6 +1372,7 @@ def _crear_tablas(cursor):
         ('solicitudes_pago', _crear_tabla_solicitudes_pago),
         ('interacciones_comercio', _crear_tabla_interacciones_comercio),
         ('imagenes_automaticas', _crear_tabla_imagenes_automaticas),
+        ('boosts', _crear_tabla_boosts),
     )
     for nombre, fn in pares:
         if _tabla_existe(cursor, nombre):
@@ -1500,6 +1538,10 @@ def _crear_indices(cursor):
         'CREATE INDEX IF NOT EXISTS idx_interacciones_comercio_producto ON interacciones_comercio(producto_id)',
         'CREATE INDEX IF NOT EXISTS idx_imagenes_automaticas_codigo ON imagenes_automaticas(codigo_barras)',
         'CREATE INDEX IF NOT EXISTS idx_imagenes_automaticas_producto ON imagenes_automaticas(producto_id)',
+        # Destacados / Boosts: índice para priorizar sin latencia en la portada.
+        'CREATE INDEX IF NOT EXISTS idx_productos_boost_fin ON productos(boost_fin)',
+        'CREATE INDEX IF NOT EXISTS idx_comercios_boost_fin ON comercios(boost_fin)',
+        'CREATE INDEX IF NOT EXISTS idx_boosts_comercio ON boosts(comercio_id)',
     ]
     for ddl in indices:
         _ejecutar_indice_si_falta(cursor, ddl)

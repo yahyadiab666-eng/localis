@@ -146,6 +146,47 @@ def _filtro_producto_publico():
         filtro += " AND LEFT(LOWER(TRIM(COALESCE(p.nombre, ''))), 2) <> '__'"
     return filtro
 
+
+_BOOST_DISPONIBLE = None
+
+
+def _boost_disponible():
+    """True si las columnas de boost existen (cacheado). Degradación segura.
+
+    Evita ``UndefinedColumn`` en la portada si la migración aún no se aplicó.
+    Si faltan, las crea de forma idempotente (auto-saneo), igual que
+    ``_activo_disponible``.
+    """
+    global _BOOST_DISPONIBLE
+    if _BOOST_DISPONIBLE is not None:
+        return _BOOST_DISPONIBLE
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            for tabla in ('productos', 'comercios'):
+                cursor.execute(
+                    """
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = ? AND column_name = 'boost_fin'
+                    LIMIT 1
+                    """,
+                    (tabla,),
+                )
+                if not cursor.fetchone():
+                    cursor.execute(
+                        f'ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS boost_inicio TIMESTAMP'
+                    )
+                    cursor.execute(
+                        f'ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS boost_fin TIMESTAMP'
+                    )
+                    conexion.commit()
+        _BOOST_DISPONIBLE = True
+    except Exception:
+        _BOOST_DISPONIBLE = False
+    return _BOOST_DISPONIBLE
+
+
 _CONFIG_TTL_SEG = 120
 _POOL_MUESTRA_ALEATORIA = 400
 # Autorreparación de imágenes por importación (0 desactiva).
@@ -609,6 +650,19 @@ def _base_query_productos_publicos(con_maestro=True, con_categoria=False):
     else:
         cat_select = 'NULL::text AS categoria_nombre'
         cat_join = ''
+    # Destacados / Boosts: columnas y flags de prioridad (sin latencia).
+    if _boost_disponible():
+        boost_select = (
+            'p.boost_fin AS boost_fin, '
+            '(p.boost_fin IS NOT NULL AND p.boost_fin > CURRENT_TIMESTAMP) AS destacado_producto, '
+            '(c.boost_fin IS NOT NULL AND c.boost_fin > CURRENT_TIMESTAMP) AS destacado_tienda'
+        )
+    else:
+        boost_select = (
+            'NULL::timestamp AS boost_fin, '
+            'FALSE AS destacado_producto, '
+            'FALSE AS destacado_tienda'
+        )
     return f"""
         SELECT
             p.id,
@@ -621,7 +675,8 @@ def _base_query_productos_publicos(con_maestro=True, con_categoria=False):
             c.nombre AS comercio_nombre,
             c.telefono AS comercio_telefono,
             c.id AS comercio_id,
-            {cat_select}
+            {cat_select},
+            {boost_select}
         FROM comercios c
         JOIN productos p ON p.comercio_id = c.id
         {cat_join}
@@ -823,7 +878,16 @@ def _buscar_y_filtrar_productos_once(
             query, parametros = _aplicar_filtros_productos(
                 query, parametros, palabra_clave, categoria_nombre, comercio_id
             )
-            query += ' ORDER BY p.id DESC'
+            # Destacados / Boosts primero, luego por novedad (sin sobrecarga).
+            if _boost_disponible():
+                query += (
+                    ' ORDER BY '
+                    'CASE WHEN (p.boost_fin IS NOT NULL AND p.boost_fin > CURRENT_TIMESTAMP) '
+                    'OR (c.boost_fin IS NOT NULL AND c.boost_fin > CURRENT_TIMESTAMP) '
+                    'THEN 0 ELSE 1 END, p.id DESC'
+                )
+            else:
+                query += ' ORDER BY p.id DESC'
             if limit:
                 query += ' LIMIT ?'
                 parametros.append(int(limit))
@@ -841,6 +905,9 @@ def _buscar_y_filtrar_productos_once(
                 precio = 0.0
             d['precio_usd'] = precio
             d['precio_bs'] = round(precio * tasa, 2)
+            d['destacado'] = bool(d.get('destacado_producto')) or bool(
+                d.get('destacado_tienda')
+            )
             productos.append(d)
 
         return productos
@@ -850,6 +917,13 @@ def obtener_producto_publico(producto_id):
     """Producto con datos de tienda para modal/vista pública."""
     try:
         tasa = obtener_tasa_dolar() or 1.0
+        if _boost_disponible():
+            boost_select = (
+                '(p.boost_fin IS NOT NULL AND p.boost_fin > CURRENT_TIMESTAMP) AS destacado_producto, '
+                '(c.boost_fin IS NOT NULL AND c.boost_fin > CURRENT_TIMESTAMP) AS destacado_tienda'
+            )
+        else:
+            boost_select = 'FALSE AS destacado_producto, FALSE AS destacado_tienda'
         with get_db_connection(row_factory=sqlite3.Row, read_only=True) as conexion:
             cursor = conexion.cursor()
             cursor.execute(
@@ -864,7 +938,8 @@ def obtener_producto_publico(producto_id):
                     {_SQL_IMAGEN_URL},
                     c.nombre AS comercio_nombre,
                     c.id AS comercio_id,
-                    c.telefono AS comercio_telefono
+                    c.telefono AS comercio_telefono,
+                    {boost_select}
                 FROM comercios c
                 JOIN productos p ON p.comercio_id = c.id
                 WHERE p.id = ?{_filtro_comercio_publico()}{_filtro_producto_publico()}
@@ -881,6 +956,9 @@ def obtener_producto_publico(producto_id):
                 precio = 0.0
             d['precio_usd'] = precio
             d['precio_bs'] = round(precio * tasa, 2)
+            d['destacado'] = bool(d.get('destacado_producto')) or bool(
+                d.get('destacado_tienda')
+            )
         _completar_imagenes_productos([d])
         return d
     except Exception as e:

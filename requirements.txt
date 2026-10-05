@@ -12,6 +12,7 @@ numpy
 rapidocr-onnxruntime
 opencv-python-headless
 Pillow
+qrcode[pil]
 openpyxl
 xlrd>=2.0.1
 Werkzeug

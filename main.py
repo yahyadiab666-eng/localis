@@ -241,6 +241,13 @@ from backend.apariencia import (
     normalizar_color_banner,
     opciones_banner,
 )
+from backend.boosts import (
+    DURACION_BOOST_DIAS,
+    PRECIO_BOOST_USD,
+    contratar_boost_producto,
+    contratar_boost_tienda,
+    estado_boosts_comercio,
+)
 
 print('[Localis] Creando aplicación Flask...', flush=True)
 
@@ -1478,6 +1485,12 @@ def panel_comercio():
     except Exception:
         whatsapp = WHATSAPP_SOPORTE
 
+    try:
+        boosts = estado_boosts_comercio(comercio.get('id')) if comercio.get('id') else {}
+    except Exception as error:
+        print(f'[Localis] panel_comercio boosts fallo: {type(error).__name__}: {error}')
+        boosts = {}
+
     productos = productos or []
     _debug_imagenes_antes_de_render(productos, 'panel_comercio')
     try:
@@ -1491,6 +1504,9 @@ def panel_comercio():
             plan_info=plan_info,
             avisos=avisos,
             metricas=metricas,
+            boosts=boosts,
+            precio_boost=PRECIO_BOOST_USD,
+            dias_boost=DURACION_BOOST_DIAS,
             nav_activo='panel',
         )
     except Exception as error:
@@ -2065,6 +2081,93 @@ def suscripcion_solicitar_pago():
         'info',
     )
     return redirect(url_for('comercio_planes', abrir_pago=plan_tipo))
+
+
+# ==========================================
+# DESTACADOS / BOOSTS Y CÓDIGO QR
+# ==========================================
+
+
+@app.route('/comercio/boost/tienda', methods=['POST'])
+@login_requerido
+def boost_tienda():
+    """Destaca la tienda del comerciante (micro-pago de visibilidad)."""
+    comercio, redireccion = _requiere_comercio()
+    if redireccion:
+        return redireccion
+
+    exito, mensaje = contratar_boost_tienda(comercio['id'])
+    flash(mensaje, 'exito' if exito else 'error')
+    return redirect(url_for('panel_comercio'))
+
+
+@app.route('/comercio/boost/producto/<int:producto_id>', methods=['POST'])
+@login_requerido
+def boost_producto(producto_id):
+    """Destaca un producto del comerciante."""
+    comercio, redireccion = _requiere_comercio()
+    if redireccion:
+        return redireccion
+
+    exito, mensaje = contratar_boost_producto(comercio['id'], producto_id)
+    flash(mensaje, 'exito' if exito else 'error')
+    return redirect(url_for('panel_comercio'))
+
+
+def _url_tienda_externa(comercio_id):
+    """URL pública absoluta de la tienda (https detrás del proxy de Render)."""
+    url = url_for('tienda_publica', comercio_id=comercio_id, _external=True)
+    proto = (request.headers.get('X-Forwarded-Proto') or '').split(',')[0].strip().lower()
+    if proto == 'https' and url.startswith('http://'):
+        url = 'https://' + url[len('http://'):]
+    return url
+
+
+@app.route('/comercio/qr')
+@login_requerido
+def comercio_qr():
+    """Página con el código QR de la tienda para imprimir/descargar."""
+    comercio, redireccion = _requiere_comercio()
+    if redireccion:
+        return redireccion
+
+    url_tienda = _url_tienda_externa(comercio['id'])
+    return render_template(
+        'comercio_qr.html',
+        comercio=_normalizar_imagenes_comercio(comercio),
+        url_tienda=url_tienda,
+        nav_activo='qr',
+    )
+
+
+@app.route('/comercio/qr.png')
+@login_requerido
+def comercio_qr_png():
+    """Genera al vuelo el PNG del QR de la tienda."""
+    comercio, redireccion = _requiere_comercio()
+    if redireccion:
+        return redireccion
+
+    try:
+        from backend.qr_codes import generar_qr_png
+    except Exception as error:
+        print(f'[Localis QR] librería no disponible: {error}')
+        return Response('Código QR no disponible.', status=503)
+
+    try:
+        png = generar_qr_png(_url_tienda_externa(comercio['id']))
+    except Exception as error:
+        print(f'[Localis QR] generación fallida: {error}')
+        return Response('No se pudo generar el código QR.', status=500)
+
+    return Response(
+        png,
+        mimetype='image/png',
+        headers={
+            'Content-Disposition': 'inline; filename="qr-tienda.png"',
+            'Cache-Control': 'no-store',
+        },
+    )
 
 
 # ==========================================

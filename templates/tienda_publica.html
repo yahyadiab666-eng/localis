@@ -160,6 +160,11 @@
                    onerror="window.rescatarImagenProducto(this)">
             </div>
             <div class="p-3 flex-grow flex flex-col justify-between">
+              {% if producto.destacado %}
+              <span class="localis-badge-destacado inline-flex items-center gap-1 self-start">
+                <i data-lucide="sparkles" style="width:10px;height:10px;"></i> Destacado
+              </span>
+              {% endif %}
               <h4 class="font-medium text-sm text-gray-900 line-clamp-1">{{ producto.nombre }}</h4>
               <p class="text-xs text-gray-500 line-clamp-2 mt-1">{{ producto.descripcion or '' }}</p>
               <div class="mt-2 flex justify-between items-center">

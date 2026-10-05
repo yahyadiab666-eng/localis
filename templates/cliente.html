@@ -152,6 +152,11 @@
               </div>
               <div class="p-3 flex-grow flex flex-col justify-between">
                 <div>
+                  {% if producto.destacado %}
+                  <span class="localis-badge-destacado inline-flex items-center gap-1">
+                    <i data-lucide="sparkles" style="width:10px;height:10px;"></i> Destacado
+                  </span>
+                  {% endif %}
                   <p class="text-amber-600 text-[11px] font-bold uppercase tracking-wider mb-1">{{ producto.comercio_nombre }}</p>
                   <h4 class="font-medium text-sm text-gray-900 line-clamp-1">{{ producto.nombre }}</h4>
                   <p class="text-xs text-gray-500 line-clamp-2 mt-1">{{ producto.descripcion or 'Sin descripción disponible.' }}</p>
@@ -209,6 +214,9 @@
       </div>
       <div class="p-6 space-y-3">
         <p id="modal-comercio" class="text-amber-600 text-xs font-bold uppercase tracking-wider"></p>
+        <span id="modal-destacado" class="localis-badge-destacado inline-flex items-center gap-1" style="display:none;">
+          <i data-lucide="sparkles" style="width:10px;height:10px;"></i> Destacado
+        </span>
         <h3 id="modal-nombre" class="font-display text-2xl font-bold text-gray-900"></h3>
         <p id="modal-descripcion" class="text-sm text-gray-600"></p>
         <div class="flex items-center justify-between pt-2 border-t">
@@ -279,6 +287,10 @@
         document.getElementById('modal-comercio').textContent = p.comercio_nombre || '';
         document.getElementById('modal-nombre').textContent = p.nombre || '';
         document.getElementById('modal-descripcion').textContent = p.descripcion || 'Sin descripción.';
+        const badgeDestacado = document.getElementById('modal-destacado');
+        if (badgeDestacado) {
+          badgeDestacado.style.display = p.destacado ? 'inline-flex' : 'none';
+        }
         document.getElementById('modal-precio-usd').textContent = `$${Number(p.precio_usd).toFixed(2)}`;
         document.getElementById('modal-precio-bs').textContent = `${Number(p.precio_bs).toFixed(2)} Bs`;
         document.getElementById('modal-btn-tienda').href = `/tienda/${p.comercio_id}`;

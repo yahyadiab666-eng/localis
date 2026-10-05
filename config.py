@@ -30,18 +30,18 @@ def url_banner_por_defecto():
     return DEFAULT_BANNER_URL
 
 # ==========================================
-# INTERRUPTOR DE PAGOS (CONGELAMIENTO TEMPORAL)
+# INTERRUPTOR DE PAGOS (MODELO TRADICIONAL RESTAURADO)
 # ==========================================
-# Localis entra en fase de lanzamiento 100% gratuita. Mientras
-# ``LOCALIS_PAGOS_HABILITADOS`` esté en 0 (por defecto), el panel del comerciante
-# muestra un banner informativo y no se permite cobrar ni activar planes de pago.
-# La lógica, las tablas, los endpoints y las plantillas de pago permanecen
-# FÍSICAMENTE INTACTOS en el repositorio: solo se congelan mediante este flag.
-# Para reactivar la monetización en el futuro basta con definir
-# ``LOCALIS_PAGOS_HABILITADOS=1`` en el entorno (sin tocar el código).
+# El modelo base de suscripciones/planes está restaurado y ACTIVO por defecto:
+# período de gracia (30 días de prueba) y límites de productos por volumen.
+# Mientras ``LOCALIS_PAGOS_HABILITADOS`` esté en 1 (por defecto), el panel del
+# comerciante muestra Planes/Suscripción/Pago Móvil y se aplican los límites.
+# La lógica de pagos permanece físicamente intacta; si en el futuro se quiere
+# volver a congelar (fase gratuita), basta con definir
+# ``LOCALIS_PAGOS_HABILITADOS=0`` en el entorno (sin tocar el código).
 def pagos_habilitados():
-    """True si el sistema de pagos está activo. Por defecto: congelado (gratis)."""
-    valor = str(os.environ.get('LOCALIS_PAGOS_HABILITADOS', '0')).strip().lower()
+    """True si el sistema de pagos está activo. Por defecto: ACTIVO."""
+    valor = str(os.environ.get('LOCALIS_PAGOS_HABILITADOS', '1')).strip().lower()
     return valor in ('1', 'true', 'yes', 'on')
 
 

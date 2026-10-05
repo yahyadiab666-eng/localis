@@ -164,6 +164,39 @@
       </div>
     </section>
 
+    <!-- Destacar producto / tienda + Código QR -->
+    <section class="bg-white rounded-2xl p-5 sm:p-6 shadow-sm border border-stone-200/80 card-hover">
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+        <div class="space-y-2">
+          <h3 class="font-display text-xl font-bold text-gray-900 flex items-center gap-2">
+            <i data-lucide="sparkles" class="text-amber-600" style="width:20px;height:20px;"></i> Destacar mi negocio
+          </h3>
+          <p class="text-stone-500 text-xs leading-relaxed">
+            Aparece en las primeras posiciones de la portada de Localis.
+            Micro-pago accesible: <strong>${{ "%.2f"|format(precio_boost) }} USD por {{ dias_boost }} días</strong>.
+          </p>
+          {% if boosts.tienda_activo %}
+          <p class="text-xs text-emerald-700 font-semibold">
+            Tu tienda está destacada hasta el {{ boosts.tienda_boost_fin }}.
+          </p>
+          {% endif %}
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <form action="{{ url_for('boost_tienda') }}" method="POST" data-loading="true" data-loading-texto="Destacando…">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn-touch inline-flex items-center gap-2 bg-amber-500 text-stone-900 font-bold px-5 py-2.5 rounded-full text-xs hover:bg-amber-400 transition">
+              <i data-lucide="sparkles" style="width:14px;height:14px;"></i>
+              {{ 'Renovar destacado' if boosts.tienda_activo else 'Destacar mi tienda' }}
+            </button>
+          </form>
+          <a href="{{ url_for('comercio_qr') }}"
+             class="btn-touch inline-flex items-center gap-2 bg-stone-900 text-white font-bold px-5 py-2.5 rounded-full text-xs hover:bg-stone-800 transition">
+            <i data-lucide="qr-code" style="width:14px;height:14px;"></i> Generar QR de mi tienda
+          </a>
+        </div>
+      </div>
+    </section>
+
     {% if metricas is defined %}
     <!-- Interacciones: interés real de los clientes -->
     <section class="space-y-4">
@@ -286,7 +319,8 @@
         {% for producto in productos %}
           {% set img_producto = producto|url_imagen_producto %}
           {% set es_placeholder = (not img_producto) or (img_producto == placeholder_producto) %}
-          <article class="card-hover card-producto-mobile panel-producto-card rounded-xl overflow-hidden bg-white shadow-sm border border-stone-100 flex flex-col h-full"
+          {% set boost_info = boosts.productos.get(producto.id) if boosts else none %}
+          <article class="card-hover card-producto-mobile panel-producto-card rounded-xl overflow-hidden bg-white shadow-sm border border-stone-100 flex flex-col h-full{% if boost_info and boost_info.activo %} ring-1 ring-violet-300{% endif %}"
                    data-producto-busqueda="{{ producto.nombre }} {{ producto.descripcion }} {{ producto.codigo_barras }}">
             <div class="localis-img-producto-wrap{% if es_placeholder %} localis-img-producto-wrap--vacio{% endif %}">
               <img src="{{ img_producto or placeholder_producto }}"
@@ -308,7 +342,14 @@
               {% endif %}
             </div>
             <div class="p-3 flex-grow flex flex-col">
-              <h4 class="font-bold text-gray-900 text-sm line-clamp-2" title="{{ producto.nombre }}">{{ producto.nombre }}</h4>
+              <div class="flex items-start justify-between gap-1">
+                <h4 class="font-bold text-gray-900 text-sm line-clamp-2" title="{{ producto.nombre }}">{{ producto.nombre }}</h4>
+                {% if boost_info and boost_info.activo %}
+                <span class="inline-flex items-center gap-1 text-[9px] font-bold text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded-full shrink-0" title="Producto destacado">
+                  <i data-lucide="sparkles" style="width:9px;height:9px;"></i> Destacado
+                </span>
+                {% endif %}
+              </div>
               <p class="text-stone-500 text-xs mt-1 line-clamp-2">{{ producto.descripcion or 'Sin descripción' }}</p>
               {% if producto.codigo_barras %}
               <p class="text-[10px] font-mono text-stone-400 mt-1 truncate">{{ producto.codigo_barras }}</p>
@@ -323,6 +364,14 @@
                      class="btn-touch p-2 rounded-lg text-amber-700 bg-amber-50 hover:bg-amber-100 transition" title="Editar">
                     <i data-lucide="pencil" style="width:16px;height:16px;"></i>
                   </a>
+                  <form action="{{ url_for('boost_producto', producto_id=producto.id) }}" method="POST" class="inline-block" data-loading="true" data-loading-texto="Destacando…">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit"
+                            class="btn-touch p-2 rounded-lg text-violet-700 bg-violet-50 hover:bg-violet-100 transition"
+                            title="{{ 'Renovar destacado' if (boost_info and boost_info.activo) else 'Destacar producto ($' ~ '%.2f'|format(precio_boost) ~ ')' }}">
+                      <i data-lucide="sparkles" style="width:16px;height:16px;"></i>
+                    </button>
+                  </form>
                   <form action="{{ url_for('eliminar_producto_ruta', producto_id=producto.id) }}" method="POST" class="inline-block" data-loading="true" data-loading-texto="Eliminando…">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" onclick="return confirm('¿Seguro que deseas eliminar este producto?')"
