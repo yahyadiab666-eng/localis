@@ -475,3 +475,28 @@ img.localis-img-producto-thumb--vacio:not([src]) {
   line-height: 1.4;
   box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.25);
 }
+
+
+/* Botón compacto de compartir producto (icono de acción rápida, no invasivo) */
+.localis-btn-share-producto {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid #e7e5e4;
+  border-radius: 9999px;
+  background: #ffffff;
+  color: #57534e;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.localis-btn-share-producto:hover {
+  background: #f5f5f4;
+  color: #1c1917;
+  border-color: #d6d3d1;
+}
+.localis-btn-share-producto:active { transform: scale(0.94); }
+.localis-btn-share-producto svg { width: 0.875rem; height: 0.875rem; }

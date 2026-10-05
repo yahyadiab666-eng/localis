@@ -171,24 +171,29 @@
                 <span class="text-sm font-bold text-amber-600">${{ "%.2f"|format(producto.precio_usd) }}</span>
                 <span class="text-[10px] text-gray-400">{{ "%.2f"|format(producto.precio_bs) }} Bs</span>
               </div>
-              {% if producto.whatsapp_url %}
-              <a href="{{ producto.whatsapp_url }}" target="_blank" rel="noopener"
-                 data-interaccion="clic_whatsapp" data-interaccion-comercio="{{ comercio.id }}"
-                 data-interaccion-producto="{{ producto.id }}"
-                 class="mt-2 inline-flex items-center justify-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1.5 rounded-full transition"
-                 onclick="event.stopPropagation();">
-                <i data-lucide="message-circle" style="width:12px;height:12px;"></i> Consultar por WhatsApp
-              </a>
-              {% endif %}
-              <button type="button"
-                      data-producto-id="{{ producto.id }}"
-                      data-producto-nombre="{{ producto.nombre }}"
-                      data-producto-precio-usd="{{ producto.precio_usd }}"
-                      data-producto-precio-bs="{{ producto.precio_bs }}"
-                      onclick="event.stopPropagation(); window.compartirProductoDesdeBoton(this);"
-                      class="mt-2 inline-flex items-center justify-center gap-1 text-[11px] font-bold text-stone-700 bg-stone-100 hover:bg-stone-200 px-2.5 py-1.5 rounded-full transition">
-                <i data-lucide="share-2" style="width:12px;height:12px;"></i> Compartir producto
-              </button>
+              <div class="mt-2 flex items-center gap-2">
+                {% if producto.whatsapp_url %}
+                <a href="{{ producto.whatsapp_url }}" target="_blank" rel="noopener"
+                   data-interaccion="clic_whatsapp" data-interaccion-comercio="{{ comercio.id }}"
+                   data-interaccion-producto="{{ producto.id }}"
+                   class="flex-1 inline-flex items-center justify-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1.5 rounded-full transition"
+                   onclick="event.stopPropagation();">
+                  <i data-lucide="message-circle" style="width:12px;height:12px;"></i> WhatsApp
+                </a>
+                {% endif %}
+                <button type="button"
+                        class="localis-btn-share-producto"
+                        data-producto-id="{{ producto.id }}"
+                        data-producto-nombre="{{ producto.nombre|e }}"
+                        data-producto-precio-usd="{{ producto.precio_usd }}"
+                        data-producto-precio-bs="{{ producto.precio_bs }}"
+                        data-producto-enlace="{{ url_for('tienda_publica', comercio_id=comercio.id) }}?producto={{ producto.id }}"
+                        title="Compartir producto"
+                        aria-label="Compartir producto"
+                        onclick="event.stopPropagation(); window.compartirProductoDesdeBoton(this);">
+                  <i data-lucide="share-2" style="width:14px;height:14px;"></i>
+                </button>
+              </div>
             </div>
           </div>
         {% endfor %}
