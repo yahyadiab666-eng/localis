@@ -132,7 +132,7 @@
       {% if productos %}
         <div class="grid grid-cols-2 md:grid-cols-4 gap-5 grid-productos-mobile">
           {% for producto in productos %}
-            <div class="card-hover card-producto-mobile rounded-xl overflow-hidden bg-white shadow flex flex-col justify-between h-full"
+            <div class="card-hover card-producto-mobile localis-card-producto rounded-xl overflow-hidden bg-white shadow flex flex-col justify-between h-full"
                  role="button" tabindex="0"
                  data-producto-id="{{ producto.id }}"
                  data-interaccion="clic_producto"
@@ -166,7 +166,7 @@
                   <div class="flex items-center gap-2">
                     <span class="text-[10px] text-gray-400 font-semibold">{{ "%.2f"|format(producto.precio_bs) }} Bs</span>
                     <button type="button"
-                            class="localis-btn-share-producto"
+                            class="localis-btn-share-producto localis-card-share"
                             data-producto-id="{{ producto.id }}"
                             data-producto-nombre="{{ producto.nombre|e }}"
                             data-producto-precio-usd="{{ producto.precio_usd }}"

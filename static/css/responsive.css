@@ -506,3 +506,19 @@ img.localis-img-producto-thumb--vacio:not([src]) {
   height: 0.875rem;
   stroke-width: 2.1;
 }
+
+/* Ficha de producto: ancla para el botón de compartir posicionado en móvil */
+.localis-card-producto {
+  position: relative;
+}
+
+/* En móviles el botón de compartir se mueve a la esquina superior derecha
+   para no tapar el precio ni desalinear la tarjeta. */
+@media (max-width: 640px) {
+  .localis-card-share {
+    position: absolute;
+    top: 0.4rem;
+    right: 0.4rem;
+    z-index: 20;
+  }
+}

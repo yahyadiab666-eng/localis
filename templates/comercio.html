@@ -22,6 +22,9 @@
 
 <body class="w-full min-h-screen flex flex-col justify-between panel-comercio" style="background: rgb(254, 251, 246);">
 
+  {# Defensivo: el panel siempre pasa 'premios', pero nunca debe romper si falta. #}
+  {% set premios = premios | default({}, true) %}
+
   {% include 'partials/nav_comercio.html' %}
 
   {% with mensajes = get_flashed_messages(with_categories=true) %}
@@ -288,7 +291,7 @@
           {% set img_producto = producto|url_imagen_producto %}
           {% set es_placeholder = (not img_producto) or (img_producto == placeholder_producto) %}
           {% set boost_info = boosts.productos.get(producto.id) if boosts else none %}
-          <article class="card-hover card-producto-mobile panel-producto-card rounded-xl overflow-hidden bg-white shadow-sm border border-stone-100 flex flex-col h-full{% if boost_info and boost_info.activo %} ring-1 ring-violet-300{% endif %}"
+          <article class="card-hover card-producto-mobile panel-producto-card localis-card-producto rounded-xl overflow-hidden bg-white shadow-sm border border-stone-100 flex flex-col h-full{% if boost_info and boost_info.activo %} ring-1 ring-violet-300{% endif %}"
                    data-producto-busqueda="{{ producto.nombre }} {{ producto.descripcion }} {{ producto.codigo_barras }}">
             <div class="localis-img-producto-wrap{% if es_placeholder %} localis-img-producto-wrap--vacio{% endif %}">
               <img src="{{ img_producto or placeholder_producto }}"
@@ -329,7 +332,7 @@
                 </div>
                 <div class="flex gap-1 shrink-0">
                   <button type="button"
-                          class="localis-btn-share-producto"
+                          class="localis-btn-share-producto localis-card-share"
                           data-producto-id="{{ producto.id }}"
                           data-producto-nombre="{{ producto.nombre|e }}"
                           data-producto-precio-usd="{{ producto.precio_usd }}"
@@ -521,52 +524,98 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="producto_id" id="boost-producto-id" value="">
 
-        <div class="space-y-2">
-          <p class="text-xs font-bold uppercase text-stone-600">Elige la duración</p>
-          <div class="grid grid-cols-3 gap-2">
-            {% for opcion in opciones_boost %}
-            <label class="cursor-pointer">
-              <input type="radio" name="dias" value="{{ opcion.dias }}" data-precio="{{ opcion.precio_usd }}"
-                     class="peer sr-only" {% if loop.first %}checked{% endif %}>
-              <span class="block text-center rounded-xl border border-stone-200 px-2 py-3 transition peer-checked:border-amber-500 peer-checked:ring-2 peer-checked:ring-amber-500/30">
-                <span class="block text-lg font-black text-gray-900">{{ opcion.dias }}d</span>
-                <span class="block text-[11px] font-bold text-amber-700">${{ "%.2f"|format(opcion.precio_usd) }}</span>
-              </span>
-            </label>
-            {% endfor %}
+        <!-- Método de pago del destacado -->
+        <div class="grid grid-cols-2 gap-2 text-xs font-bold">
+          <label class="cursor-pointer">
+            <input type="radio" name="metodo_boost" value="pago_movil" class="peer sr-only" checked
+                   onchange="cambiarMetodoBoost()">
+            <span class="block text-center rounded-xl border border-stone-200 px-3 py-2.5 transition peer-checked:border-amber-500 peer-checked:ring-2 peer-checked:ring-amber-500/30">
+              Pago móvil
+            </span>
+          </label>
+          <label class="cursor-pointer">
+            <input type="radio" name="metodo_boost" value="puntos" class="peer sr-only"
+                   onchange="cambiarMetodoBoost()">
+            <span class="block text-center rounded-xl border border-stone-200 px-3 py-2.5 transition peer-checked:border-violet-500 peer-checked:ring-2 peer-checked:ring-violet-500/30">
+              Canjear puntos
+            </span>
+          </label>
+        </div>
+
+        <div id="boost-pago-bloque" class="space-y-4">
+          <div class="space-y-2">
+            <p class="text-xs font-bold uppercase text-stone-600">Elige la duración</p>
+            <div class="grid grid-cols-3 gap-2">
+              {% for opcion in opciones_boost %}
+              <label class="cursor-pointer">
+                <input type="radio" name="dias" value="{{ opcion.dias }}" data-precio="{{ opcion.precio_usd }}"
+                       class="peer sr-only" {% if loop.first %}checked{% endif %}>
+                <span class="block text-center rounded-xl border border-stone-200 px-2 py-3 transition peer-checked:border-amber-500 peer-checked:ring-2 peer-checked:ring-amber-500/30">
+                  <span class="block text-lg font-black text-gray-900">{{ opcion.dias }}d</span>
+                  <span class="block text-[11px] font-bold text-amber-700">${{ "%.2f"|format(opcion.precio_usd) }}</span>
+                </span>
+              </label>
+              {% endfor %}
+            </div>
           </div>
+
+          <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm space-y-1">
+            <p class="font-bold text-amber-900">Datos para Pago Móvil</p>
+            <p><span class="text-stone-500">Banco:</span> {{ pago_movil.banco or '—' }}</p>
+            <p><span class="text-stone-500">Cédula/RIF:</span> {{ pago_movil.cedula_rif or '—' }}</p>
+            <p><span class="text-stone-500">Teléfono:</span> {{ pago_movil.telefono or '—' }}</p>
+            <p><span class="text-stone-500">Tasa:</span> <strong>{{ "%.2f"|format(tasa or 1) }} Bs/USD</strong></p>
+            <p id="boost-monto-bs" class="pt-2 border-t border-amber-200 mt-2 font-bold text-amber-900"></p>
+          </div>
+
+          <div>
+            <label for="boost-comprobante" class="block text-xs font-bold uppercase text-stone-600 mb-1">Captura del comprobante</label>
+            <input type="file" id="boost-comprobante" name="comprobante"
+                   accept="image/png, image/jpeg, image/webp" required
+                   class="w-full text-xs text-stone-600 file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-amber-500 file:text-stone-900 hover:file:bg-amber-400 bg-white rounded-xl border border-stone-200 cursor-pointer">
+            <p class="text-[11px] text-stone-500 mt-1">
+              Sube la captura de tu pago móvil. Validamos con OCR el banco
+              <strong>{{ pago_movil.banco or '—' }}</strong>, el RIF/cédula
+              <strong>{{ pago_movil.cedula_rif or '—' }}</strong>, el teléfono
+              <strong>{{ pago_movil.telefono or '—' }}</strong>, la referencia, el monto y la fecha.
+            </p>
+          </div>
+
+          <div id="boost-preview" class="rounded-xl border border-dashed border-stone-200 bg-stone-50 p-3 min-h-[80px] flex items-center justify-center text-xs text-stone-400">
+            Vista previa del comprobante
+          </div>
+
+          <button type="submit" id="boost-btn-submit"
+                  class="btn-touch w-full py-3 rounded-full font-bold text-sm bg-stone-900 text-white flex items-center justify-center gap-2 disabled:opacity-60">
+            <i data-lucide="sparkles" style="width:16px;height:16px;"></i> Verificar pago y destacar
+          </button>
         </div>
 
-        <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm space-y-1">
-          <p class="font-bold text-amber-900">Datos para Pago Móvil</p>
-          <p><span class="text-stone-500">Banco:</span> {{ pago_movil.banco or '—' }}</p>
-          <p><span class="text-stone-500">Cédula/RIF:</span> {{ pago_movil.cedula_rif or '—' }}</p>
-          <p><span class="text-stone-500">Teléfono:</span> {{ pago_movil.telefono or '—' }}</p>
-          <p><span class="text-stone-500">Tasa:</span> <strong>{{ "%.2f"|format(tasa or 1) }} Bs/USD</strong></p>
-          <p id="boost-monto-bs" class="pt-2 border-t border-amber-200 mt-2 font-bold text-amber-900"></p>
-        </div>
-
-        <div>
-          <label for="boost-comprobante" class="block text-xs font-bold uppercase text-stone-600 mb-1">Captura del comprobante</label>
-          <input type="file" id="boost-comprobante" name="comprobante"
-                 accept="image/png, image/jpeg, image/webp" required
-                 class="w-full text-xs text-stone-600 file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-amber-500 file:text-stone-900 hover:file:bg-amber-400 bg-white rounded-xl border border-stone-200 cursor-pointer">
-          <p class="text-[11px] text-stone-500 mt-1">
-            Sube la captura de tu pago móvil. Validamos con OCR el banco
-            <strong>{{ pago_movil.banco or '—' }}</strong>, el RIF/cédula
-            <strong>{{ pago_movil.cedula_rif or '—' }}</strong>, el teléfono
-            <strong>{{ pago_movil.telefono or '—' }}</strong>, la referencia, el monto y la fecha.
+        <div id="boost-puntos-bloque" class="hidden space-y-3">
+          <div class="bg-violet-50 border border-violet-200 rounded-xl p-4 text-sm space-y-1">
+            <p class="font-bold text-violet-900">Canje con puntos</p>
+            <p><span class="text-stone-500">Tu saldo:</span> <strong>{{ premios.puntos or 0 }} pts</strong></p>
+            <p><span class="text-stone-500">Costo:</span>
+              <strong>{{ premios.puntos_por_destacado or 5 }} pts por {{ premios.dias_destacado or 7 }} días</strong>
+            </p>
+          </div>
+          {% if (premios.puntos or 0) >= (premios.puntos_por_destacado or 5) %}
+          <button type="button" id="boost-btn-puntos" onclick="canjearBoostConPuntos()"
+                  class="btn-touch w-full py-3 rounded-full font-bold text-sm bg-violet-600 text-white hover:bg-violet-500 transition">
+            <i data-lucide="gift" style="width:16px;height:16px;display:inline-block;vertical-align:middle;"></i>
+            Canjear y destacar {{ premios.dias_destacado or 7 }} días
+          </button>
+          {% else %}
+          <p class="text-xs text-stone-500">
+            Aún no tienes puntos suficientes. Comparte el nombre de tu comercio para que
+            otros lo usen como referencia al registrarse y ganes 1 punto por cada uno.
           </p>
+          <a href="{{ url_for('comercio_premios') }}"
+             class="btn-touch w-full inline-flex items-center justify-center py-3 rounded-full font-bold text-sm border border-stone-300 text-stone-700 hover:bg-stone-50 transition">
+            Ver Premios y Puntos
+          </a>
+          {% endif %}
         </div>
-
-        <div id="boost-preview" class="rounded-xl border border-dashed border-stone-200 bg-stone-50 p-3 min-h-[80px] flex items-center justify-center text-xs text-stone-400">
-          Vista previa del comprobante
-        </div>
-
-        <button type="submit" id="boost-btn-submit"
-                class="btn-touch w-full py-3 rounded-full font-bold text-sm bg-stone-900 text-white flex items-center justify-center gap-2 disabled:opacity-60">
-          <i data-lucide="sparkles" style="width:16px;height:16px;"></i> Verificar pago y destacar
-        </button>
       </form>
     </div>
   </div>
@@ -717,9 +766,39 @@
       if (preview) preview.innerHTML = 'Vista previa del comprobante';
       const comp = document.getElementById('boost-comprobante');
       if (comp) comp.value = '';
+      const metodoPago = form.querySelector('input[name="metodo_boost"][value="pago_movil"]');
+      if (metodoPago) metodoPago.checked = true;
+      cambiarMetodoBoost();
       actualizarMontoBoost();
       modal.classList.add('activo');
       if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    function cambiarMetodoBoost() {
+      const form = document.getElementById('form-boost');
+      if (!form) return;
+      const sel = form.querySelector('input[name="metodo_boost"]:checked');
+      const metodo = sel ? sel.value : 'pago_movil';
+      const pago = document.getElementById('boost-pago-bloque');
+      const puntos = document.getElementById('boost-puntos-bloque');
+      const comp = document.getElementById('boost-comprobante');
+      if (metodo === 'puntos') {
+        if (pago) pago.classList.add('hidden');
+        if (puntos) puntos.classList.remove('hidden');
+        if (comp) comp.removeAttribute('required');
+      } else {
+        if (pago) pago.classList.remove('hidden');
+        if (puntos) puntos.classList.add('hidden');
+        if (comp) comp.setAttribute('required', 'required');
+      }
+    }
+
+    function canjearBoostConPuntos() {
+      const form = document.getElementById('form-boost');
+      if (!form) return;
+      form.action = '{{ url_for("boost_canjear_puntos") }}';
+      form.method = 'POST';
+      form.submit();
     }
 
     function cerrarModalBoost() {

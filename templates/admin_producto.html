@@ -100,9 +100,6 @@
                              onerror="window.rescatarImagenProducto ? window.rescatarImagenProducto(this) : (this.onerror=null, this.src='{{ placeholder_producto }}');">
                         <p class="muted">Se comprime al guardar. Si la nube no responde, la foto queda publicada igual.</p>
                     </div>
-                    <input type="url" id="imagen_url" name="imagen_url"
-                           value="{{ producto.imagen_url if producto and producto.imagen_url else '' }}"
-                           placeholder="https://… (URL de la imagen)">
                     <input type="file" id="imagen" name="imagen" accept="image/*" style="margin-top:6px;">
                     {% if producto %}
                     <label class="muted" style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;">

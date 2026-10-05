@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>Premios y Puntos - Localis</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}">
+  <style>
+    body { font-family: 'DM Sans', sans-serif; }
+    .font-display { font-family: 'Fraunces', serif; }
+  </style>
+</head>
+<body class="w-full min-h-screen flex flex-col" style="background: rgb(254, 251, 246);">
+
+  {% include 'partials/nav_comercio.html' %}
+
+  {% with mensajes = get_flashed_messages(with_categories=true) %}
+    {% if mensajes %}
+      <div class="fixed top-4 right-4 z-50 space-y-2 flash-mobile max-w-md">
+        {% for categoria, mensaje in mensajes %}
+          <div class="p-4 rounded-xl shadow-lg text-white text-sm flex items-center gap-3 localis-flash-alerta flash-auto-dismiss {% if categoria == 'error' %}bg-red-500{% elif categoria == 'exito' %}bg-emerald-600{% else %}bg-amber-600{% endif %}">
+            <i data-lucide="info" style="width:18px;height:18px;"></i>
+            <span>{{ mensaje }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  <main class="max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-10 w-full flex-1 space-y-8">
+
+    <div class="space-y-2">
+      <h1 class="font-display text-2xl sm:text-3xl font-bold text-gray-900 flex items-center gap-2">
+        <i data-lucide="gift" class="text-violet-600" style="width:28px;height:28px;"></i> Premios y Puntos
+      </h1>
+      <p class="text-stone-500 text-sm">
+        Recomienda Localis a otros comercios y gana puntos para destacar tus productos gratis.
+      </p>
+    </div>
+
+    <!-- Balance -->
+    <section class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div class="bg-white rounded-2xl border border-stone-200 p-5 text-center shadow-sm">
+        <span class="block text-3xl font-black text-violet-600">{{ premios.puntos or 0 }}</span>
+        <span class="block text-[11px] font-semibold uppercase tracking-wider text-stone-400 mt-1">Puntos disponibles</span>
+      </div>
+      <div class="bg-white rounded-2xl border border-stone-200 p-5 text-center shadow-sm">
+        <span class="block text-3xl font-black text-stone-900">{{ premios.referidos_total or 0 }}</span>
+        <span class="block text-[11px] font-semibold uppercase tracking-wider text-stone-400 mt-1">Comercios referidos</span>
+      </div>
+      <div class="bg-white rounded-2xl border border-stone-200 p-5 text-center shadow-sm">
+        <span class="block text-3xl font-black text-amber-600">{{ premios.canjes_total or 0 }}</span>
+        <span class="block text-[11px] font-semibold uppercase tracking-wider text-stone-400 mt-1">Destacados canjeados</span>
+      </div>
+    </section>
+
+    <!-- Catálogo de canjes -->
+    <section class="bg-white rounded-2xl border border-stone-200 p-5 sm:p-6 shadow-sm space-y-4">
+      <h2 class="font-display text-xl font-bold text-gray-900">Catálogo de canjes</h2>
+      <div class="rounded-2xl border border-violet-200 bg-violet-50 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div class="space-y-1">
+          <p class="font-bold text-violet-900 flex items-center gap-2">
+            <i data-lucide="sparkles" style="width:18px;height:18px;"></i>
+            Destacado de producto gratis · {{ premios.dias_destacado or 7 }} días
+          </p>
+          <p class="text-xs text-stone-600">
+            Costo: <strong>{{ premios.puntos_por_destacado or 5 }} puntos</strong>.
+            Tu producto aparece en las primeras posiciones de la portada.
+          </p>
+        </div>
+        <span class="shrink-0 inline-flex items-center gap-1 rounded-full bg-violet-600 text-white text-sm font-bold px-4 py-2">
+          {{ premios.puntos_por_destacado or 5 }} pts
+        </span>
+      </div>
+
+      {% if productos %}
+      <form action="{{ url_for('boost_canjear_puntos') }}" method="POST" data-loading="true" data-loading-texto="Canjeando…"
+            class="flex flex-col sm:flex-row gap-2 sm:items-center">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <select name="producto_id" required
+                class="flex-1 px-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:outline-none focus:border-violet-500">
+          {% for producto in productos %}
+          <option value="{{ producto.id }}">{{ producto.nombre }}</option>
+          {% endfor %}
+        </select>
+        {% if (premios.puntos or 0) >= (premios.puntos_por_destacado or 5) %}
+        <button type="submit"
+                class="btn-touch inline-flex items-center justify-center gap-2 bg-violet-600 text-white font-bold px-5 py-2.5 rounded-xl text-sm hover:bg-violet-500 transition">
+          <i data-lucide="gift" style="width:16px;height:16px;"></i> Canjear y destacar
+        </button>
+        {% else %}
+        <button type="button" disabled
+                class="inline-flex items-center justify-center gap-2 bg-stone-200 text-stone-500 font-bold px-5 py-2.5 rounded-xl text-sm cursor-not-allowed"
+                title="Necesitas más puntos">
+          Puntos insuficientes
+        </button>
+        {% endif %}
+      </form>
+      {% else %}
+      <p class="text-xs text-stone-500">Añade productos a tu catálogo para poder canjear destacados.</p>
+      {% endif %}
+    </section>
+
+    <!-- Cómo ganar puntos -->
+    <section class="bg-white rounded-2xl border border-stone-200 p-5 sm:p-6 shadow-sm space-y-3">
+      <h2 class="font-display text-xl font-bold text-gray-900">¿Cómo gano puntos?</h2>
+      <p class="text-sm text-stone-600">
+        Comparte el nombre exacto de tu comercio (<strong>{{ comercio.nombre }}</strong>) y pide a
+        nuevos comercios que lo ingresen en el campo <em>"Comercio que te recomendó"</em> al registrarse.
+        Ganarás <strong>1 punto</strong> por cada comercio que te referencie.
+      </p>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" onclick="copiarNombreComercio()"
+                class="btn-touch inline-flex items-center gap-2 border border-stone-300 text-stone-700 font-bold px-4 py-2 rounded-full text-xs hover:bg-stone-50 transition">
+          <i data-lucide="copy" style="width:14px;height:14px;"></i> Copiar mi nombre para compartir
+        </button>
+      </div>
+    </section>
+
+    <!-- Historial de referidos -->
+    <section class="bg-white rounded-2xl border border-stone-200 p-5 sm:p-6 shadow-sm space-y-3">
+      <h2 class="font-display text-xl font-bold text-gray-900">Mis referidos</h2>
+      {% if premios.referidos %}
+      <ul class="divide-y divide-stone-100">
+        {% for ref in premios.referidos %}
+        <li class="py-2.5 flex items-center justify-between gap-3 text-sm">
+          <span class="text-stone-700 flex items-center gap-2">
+            <i data-lucide="user-plus" class="text-violet-500" style="width:15px;height:15px;"></i>
+            {{ ref.nombre_referente or 'Comercio referido' }}
+          </span>
+          <span class="text-xs font-bold text-violet-700">+{{ ref.puntos_otorgados or 1 }} pt</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="text-sm text-stone-500">Todavía no tienes referidos. ¡Comparte tu nombre para empezar a ganar puntos!</p>
+      {% endif %}
+    </section>
+  </main>
+
+  <footer class="w-full py-6 px-6 text-center mt-auto" style="background: rgb(17, 17, 17);">
+    <p class="text-xs text-stone-500">© 2026 Localis · Impulsando los negocios locales.</p>
+  </footer>
+
+  <script>
+    lucide.createIcons();
+    var NOMBRE_COMERCIO = {{ comercio.nombre | tojson }};
+    function copiarNombreComercio() {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(NOMBRE_COMERCIO).then(function () {
+          window.mostrarAlertaLocalis?.('¡Nombre copiado! Compártelo con otros comercios.', 'exito');
+        }).catch(function () {
+          window.prompt('Copia el nombre de tu comercio:', NOMBRE_COMERCIO);
+        });
+      } else {
+        window.prompt('Copia el nombre de tu comercio:', NOMBRE_COMERCIO);
+      }
+    }
+  </script>
+  <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/localis.js') }}?v=compartir-3"></script>
+</body>
+</html>

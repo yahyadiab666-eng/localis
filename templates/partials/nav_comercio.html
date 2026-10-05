@@ -12,6 +12,11 @@
         <i data-lucide="layout-dashboard" style="width:15px;height:15px;"></i>
         <span class="hidden sm:inline">Panel</span>
       </a>
+      <a href="{{ url_for('comercio_premios') }}"
+         class="btn-touch text-xs sm:text-sm font-medium px-2.5 py-1.5 rounded-full transition flex items-center gap-1 {% if nav_activo == 'premios' %}bg-violet-500/20 text-violet-300{% else %}text-stone-300 hover:text-white{% endif %}">
+        <i data-lucide="gift" style="width:15px;height:15px;"></i>
+        <span class="hidden sm:inline">Premios</span>
+      </a>
       <!-- RESTAURAR_PAGOS_INICIO -->
       {# Enlace "Planes" oculto: la app se muestra como nativamente gratuita. #}
       {% if not pagos_congelados %}

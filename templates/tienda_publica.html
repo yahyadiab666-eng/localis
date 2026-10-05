@@ -145,7 +145,7 @@
     {% if productos %}
       <div class="grid grid-cols-2 md:grid-cols-4 gap-5 grid-productos-mobile">
         {% for producto in productos %}
-          <div class="card-hover card-producto-mobile rounded-xl overflow-hidden bg-white shadow border border-stone-100 flex flex-col h-full cursor-pointer"
+          <div class="card-hover card-producto-mobile localis-card-producto rounded-xl overflow-hidden bg-white shadow border border-stone-100 flex flex-col h-full cursor-pointer"
                id="producto-{{ producto.id }}"
                role="button" tabindex="0"
                data-interaccion="clic_producto" data-interaccion-comercio="{{ comercio.id }}"
@@ -182,7 +182,7 @@
                 </a>
                 {% endif %}
                 <button type="button"
-                        class="localis-btn-share-producto"
+                        class="localis-btn-share-producto localis-card-share"
                         data-producto-id="{{ producto.id }}"
                         data-producto-nombre="{{ producto.nombre|e }}"
                         data-producto-precio-usd="{{ producto.precio_usd }}"

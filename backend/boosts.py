@@ -291,6 +291,86 @@ def activar_boost_producto(
 # ==========================================
 
 
+def aplicar_boost_en_cursor(
+    cursor,
+    comercio_id,
+    producto_id,
+    dias,
+    metodo='pago_movil_ocr',
+    referencia=None,
+    comprobante_url=None,
+    comprobante_hash=None,
+    precio_usd=0.0,
+    registrar_solicitud=True,
+):
+    """Aplica el boost (auditoría + activación) usando un cursor existente.
+
+    No hace commit: el llamador controla la transacción. Retorna
+    ``(exito, mensaje, datos)`` donde ``datos`` incluye ``inicio``/``fin``.
+    """
+    try:
+        comercio_id = _a_int(comercio_id, 'comercio_id')
+        producto_id = _a_int(producto_id, 'producto_id')
+        dias = _a_int(dias, 'dias')
+    except ValueError as error:
+        return False, str(error), None
+
+    if dias not in PRECIOS_BOOST_USD:
+        return False, 'Duración no válida.', None
+
+    inicio = _ahora_utc()
+    fin = inicio + timedelta(days=dias)
+
+    # Propiedad inequívoca producto -> comercio.
+    cursor.execute(
+        'SELECT id FROM productos WHERE id = ? AND comercio_id = ?',
+        (producto_id, comercio_id),
+    )
+    if not cursor.fetchone():
+        return False, 'El producto no pertenece a tu comercio.', None
+
+    if registrar_solicitud:
+        cursor.execute(
+            """
+            INSERT INTO solicitudes_pago
+                (comercio_id, plan_tipo, referencia, fecha_transferencia, estado,
+                 comprobante_url, comprobante_hash)
+            VALUES (?, ?, ?, ?, 'aprobado', ?, ?)
+            """,
+            (
+                comercio_id,
+                f'boost_{dias}d',
+                referencia,
+                inicio.strftime('%Y-%m-%d'),
+                comprobante_url,
+                comprobante_hash,
+            ),
+        )
+
+    cursor.execute(
+        """
+        INSERT INTO boosts
+            (comercio_id, tipo, objetivo_id, precio_usd, dias_duracion,
+             referencia_pago, metodo, estado, fecha_inicio, fecha_fin)
+        VALUES (?, 'producto', ?, ?, ?, ?, ?, 'activo', ?, ?)
+        """,
+        (comercio_id, producto_id, precio_usd, dias, referencia, metodo, inicio, fin),
+    )
+
+    cursor.execute(
+        """
+        UPDATE productos
+        SET boost_inicio = ?, boost_fin = ?
+        WHERE id = ? AND comercio_id = ?
+        """,
+        (inicio, fin, producto_id, comercio_id),
+    )
+    if cursor.rowcount == 0:
+        return False, 'No se pudo activar el destacado.', None
+
+    return True, 'ok', {'inicio': inicio, 'fin': fin}
+
+
 def estado_boosts_productos(comercio_id):
     """Boosts de producto de un comercio: ``{'productos': {id: {...}}}``."""
     resultado = {'productos': {}}

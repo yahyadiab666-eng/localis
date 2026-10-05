@@ -248,6 +248,11 @@ from backend.boosts import (
     opciones_boost,
     precio_boost,
 )
+from backend.referidos import (
+    PUNTOS_POR_DESTACADO,
+    canjear_destacado,
+    resumen_premios,
+)
 
 print('[Localis] Creando aplicación Flask...', flush=True)
 
@@ -1520,6 +1525,13 @@ def panel_comercio():
         print(f'[Localis] panel_comercio pago movil fallo: {type(error).__name__}: {error}')
         pago_movil = {}
 
+    # Premios y puntos (canje de destacados gratuitos).
+    try:
+        premios = resumen_premios(comercio.get('id')) if comercio.get('id') else {}
+    except Exception as error:
+        print(f'[Localis] panel_comercio premios fallo: {type(error).__name__}: {error}')
+        premios = {'puntos': 0, 'puntos_por_destacado': PUNTOS_POR_DESTACADO}
+
     productos = productos or []
     _debug_imagenes_antes_de_render(productos, 'panel_comercio')
     try:
@@ -1536,6 +1548,7 @@ def panel_comercio():
             boosts=boosts,
             opciones_boost=opciones_boost(),
             pago_movil=pago_movil,
+            premios=premios,
             nav_activo='panel',
         )
     except Exception as error:
@@ -1638,6 +1651,7 @@ def crear_comercio():
         maps_url = request.form.get('maps_url', '').strip()
         documento_identidad = request.form.get('documento_identidad', '').strip()
         banner_color = normalizar_color_banner(request.form.get('banner_color'))
+        referido_por = request.form.get('referido_por', '').strip()
         categoria_raw = request.form.get('categoria_id')
         if not categoria_raw or not str(categoria_raw).strip().isdigit():
             flash('Debes seleccionar una categoría válida.', 'error')
@@ -1666,6 +1680,7 @@ def crear_comercio():
             maps_url=maps_url or None,
             documento_identidad=documento_identidad or None,
             banner_color=banner_color,
+            referido_por=referido_por or None,
         )
 
         if exito:
@@ -2236,6 +2251,54 @@ def api_verificar_boost():
             }
         ),
         200,
+    )
+
+
+@app.route('/comercio/boost/canjear', methods=['POST'])
+@login_requerido
+def boost_canjear_puntos():
+    """Canjea puntos por un destacado gratis de un producto (sin pago móvil)."""
+    comercio, redireccion = _requiere_comercio()
+    if redireccion:
+        return redireccion
+
+    producto_id = request.form.get('producto_id')
+    exito, mensaje = canjear_destacado(comercio['id'], producto_id)
+    flash(mensaje, 'exito' if exito else 'error')
+    return redirect(url_for('panel_comercio'))
+
+
+@app.route('/comercio/premios')
+@login_requerido
+def comercio_premios():
+    """Sección 'Premios y Puntos': saldo, referidos y catálogo de canjes."""
+    comercio, redireccion = _requiere_comercio()
+    if redireccion:
+        return redireccion
+
+    try:
+        premios = resumen_premios(comercio['id'])
+    except Exception as error:
+        print(f'[Localis] premios fallo: {type(error).__name__}: {error}')
+        premios = {
+            'puntos': 0,
+            'referidos_total': 0,
+            'referidos': [],
+            'canjes_total': 0,
+            'puntos_por_destacado': PUNTOS_POR_DESTACADO,
+            'dias_destacado': 7,
+        }
+    try:
+        productos = obtener_productos_comercio(comercio['id'])
+    except Exception:
+        productos = []
+
+    return render_template(
+        'comercio_premios.html',
+        comercio=_normalizar_imagenes_comercio(comercio),
+        productos=productos,
+        premios=premios,
+        nav_activo='premios',
     )
 
 

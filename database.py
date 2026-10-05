@@ -113,6 +113,8 @@ TABLAS_PERMITIDAS = frozenset({
     'interacciones_comercio',
     'imagenes_automaticas',
     'boosts',
+    'referidos',
+    'canjes_puntos',
 })
 
 # Columnas que deben existir en tablas ya creadas (ADD COLUMN IF NOT EXISTS).
@@ -168,6 +170,10 @@ COLUMNAS_ESQUEMA = {
         # Destacados / Boosts (micro-pago): fecha de inicio y fin del destaque.
         ('boost_inicio', 'TIMESTAMP'),
         ('boost_fin', 'TIMESTAMP'),
+        # Recompensas y referidos B2B por puntos.
+        ('puntos', 'INTEGER DEFAULT 0'),
+        ('referido_por', 'TEXT'),
+        ('referente_id', 'INTEGER'),
     ],
     'sucursales': [
         ('comercio_id', 'INTEGER'),
@@ -202,6 +208,23 @@ COLUMNAS_ESQUEMA = {
         # Referencia de pago móvil (antifraude / anti doble gasto).
         ('referencia_pago', 'TEXT'),
         ('metodo', "TEXT DEFAULT 'pago_movil'"),
+        ('estado', "TEXT DEFAULT 'activo'"),
+        ('fecha_inicio', 'TIMESTAMPTZ'),
+        ('fecha_fin', 'TIMESTAMPTZ'),
+        ('fecha_registro', 'TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP'),
+    ],
+    'referidos': [
+        ('referente_comercio_id', 'INTEGER'),
+        ('referido_comercio_id', 'INTEGER'),
+        ('nombre_referente', 'TEXT'),
+        ('puntos_otorgados', 'INTEGER DEFAULT 1'),
+        ('fecha_registro', 'TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP'),
+    ],
+    'canjes_puntos': [
+        ('comercio_id', 'INTEGER'),
+        ('producto_id', 'INTEGER'),
+        ('puntos_usados', 'INTEGER DEFAULT 0'),
+        ('dias_duracion', 'INTEGER DEFAULT 7'),
         ('estado', "TEXT DEFAULT 'activo'"),
         ('fecha_inicio', 'TIMESTAMPTZ'),
         ('fecha_fin', 'TIMESTAMPTZ'),
@@ -1407,6 +1430,39 @@ def _crear_tabla_boosts(cursor):
     )
 
 
+def _crear_tabla_referidos(cursor):
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS referidos (
+            id SERIAL PRIMARY KEY,
+            referente_comercio_id INTEGER REFERENCES comercios(id) ON DELETE SET NULL,
+            referido_comercio_id INTEGER REFERENCES comercios(id) ON DELETE SET NULL,
+            nombre_referente TEXT,
+            puntos_otorgados INTEGER NOT NULL DEFAULT 1,
+            fecha_registro TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
+def _crear_tabla_canjes_puntos(cursor):
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS canjes_puntos (
+            id SERIAL PRIMARY KEY,
+            comercio_id INTEGER REFERENCES comercios(id) ON DELETE CASCADE,
+            producto_id INTEGER REFERENCES productos(id) ON DELETE SET NULL,
+            puntos_usados INTEGER NOT NULL DEFAULT 0,
+            dias_duracion INTEGER NOT NULL DEFAULT 7,
+            estado TEXT DEFAULT 'activo',
+            fecha_inicio TIMESTAMPTZ,
+            fecha_fin TIMESTAMPTZ,
+            fecha_registro TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
 def _crear_tablas(cursor):
     """Crea tablas faltantes. No reejecuta CREATE TABLE si ya existen (AccessExclusiveLock)."""
     pares = (
@@ -1428,6 +1484,8 @@ def _crear_tablas(cursor):
         ('interacciones_comercio', _crear_tabla_interacciones_comercio),
         ('imagenes_automaticas', _crear_tabla_imagenes_automaticas),
         ('boosts', _crear_tabla_boosts),
+        ('referidos', _crear_tabla_referidos),
+        ('canjes_puntos', _crear_tabla_canjes_puntos),
     )
     for nombre, fn in pares:
         if _tabla_existe(cursor, nombre):
@@ -1599,6 +1657,10 @@ def _crear_indices(cursor):
         'CREATE INDEX IF NOT EXISTS idx_boosts_comercio ON boosts(comercio_id)',
         # Anti doble-gasto: la referencia de pago móvil es única en boosts.
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_boosts_referencia ON boosts(referencia_pago) WHERE referencia_pago IS NOT NULL',
+        # Recompensas y referidos B2B por puntos.
+        'CREATE INDEX IF NOT EXISTS idx_referidos_referente ON referidos(referente_comercio_id)',
+        'CREATE INDEX IF NOT EXISTS idx_canjes_comercio ON canjes_puntos(comercio_id)',
+        'CREATE INDEX IF NOT EXISTS idx_comercios_puntos ON comercios(puntos)',
     ]
     for ddl in indices:
         _ejecutar_indice_si_falta(cursor, ddl)

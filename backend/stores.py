@@ -311,6 +311,7 @@ def registrar_comercio_completo(
     maps_url=None,
     documento_identidad=None,
     banner_color=None,
+    referido_por=None,
 ):
     plan_gratis = obtener_plan_por_codigo(PLAN_GRATIS_CODIGO)
     plan_id = plan_gratis.get('id')
@@ -395,6 +396,44 @@ def registrar_comercio_completo(
                     cursor.execute(
                         f"UPDATE comercios SET {', '.join(fragmentos)} WHERE id = ?",
                         tuple(extra),
+                    )
+
+            # Referidos B2B: otorga 1 punto al comercio referente. Se aísla con
+            # savepoint para que un fallo aquí NUNCA rompa el registro.
+            if nuevo_id and referido_por:
+                try:
+                    from backend.referidos import (
+                        otorgar_referido_cursor,
+                        resolver_referente_cursor,
+                    )
+
+                    cursor.execute('SAVEPOINT referido_b2b')
+                    nombre_ref = referido_por.strip()
+                    referente = resolver_referente_cursor(
+                        cursor, nombre_ref, excluir_id=nuevo_id
+                    )
+                    if referente and referente.get('id'):
+                        otorgar_referido_cursor(
+                            cursor, referente['id'], nuevo_id, nombre_ref
+                        )
+                        cursor.execute(
+                            'UPDATE comercios SET referente_id = ?, referido_por = ? WHERE id = ?',
+                            (referente['id'], nombre_ref, nuevo_id),
+                        )
+                    else:
+                        cursor.execute(
+                            'UPDATE comercios SET referido_por = ? WHERE id = ?',
+                            (nombre_ref, nuevo_id),
+                        )
+                    cursor.execute('RELEASE SAVEPOINT referido_b2b')
+                except Exception as error:
+                    try:
+                        cursor.execute('ROLLBACK TO SAVEPOINT referido_b2b')
+                    except Exception:
+                        pass
+                    print(
+                        f'[Localis Referidos] no se pudo otorgar el punto: {error}',
+                        flush=True,
                     )
 
             conexion.commit()
