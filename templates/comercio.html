@@ -325,12 +325,12 @@
               {% if producto.codigo_barras %}
               <p class="text-[10px] font-mono text-stone-400 mt-1 truncate">{{ producto.codigo_barras }}</p>
               {% endif %}
-              <div class="mt-auto pt-3 border-t border-stone-100 flex items-end justify-between gap-2">
+              <div class="mt-auto pt-3 border-t border-stone-100 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
                 <div class="min-w-0">
-                  <span class="font-bold text-amber-600 text-sm whitespace-nowrap">${{ "%.2f"|format(producto.precio_usd) }}</span>
-                  <span class="block text-stone-400 text-[10px] whitespace-nowrap">{{ "%.2f"|format(producto.precio_bs) }} Bs.</span>
+                  <span class="block font-bold text-amber-600 text-sm break-words leading-tight">${{ "%.2f"|format(producto.precio_usd) }}</span>
+                  <span class="block text-stone-400 text-[10px] break-words">{{ "%.2f"|format(producto.precio_bs) }} Bs.</span>
                 </div>
-                <div class="flex gap-1 shrink-0">
+                <div class="flex gap-1 shrink-0 self-end sm:self-auto sm:ml-auto">
                   <button type="button"
                           class="absolute top-2 right-2 z-20 localis-btn-share-producto localis-card-share"
                           data-producto-id="{{ producto.id }}"

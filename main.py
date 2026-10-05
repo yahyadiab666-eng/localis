@@ -222,6 +222,7 @@ from backend.stores import (
     actualizar_producto,
     buscar_y_filtrar_productos,
     eliminar_producto,
+    listar_portada_hibrida,
     obtener_comercio_por_id,
     obtener_comercio_por_usuario,
     obtener_config,
@@ -947,14 +948,17 @@ def index():
         hay_mas = False
         pagina = 1
     else:
-        # Portada paginada y navegable: se pide +1 para saber si hay más páginas.
-        lote = buscar_y_filtrar_productos(
-            limit=por_pagina + 1,
-            offset=(pagina - 1) * por_pagina,
-            orden_aleatorio=False,
-        )
-        hay_mas = len(lote) > por_pagina
-        productos = lote[:por_pagina]
+        # Portada: destacados fijos arriba + "revoltijo" justo de no destacados
+        # (mezcla aleatoria por carga, con tope por comercio).
+        try:
+            productos, hay_mas = listar_portada_hibrida(
+                limit=por_pagina,
+                offset=(pagina - 1) * por_pagina,
+            )
+        except Exception as error:
+            print(f'[Localis] portada fallo: {type(error).__name__}: {error}')
+            traceback.print_exc()
+            productos, hay_mas = [], False
 
     from backend.stores import obtener_configs
 

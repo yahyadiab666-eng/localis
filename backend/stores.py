@@ -950,6 +950,128 @@ def _buscar_y_filtrar_productos_once(
         return productos
 
 
+def listar_portada_hibrida(limit, offset=0):
+    """Portada: destacados fijos arriba + "revoltijo" justo de no destacados.
+
+    - **Destacados** (``p.boost_fin > NOW()``): fijos en las primeras posiciones,
+      con orden estable por fecha de boost (``boost_fin DESC, id DESC``).
+    - **No destacados**: mezcla aleatoria reordenada en cada carga, con un tope
+      por comercio (``ROW_NUMBER``) para que ninguna tienda monopolice.
+
+    Retorna ``(productos, hay_mas)``. Nunca lanza: degrada a lista vacía.
+    """
+    try:
+        limit = max(1, int(limit or 1))
+    except (TypeError, ValueError):
+        limit = 60
+    try:
+        offset = max(0, int(offset or 0))
+    except (TypeError, ValueError):
+        offset = 0
+
+    try:
+        pool = max(limit, _POOL_MUESTRA_ALEATORIA)
+        with get_db_connection(row_factory=sqlite3.Row, read_only=True) as conexion:
+            cursor = conexion.cursor()
+            filtros = _filtro_comercio_publico() + _filtro_producto_publico()
+
+            # 1) Destacados: fijos arriba (estables).
+            destacados_ids = []
+            if _boost_disponible():
+                cursor.execute(
+                    f"""
+                    SELECT p.id AS id
+                    FROM comercios c
+                    JOIN productos p ON p.comercio_id = c.id
+                    WHERE 1=1 {filtros}
+                      AND p.boost_fin IS NOT NULL
+                      AND p.boost_fin > CURRENT_TIMESTAMP
+                    ORDER BY p.boost_fin DESC, p.id DESC
+                    LIMIT ?
+                    """,
+                    (pool,),
+                )
+                destacados_ids = [
+                    _valor_fila(fila, 'id', 0)
+                    for fila in cursor.fetchall()
+                    if _valor_fila(fila, 'id', 0) is not None
+                ]
+
+            # 2) No destacados: tope por comercio (equidad) y mezcla aleatoria.
+            cap = _cap_productos_por_comercio(cursor, pool)
+            excluir_destacados = ''
+            if _boost_disponible():
+                excluir_destacados = (
+                    ' AND (p.boost_fin IS NULL OR p.boost_fin <= CURRENT_TIMESTAMP)'
+                )
+            cursor.execute(
+                f"""
+                SELECT id FROM (
+                    SELECT p.id AS id,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY p.comercio_id ORDER BY p.id DESC
+                           ) AS rn
+                    FROM comercios c
+                    JOIN productos p ON p.comercio_id = c.id
+                    WHERE 1=1 {filtros}{excluir_destacados}
+                ) ranked
+                WHERE rn <= ?
+                """,
+                (cap,),
+            )
+            normales_ids = [
+                _valor_fila(fila, 'id', 0)
+                for fila in cursor.fetchall()
+                if _valor_fila(fila, 'id', 0) is not None
+            ]
+
+            random.shuffle(normales_ids)
+            combinado = list(destacados_ids) + normales_ids
+            hay_mas = len(combinado) > (offset + limit)
+            page_ids = combinado[offset : offset + limit]
+            if not page_ids:
+                return [], hay_mas
+
+            # 3) Filas completas de la página.
+            placeholders = ', '.join('?' for _ in page_ids)
+            query = _base_query_productos_publicos()
+            query += f' AND p.id IN ({placeholders})'
+            filas = _ejecutar_listado_productos(cursor, conexion, query, page_ids)
+
+        # 4) Reordena según la mezcla y normaliza precios/destacado.
+        filas = _completar_imagenes_productos(
+            [dict(f) if not isinstance(f, dict) else f for f in filas]
+        )
+        tasa = obtener_tasa_dolar() or 1.0
+        por_id = {}
+        for fila in filas:
+            try:
+                por_id[int(fila.get('id'))] = fila
+            except (TypeError, ValueError):
+                continue
+        productos = []
+        for pid in page_ids:
+            fila = por_id.get(int(pid))
+            if not fila:
+                continue
+            try:
+                precio = float(fila.get('precio_usd') or 0)
+            except (TypeError, ValueError):
+                precio = 0.0
+            fila['precio_usd'] = precio
+            fila['precio_bs'] = round(precio * tasa, 2)
+            fila['destacado'] = bool(fila.get('destacado_producto'))
+            productos.append(fila)
+        return productos, hay_mas
+    except Exception as error:
+        print(
+            f'[Localis] portada hibrida fallo: {type(error).__name__}: {error}',
+            flush=True,
+        )
+        traceback.print_exc()
+        return [], False
+
+
 def obtener_producto_publico(producto_id):
     """Producto con datos de tienda para modal/vista pública."""
     try:
