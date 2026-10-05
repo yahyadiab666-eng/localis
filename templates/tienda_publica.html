@@ -187,7 +187,7 @@
                         data-producto-nombre="{{ producto.nombre|e }}"
                         data-producto-precio-usd="{{ producto.precio_usd }}"
                         data-producto-precio-bs="{{ producto.precio_bs }}"
-                        data-producto-enlace="{{ url_for('tienda_publica', comercio_id=comercio.id) }}?producto={{ producto.id }}"
+                        data-producto-enlace="{{ url_for('producto_publico', producto_id=producto.id) }}"
                         title="Compartir producto"
                         aria-label="Compartir producto"
                         onclick="event.stopPropagation(); window.compartirProductoDesdeBoton(this);">
@@ -398,19 +398,22 @@
       }
     });
 
-    // Enlace directo al producto: /tienda/<id>?producto=<pid> resalta la ficha.
+    // Enlace directo al producto: ?producto=<pid> o #producto-<pid> resaltan la ficha.
     (function () {
       var pid = new URLSearchParams(window.location.search).get('producto');
+      if (!pid && window.location.hash && window.location.hash.indexOf('#producto-') === 0) {
+        pid = window.location.hash.replace('#producto-', '');
+      }
       if (!pid) return;
       var card = document.getElementById('producto-' + pid);
       if (!card) return;
       card.scrollIntoView({ behavior: 'smooth', block: 'center' });
       card.classList.add('ring-2', 'ring-amber-500');
-      setTimeout(function () { card.classList.remove('ring-2', 'ring-amber-500'); }, 3000);
+      setTimeout(function () { card.classList.remove('ring-2', 'ring-amber-500'); }, 3200);
     })();
   </script>
   <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/localis.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/localis.js') }}?v=compartir-3"></script>
 </body>
 </html>
 

@@ -171,7 +171,7 @@
                             data-producto-nombre="{{ producto.nombre|e }}"
                             data-producto-precio-usd="{{ producto.precio_usd }}"
                             data-producto-precio-bs="{{ producto.precio_bs }}"
-                            data-producto-enlace="/tienda/{{ producto.comercio_id }}?producto={{ producto.id }}"
+                            data-producto-enlace="{{ url_for('producto_publico', producto_id=producto.id) }}"
                             title="Compartir producto" aria-label="Compartir producto"
                             onclick="event.stopPropagation(); window.compartirProductoDesdeBoton(this);">
                       <i data-lucide="share-2" style="width:14px;height:14px;"></i>
@@ -245,8 +245,8 @@
         </a>
         <div class="flex justify-center">
           <button type="button" id="modal-btn-compartir" onclick="compartirProductoActual()"
-                  class="btn-touch inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full border border-stone-300 text-stone-700 text-xs font-bold hover:bg-stone-50 transition">
-            <i data-lucide="share-2" style="width:14px;height:14px;"></i>
+                  class="btn-touch inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full border border-stone-200 bg-white text-stone-700 text-xs font-semibold leading-none shadow-sm hover:bg-stone-50 hover:border-stone-300 transition">
+            <i data-lucide="share-2" class="shrink-0" style="width:14px;height:14px;"></i>
             <span>Compartir producto</span>
           </button>
         </div>
@@ -339,7 +339,7 @@
         nombre: p.nombre || 'Producto',
         precio_usd: p.precio_usd || 0,
         precio_bs: p.precio_bs || 0,
-        enlace: `${window.location.origin}/tienda/${p.comercio_id}?producto=${p.id}`,
+        enlace: `${window.location.origin}/producto/${p.id}`,
       });
     }
 
@@ -356,7 +356,7 @@
     });
   </script>
   <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/localis.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/localis.js') }}?v=compartir-3"></script>
   <script>
     // PWA: registro del Service Worker + botón de instalación personalizado.
     (function () {

@@ -1051,6 +1051,26 @@ def imagen_producto_respaldo():
     return redirect(PLACEHOLDER_PRODUCTO)
 
 
+@app.route('/producto/<int:producto_id>')
+def producto_publico(producto_id):
+    """URL individual y canónica de un producto.
+
+    Estructura limpia: ``/producto/<id>`` redirige a la ficha del producto
+    dentro de su tienda pública (``/tienda/<comercio_id>?producto=<id>#producto-<id>``)
+    para que se abra resaltada y lista para compartir.
+    """
+    producto = obtener_producto_publico(producto_id)
+    if not producto or not producto.get('comercio_id'):
+        flash('Producto no encontrado o no disponible.', 'error')
+        return redirect(url_for('index'))
+    destino = url_for(
+        'tienda_publica',
+        comercio_id=producto['comercio_id'],
+        producto=producto_id,
+    )
+    return redirect(destino + f'#producto-{producto_id}')
+
+
 @app.route('/tienda/<int:comercio_id>')
 def tienda_publica(comercio_id):
     comercio = obtener_comercio_por_id(comercio_id, solo_visible=True)
