@@ -113,6 +113,23 @@ def _es_referencia_duplicada(error):
     return getattr(error, 'pgcode', None) == '23505'
 
 
+def referencia_ya_usada_boost(referencia):
+    """True si la referencia ya existe en la tabla ``boosts`` (auditoría)."""
+    ref = sanitizar_referencia(referencia)
+    if not ref:
+        return False
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                'SELECT 1 FROM boosts WHERE referencia_pago = ? LIMIT 1', (ref,)
+            )
+            return cursor.fetchone() is not None
+    except Exception as error:
+        print(f'[Localis Boost] no se pudo auditar la referencia: {error}', flush=True)
+        return False
+
+
 def _registrar_intento_rechazado(comercio_id, producto_id, referencia, motivo):
     """Audita un intento de boost rechazado. Nunca lanza (aislado)."""
     try:
@@ -139,11 +156,19 @@ def _registrar_intento_rechazado(comercio_id, producto_id, referencia, motivo):
 # ==========================================
 
 
-def activar_boost_producto(comercio_id, producto_id, dias, referencia):
+def activar_boost_producto(
+    comercio_id,
+    producto_id,
+    dias,
+    referencia,
+    comprobante_url=None,
+    comprobante_hash=None,
+):
     """Activa el destaque de un producto tras validar el pago móvil.
 
-    Retorna ``(exito, mensaje)``. Ante cualquier fallo no deja estado
-    inconsistente ni realiza cargos.
+    ``referencia``/``comprobante_*`` provienen del OCR del comprobante (igual
+    que el flujo de mensualidades). Retorna ``(exito, mensaje)``. Ante cualquier
+    fallo no deja estado inconsistente ni realiza cargos.
     """
     # 1) Sanitización y control de tipos.
     try:
@@ -163,9 +188,11 @@ def activar_boost_producto(comercio_id, producto_id, dias, referencia):
         )
         return False, 'La referencia de pago móvil debe tener exactamente 6 dígitos.'
 
-    # 2) Anti fraude: la referencia no puede haberse usado (planes o boosts).
+    # 2) Anti fraude: la referencia no puede haberse usado nunca.
+    #    Se audita en el sistema de pagos (pagos/solicitudes_pago = mensualidades)
+    #    y en la tabla propia de boosts.
     try:
-        if _referencia_ya_usada(referencia):
+        if _referencia_ya_usada(referencia) or referencia_ya_usada_boost(referencia):
             _registrar_intento_rechazado(
                 comercio_id, producto_id, referencia, 'referencia_reutilizada'
             )
@@ -196,18 +223,22 @@ def activar_boost_producto(comercio_id, producto_id, dias, referencia):
                 )
                 return False, 'El producto no pertenece a tu comercio.'
 
-            # 3b) Registro del pago en la tabla de pago móvil existente.
+            # 3b) Registro del pago en la tabla de pago móvil existente
+            #     (idéntico al flujo de mensualidades: trazabilidad + hash).
             cursor.execute(
                 """
                 INSERT INTO solicitudes_pago
-                    (comercio_id, plan_tipo, referencia, fecha_transferencia, estado)
-                VALUES (?, ?, ?, ?, 'aprobado')
+                    (comercio_id, plan_tipo, referencia, fecha_transferencia, estado,
+                     comprobante_url, comprobante_hash)
+                VALUES (?, ?, ?, ?, 'aprobado', ?, ?)
                 """,
                 (
                     comercio_id,
                     plan_tipo_boost,
                     referencia,
                     inicio.strftime('%Y-%m-%d'),
+                    comprobante_url,
+                    comprobante_hash,
                 ),
             )
 
@@ -217,7 +248,7 @@ def activar_boost_producto(comercio_id, producto_id, dias, referencia):
                 INSERT INTO boosts
                     (comercio_id, tipo, objetivo_id, precio_usd, dias_duracion,
                      referencia_pago, metodo, estado, fecha_inicio, fecha_fin)
-                VALUES (?, 'producto', ?, ?, ?, ?, 'pago_movil', 'activo', ?, ?)
+                VALUES (?, 'producto', ?, ?, ?, ?, 'pago_movil_ocr', 'activo', ?, ?)
                 """,
                 (comercio_id, producto_id, precio_usd, dias, referencia, inicio, fin),
             )

@@ -232,6 +232,7 @@ from backend.stores import (
 )
 from backend.analytics import (
     normalizar_tipo,
+    producto_pertenece_a_comercio,
     registrar_interaccion,
     resumen_interacciones,
 )
@@ -245,6 +246,7 @@ from backend.boosts import (
     activar_boost_producto,
     estado_boosts_productos,
     opciones_boost,
+    precio_boost,
 )
 
 print('[Localis] Creando aplicación Flask...', flush=True)
@@ -2095,26 +2097,126 @@ def suscripcion_solicitar_pago():
 # ==========================================
 
 
-@app.route('/comercio/boost/producto/<int:producto_id>', methods=['POST'])
-@login_requerido
-def boost_producto(producto_id):
-    """Destaca un producto tras validar el pago móvil (referencia única).
+@app.route('/api/boost/verificar', methods=['POST'])
+@login_requerido_api
+def api_verificar_boost():
+    """Valida el pago móvil y activa el destacado de un producto.
 
-    Reutiliza el mismo flujo de pago móvil del sistema: duración + referencia de
-    pago. La validación de propiedad, antifraude y transacción atómica vive en
-    ``backend.boosts.activar_boost_producto``.
+    Réplica EXACTA del flujo de mensualidades (``/api/pagos/verificar``):
+    comprobante + OCR antifraude (banco nacional, RIF/cédula y teléfono destino,
+    monto exacto y fecha reciente) + anti-reutilización de referencia/comprobante.
     """
-    comercio, redireccion = _requiere_comercio()
-    if redireccion:
-        return redireccion
+    comercio = _comercio_sesion_validado()
+    if not comercio:
+        return jsonify({'error': 'Selecciona un comercio válido en tu cuenta.'}), 403
 
-    dias = request.form.get('dias')
-    referencia = request.form.get('referencia')
+    producto_raw = request.form.get('producto_id')
+    try:
+        producto_id = int(str(producto_raw).strip())
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Producto no válido.'}), 400
+
+    dias_raw = request.form.get('dias')
+    try:
+        dias = int(str(dias_raw).strip())
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Duración no válida. Elige 3, 5 o 7 días.'}), 400
+
+    precio_usd = precio_boost(dias)
+    if not precio_usd:
+        return jsonify({'error': 'Duración no válida. Elige 3, 5 o 7 días.'}), 400
+
+    # a) Propiedad inequívoca: el producto debe ser del comercio de la sesión.
+    if not producto_pertenece_a_comercio(producto_id, comercio['id']):
+        return jsonify({'error': 'El producto no pertenece a tu comercio.'}), 403
+
+    archivo = request.files.get('comprobante')
+    if not archivo or not archivo.filename:
+        return jsonify({'error': 'Debes adjuntar la captura del comprobante de pago.'}), 400
+
+    from backend.images import ImageProcessingError, comprimir_bytes_a_bytes, leer_bytes_limitados
+
+    data_bytes, error_lectura = leer_bytes_limitados(archivo)
+    if error_lectura:
+        return jsonify({'error': error_lectura}), 400
+
+    hash_comprobante = calcular_hash_comprobante(data_bytes)
+    if comprobante_ya_usado(hash_comprobante):
+        return jsonify({'error': 'Este comprobante ya fue registrado en el sistema.'}), 400
+
+    try:
+        tasa = float(obtener_tasa_dolar() or 1.0)
+    except (TypeError, ValueError):
+        tasa = 1.0
+    monto_bs = round(float(precio_usd) * tasa, 2)
+
+    # b) OCR estricto: banco nacional, RIF/cédula y teléfono destino,
+    #    monto exacto y fecha reciente.
+    ocr = validar_comprobante_pago_movil(data_bytes, monto_bs)
+    if not ocr.get('ok'):
+        return (
+            jsonify(
+                {
+                    'error': ' '.join(ocr.get('errores') or ['Comprobante no válido.']),
+                    'ocr_ms': round(ocr.get('ms', 0), 1),
+                }
+            ),
+            400,
+        )
+
+    referencia = ocr['referencia']
+    comprobante_url = None
+    aviso_pago = None
+    try:
+        comprimido = comprimir_bytes_a_bytes(
+            data_bytes,
+            prefijo=f'boost_{comercio["id"]}',
+            max_dimension=1920,
+        )
+        payload, content_type, filename = comprimido
+        comprobante_url, aviso_pago = intentar_subir_bytes(
+            payload,
+            filename=filename,
+            content_type=content_type,
+            carpeta='pagos',
+        )
+        if aviso_pago:
+            print(f'[Localis Storage] comprobante boost en modo hibrido: {aviso_pago}')
+    except ImageProcessingError as error:
+        return jsonify({'error': str(error)}), 400
+    except Exception as error:
+        print(f'[Localis Boost] no se pudo subir el comprobante: {error}')
+
+    # c) Activación atómica: auditoría + referencia única + boost del producto.
     exito, mensaje = activar_boost_producto(
-        comercio['id'], producto_id, dias, referencia
+        comercio['id'],
+        producto_id,
+        dias,
+        referencia,
+        comprobante_url=comprobante_url,
+        comprobante_hash=hash_comprobante,
     )
-    flash(mensaje, 'exito' if exito else 'error')
-    return redirect(url_for('panel_comercio'))
+    if not exito:
+        return jsonify({'error': mensaje, 'ocr_ms': round(ocr.get('ms', 0), 1)}), 400
+
+    return (
+        jsonify(
+            {
+                'ok': True,
+                'mensaje': mensaje,
+                'producto_id': producto_id,
+                'dias': dias,
+                'referencia': referencia,
+                'monto_usd': float(precio_usd),
+                'monto_bs': monto_bs,
+                'tasa': tasa,
+                'fecha_comprobante': ocr.get('fecha_comprobante'),
+                'ocr_ms': round(ocr.get('ms', 0), 1),
+                **({'aviso': aviso_pago} if aviso_pago else {}),
+            }
+        ),
+        200,
+    )
 
 
 def _url_tienda_externa(comercio_id):
