@@ -94,6 +94,7 @@
             </a>
             <button type="button" id="btn-compartir-tienda"
                     data-share-path="{{ url_for('tienda_publica', comercio_id=comercio.id) }}"
+                    onclick="abrirModalCompartirTienda()"
                     class="btn-touch inline-flex items-center justify-center gap-2 bg-amber-500 text-stone-900 font-bold px-4 py-2 rounded-full text-xs hover:bg-amber-400 transition shadow-sm">
               <i data-lucide="share-2" style="width:14px;height:14px;"></i> Compartir tienda
             </button>
@@ -161,24 +162,6 @@
             </div>
           </div>
         </div>
-      </div>
-    </section>
-
-    <!-- Código QR de la tienda -->
-    <section class="bg-white rounded-2xl p-5 sm:p-6 shadow-sm border border-stone-200/80 card-hover">
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div class="space-y-1">
-          <h3 class="font-display text-xl font-bold text-gray-900 flex items-center gap-2">
-            <i data-lucide="qr-code" class="text-amber-600" style="width:20px;height:20px;"></i> Código QR de mi tienda
-          </h3>
-          <p class="text-stone-500 text-xs leading-relaxed">
-            Genera e imprime el QR para que tus clientes abran tu tienda al escanearlo.
-          </p>
-        </div>
-        <a href="{{ url_for('comercio_qr') }}"
-           class="btn-touch inline-flex items-center justify-center gap-2 bg-stone-900 text-white font-bold px-5 py-2.5 rounded-full text-xs hover:bg-stone-800 transition shrink-0">
-          <i data-lucide="qr-code" style="width:14px;height:14px;"></i> Generar QR de mi tienda
-        </a>
       </div>
     </section>
 
@@ -350,8 +333,9 @@
                     <i data-lucide="pencil" style="width:16px;height:16px;"></i>
                   </a>
                   <button type="button"
-                          onclick="abrirModalBoost({{ producto.id }}, {{ producto.nombre|tojson }})"
-                          class="btn-touch p-2 rounded-lg text-violet-700 bg-violet-50 hover:bg-violet-100 transition"
+                          data-boost-producto="{{ producto.id }}"
+                          data-boost-nombre="{{ producto.nombre|e }}"
+                          class="js-boost-producto btn-touch p-2 rounded-lg text-violet-700 bg-violet-50 hover:bg-violet-100 transition"
                           title="{{ 'Renovar destacado' if (boost_info and boost_info.activo) else 'Promocionar / Destacar producto' }}">
                     <i data-lucide="sparkles" style="width:16px;height:16px;"></i>
                   </button>
@@ -445,6 +429,53 @@
   {% endif %}
   <!-- RESTAURAR_PAGOS_FIN -->
 
+  {% if comercio.id %}
+  <!-- Modal: Compartir tienda (enlace, WhatsApp y QR) -->
+  <div id="modal-compartir-tienda" class="modal-push" onclick="if(event.target===this)cerrarModalCompartirTienda()">
+    <div class="panel p-6 space-y-4 max-w-sm">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <h3 class="font-display text-xl font-bold text-gray-900">Compartir tienda</h3>
+          <p class="text-stone-500 text-xs mt-1">Comparte el enlace de tu tienda.</p>
+        </div>
+        <button type="button" onclick="cerrarModalCompartirTienda()" aria-label="Cerrar"
+                class="btn-touch text-stone-400 hover:text-stone-700 text-2xl leading-none">&times;</button>
+      </div>
+
+      <div class="flex gap-2">
+        <input id="compartir-tienda-enlace" type="text" readonly
+               class="flex-1 min-w-0 px-3 py-2.5 rounded-full border border-stone-200 bg-stone-50 text-xs text-stone-600">
+        <button type="button" onclick="copiarEnlaceTiendaPanel()"
+                class="btn-touch inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-amber-500 text-stone-900 text-xs font-bold hover:bg-amber-400 transition shrink-0">
+          <i data-lucide="copy" style="width:14px;height:14px;"></i> Copiar
+        </button>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2 text-sm font-bold">
+        <a id="compartir-tienda-wa" href="#" target="_blank" rel="noopener"
+           class="inline-flex items-center justify-center gap-2 py-3 rounded-full bg-emerald-500 text-white hover:bg-emerald-400 transition">
+          <i data-lucide="message-circle" style="width:16px;height:16px;"></i> WhatsApp
+        </a>
+        <button type="button" onclick="toggleQrTiendaPanel()"
+                class="inline-flex items-center justify-center gap-2 py-3 rounded-full border border-stone-300 text-stone-700 hover:bg-stone-50 transition btn-touch">
+          <i data-lucide="qr-code" style="width:16px;height:16px;"></i> Ver QR
+        </button>
+      </div>
+
+      <div id="qr-tienda-panel" class="hidden text-center space-y-2 pt-2">
+        <img src="{{ url_for('tienda_qr_png', comercio_id=comercio.id) }}"
+             alt="Código QR de {{ comercio.nombre }}"
+             class="mx-auto w-48 h-48 rounded-xl border border-stone-200 bg-white">
+        <a href="{{ url_for('tienda_qr_png', comercio_id=comercio.id) }}"
+           download="qr-{{ comercio.nombre }}.png"
+           class="btn-touch inline-flex items-center gap-1.5 text-xs font-bold text-stone-700 hover:text-stone-900">
+          <i data-lucide="download" style="width:14px;height:14px;"></i> Descargar QR
+        </a>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Modal: Promocionar / Destacar producto (pago móvil) -->
   <div id="modal-boost" class="modal-push" onclick="if(event.target===this)cerrarModalBoost()">
     <div class="panel p-5 sm:p-6 space-y-4">
@@ -522,44 +553,66 @@
     })();
     {% endif %}
     // --- RESTAURAR_PAGOS_FIN ---
-    // Compartir tienda: copia el enlace público o abre el selector nativo (WhatsApp).
+    // --- Compartir tienda (enlace, WhatsApp y QR) ---
+    window.__enlaceTiendaPanel = '';
     (function () {
       const boton = document.getElementById('btn-compartir-tienda');
       if (!boton) return;
       const ruta = boton.getAttribute('data-share-path') || '';
-      const enlace = ruta ? (window.location.origin + ruta) : '';
-      if (!enlace) return;
-
-      const copiar = function () {
-        const aviso = '¡Enlace copiado! Compártelo por WhatsApp.';
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(enlace).then(function () {
-            window.mostrarAlertaLocalis?.(aviso, 'exito');
-          }).catch(function () {
-            window.prompt('Copia el enlace de tu tienda:', enlace);
-          });
-        } else {
-          window.prompt('Copia el enlace de tu tienda:', enlace);
-        }
-      };
-
-      boton.addEventListener('click', function () {
-        if (navigator.share) {
-          navigator.share({
-            title: 'Mi tienda en Localis',
-            text: 'Mira mi tienda en Localis',
-            url: enlace,
-          }).then(function () {
-            window.mostrarAlertaLocalis?.('¡Enlace compartido!', 'exito');
-          }).catch(function (error) {
-            if (error && error.name === 'AbortError') return;
-            copiar();
-          });
-        } else {
-          copiar();
-        }
-      });
+      window.__enlaceTiendaPanel = ruta
+        ? (window.location.origin + ruta)
+        : (window.location.origin + window.location.pathname);
     })();
+
+    function abrirModalCompartirTienda() {
+      const modal = document.getElementById('modal-compartir-tienda');
+      if (!modal) return;
+      const enlace = window.__enlaceTiendaPanel || (window.location.origin + window.location.pathname);
+      const input = document.getElementById('compartir-tienda-enlace');
+      if (input) input.value = enlace;
+      const wa = document.getElementById('compartir-tienda-wa');
+      if (wa) {
+        wa.href = 'https://wa.me/?text=' + encodeURIComponent('Mira mi tienda en Localis: ' + enlace);
+      }
+      const qr = document.getElementById('qr-tienda-panel');
+      if (qr) qr.classList.add('hidden');
+      modal.classList.add('activo');
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    function cerrarModalCompartirTienda() {
+      const modal = document.getElementById('modal-compartir-tienda');
+      if (modal) modal.classList.remove('activo');
+    }
+
+    function copiarEnlaceTiendaPanel() {
+      const enlace = window.__enlaceTiendaPanel || '';
+      if (!enlace) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(enlace).then(function () {
+          window.mostrarAlertaLocalis?.('¡Enlace copiado!', 'exito');
+        }).catch(function () {
+          window.prompt('Copia el enlace de tu tienda:', enlace);
+        });
+      } else {
+        window.prompt('Copia el enlace de tu tienda:', enlace);
+      }
+    }
+
+    function toggleQrTiendaPanel() {
+      const qr = document.getElementById('qr-tienda-panel');
+      if (qr) qr.classList.toggle('hidden');
+    }
+
+    // --- Promocionar producto: listeners robustos (sin onclick inline) ---
+    document.querySelectorAll('.js-boost-producto').forEach(function (boton) {
+      boton.addEventListener('click', function () {
+        abrirModalBoost(
+          boton.getAttribute('data-boost-producto'),
+          boton.getAttribute('data-boost-nombre')
+        );
+      });
+    });
 
     // --- Promocionar / Destacar producto (pago móvil) ---
     const TASA_BOOST = {{ (tasa or 1)|tojson }};

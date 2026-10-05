@@ -2126,31 +2126,12 @@ def _url_tienda_externa(comercio_id):
     return url
 
 
-@app.route('/comercio/qr')
-@login_requerido
-def comercio_qr():
-    """Página con el código QR de la tienda para imprimir/descargar."""
-    comercio, redireccion = _requiere_comercio()
-    if redireccion:
-        return redireccion
+@app.route('/tienda/<int:comercio_id>/qr.png')
+def tienda_qr_png(comercio_id):
+    """QR público de la tienda, generado al vuelo (usado en "Compartir tienda").
 
-    url_tienda = _url_tienda_externa(comercio['id'])
-    return render_template(
-        'comercio_qr.html',
-        comercio=_normalizar_imagenes_comercio(comercio),
-        url_tienda=url_tienda,
-        nav_activo='qr',
-    )
-
-
-@app.route('/comercio/qr.png')
-@login_requerido
-def comercio_qr_png():
-    """Genera al vuelo el PNG del QR de la tienda."""
-    comercio, redireccion = _requiere_comercio()
-    if redireccion:
-        return redireccion
-
+    Es público (no requiere sesión) porque codifica la URL pública de la tienda.
+    """
     try:
         from backend.qr_codes import generar_qr_png
     except Exception as error:
@@ -2158,7 +2139,7 @@ def comercio_qr_png():
         return Response('Código QR no disponible.', status=503)
 
     try:
-        png = generar_qr_png(_url_tienda_externa(comercio['id']))
+        png = generar_qr_png(_url_tienda_externa(comercio_id))
     except Exception as error:
         print(f'[Localis QR] generación fallida: {error}')
         return Response('No se pudo generar el código QR.', status=500)
@@ -2168,7 +2149,7 @@ def comercio_qr_png():
         mimetype='image/png',
         headers={
             'Content-Disposition': 'inline; filename="qr-tienda.png"',
-            'Cache-Control': 'no-store',
+            'Cache-Control': 'public, max-age=3600',
         },
     )
 

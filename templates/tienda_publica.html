@@ -232,6 +232,22 @@
         </button>
       </div>
 
+      <button type="button" onclick="toggleQrTienda()"
+              class="mt-2 w-full inline-flex items-center justify-center gap-2 py-3 rounded-full border border-stone-300 text-stone-700 hover:bg-stone-50 transition btn-touch text-sm font-bold">
+        <i data-lucide="qr-code" style="width:16px;height:16px;"></i> Ver código QR de esta tienda
+      </button>
+
+      <div id="qr-tienda-wrap" class="hidden mt-4 text-center space-y-2">
+        <img src="{{ url_for('tienda_qr_png', comercio_id=comercio.id) }}"
+             alt="Código QR de {{ comercio.nombre }}"
+             class="mx-auto w-48 h-48 rounded-xl border border-stone-200 bg-white">
+        <a href="{{ url_for('tienda_qr_png', comercio_id=comercio.id) }}"
+           download="qr-{{ comercio.nombre }}.png"
+           class="btn-touch inline-flex items-center gap-1.5 text-xs font-bold text-stone-700 hover:text-stone-900">
+          <i data-lucide="download" style="width:14px;height:14px;"></i> Descargar QR
+        </a>
+      </div>
+
       <div class="mt-4 flex gap-2">
         <input id="compartir-enlace" type="text" readonly
                class="flex-1 min-w-0 px-3 py-2.5 rounded-full border border-stone-200 bg-stone-50 text-xs text-stone-600"
@@ -312,6 +328,9 @@
       const nativo = document.getElementById('compartir-nativo');
       if (nativo && navigator.share) nativo.classList.remove('hidden');
 
+      const qr = document.getElementById('qr-tienda-wrap');
+      if (qr) qr.classList.add('hidden');
+
       modal.classList.remove('hidden');
       modal.classList.add('flex');
       if (typeof lucide !== 'undefined') lucide.createIcons();
@@ -322,6 +341,11 @@
       if (!modal) return;
       modal.classList.add('hidden');
       modal.classList.remove('flex');
+    }
+
+    function toggleQrTienda() {
+      const qr = document.getElementById('qr-tienda-wrap');
+      if (qr) qr.classList.toggle('hidden');
     }
 
     function compartirNativo() {
