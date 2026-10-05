@@ -521,6 +521,28 @@ def eliminar_producto_admin(producto_id, admin_id, comercio_id=None):
     try:
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
+            # Desvincula el destacado del producto (por ID) antes de borrarlo.
+            try:
+                cursor.execute('SAVEPOINT boost_off_admin')
+                cursor.execute(
+                    """
+                    UPDATE boosts
+                    SET estado = 'expirado'
+                    WHERE tipo = 'producto' AND objetivo_id = ?
+                    """,
+                    (int(producto_id),),
+                )
+                cursor.execute('RELEASE SAVEPOINT boost_off_admin')
+            except Exception as error_boost:
+                try:
+                    cursor.execute('ROLLBACK TO SAVEPOINT boost_off_admin')
+                except Exception:
+                    pass
+                print(
+                    f'[Localis Boost] admin: destacado no desvinculado '
+                    f'(id={producto_id}): {error_boost}',
+                    flush=True,
+                )
             if comercio_id:
                 cursor.execute(
                     'DELETE FROM productos WHERE id = ? AND comercio_id = ?',

@@ -689,18 +689,18 @@ def _base_query_productos_publicos(con_maestro=True, con_categoria=False):
     else:
         cat_select = 'NULL::text AS categoria_nombre'
         cat_join = ''
-    # Destacados / Boosts: columnas y flags de prioridad (sin latencia).
+    # Destacados / Boosts: el estado depende estricta e inequívocamente del ID
+    # del producto (``p.id`` -> ``p.boost_fin``) y de que la fecha no haya
+    # expirado. No se hereda el boost de la tienda (evita "fantasmas").
     if _boost_disponible():
         boost_select = (
             'p.boost_fin AS boost_fin, '
-            '(p.boost_fin IS NOT NULL AND p.boost_fin > CURRENT_TIMESTAMP) AS destacado_producto, '
-            '(c.boost_fin IS NOT NULL AND c.boost_fin > CURRENT_TIMESTAMP) AS destacado_tienda'
+            '(p.boost_fin IS NOT NULL AND p.boost_fin > CURRENT_TIMESTAMP) AS destacado_producto'
         )
     else:
         boost_select = (
             'NULL::timestamp AS boost_fin, '
-            'FALSE AS destacado_producto, '
-            'FALSE AS destacado_tienda'
+            'FALSE AS destacado_producto'
         )
     return f"""
         SELECT
@@ -917,12 +917,12 @@ def _buscar_y_filtrar_productos_once(
             query, parametros = _aplicar_filtros_productos(
                 query, parametros, palabra_clave, categoria_nombre, comercio_id
             )
-            # Destacados / Boosts primero, luego por novedad (sin sobrecarga).
+            # Destacados / Boosts primero (solo por ID/fecha del producto),
+            # luego por novedad (sin sobrecarga; usa idx_productos_boost_fin).
             if _boost_disponible():
                 query += (
                     ' ORDER BY '
                     'CASE WHEN (p.boost_fin IS NOT NULL AND p.boost_fin > CURRENT_TIMESTAMP) '
-                    'OR (c.boost_fin IS NOT NULL AND c.boost_fin > CURRENT_TIMESTAMP) '
                     'THEN 0 ELSE 1 END, p.id DESC'
                 )
             else:
@@ -944,9 +944,7 @@ def _buscar_y_filtrar_productos_once(
                 precio = 0.0
             d['precio_usd'] = precio
             d['precio_bs'] = round(precio * tasa, 2)
-            d['destacado'] = bool(d.get('destacado_producto')) or bool(
-                d.get('destacado_tienda')
-            )
+            d['destacado'] = bool(d.get('destacado_producto'))
             productos.append(d)
 
         return productos
@@ -957,12 +955,12 @@ def obtener_producto_publico(producto_id):
     try:
         tasa = obtener_tasa_dolar() or 1.0
         if _boost_disponible():
+            # Solo el ID del producto y su fecha; nunca el boost de la tienda.
             boost_select = (
-                '(p.boost_fin IS NOT NULL AND p.boost_fin > CURRENT_TIMESTAMP) AS destacado_producto, '
-                '(c.boost_fin IS NOT NULL AND c.boost_fin > CURRENT_TIMESTAMP) AS destacado_tienda'
+                '(p.boost_fin IS NOT NULL AND p.boost_fin > CURRENT_TIMESTAMP) AS destacado_producto'
             )
         else:
-            boost_select = 'FALSE AS destacado_producto, FALSE AS destacado_tienda'
+            boost_select = 'FALSE AS destacado_producto'
         with get_db_connection(row_factory=sqlite3.Row, read_only=True) as conexion:
             cursor = conexion.cursor()
             cursor.execute(
@@ -995,9 +993,7 @@ def obtener_producto_publico(producto_id):
                 precio = 0.0
             d['precio_usd'] = precio
             d['precio_bs'] = round(precio * tasa, 2)
-            d['destacado'] = bool(d.get('destacado_producto')) or bool(
-                d.get('destacado_tienda')
-            )
+            d['destacado'] = bool(d.get('destacado_producto'))
         _completar_imagenes_productos([d])
         return d
     except Exception as e:
@@ -1154,6 +1150,43 @@ def eliminar_producto(producto_id, comercio_id):
     try:
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
+            # Verifica propiedad por ID antes de tocar nada.
+            cursor.execute(
+                'SELECT id FROM productos WHERE id = ? AND comercio_id = ?',
+                (producto_id, comercio_id),
+            )
+            if not cursor.fetchone():
+                conexion.rollback()
+                return (
+                    False,
+                    'No se encontró el producto o no tienes permiso para eliminarlo.',
+                )
+
+            # Desvincula/inactiva el destacado del producto (por ID único) para
+            # que no quede un "destacado fantasma" reutilizable. Aislado con
+            # savepoint: nunca rompe el borrado si algo falla.
+            try:
+                cursor.execute('SAVEPOINT boost_off')
+                cursor.execute(
+                    """
+                    UPDATE boosts
+                    SET estado = 'expirado'
+                    WHERE tipo = 'producto' AND objetivo_id = ?
+                    """,
+                    (producto_id,),
+                )
+                cursor.execute('RELEASE SAVEPOINT boost_off')
+            except Exception as error_boost:
+                try:
+                    cursor.execute('ROLLBACK TO SAVEPOINT boost_off')
+                except Exception:
+                    pass
+                print(
+                    f'[Localis Boost] destacado no desvinculado (id={producto_id}): '
+                    f'{error_boost}',
+                    flush=True,
+                )
+
             cursor.execute(
                 'DELETE FROM productos WHERE id = ? AND comercio_id = ?',
                 (producto_id, comercio_id),
