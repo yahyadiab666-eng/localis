@@ -499,4 +499,9 @@ img.localis-img-producto-thumb--vacio:not([src]) {
   border-color: #d6d3d1;
 }
 .localis-btn-share-producto:active { transform: scale(0.94); }
-.localis-btn-share-producto svg { width: 0.875rem; height: 0.875rem; }
+.localis-btn-share-producto svg {
+  display: block;
+  width: 0.875rem;
+  height: 0.875rem;
+  stroke-width: 2.1;
+}

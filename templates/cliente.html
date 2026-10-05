@@ -239,17 +239,19 @@
           </div>
         </div>
         <a id="modal-btn-whatsapp" href="#" target="_blank" rel="noopener"
-           class="btn-touch w-full text-center py-3 rounded-full font-bold text-sm transition items-center justify-center gap-2"
+           class="btn-touch w-full py-3 rounded-full font-bold text-sm transition inline-flex items-center justify-center gap-2"
            style="display: none; background: rgb(16, 185, 129); color: #fff;">
           <i data-lucide="message-circle" style="width:16px;height:16px;"></i> Consultar por WhatsApp
         </a>
-        <button type="button" onclick="compartirProductoActual()"
-                class="btn-touch w-full text-center py-3 rounded-full font-bold text-sm transition items-center justify-center gap-2"
-                style="background: #1c1917; color: #fff;">
-          <i data-lucide="share-2" style="width:16px;height:16px;"></i> Compartir producto
-        </button>
+        <div class="flex justify-center">
+          <button type="button" id="modal-btn-compartir" onclick="compartirProductoActual()"
+                  class="btn-touch inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full border border-stone-300 text-stone-700 text-xs font-bold hover:bg-stone-50 transition">
+            <i data-lucide="share-2" style="width:14px;height:14px;"></i>
+            <span>Compartir producto</span>
+          </button>
+        </div>
         <a id="modal-btn-tienda" href="#"
-           class="btn-touch block w-full text-center py-3 rounded-full font-bold text-sm transition" style="background: rgb(245, 158, 11); color: rgb(26, 26, 26);">
+           class="btn-touch w-full py-3 rounded-full font-bold text-sm transition inline-flex items-center justify-center" style="background: rgb(245, 158, 11); color: rgb(26, 26, 26);">
           Ir a la Tienda
         </a>
       </div>
