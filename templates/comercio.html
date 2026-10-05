@@ -8,7 +8,7 @@
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}?v=cards-2">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}">
   <style>
     body { font-family: 'DM Sans', sans-serif; }
@@ -291,7 +291,7 @@
           {% set img_producto = producto|url_imagen_producto %}
           {% set es_placeholder = (not img_producto) or (img_producto == placeholder_producto) %}
           {% set boost_info = boosts.productos.get(producto.id) if boosts else none %}
-          <article class="card-hover card-producto-mobile panel-producto-card localis-card-producto rounded-xl overflow-hidden bg-white shadow-sm border border-stone-100 flex flex-col h-full{% if boost_info and boost_info.activo %} ring-1 ring-violet-300{% endif %}"
+          <article class="relative card-hover card-producto-mobile panel-producto-card localis-card-producto rounded-xl overflow-hidden bg-white shadow-sm border border-stone-100 flex flex-col h-full{% if boost_info and boost_info.activo %} ring-1 ring-violet-300{% endif %}"
                    data-producto-busqueda="{{ producto.nombre }} {{ producto.descripcion }} {{ producto.codigo_barras }}">
             <div class="localis-img-producto-wrap{% if es_placeholder %} localis-img-producto-wrap--vacio{% endif %}">
               <img src="{{ img_producto or placeholder_producto }}"
@@ -332,7 +332,7 @@
                 </div>
                 <div class="flex gap-1 shrink-0">
                   <button type="button"
-                          class="localis-btn-share-producto localis-card-share"
+                          class="absolute top-2 right-2 z-20 localis-btn-share-producto localis-card-share"
                           data-producto-id="{{ producto.id }}"
                           data-producto-nombre="{{ producto.nombre|e }}"
                           data-producto-precio-usd="{{ producto.precio_usd }}"
