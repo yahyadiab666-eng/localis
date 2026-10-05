@@ -242,11 +242,9 @@ from backend.apariencia import (
     opciones_banner,
 )
 from backend.boosts import (
-    DURACION_BOOST_DIAS,
-    PRECIO_BOOST_USD,
-    contratar_boost_producto,
-    contratar_boost_tienda,
-    estado_boosts_comercio,
+    activar_boost_producto,
+    estado_boosts_productos,
+    opciones_boost,
 )
 
 print('[Localis] Creando aplicación Flask...', flush=True)
@@ -1486,10 +1484,19 @@ def panel_comercio():
         whatsapp = WHATSAPP_SOPORTE
 
     try:
-        boosts = estado_boosts_comercio(comercio.get('id')) if comercio.get('id') else {}
+        boosts = (
+            estado_boosts_productos(comercio.get('id')) if comercio.get('id') else {}
+        )
     except Exception as error:
         print(f'[Localis] panel_comercio boosts fallo: {type(error).__name__}: {error}')
-        boosts = {}
+        boosts = {'productos': {}}
+
+    # Datos de pago móvil (misma fuente que el flujo de planes) para el modal.
+    try:
+        pago_movil = obtener_datos_pago_movil()
+    except Exception as error:
+        print(f'[Localis] panel_comercio pago movil fallo: {type(error).__name__}: {error}')
+        pago_movil = {}
 
     productos = productos or []
     _debug_imagenes_antes_de_render(productos, 'panel_comercio')
@@ -1505,8 +1512,8 @@ def panel_comercio():
             avisos=avisos,
             metricas=metricas,
             boosts=boosts,
-            precio_boost=PRECIO_BOOST_USD,
-            dias_boost=DURACION_BOOST_DIAS,
+            opciones_boost=opciones_boost(),
+            pago_movil=pago_movil,
             nav_activo='panel',
         )
     except Exception as error:
@@ -2088,28 +2095,24 @@ def suscripcion_solicitar_pago():
 # ==========================================
 
 
-@app.route('/comercio/boost/tienda', methods=['POST'])
-@login_requerido
-def boost_tienda():
-    """Destaca la tienda del comerciante (micro-pago de visibilidad)."""
-    comercio, redireccion = _requiere_comercio()
-    if redireccion:
-        return redireccion
-
-    exito, mensaje = contratar_boost_tienda(comercio['id'])
-    flash(mensaje, 'exito' if exito else 'error')
-    return redirect(url_for('panel_comercio'))
-
-
 @app.route('/comercio/boost/producto/<int:producto_id>', methods=['POST'])
 @login_requerido
 def boost_producto(producto_id):
-    """Destaca un producto del comerciante."""
+    """Destaca un producto tras validar el pago móvil (referencia única).
+
+    Reutiliza el mismo flujo de pago móvil del sistema: duración + referencia de
+    pago. La validación de propiedad, antifraude y transacción atómica vive en
+    ``backend.boosts.activar_boost_producto``.
+    """
     comercio, redireccion = _requiere_comercio()
     if redireccion:
         return redireccion
 
-    exito, mensaje = contratar_boost_producto(comercio['id'], producto_id)
+    dias = request.form.get('dias')
+    referencia = request.form.get('referencia')
+    exito, mensaje = activar_boost_producto(
+        comercio['id'], producto_id, dias, referencia
+    )
     flash(mensaje, 'exito' if exito else 'error')
     return redirect(url_for('panel_comercio'))
 

@@ -164,36 +164,21 @@
       </div>
     </section>
 
-    <!-- Destacar producto / tienda + Código QR -->
+    <!-- Código QR de la tienda -->
     <section class="bg-white rounded-2xl p-5 sm:p-6 shadow-sm border border-stone-200/80 card-hover">
-      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
-        <div class="space-y-2">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div class="space-y-1">
           <h3 class="font-display text-xl font-bold text-gray-900 flex items-center gap-2">
-            <i data-lucide="sparkles" class="text-amber-600" style="width:20px;height:20px;"></i> Destacar mi negocio
+            <i data-lucide="qr-code" class="text-amber-600" style="width:20px;height:20px;"></i> Código QR de mi tienda
           </h3>
           <p class="text-stone-500 text-xs leading-relaxed">
-            Aparece en las primeras posiciones de la portada de Localis.
-            Micro-pago accesible: <strong>${{ "%.2f"|format(precio_boost) }} USD por {{ dias_boost }} días</strong>.
+            Genera e imprime el QR para que tus clientes abran tu tienda al escanearlo.
           </p>
-          {% if boosts.tienda_activo %}
-          <p class="text-xs text-emerald-700 font-semibold">
-            Tu tienda está destacada hasta el {{ boosts.tienda_boost_fin }}.
-          </p>
-          {% endif %}
         </div>
-        <div class="flex flex-wrap gap-2">
-          <form action="{{ url_for('boost_tienda') }}" method="POST" data-loading="true" data-loading-texto="Destacando…">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn-touch inline-flex items-center gap-2 bg-amber-500 text-stone-900 font-bold px-5 py-2.5 rounded-full text-xs hover:bg-amber-400 transition">
-              <i data-lucide="sparkles" style="width:14px;height:14px;"></i>
-              {{ 'Renovar destacado' if boosts.tienda_activo else 'Destacar mi tienda' }}
-            </button>
-          </form>
-          <a href="{{ url_for('comercio_qr') }}"
-             class="btn-touch inline-flex items-center gap-2 bg-stone-900 text-white font-bold px-5 py-2.5 rounded-full text-xs hover:bg-stone-800 transition">
-            <i data-lucide="qr-code" style="width:14px;height:14px;"></i> Generar QR de mi tienda
-          </a>
-        </div>
+        <a href="{{ url_for('comercio_qr') }}"
+           class="btn-touch inline-flex items-center justify-center gap-2 bg-stone-900 text-white font-bold px-5 py-2.5 rounded-full text-xs hover:bg-stone-800 transition shrink-0">
+          <i data-lucide="qr-code" style="width:14px;height:14px;"></i> Generar QR de mi tienda
+        </a>
       </div>
     </section>
 
@@ -364,14 +349,12 @@
                      class="btn-touch p-2 rounded-lg text-amber-700 bg-amber-50 hover:bg-amber-100 transition" title="Editar">
                     <i data-lucide="pencil" style="width:16px;height:16px;"></i>
                   </a>
-                  <form action="{{ url_for('boost_producto', producto_id=producto.id) }}" method="POST" class="inline-block" data-loading="true" data-loading-texto="Destacando…">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit"
-                            class="btn-touch p-2 rounded-lg text-violet-700 bg-violet-50 hover:bg-violet-100 transition"
-                            title="{{ 'Renovar destacado' if (boost_info and boost_info.activo) else 'Destacar producto ($' ~ '%.2f'|format(precio_boost) ~ ')' }}">
-                      <i data-lucide="sparkles" style="width:16px;height:16px;"></i>
-                    </button>
-                  </form>
+                  <button type="button"
+                          onclick="abrirModalBoost({{ producto.id }}, {{ producto.nombre|tojson }})"
+                          class="btn-touch p-2 rounded-lg text-violet-700 bg-violet-50 hover:bg-violet-100 transition"
+                          title="{{ 'Renovar destacado' if (boost_info and boost_info.activo) else 'Promocionar / Destacar producto' }}">
+                    <i data-lucide="sparkles" style="width:16px;height:16px;"></i>
+                  </button>
                   <form action="{{ url_for('eliminar_producto_ruta', producto_id=producto.id) }}" method="POST" class="inline-block" data-loading="true" data-loading-texto="Eliminando…">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" onclick="return confirm('¿Seguro que deseas eliminar este producto?')"
@@ -462,6 +445,61 @@
   {% endif %}
   <!-- RESTAURAR_PAGOS_FIN -->
 
+  <!-- Modal: Promocionar / Destacar producto (pago móvil) -->
+  <div id="modal-boost" class="modal-push" onclick="if(event.target===this)cerrarModalBoost()">
+    <div class="panel p-5 sm:p-6 space-y-4">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <h3 class="font-display text-xl font-bold text-gray-900">Promocionar producto</h3>
+          <p id="boost-producto-nombre" class="text-stone-500 text-xs mt-1"></p>
+        </div>
+        <button type="button" onclick="cerrarModalBoost()" aria-label="Cerrar"
+                class="btn-touch text-stone-400 hover:text-stone-700 text-2xl leading-none">&times;</button>
+      </div>
+
+      <form id="form-boost" action="" method="POST" class="space-y-4">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <div class="space-y-2">
+          <p class="text-xs font-bold uppercase text-stone-600">Elige la duración</p>
+          <div class="grid grid-cols-3 gap-2">
+            {% for opcion in opciones_boost %}
+            <label class="cursor-pointer">
+              <input type="radio" name="dias" value="{{ opcion.dias }}" data-precio="{{ opcion.precio_usd }}"
+                     class="peer sr-only" {% if loop.first %}checked{% endif %}>
+              <span class="block text-center rounded-xl border border-stone-200 px-2 py-3 transition peer-checked:border-amber-500 peer-checked:ring-2 peer-checked:ring-amber-500/30">
+                <span class="block text-lg font-black text-gray-900">{{ opcion.dias }}d</span>
+                <span class="block text-[11px] font-bold text-amber-700">${{ "%.2f"|format(opcion.precio_usd) }}</span>
+              </span>
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm space-y-1">
+          <p class="font-bold text-amber-900">Datos para Pago Móvil</p>
+          <p><span class="text-stone-500">Banco:</span> {{ pago_movil.banco or '—' }}</p>
+          <p><span class="text-stone-500">Cédula/RIF:</span> {{ pago_movil.cedula_rif or '—' }}</p>
+          <p><span class="text-stone-500">Teléfono:</span> {{ pago_movil.telefono or '—' }}</p>
+          <p><span class="text-stone-500">Tasa:</span> <strong>{{ "%.2f"|format(tasa or 1) }} Bs/USD</strong></p>
+          <p id="boost-monto-bs" class="pt-2 border-t border-amber-200 mt-2 font-bold text-amber-900"></p>
+        </div>
+
+        <div>
+          <label for="boost-referencia" class="block text-xs font-bold uppercase text-stone-600 mb-1">Referencia de pago móvil</label>
+          <input type="text" id="boost-referencia" name="referencia" inputmode="numeric" pattern="\d{6}" maxlength="6"
+                 placeholder="6 dígitos" required
+                 class="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-sm tracking-widest focus:border-amber-500 outline-none">
+          <p class="text-[11px] text-stone-400 mt-1">Ingresa la referencia de 6 dígitos de tu pago móvil.</p>
+        </div>
+
+        <button type="submit" class="btn-touch w-full py-3 rounded-full font-bold text-sm bg-stone-900 text-white flex items-center justify-center gap-2">
+          <i data-lucide="sparkles" style="width:16px;height:16px;"></i> Confirmar y destacar
+        </button>
+      </form>
+    </div>
+  </div>
+
   <script>
     // --- RESTAURAR_PAGOS_INICIO ---
     // Lógica JS de los modales de suscripción (vencido): oculta en la fase gratuita.
@@ -522,6 +560,47 @@
         }
       });
     })();
+
+    // --- Promocionar / Destacar producto (pago móvil) ---
+    const TASA_BOOST = {{ (tasa or 1)|tojson }};
+
+    function actualizarMontoBoost() {
+      const form = document.getElementById('form-boost');
+      const monto = document.getElementById('boost-monto-bs');
+      if (!form || !monto) return;
+      const sel = form.querySelector('input[name="dias"]:checked');
+      if (!sel) return;
+      const precio = parseFloat(sel.getAttribute('data-precio') || '0');
+      monto.textContent =
+        'Monto a pagar: ' + (precio * TASA_BOOST).toFixed(2) +
+        ' Bs ($' + precio.toFixed(2) + ' USD)';
+    }
+
+    function abrirModalBoost(productoId, nombre) {
+      const modal = document.getElementById('modal-boost');
+      const form = document.getElementById('form-boost');
+      if (!modal || !form) return;
+      form.action = '/comercio/boost/producto/' + encodeURIComponent(productoId);
+      const nombreEl = document.getElementById('boost-producto-nombre');
+      if (nombreEl) nombreEl.textContent = nombre ? ('Producto: ' + nombre) : '';
+      actualizarMontoBoost();
+      modal.classList.add('activo');
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    function cerrarModalBoost() {
+      const modal = document.getElementById('modal-boost');
+      if (modal) modal.classList.remove('activo');
+    }
+
+    (function () {
+      const form = document.getElementById('form-boost');
+      if (!form) return;
+      form.addEventListener('change', function (evento) {
+        if (evento.target && evento.target.name === 'dias') actualizarMontoBoost();
+      });
+    })();
+
     lucide.createIcons();
   </script>
   <script src="{{ url_for('static', filename='js/flash.js') }}"></script>

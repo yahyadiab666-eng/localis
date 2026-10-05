@@ -189,9 +189,9 @@ COLUMNAS_ESQUEMA = {
         ('stock', 'INTEGER DEFAULT 0'),
         ('codigo_barras', 'TEXT'),
         ('activo', 'INTEGER DEFAULT 1'),
-        # Destacados / Boosts (micro-pago) a nivel de producto.
-        ('boost_inicio', 'TIMESTAMP'),
-        ('boost_fin', 'TIMESTAMP'),
+        # Destacados / Boosts (micro-pago) a nivel de producto. UTC estricto.
+        ('boost_inicio', 'TIMESTAMPTZ'),
+        ('boost_fin', 'TIMESTAMPTZ'),
     ],
     'boosts': [
         ('comercio_id', 'INTEGER'),
@@ -199,10 +199,13 @@ COLUMNAS_ESQUEMA = {
         ('objetivo_id', 'INTEGER'),
         ('precio_usd', 'DOUBLE PRECISION DEFAULT 0'),
         ('dias_duracion', 'INTEGER DEFAULT 7'),
+        # Referencia de pago móvil (antifraude / anti doble gasto).
+        ('referencia_pago', 'TEXT'),
+        ('metodo', "TEXT DEFAULT 'pago_movil'"),
         ('estado', "TEXT DEFAULT 'activo'"),
-        ('fecha_inicio', 'TIMESTAMP'),
-        ('fecha_fin', 'TIMESTAMP'),
-        ('fecha_registro', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+        ('fecha_inicio', 'TIMESTAMPTZ'),
+        ('fecha_fin', 'TIMESTAMPTZ'),
+        ('fecha_registro', 'TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP'),
     ],
     'imagenes_automaticas': [
         ('clave', 'TEXT'),
@@ -926,6 +929,56 @@ def _migrar_columnas(cursor):
                     flush=True,
                 )
     _asegurar_columnas_imagen_oficiales(cursor)
+    _normalizar_columnas_boost_utc(cursor)
+
+
+def _normalizar_columnas_boost_utc(cursor):
+    """Asegura que las fechas de boost sean ``TIMESTAMPTZ`` (UTC estricto).
+
+    Idempotente: convierte columnas legacy ``timestamp without time zone`` a
+    ``timestamptz`` interpretando el valor previo como UTC, para evitar
+    desajustes de zona horaria en la expiración de los destacados.
+    """
+    objetivos = (
+        ('productos', 'boost_inicio'),
+        ('productos', 'boost_fin'),
+        ('boosts', 'fecha_inicio'),
+        ('boosts', 'fecha_fin'),
+        ('boosts', 'fecha_registro'),
+    )
+    for tabla, columna in objetivos:
+        try:
+            if not _tabla_existe(cursor, tabla):
+                continue
+            if not _columna_existe(cursor, tabla, columna):
+                continue
+            cursor.execute(
+                """
+                SELECT data_type FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = %s AND column_name = %s
+                """,
+                (tabla, columna),
+            )
+            fila = cursor.fetchone()
+            if isinstance(fila, dict):
+                tipo = str(fila.get('data_type') or '')
+            elif fila:
+                tipo = str(fila[0] or '')
+            else:
+                tipo = ''
+            if tipo != 'timestamp without time zone':
+                continue
+            _ejecutar_ddl_seguro(
+                cursor,
+                f"ALTER TABLE {tabla} ALTER COLUMN {columna} "
+                f"TYPE TIMESTAMPTZ USING {columna} AT TIME ZONE 'UTC'",
+            )
+        except Exception as error:
+            print(
+                f'[Localis Boost] normalización {tabla}.{columna}: {error}',
+                flush=True,
+            )
 
 
 def _reconciliar_estados_imagenes(cursor):
@@ -1343,10 +1396,12 @@ def _crear_tabla_boosts(cursor):
             objetivo_id INTEGER,
             precio_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
             dias_duracion INTEGER DEFAULT 7,
+            referencia_pago TEXT,
+            metodo TEXT DEFAULT 'pago_movil',
             estado TEXT DEFAULT 'activo',
-            fecha_inicio TIMESTAMP,
-            fecha_fin TIMESTAMP,
-            fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            fecha_inicio TIMESTAMPTZ,
+            fecha_fin TIMESTAMPTZ,
+            fecha_registro TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
@@ -1542,6 +1597,8 @@ def _crear_indices(cursor):
         'CREATE INDEX IF NOT EXISTS idx_productos_boost_fin ON productos(boost_fin)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_boost_fin ON comercios(boost_fin)',
         'CREATE INDEX IF NOT EXISTS idx_boosts_comercio ON boosts(comercio_id)',
+        # Anti doble-gasto: la referencia de pago móvil es única en boosts.
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_boosts_referencia ON boosts(referencia_pago) WHERE referencia_pago IS NOT NULL',
     ]
     for ddl in indices:
         _ejecutar_indice_si_falta(cursor, ddl)
