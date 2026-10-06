@@ -62,25 +62,23 @@
     <!-- Catálogo de canjes -->
     <section class="bg-white rounded-2xl border border-stone-200 p-5 sm:p-6 shadow-sm space-y-4">
       <h2 class="font-display text-xl font-bold text-gray-900">Catálogo de canjes</h2>
-      <div class="rounded-2xl border border-violet-200 bg-violet-50 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div class="space-y-1">
-          <p class="font-bold text-violet-900 flex items-center gap-2">
-            <i data-lucide="sparkles" style="width:18px;height:18px;"></i>
-            Destacado de producto gratis · {{ premios.dias_destacado or 7 }} días
-          </p>
-          <p class="text-xs text-stone-600">
-            Costo: <strong>{{ premios.puntos_por_destacado or 5 }} puntos</strong>.
-            Tu producto aparece en las primeras posiciones de la portada.
-          </p>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {% for canje in premios.get('canjes', []) %}
+        <div class="rounded-2xl border border-violet-200 bg-violet-50 p-4 flex flex-col items-center text-center gap-1">
+          <i data-lucide="sparkles" class="text-violet-600" style="width:20px;height:20px;"></i>
+          <p class="font-bold text-violet-900">{{ canje.dias }} días de destacado</p>
+          <span class="inline-flex items-center gap-1 rounded-full bg-violet-600 text-white text-xs font-bold px-3 py-1">{{ canje.puntos }} pts</span>
         </div>
-        <span class="shrink-0 inline-flex items-center gap-1 rounded-full bg-violet-600 text-white text-sm font-bold px-4 py-2">
-          {{ premios.puntos_por_destacado or 5 }} pts
-        </span>
+        {% else %}
+        <div class="rounded-2xl border border-violet-200 bg-violet-50 p-4 text-center text-sm text-stone-600 sm:col-span-3">
+          Destacado de producto gratis: 7 días por 5 pts · 5 días por 4 pts · 3 días por 3 pts.
+        </div>
+        {% endfor %}
       </div>
 
       {% if productos %}
       <form action="{{ url_for('boost_canjear_puntos') }}" method="POST" data-loading="true" data-loading-texto="Canjeando…"
-            class="flex flex-col sm:flex-row gap-2 sm:items-center">
+            class="flex flex-col sm:flex-row gap-2 sm:items-center pt-2 border-t border-stone-100">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <select name="producto_id" required
                 class="flex-1 px-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:outline-none focus:border-violet-500">
@@ -88,7 +86,13 @@
           <option value="{{ producto.id }}">{{ producto.nombre }}</option>
           {% endfor %}
         </select>
-        {% if (premios.puntos or 0) >= (premios.puntos_por_destacado or 5) %}
+        <select name="dias" required
+                class="sm:w-48 px-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:outline-none focus:border-violet-500">
+          {% for canje in premios.get('canjes', []) %}
+          <option value="{{ canje.dias }}">{{ canje.dias }} días — {{ canje.puntos }} pts</option>
+          {% endfor %}
+        </select>
+        {% if (premios.puntos or 0) >= (premios.puntos_minimos or 3) %}
         <button type="submit"
                 class="btn-touch inline-flex items-center justify-center gap-2 bg-violet-600 text-white font-bold px-5 py-2.5 rounded-xl text-sm hover:bg-violet-500 transition">
           <i data-lucide="gift" style="width:16px;height:16px;"></i> Canjear y destacar
@@ -101,6 +105,9 @@
         </button>
         {% endif %}
       </form>
+      <p class="text-[11px] text-stone-400">
+        Si eliges un tier que supera tu saldo, el sistema te avisará sin descontar puntos.
+      </p>
       {% else %}
       <p class="text-xs text-stone-500">Añade productos a tu catálogo para poder canjear destacados.</p>
       {% endif %}

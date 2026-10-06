@@ -10,12 +10,42 @@ no romper el flujo de registro ni el panel del comerciante.
 
 import sqlite3
 
-from backend.boosts import PRECIOS_BOOST_USD, aplicar_boost_en_cursor
+from backend.boosts import aplicar_boost_en_cursor
 from backend.db import get_db_connection
 
 PUNTOS_POR_REFERIDO = 1
-PUNTOS_POR_DESTACADO = 5
+
+# Catálogo de canjes: duración (días) -> puntos requeridos.
+# Se conserva el plan original (5 puntos = 7 días) y se añaden nuevos tiers.
+CANJES_PUNTOS = (
+    {'dias': 7, 'puntos': 5},
+    {'dias': 5, 'puntos': 4},
+    {'dias': 3, 'puntos': 3},
+)
+
+# Compatibilidad con el contrato previo del módulo (tier por defecto).
 DIAS_DESTACADO_PUNTOS = 7
+PUNTOS_POR_DESTACADO = 5
+
+# Puntos mínimos para habilitar cualquier canje (el tier más económico).
+PUNTOS_MINIMOS_CANJE = min(tier['puntos'] for tier in CANJES_PUNTOS)
+
+
+def opciones_canje():
+    """Catálogo de canjes disponibles (copia segura para plantillas/JSON)."""
+    return [dict(tier) for tier in CANJES_PUNTOS]
+
+
+def canje_por_dias(dias):
+    """Devuelve el tier ``{'dias', 'puntos'}`` para una duración, o ``None``."""
+    try:
+        dias_int = int(str(dias).strip())
+    except (TypeError, ValueError):
+        return None
+    for tier in CANJES_PUNTOS:
+        if tier['dias'] == dias_int:
+            return dict(tier)
+    return None
 
 
 def _a_int(valor, campo='id'):
@@ -114,6 +144,9 @@ def resumen_premios(comercio_id):
         'referidos_total': 0,
         'referidos': [],
         'canjes_total': 0,
+        # Catálogo completo de tiers + compatibilidad con el tier por defecto.
+        'canjes': opciones_canje(),
+        'puntos_minimos': PUNTOS_MINIMOS_CANJE,
         'puntos_por_destacado': PUNTOS_POR_DESTACADO,
         'dias_destacado': DIAS_DESTACADO_PUNTOS,
     }
@@ -168,19 +201,24 @@ def resumen_premios(comercio_id):
 
 
 def canjear_destacado(comercio_id, producto_id, dias=DIAS_DESTACADO_PUNTOS):
-    """Canjea ``PUNTOS_POR_DESTACADO`` por un destacado gratis del producto.
+    """Canjea el tier de puntos correspondiente a ``dias`` por un destacado gratis.
 
+    Tiers: 7 días = 5 pts · 5 días = 4 pts · 3 días = 3 pts.
     Descuento atómico (solo si hay saldo) + activación del boost en una única
     transacción. Retorna ``(exito, mensaje)``.
     """
     try:
         comercio_id = _a_int(comercio_id, 'comercio_id')
         producto_id = _a_int(producto_id, 'producto_id')
-        dias = _a_int(dias, 'dias')
     except ValueError as error:
         return False, str(error)
-    if dias not in PRECIOS_BOOST_USD:
-        dias = DIAS_DESTACADO_PUNTOS
+
+    # Resuelve el tier por duración; si falta o es inválido, usa el de 7 días.
+    tier = canje_por_dias(dias) or canje_por_dias(DIAS_DESTACADO_PUNTOS)
+    if not tier:
+        return False, 'Canje no válido.'
+    dias = tier['dias']
+    puntos = tier['puntos']
 
     try:
         with get_db_connection() as conexion:
@@ -194,7 +232,7 @@ def canjear_destacado(comercio_id, producto_id, dias=DIAS_DESTACADO_PUNTOS):
                 WHERE id = ? AND COALESCE(puntos, 0) >= ?
                 RETURNING puntos
                 """,
-                (PUNTOS_POR_DESTACADO, comercio_id, PUNTOS_POR_DESTACADO),
+                (puntos, comercio_id, puntos),
             )
             if not cursor.fetchone():
                 conexion.rollback()
@@ -206,7 +244,7 @@ def canjear_destacado(comercio_id, producto_id, dias=DIAS_DESTACADO_PUNTOS):
                 saldo = int(_valor(fila, 'puntos', 0) or 0) if fila else 0
                 return (
                     False,
-                    f'Necesitas {PUNTOS_POR_DESTACADO} puntos para canjear. '
+                    f'Necesitas {puntos} puntos para canjear {dias} días. '
                     f'Tu saldo actual es {saldo}.',
                 )
 
@@ -234,7 +272,7 @@ def canjear_destacado(comercio_id, producto_id, dias=DIAS_DESTACADO_PUNTOS):
                 (
                     comercio_id,
                     producto_id,
-                    PUNTOS_POR_DESTACADO,
+                    puntos,
                     dias,
                     datos['inicio'],
                     datos['fin'],
@@ -244,7 +282,7 @@ def canjear_destacado(comercio_id, producto_id, dias=DIAS_DESTACADO_PUNTOS):
 
         return (
             True,
-            f'¡Destacado gratis por {dias} días canjeado con {PUNTOS_POR_DESTACADO} puntos!',
+            f'¡Destacado gratis por {dias} días canjeado con {puntos} puntos!',
         )
     except Exception as error:
         print(

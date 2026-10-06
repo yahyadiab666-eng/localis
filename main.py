@@ -2267,7 +2267,10 @@ def boost_canjear_puntos():
         return redireccion
 
     producto_id = request.form.get('producto_id')
-    exito, mensaje = canjear_destacado(comercio['id'], producto_id)
+    # El modal usa "dias_puntos" (para no chocar con el selector de pago móvil);
+    # el formulario de la sección Premios usa "dias".
+    dias = request.form.get('dias_puntos') or request.form.get('dias')
+    exito, mensaje = canjear_destacado(comercio['id'], producto_id, dias)
     flash(mensaje, 'exito' if exito else 'error')
     return redirect(url_for('panel_comercio'))
 

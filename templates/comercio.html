@@ -592,23 +592,31 @@
         </div>
 
         <div id="boost-puntos-bloque" class="hidden space-y-3">
-          <div class="bg-violet-50 border border-violet-200 rounded-xl p-4 text-sm space-y-1">
+          <div class="bg-violet-50 border border-violet-200 rounded-xl p-4 text-sm space-y-2">
             <p class="font-bold text-violet-900">Canje con puntos</p>
             <p><span class="text-stone-500">Tu saldo:</span> <strong>{{ premios.puntos or 0 }} pts</strong></p>
-            <p><span class="text-stone-500">Costo:</span>
-              <strong>{{ premios.puntos_por_destacado or 5 }} pts por {{ premios.dias_destacado or 7 }} días</strong>
-            </p>
+            <label for="boost-dias-puntos" class="block text-xs font-bold uppercase text-stone-600">Duración y costo</label>
+            <select name="dias_puntos" id="boost-dias-puntos"
+                    class="w-full px-3 py-2.5 bg-white border border-violet-200 rounded-xl text-sm focus:outline-none focus:border-violet-500">
+              {% for canje in premios.get('canjes', []) %}
+              <option value="{{ canje.dias }}">{{ canje.dias }} días — {{ canje.puntos }} pts</option>
+              {% else %}
+              <option value="7">7 días — 5 pts</option>
+              <option value="5">5 días — 4 pts</option>
+              <option value="3">3 días — 3 pts</option>
+              {% endfor %}
+            </select>
           </div>
-          {% if (premios.puntos or 0) >= (premios.puntos_por_destacado or 5) %}
+          {% if (premios.puntos or 0) >= (premios.puntos_minimos or 3) %}
           <button type="button" id="boost-btn-puntos" onclick="canjearBoostConPuntos()"
                   class="btn-touch w-full py-3 rounded-full font-bold text-sm bg-violet-600 text-white hover:bg-violet-500 transition">
             <i data-lucide="gift" style="width:16px;height:16px;display:inline-block;vertical-align:middle;"></i>
-            Canjear y destacar {{ premios.dias_destacado or 7 }} días
+            Canjear y destacar
           </button>
           {% else %}
           <p class="text-xs text-stone-500">
-            Aún no tienes puntos suficientes. Comparte el nombre de tu comercio para que
-            otros lo usen como referencia al registrarse y ganes 1 punto por cada uno.
+            Aún no tienes puntos suficientes (mínimo {{ premios.puntos_minimos or 3 }}). Comparte el
+            nombre de tu comercio para que otros lo usen como referencia al registrarse y ganes 1 punto por cada uno.
           </p>
           <a href="{{ url_for('comercio_premios') }}"
              class="btn-touch w-full inline-flex items-center justify-center py-3 rounded-full font-bold text-sm border border-stone-300 text-stone-700 hover:bg-stone-50 transition">
