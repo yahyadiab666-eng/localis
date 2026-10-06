@@ -12,8 +12,8 @@
   
   <!-- Fonts -->
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}?v={{ asset_v }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}?v={{ asset_v }}">
   <style>
     body { font-family: 'DM Sans', sans-serif; }
     .font-display { font-family: 'Fraunces', serif; }
@@ -24,7 +24,7 @@
   </style>
 </head>
 
-<body class="w-full min-h-screen flex flex-col justify-between" style="background: rgb(254, 251, 246);">
+<body class="w-full min-h-screen flex flex-col justify-between panel-comercio" style="background: rgb(254, 251, 246);">
 
   <div>
     <!-- BARRA DE NAVEGACIÓN SUPERIOR -->
@@ -190,8 +190,8 @@
   <script>
     lucide.createIcons();
   </script>
-  <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/localis.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/flash.js') }}?v={{ asset_v }}"></script>
+  <script src="{{ url_for('static', filename='js/localis.js') }}?v={{ asset_v }}"></script>
   <script>
     (function () {
       var input = document.getElementById('imagen');

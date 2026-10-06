@@ -104,7 +104,7 @@
   <!-- ======================================================
        Drawer móvil: opciones secundarias agrupadas
        ====================================================== -->
-  <div id="nav-comercio-drawer" class="nav-comercio-drawer" aria-hidden="true">
+  <div id="nav-comercio-drawer" class="nav-comercio-drawer hidden" style="display: none;" aria-hidden="true">
     <div class="nav-comercio-drawer__backdrop" onclick="cerrarNavComercio()"></div>
     <aside class="nav-comercio-drawer__panel" role="dialog" aria-modal="true"
            aria-label="Menú del panel de comercio">
@@ -175,16 +175,26 @@
     var drawer = document.getElementById('nav-comercio-drawer');
     if (!toggle || !drawer) return;
 
+    // Oculta/cierra con triple respaldo (clase Tailwind + clase propia + estilo
+    // en línea) para que el menú nunca se muestre como lista sin formato si el
+    // CSS externo falla, no carga o está cacheado.
     function abrir() {
+      drawer.classList.remove('hidden');
       drawer.classList.add('abierto');
+      drawer.style.display = '';
       drawer.setAttribute('aria-hidden', 'false');
       toggle.setAttribute('aria-expanded', 'true');
     }
     function cerrar() {
+      drawer.classList.add('hidden');
       drawer.classList.remove('abierto');
+      drawer.style.display = 'none';
       drawer.setAttribute('aria-hidden', 'true');
       toggle.setAttribute('aria-expanded', 'false');
     }
+
+    // Estado inicial consistente aunque el CSS no haya cargado.
+    cerrar();
 
     window.toggleNavComercio = function (event) {
       if (event) event.stopPropagation();
