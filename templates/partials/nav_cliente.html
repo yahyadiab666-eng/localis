@@ -15,17 +15,17 @@
             aria-haspopup="true" aria-expanded="false" aria-label="Menú de usuario">
       {% if foto_url %}
       <img src="{{ foto_url }}" alt="{{ username or 'Usuario' }}"
-           class="w-8 h-8 rounded-full object-cover border border-white/40"
+           class="w-9 h-9 rounded-full object-cover border border-white/40 shrink-0"
            onerror="this.style.display='none'; var s=this.nextElementSibling; if(s){s.classList.remove('hidden'); s.classList.add('flex');}">
       {% endif %}
-      <span class="w-8 h-8 rounded-full bg-amber-500 text-stone-900 font-bold items-center justify-center {% if foto_url %}hidden{% else %}flex{% endif %}">
+      <span class="w-9 h-9 rounded-full bg-amber-500 text-stone-900 font-bold items-center justify-center shrink-0 {% if foto_url %}hidden{% else %}flex{% endif %}">
         {{ (username or 'U')[:1] | upper }}
       </span>
       <span class="hidden sm:inline text-xs font-semibold text-white max-w-[110px] truncate">{{ username or 'Mi cuenta' }}</span>
     </button>
 
     <div id="nav-cliente-menu"
-         class="hidden absolute left-0 mt-2 w-56 bg-white rounded-2xl shadow-2xl border border-stone-200 py-2 z-[130]">
+         class="hidden absolute left-0 mt-2 w-56 max-w-[calc(100vw-1.5rem)] bg-white rounded-2xl shadow-2xl border border-stone-200 py-2 z-[140]">
       <div class="px-4 py-2 border-b border-stone-100">
         <p class="text-sm font-bold text-stone-900 truncate">{{ username or 'Usuario' }}</p>
         <p class="text-[11px] text-stone-400 truncate">{{ correo or '' }}</p>
@@ -67,10 +67,13 @@
   {% endif %}
 </div>
 
+{# En la propia guía el botón "Cómo funciona" es redundante: se oculta. #}
+{% if nav_activo != 'ayuda' %}
 <div class="flex items-center gap-2 sm:gap-3 flex-wrap justify-end">
   <a href="{{ url_for('como_funciona') }}"
      class="btn-touch px-3 py-2 rounded-full text-xs sm:text-sm font-semibold text-white/90 border border-white/25 hover:bg-white/10 transition">Cómo funciona</a>
 </div>
+{% endif %}
 
 <script>
   (function () {
