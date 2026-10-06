@@ -1,69 +1,203 @@
-{# nav_activo: 'panel' | 'planes' | 'editar' | 'ayuda' #}
+{# nav_activo: 'panel' | 'premios' | 'planes' | 'editar' | 'ayuda' | 'perfil' #}
 <header class="w-full bg-stone-900 border-b border-stone-800">
-  <nav class="nav-comercio-top flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 max-w-6xl w-full mx-auto gap-3">
+  <nav class="nav-comercio-top flex items-center justify-between px-3 sm:px-6 py-3 max-w-6xl w-full mx-auto gap-2 sm:gap-3">
+
+    <!-- Marca + contexto -->
     <div class="flex items-center gap-2 sm:gap-3 min-w-0">
       <a href="{{ url_for('index') }}" class="font-display text-white text-xl sm:text-[28px] font-black tracking-tight shrink-0">localis</a>
-      <span class="hidden xs:inline bg-amber-500/20 text-amber-400 text-[10px] sm:text-[11px] font-bold px-2 sm:px-2.5 py-0.5 rounded-full uppercase tracking-wider truncate">Panel comerciante</span>
+      <span class="hidden sm:inline bg-amber-500/20 text-amber-400 text-[10px] sm:text-[11px] font-bold px-2 sm:px-2.5 py-0.5 rounded-full uppercase tracking-wider truncate">Panel comerciante</span>
     </div>
 
-    <div class="nav-comercio-links flex items-center gap-2 sm:gap-4 flex-wrap justify-end">
+    <!-- ======================================================
+         Escritorio: enlaces completos en una sola fila
+         ====================================================== -->
+    <div class="nav-comercio-links hidden lg:flex items-center gap-2 xl:gap-3 flex-wrap justify-end">
       <a href="{{ url_for('index') }}"
-         class="btn-touch text-xs sm:text-sm font-medium px-2.5 py-1.5 rounded-full transition flex items-center gap-1 text-stone-300 hover:text-white"
+         class="nav-comercio-link"
          aria-label="Volver al inicio" title="Volver al inicio (sin cerrar sesión)">
         <i data-lucide="home" style="width:15px;height:15px;"></i>
         <span>Inicio</span>
       </a>
       <a href="{{ url_for('panel_comercio') }}"
-         class="btn-touch text-xs sm:text-sm font-medium px-2.5 py-1.5 rounded-full transition flex items-center gap-1 {% if nav_activo == 'panel' %}bg-white/10 text-white{% else %}text-stone-300 hover:text-white{% endif %}">
+         class="nav-comercio-link {% if nav_activo == 'panel' %}is-active{% endif %}">
         <i data-lucide="layout-dashboard" style="width:15px;height:15px;"></i>
-        <span class="hidden sm:inline">Panel</span>
+        <span>Panel</span>
       </a>
       <a href="{{ url_for('comercio_premios') }}"
-         class="btn-touch text-xs sm:text-sm font-medium px-2.5 py-1.5 rounded-full transition flex items-center gap-1 {% if nav_activo == 'premios' %}bg-violet-500/20 text-violet-300{% else %}text-stone-300 hover:text-white{% endif %}">
+         class="nav-comercio-link {% if nav_activo == 'premios' %}is-active-violet{% endif %}">
         <i data-lucide="gift" style="width:15px;height:15px;"></i>
-        <span class="hidden sm:inline">Premios</span>
+        <span>Premios</span>
       </a>
       <!-- RESTAURAR_PAGOS_INICIO -->
-      {# Enlace "Planes" oculto: la app se muestra como nativamente gratuita. #}
       {% if not pagos_congelados %}
       <a href="{{ url_for('comercio_planes') }}"
-         class="btn-touch text-xs sm:text-sm font-medium px-2.5 py-1.5 rounded-full transition flex items-center gap-1 {% if nav_activo == 'planes' %}bg-amber-500/20 text-amber-300{% else %}text-stone-300 hover:text-white{% endif %}">
+         class="nav-comercio-link {% if nav_activo == 'planes' %}is-active-amber{% endif %}">
         <i data-lucide="credit-card" style="width:15px;height:15px;"></i>
-        <span class="hidden sm:inline">Planes</span>
+        <span>Planes</span>
       </a>
       {% endif %}
       <!-- RESTAURAR_PAGOS_FIN -->
       <a href="{{ url_for('editar_comercio') }}"
-         class="btn-touch text-xs sm:text-sm font-medium px-2.5 py-1.5 rounded-full transition flex items-center gap-1 {% if nav_activo == 'editar' %}bg-white/10 text-white{% else %}text-stone-300 hover:text-white{% endif %}">
+         class="nav-comercio-link {% if nav_activo == 'editar' %}is-active{% endif %}">
         <i data-lucide="settings" style="width:15px;height:15px;"></i>
-        <span class="hidden sm:inline">Editar</span>
+        <span>Editar</span>
       </a>
       <a href="{{ url_for('como_funciona') }}"
-         class="btn-touch text-xs sm:text-sm font-medium px-2.5 py-1.5 rounded-full transition flex items-center gap-1 {% if nav_activo == 'ayuda' %}bg-emerald-500/20 text-emerald-300{% else %}text-stone-300 hover:text-white{% endif %}">
+         class="nav-comercio-link {% if nav_activo == 'ayuda' %}is-active-emerald{% endif %}">
         <i data-lucide="help-circle" style="width:15px;height:15px;"></i>
-        <span class="hidden sm:inline">Guía</span>
+        <span>Guía</span>
       </a>
       {% if comercio and comercio.id %}
-      <a href="{{ url_for('tienda_publica', comercio_id=comercio.id) }}"
-         class="btn-touch text-xs sm:text-sm font-medium text-stone-300 hover:text-white transition hidden md:flex items-center gap-1">
-        <i data-lucide="store" style="width:15px;height:15px;"></i> Ver tienda
+      <a href="{{ url_for('tienda_publica', comercio_id=comercio.id) }}" target="_blank" rel="noopener"
+         class="nav-comercio-link">
+        <i data-lucide="store" style="width:15px;height:15px;"></i>
+        <span>Ver tienda</span>
       </a>
       {% endif %}
       <a href="{{ url_for('perfil') }}"
-         class="btn-touch text-xs sm:text-sm font-medium px-2.5 py-1.5 rounded-full transition flex items-center gap-1 {% if nav_activo == 'perfil' %}bg-white/10 text-white{% else %}text-stone-300 hover:text-white{% endif %}"
+         class="nav-comercio-link {% if nav_activo == 'perfil' %}is-active{% endif %}"
          aria-label="Mi perfil" title="Mi perfil">
         <i data-lucide="user" style="width:15px;height:15px;"></i>
-        <span class="hidden sm:inline">Mi perfil</span>
+        <span>Mi perfil</span>
       </a>
       <form method="POST" action="{{ url_for('logout') }}" class="inline-flex"
             onsubmit="return confirm('¿Seguro que quieres cerrar sesión?');">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" aria-label="Cerrar sesión" title="Cerrar sesión"
-                class="btn-touch px-3 py-1.5 rounded-full text-xs sm:text-sm font-semibold bg-red-500/10 text-red-400 hover:bg-red-500/20 flex items-center gap-1">
+                class="nav-comercio-link nav-comercio-link--salir">
           <i data-lucide="log-out" style="width:15px;height:15px;"></i>
           <span>Salir</span>
         </button>
       </form>
     </div>
+
+    <!-- ======================================================
+         Móvil / tablet: solo acciones esenciales + hamburguesa
+         ====================================================== -->
+    <div class="nav-comercio-mobile flex lg:hidden items-center gap-1.5 shrink-0">
+      <a href="{{ url_for('index') }}" class="nav-comercio-icon"
+         aria-label="Volver al inicio" title="Volver al inicio">
+        <i data-lucide="home" style="width:18px;height:18px;"></i>
+      </a>
+      {% if comercio and comercio.id %}
+      <a href="{{ url_for('tienda_publica', comercio_id=comercio.id) }}" target="_blank" rel="noopener"
+         class="nav-comercio-icon" aria-label="Ver tienda" title="Ver tienda">
+        <i data-lucide="store" style="width:18px;height:18px;"></i>
+      </a>
+      {% endif %}
+      <form method="POST" action="{{ url_for('logout') }}" class="inline-flex"
+            onsubmit="return confirm('¿Seguro que quieres cerrar sesión?');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="nav-comercio-icon nav-comercio-icon--salir"
+                aria-label="Cerrar sesión" title="Cerrar sesión">
+          <i data-lucide="log-out" style="width:18px;height:18px;"></i>
+        </button>
+      </form>
+      <button type="button" id="nav-comercio-toggle" onclick="toggleNavComercio(event)"
+              class="nav-comercio-icon" aria-label="Abrir menú" aria-haspopup="true"
+              aria-expanded="false" aria-controls="nav-comercio-drawer">
+        <i data-lucide="menu" style="width:20px;height:20px;"></i>
+      </button>
+    </div>
   </nav>
+
+  <!-- ======================================================
+       Drawer móvil: opciones secundarias agrupadas
+       ====================================================== -->
+  <div id="nav-comercio-drawer" class="nav-comercio-drawer" aria-hidden="true">
+    <div class="nav-comercio-drawer__backdrop" onclick="cerrarNavComercio()"></div>
+    <aside class="nav-comercio-drawer__panel" role="dialog" aria-modal="true"
+           aria-label="Menú del panel de comercio">
+      <div class="nav-comercio-drawer__head">
+        <div class="min-w-0">
+          <p class="nav-comercio-drawer__user truncate">{{ username or 'Mi cuenta' }}</p>
+          <p class="nav-comercio-drawer__mail truncate">{{ correo or '' }}</p>
+        </div>
+        <button type="button" onclick="cerrarNavComercio()" class="nav-comercio-icon"
+                aria-label="Cerrar menú">
+          <i data-lucide="x" style="width:18px;height:18px;"></i>
+        </button>
+      </div>
+
+      <nav class="nav-comercio-drawer__links">
+        <a href="{{ url_for('panel_comercio') }}"
+           class="nav-comercio-drawer__link {% if nav_activo == 'panel' %}is-active{% endif %}">
+          <i data-lucide="layout-dashboard" style="width:18px;height:18px;"></i> Panel
+        </a>
+        <a href="{{ url_for('comercio_premios') }}"
+           class="nav-comercio-drawer__link {% if nav_activo == 'premios' %}is-active{% endif %}">
+          <i data-lucide="gift" style="width:18px;height:18px;"></i> Premios
+        </a>
+        <!-- RESTAURAR_PAGOS_INICIO -->
+        {% if not pagos_congelados %}
+        <a href="{{ url_for('comercio_planes') }}"
+           class="nav-comercio-drawer__link {% if nav_activo == 'planes' %}is-active{% endif %}">
+          <i data-lucide="credit-card" style="width:18px;height:18px;"></i> Planes
+        </a>
+        {% endif %}
+        <!-- RESTAURAR_PAGOS_FIN -->
+        <a href="{{ url_for('editar_comercio') }}"
+           class="nav-comercio-drawer__link {% if nav_activo == 'editar' %}is-active{% endif %}">
+          <i data-lucide="settings" style="width:18px;height:18px;"></i> Editar tienda
+        </a>
+        <a href="{{ url_for('como_funciona') }}"
+           class="nav-comercio-drawer__link {% if nav_activo == 'ayuda' %}is-active{% endif %}">
+          <i data-lucide="help-circle" style="width:18px;height:18px;"></i> Guía de uso
+        </a>
+        {% if comercio and comercio.id %}
+        <a href="{{ url_for('tienda_publica', comercio_id=comercio.id) }}" target="_blank" rel="noopener"
+           class="nav-comercio-drawer__link">
+          <i data-lucide="store" style="width:18px;height:18px;"></i> Ver tienda
+        </a>
+        {% endif %}
+        <a href="{{ url_for('perfil') }}"
+           class="nav-comercio-drawer__link {% if nav_activo == 'perfil' %}is-active{% endif %}">
+          <i data-lucide="user" style="width:18px;height:18px;"></i> Mi perfil
+        </a>
+      </nav>
+
+      <div class="nav-comercio-drawer__foot">
+        <form method="POST" action="{{ url_for('logout') }}"
+              onsubmit="return confirm('¿Seguro que quieres cerrar sesión?');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="nav-comercio-drawer__salir">
+            <i data-lucide="log-out" style="width:18px;height:18px;"></i> Cerrar sesión
+          </button>
+        </form>
+      </div>
+    </aside>
+  </div>
 </header>
+
+<script>
+  (function () {
+    var toggle = document.getElementById('nav-comercio-toggle');
+    var drawer = document.getElementById('nav-comercio-drawer');
+    if (!toggle || !drawer) return;
+
+    function abrir() {
+      drawer.classList.add('abierto');
+      drawer.setAttribute('aria-hidden', 'false');
+      toggle.setAttribute('aria-expanded', 'true');
+    }
+    function cerrar() {
+      drawer.classList.remove('abierto');
+      drawer.setAttribute('aria-hidden', 'true');
+      toggle.setAttribute('aria-expanded', 'false');
+    }
+
+    window.toggleNavComercio = function (event) {
+      if (event) event.stopPropagation();
+      if (drawer.classList.contains('abierto')) { cerrar(); } else { abrir(); }
+    };
+    window.cerrarNavComercio = cerrar;
+
+    document.addEventListener('keydown', function (evento) {
+      if (evento.key === 'Escape') cerrar();
+    });
+
+    if (window.lucide && typeof lucide.createIcons === 'function') {
+      lucide.createIcons();
+    }
+  })();
+</script>

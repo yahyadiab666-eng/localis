@@ -144,6 +144,222 @@ img.localis-img-producto-thumb--vacio:not([src]) {
   min-width: 0;
 }
 
+/* =========================================================
+   Barra del panel de comercio — enlaces (escritorio)
+   ========================================================= */
+.nav-comercio-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: 9999px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #d6d3d1;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.nav-comercio-link:hover {
+  background: rgba(255, 255, 255, 0.10);
+  color: #fff;
+}
+
+.nav-comercio-link.is-active {
+  background: rgba(255, 255, 255, 0.10);
+  color: #fff;
+}
+
+.nav-comercio-link.is-active-violet {
+  background: rgba(139, 92, 246, 0.20);
+  color: #c4b5fd;
+}
+
+.nav-comercio-link.is-active-amber {
+  background: rgba(245, 158, 11, 0.20);
+  color: #fcd34d;
+}
+
+.nav-comercio-link.is-active-emerald {
+  background: rgba(16, 185, 129, 0.20);
+  color: #6ee7b7;
+}
+
+.nav-comercio-link--salir {
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
+  font-weight: 600;
+}
+
+.nav-comercio-link--salir:hover {
+  background: rgba(239, 68, 68, 0.22);
+  color: #fca5a5;
+}
+
+/* =========================================================
+   Barra del panel de comercio — móvil (iconos 44x44 + drawer)
+   ========================================================= */
+.nav-comercio-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  border-radius: 9999px;
+  color: #d6d3d1;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.nav-comercio-icon:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+.nav-comercio-icon:active {
+  transform: scale(0.96);
+}
+
+.nav-comercio-icon--salir {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.22);
+}
+
+.nav-comercio-icon--salir:hover {
+  background: rgba(239, 68, 68, 0.22);
+  color: #fca5a5;
+}
+
+.nav-comercio-drawer {
+  display: none;
+}
+
+.nav-comercio-drawer.abierto {
+  display: block;
+}
+
+.nav-comercio-drawer__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  background: rgba(28, 25, 23, 0.55);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.nav-comercio-drawer__panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 401;
+  display: flex;
+  flex-direction: column;
+  width: min(86vw, 340px);
+  height: 100%;
+  background: #fff;
+  box-shadow: -12px 0 40px rgba(0, 0, 0, 0.25);
+  overflow-y: auto;
+  animation: navComercioEntrar 0.18s ease-out;
+}
+
+@keyframes navComercioEntrar {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-comercio-drawer__panel {
+    animation: none;
+  }
+}
+
+.nav-comercio-drawer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: #1c1917;
+}
+
+.nav-comercio-drawer__head .nav-comercio-icon {
+  color: #e7e5e4;
+}
+
+.nav-comercio-drawer__user {
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.nav-comercio-drawer__mail {
+  color: #a8a29e;
+  font-size: 0.72rem;
+}
+
+.nav-comercio-drawer__links {
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem;
+}
+
+.nav-comercio-drawer__link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 48px;
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.75rem;
+  color: #44403c;
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.nav-comercio-drawer__link:hover {
+  background: #f5f5f4;
+  color: #1c1917;
+}
+
+.nav-comercio-drawer__link.is-active {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.nav-comercio-drawer__foot {
+  margin-top: auto;
+  padding: 1rem;
+  border-top: 1px solid #e7e5e4;
+}
+
+.nav-comercio-drawer__salir {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 48px;
+  border-radius: 9999px;
+  background: #fee2e2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.nav-comercio-drawer__salir:active {
+  transform: scale(0.98);
+}
+
 @media (max-width: 768px) {
   .hero-header {
     min-height: 52vh !important;
@@ -178,22 +394,9 @@ img.localis-img-producto-thumb--vacio:not([src]) {
     font-size: 1.25rem !important;
   }
 
-  .nav-comercio-links {
-    flex-wrap: wrap;
-    gap: 0.5rem !important;
-    justify-content: center;
-  }
-
-  .nav-comercio-links a,
-  .nav-comercio-links button {
-    font-size: 0.75rem !important;
-    padding: 0.45rem 0.75rem !important;
-  }
-
+  /* Barra panel comercio — móvil: una sola fila, sin wrap ni desborde */
   .nav-comercio-top {
-    flex-direction: column;
-    align-items: flex-start !important;
-    gap: 0.75rem;
+    flex-wrap: nowrap;
   }
 
   .tabla-responsive {
