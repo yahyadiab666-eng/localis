@@ -45,12 +45,17 @@
       </a>
       {% endif %}
 
-      <a href="{{ url_for('index') }}" class="flex items-center gap-2 px-4 py-2.5 text-sm text-stone-700 hover:bg-stone-50">
+      <a href="{{ url_for('perfil') }}" class="flex items-center gap-2 px-4 py-2.5 text-sm text-stone-700 hover:bg-stone-50">
         <i data-lucide="user" style="width:15px;height:15px;"></i> Mi cuenta
       </a>
-      <a href="{{ url_for('logout') }}" class="flex items-center gap-2 px-4 py-2.5 text-sm text-rose-600 hover:bg-rose-50">
-        <i data-lucide="log-out" style="width:15px;height:15px;"></i> Cerrar sesión
-      </a>
+      <form method="POST" action="{{ url_for('logout') }}"
+            onsubmit="return confirm('¿Seguro que quieres cerrar sesión?');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" aria-label="Cerrar sesión"
+                class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-rose-600 hover:bg-rose-50">
+          <i data-lucide="log-out" style="width:15px;height:15px;"></i> Cerrar sesión
+        </button>
+      </form>
     </div>
   </div>
   {% else %}

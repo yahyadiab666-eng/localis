@@ -14,6 +14,34 @@ def _fila_a_dict(fila):
     return dict(fila)
 
 
+# Columnas del perfil público del usuario. La contraseña NUNCA se incluye.
+CAMPOS_PERFIL_USUARIO = 'id, nombre, correo, foto_url, rol'
+
+
+def obtener_usuario_por_id(usuario_id):
+    """Devuelve el perfil del usuario (sin contraseña) o ``None``.
+
+    Se usa en la vista ``/perfil`` para mostrar la cuenta del usuario de
+    forma limpia y separada del panel de comercios. Es de solo lectura y
+    excluye estrictamente la columna ``contrasena``.
+    """
+    if not usuario_id:
+        return None
+    try:
+        with get_db_connection(row_factory=sqlite3.Row) as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                f'SELECT {CAMPOS_PERFIL_USUARIO} FROM usuarios WHERE id = ?',
+                (usuario_id,),
+            )
+            return _fila_a_dict(cursor.fetchone())
+    except psycopg2.Error:
+        raise
+    except Exception as error:
+        print(f'Error al obtener usuario {usuario_id}: {error}')
+        return None
+
+
 def obtener_o_crear_usuario_google(google_info):
     if not google_info:
         return False, "No se recibió información de perfil desde Google."

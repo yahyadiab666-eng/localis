@@ -71,7 +71,11 @@
             {% if comercio.id %}
             <a href="{{ url_for('tienda_publica', comercio_id=comercio.id) }}" target="_blank" rel="noopener">Ver tienda pública</a>
             {% endif %}
-            <a href="{{ url_for('logout') }}" style="color:#ffc107;">Cerrar Sesión</a>
+            <form method="POST" action="{{ url_for('logout') }}" style="display:inline;"
+                  onsubmit="return confirm('¿Seguro que quieres cerrar sesión?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" style="color:#ffc107;background:none;border:none;cursor:pointer;font:inherit;font-weight:600;margin-left:15px;padding:0;">Cerrar Sesión</button>
+            </form>
         </div>
     </header>
 

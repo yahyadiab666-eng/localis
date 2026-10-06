@@ -145,7 +145,7 @@ from backend.admin import (
     resolver_ticket_soporte,
     suspender_comercio_temporal,
 )
-from backend.auth import obtener_o_crear_usuario_google
+from backend.auth import obtener_o_crear_usuario_google, obtener_usuario_por_id
 from backend.diagnostics import ejecutar_diagnostico_inicio, obtener_estado_sistema
 from backend.error_handlers import registrar_manejadores_errores
 from utils.images import (
@@ -223,6 +223,7 @@ from backend.stores import (
     actualizar_producto,
     buscar_y_filtrar_productos,
     eliminar_producto,
+    listar_comercios_por_usuario,
     listar_portada_hibrida,
     obtener_comercio_por_id,
     obtener_comercio_por_usuario,
@@ -1354,8 +1355,58 @@ def google_callback():
         return _oauth_error('usuario/sesion', error)
 
 
-@app.route('/logout')
+@app.route('/perfil')
+@login_requerido
+def perfil():
+    """Vista de cuenta del usuario autenticado.
+
+    Separada por completo del panel de comercios: solo lee el perfil del
+    usuario (sin contraseña) y, si es comerciante, sus tiendas vinculadas.
+    """
+    usuario_id = session.get('usuario_id')
+    usuario = None
+    try:
+        usuario = obtener_usuario_por_id(usuario_id)
+    except Exception as error:
+        print(f'[Localis] perfil usuario fallo: {type(error).__name__}: {error}')
+        traceback.print_exc()
+
+    if not usuario:
+        # La sesión apunta a un usuario que ya no existe: se limpia y se
+        # redirige al login (mismo criterio que ``login_requerido``).
+        session.clear()
+        flash('Tu sesión expiró. Inicia sesión nuevamente.', 'error')
+        return redirect(url_for('login'))
+
+    soy_comerciante = False
+    comercios = []
+    try:
+        soy_comerciante = es_usuario_comerciante(usuario_id)
+        if soy_comerciante:
+            comercios = listar_comercios_por_usuario(usuario_id) or []
+    except Exception as error:
+        print(f'[Localis] perfil comercios fallo: {type(error).__name__}: {error}')
+        traceback.print_exc()
+        comercios = []
+
+    return render_template(
+        'perfil.html',
+        usuario=usuario,
+        comercios=comercios,
+        es_admin=bool(session.get('es_admin')),
+        es_comerciante=soy_comerciante,
+    )
+
+
+@app.route('/logout', methods=['GET', 'POST'])
 def logout():
+    """Cierra la sesión del usuario.
+
+    La interfaz usa POST + token CSRF (todas las barras envían un formulario),
+    que es el flujo seguro y con confirmación. Se acepta también GET para no
+    romper enlaces/llamadas heredados ni devolver un 405 inesperado a un
+    usuario con sesión activa. No toca ninguna ruta de pagos ni de comercio.
+    """
     limpiar_contexto_comercio()
     session.clear()
     flash('Sesión cerrada correctamente.', 'info')

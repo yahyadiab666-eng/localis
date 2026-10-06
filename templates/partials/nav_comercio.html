@@ -7,6 +7,12 @@
     </div>
 
     <div class="nav-comercio-links flex items-center gap-2 sm:gap-4 flex-wrap justify-end">
+      <a href="{{ url_for('index') }}"
+         class="btn-touch text-xs sm:text-sm font-medium px-2.5 py-1.5 rounded-full transition flex items-center gap-1 text-stone-300 hover:text-white"
+         aria-label="Volver al inicio" title="Volver al inicio (sin cerrar sesión)">
+        <i data-lucide="home" style="width:15px;height:15px;"></i>
+        <span>Inicio</span>
+      </a>
       <a href="{{ url_for('panel_comercio') }}"
          class="btn-touch text-xs sm:text-sm font-medium px-2.5 py-1.5 rounded-full transition flex items-center gap-1 {% if nav_activo == 'panel' %}bg-white/10 text-white{% else %}text-stone-300 hover:text-white{% endif %}">
         <i data-lucide="layout-dashboard" style="width:15px;height:15px;"></i>
@@ -43,11 +49,21 @@
         <i data-lucide="store" style="width:15px;height:15px;"></i> Ver tienda
       </a>
       {% endif %}
-      <a href="{{ url_for('logout') }}"
-         class="btn-touch px-3 py-1.5 rounded-full text-xs sm:text-sm font-semibold bg-red-500/10 text-red-400 hover:bg-red-500/20 flex items-center gap-1">
-        <i data-lucide="log-out" style="width:15px;height:15px;"></i>
-        <span class="hidden sm:inline">Salir</span>
+      <a href="{{ url_for('perfil') }}"
+         class="btn-touch text-xs sm:text-sm font-medium px-2.5 py-1.5 rounded-full transition flex items-center gap-1 {% if nav_activo == 'perfil' %}bg-white/10 text-white{% else %}text-stone-300 hover:text-white{% endif %}"
+         aria-label="Mi perfil" title="Mi perfil">
+        <i data-lucide="user" style="width:15px;height:15px;"></i>
+        <span class="hidden sm:inline">Mi perfil</span>
       </a>
+      <form method="POST" action="{{ url_for('logout') }}" class="inline-flex"
+            onsubmit="return confirm('¿Seguro que quieres cerrar sesión?');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" aria-label="Cerrar sesión" title="Cerrar sesión"
+                class="btn-touch px-3 py-1.5 rounded-full text-xs sm:text-sm font-semibold bg-red-500/10 text-red-400 hover:bg-red-500/20 flex items-center gap-1">
+          <i data-lucide="log-out" style="width:15px;height:15px;"></i>
+          <span>Salir</span>
+        </button>
+      </form>
     </div>
   </nav>
 </header>
