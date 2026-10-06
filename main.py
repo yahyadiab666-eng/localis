@@ -207,6 +207,7 @@ from backend.utils import (
 from backend.session_comercio import (
     asegurar_contexto_comercio,
     destino_panel_usuario,
+    es_usuario_comerciante,
     limpiar_contexto_comercio,
     vincular_comercio_en_sesion,
 )
@@ -382,6 +383,36 @@ def _injectar_estado_pagos():
         'pagos_congelados': not habilitados,
         'mensaje_pagos_congelados': MENSAJE_PAGOS_CONGELADOS,
     }
+
+
+@app.context_processor
+def _injectar_usuario_publico():
+    """Datos del usuario en sesión disponibles en TODAS las plantillas (Fase 3).
+
+    Se exponen solo claves de sesión (sin consultar la BD) para que la barra
+    pública pueda pintar el avatar y el menú sin tocar rutas ni lógica.
+    """
+    try:
+        usuario_id = session.get('usuario_id')
+        return {
+            'usuario_id': usuario_id,
+            'username': session.get('username') or '',
+            'correo': session.get('correo') or '',
+            'foto_url': session.get('foto_url') or '',
+            'es_admin': bool(session.get('es_admin')),
+            # Comerciante si la sesión lo marca o si ya tiene comercio vinculado.
+            'es_comerciante': bool(session.get('es_comerciante'))
+            or bool(session.get('comercio_id')),
+        }
+    except Exception:
+        return {
+            'usuario_id': None,
+            'username': '',
+            'correo': '',
+            'foto_url': '',
+            'es_admin': False,
+            'es_comerciante': False,
+        }
 
 
 def _debug_imagenes_antes_de_render(productos, origen):
@@ -1144,9 +1175,13 @@ def tienda_publica(comercio_id):
 @app.route('/login')
 def login():
     if session.get('usuario_id'):
+        # Fase 2: admin -> /admin; comerciante con negocio -> /comercio;
+        # cliente sin negocio -> catálogo público (no al panel de comercio).
         if session.get('es_admin'):
             return redirect(url_for('panel_admin'))
-        return redirect(url_for('panel_comercio'))
+        if es_usuario_comerciante():
+            return redirect(url_for('panel_comercio'))
+        return redirect(url_for('index'))
     return render_template('login.html')
 
 
@@ -1281,24 +1316,39 @@ def google_callback():
         session['rol'] = usuario_o_error.get('rol', 'comerciante')
         session['es_admin'] = usuario_o_error.get('rol') == 'admin'
 
+        # --- FASE 1: persistencia real de la sesión -------------------------
+        # Marca la sesión como permanente para que la cookie respete
+        # PERMANENT_SESSION_LIFETIME (14 días) y no muera al cerrar el navegador/app.
+        session.permanent = True
+        session.modified = True
+
         flash(f"¡Bienvenido, {session['username']}!", 'exito')
 
+        # --- FASE 2: redirección por capacidad ------------------------------
+        # 1) Admin -> panel de administración.
         if session['es_admin']:
             return redirect(url_for('panel_admin'))
-        if session['rol'] == 'comerciante':
-            try:
-                comercio = obtener_comercio_por_usuario(usuario_o_error['id'])
-                if comercio:
-                    vincular_comercio_en_sesion(comercio['id'])
-            except Exception as error_comercio:
-                print(
-                    f'[Localis OAuth] comercio no resuelto: '
-                    f'{type(error_comercio).__name__}: {error_comercio}',
-                    flush=True,
-                )
-                traceback.print_exc()
+
+        # 2) Comerciante CON negocio registrado -> panel de comercio.
+        comercio = None
+        try:
+            comercio = obtener_comercio_por_usuario(usuario_o_error['id'])
+        except Exception as error_comercio:
+            print(
+                f'[Localis OAuth] comercio no resuelto: '
+                f'{type(error_comercio).__name__}: {error_comercio}',
+                flush=True,
+            )
+            traceback.print_exc()
+
+        if comercio:
+            # Al vincular el comercio se marca es_comerciante = True.
+            vincular_comercio_en_sesion(comercio['id'])
             return redirect(url_for('panel_comercio'))
 
+        # 3) Cliente SIN negocio -> catálogo público (no forzar el alta de tienda).
+        session['es_comerciante'] = False
+        session.modified = True
         return redirect(url_for('index'))
     except Exception as error:
         return _oauth_error('usuario/sesion', error)

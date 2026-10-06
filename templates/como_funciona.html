@@ -21,16 +21,7 @@
   {% else %}
   <header class="w-full bg-stone-900 border-b border-stone-800">
     <nav class="guia-ayuda-nav flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 max-w-6xl w-full mx-auto gap-3">
-      <a href="{{ url_for('index') }}" class="font-display text-white text-xl sm:text-[28px] font-black tracking-tight shrink-0">localis</a>
-      <div class="flex items-center gap-2 sm:gap-4 flex-wrap justify-end">
-        <a href="{{ url_for('index') }}" class="btn-touch text-xs sm:text-sm font-medium text-stone-300 hover:text-white px-2.5 py-1.5">Inicio</a>
-        <a href="{{ url_for('como_funciona') }}" class="btn-touch text-xs sm:text-sm font-medium bg-white/10 text-white px-2.5 py-1.5 rounded-full">Guía</a>
-        {% if session.get('usuario_id') %}
-        <a href="{{ url_for('panel_comercio') }}" class="btn-touch text-xs sm:text-sm font-semibold px-3 py-1.5 rounded-full" style="background: rgb(245, 158, 11); color: rgb(26, 26, 26);">Mi panel</a>
-        {% else %}
-        <a href="{{ url_for('login') }}" class="btn-touch text-xs sm:text-sm font-semibold px-3 py-1.5 rounded-full" style="background: rgb(245, 158, 11); color: rgb(26, 26, 26);">Registrar comercio</a>
-        {% endif %}
-      </div>
+      {% include 'partials/nav_cliente.html' %}
     </nav>
   </header>
   {% endif %}
