@@ -11,7 +11,7 @@
   <div class="flex items-center gap-2 sm:gap-3 min-w-0">
     <a href="{{ url_for('index') }}"
        class="font-display text-white text-2xl sm:text-[28px] font-black tracking-tight shrink-0"
-       aria-label="Ir al inicio">localis</a>
+       aria-label="Ir al inicio"{% if request.endpoint == 'index' %} aria-current="page"{% endif %}>localis</a>
 
     {% if usuario_id %}
     {# Avatar del cliente junto al logo (esquina superior izquierda). #}
@@ -78,36 +78,27 @@
     {% endif %}
   </div>
 
-  <!-- Acciones de navegación (el lado derecho nunca queda vacío: "Inicio" siempre) -->
+  {# Acciones de navegación pública. Las opciones de cuenta (panel, admin,
+     perfil…) viven SOLO en el menú del avatar para no duplicar accesos.
+     El botón "Inicio" se muestra únicamente en las vistas internas: en la
+     propia página de inicio es redundante (el logo ya lleva al inicio). #}
   <div class="flex items-center gap-2 sm:gap-3 flex-wrap justify-end">
+    {% if request.endpoint != 'index' %}
     <a href="{{ url_for('index') }}"
        class="btn-touch inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs sm:text-sm font-semibold text-white/90 border border-white/25 hover:bg-white/10 transition"
-       aria-label="Ir al inicio" aria-current="page">
+       aria-label="Volver al inicio">
       <i data-lucide="home" style="width:15px;height:15px;"></i>
       <span>Inicio</span>
     </a>
+    {% endif %}
 
     {# En la propia guía el botón "Cómo funciona" es redundante: se oculta. #}
     {% if nav_activo != 'ayuda' %}
     <a href="{{ url_for('como_funciona') }}"
-       class="btn-touch inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs sm:text-sm font-semibold text-white/90 border border-white/25 hover:bg-white/10 transition">
+       class="btn-touch inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs sm:text-sm font-semibold text-white/90 border border-white/25 hover:bg-white/10 transition"
+       {% if request.endpoint == 'como_funciona' %}aria-current="page"{% endif %}>
       <i data-lucide="help-circle" style="width:15px;height:15px;"></i>
       <span>Cómo funciona</span>
-    </a>
-    {% endif %}
-
-    {# Acceso directo y visible al panel para usuarios con negocio. #}
-    {% if es_admin %}
-    <a href="{{ url_for('panel_admin') }}"
-       class="btn-touch inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs sm:text-sm font-semibold text-amber-300 border border-amber-300/40 hover:bg-amber-400/10 transition">
-      <i data-lucide="shield" style="width:15px;height:15px;"></i>
-      <span>Panel admin</span>
-    </a>
-    {% elif es_comerciante %}
-    <a href="{{ url_for('panel_comercio') }}"
-       class="btn-touch inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs sm:text-sm font-semibold text-amber-300 border border-amber-300/40 hover:bg-amber-400/10 transition">
-      <i data-lucide="layout-dashboard" style="width:15px;height:15px;"></i>
-      <span>Mi panel</span>
     </a>
     {% endif %}
   </div>
