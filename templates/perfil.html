@@ -16,7 +16,7 @@
 </head>
 <body class="w-full min-h-screen flex flex-col" style="background: rgb(254, 251, 246);">
 
-  <header class="publico-header sticky top-0 z-50 bg-stone-900 text-white shadow-sm">
+  <header class="publico-header sticky top-0 z-50 bg-stone-900 text-white shadow-sm transition-transform duration-300 ease-out will-change-transform">
     <nav class="max-w-6xl mx-auto px-4 sm:px-6 py-3 sm:py-4 w-full">
       {% include 'partials/nav_cliente.html' %}
     </nav>
@@ -166,6 +166,7 @@
     <p class="text-center text-xs text-stone-400">Localis · Apoya lo local</p>
   </footer>
 
+  <script src="{{ url_for('static', filename='js/header-smart-hide.js') }}?v={{ asset_v }}"></script>
   <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
   <script>
     if (window.lucide) { lucide.createIcons(); }

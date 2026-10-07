@@ -45,7 +45,7 @@
 <body class="min-h-screen" style="background: rgb(254, 251, 246);"
       data-interaccion-auto="visita_tienda" data-interaccion-comercio="{{ comercio.id }}">
 
-  <header class="publico-header sticky top-0 z-50 bg-stone-900 text-white shadow-sm">
+  <header class="publico-header sticky top-0 z-50 bg-stone-900 text-white shadow-sm transition-transform duration-300 ease-out will-change-transform">
     <nav class="max-w-6xl mx-auto px-4 sm:px-6 py-3 sm:py-4 w-full">
       {% include 'partials/nav_cliente.html' %}
     </nav>
@@ -431,6 +431,7 @@
       setTimeout(function () { card.classList.remove('ring-2', 'ring-amber-500'); }, 3200);
     })();
   </script>
+  <script src="{{ url_for('static', filename='js/header-smart-hide.js') }}?v={{ asset_v }}"></script>
   <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
   <script src="{{ url_for('static', filename='js/localis.js') }}?v=compartir-3"></script>
 </body>
