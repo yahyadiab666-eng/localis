@@ -45,11 +45,24 @@
 <body class="min-h-screen" style="background: rgb(254, 251, 246);"
       data-interaccion-auto="visita_tienda" data-interaccion-comercio="{{ comercio.id }}">
 
-  <header class="bg-stone-900 text-white">
-    <nav class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+  <header class="publico-header sticky top-0 z-50 bg-stone-900 text-white shadow-sm">
+    <nav class="max-w-6xl mx-auto px-4 sm:px-6 py-3 sm:py-4 w-full">
       {% include 'partials/nav_cliente.html' %}
     </nav>
   </header>
+
+  <!-- Breadcrumb: ruta de navegación para no perder el contexto -->
+  <nav class="max-w-6xl mx-auto px-4 sm:px-6 pt-6 text-xs text-stone-500" aria-label="Ruta de navegación">
+    <ol class="flex items-center gap-1.5 flex-wrap">
+      <li>
+        <a href="{{ url_for('index') }}" class="inline-flex items-center gap-1 hover:text-amber-700">
+          <i data-lucide="home" style="width:13px;height:13px;"></i> Inicio
+        </a>
+      </li>
+      <li class="text-stone-300" aria-hidden="true">/</li>
+      <li class="font-semibold text-stone-700 truncate max-w-[60vw]" aria-current="page">{{ comercio.nombre }}</li>
+    </ol>
+  </nav>
 
   <section class="max-w-6xl mx-auto px-6 py-8">
     <div class="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden">
@@ -142,9 +155,8 @@
     {% if productos %}
       <div class="grid grid-cols-2 md:grid-cols-4 gap-5 grid-productos-mobile">
         {% for producto in productos %}
-          <div class="card-hover card-producto-mobile localis-card-producto rounded-xl overflow-hidden bg-white shadow border border-stone-100 flex flex-col h-full cursor-pointer"
+          <div class="card-producto-mobile localis-card-producto rounded-xl overflow-hidden bg-white shadow border border-stone-100 flex flex-col h-full"
                id="producto-{{ producto.id }}"
-               role="button" tabindex="0"
                data-interaccion="clic_producto" data-interaccion-comercio="{{ comercio.id }}"
                data-interaccion-producto="{{ producto.id }}">
             {% set img_producto = producto|url_imagen_producto %}
@@ -201,6 +213,16 @@
       </div>
     {% endif %}
   </section>
+
+  <footer class="w-full py-8 px-6 text-center mt-4" style="background: rgb(17, 17, 17);">
+    <p class="text-xs text-gray-400 mb-3">© 2026 Localis · Conectando comunidades con sus comercios.</p>
+    <div class="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-4 text-xs">
+      <a href="{{ url_for('index') }}" class="text-amber-400 hover:text-amber-300 inline-flex items-center gap-1">
+        <i data-lucide="home" style="width:14px;height:14px;"></i> Volver al inicio
+      </a>
+      <a href="{{ url_for('como_funciona') }}" class="text-amber-400 hover:text-amber-300">Cómo funciona Localis</a>
+    </div>
+  </footer>
 
   <div id="modal-compartir" class="hidden fixed inset-0 z-[200] items-center justify-center bg-black/60 p-4"
        onclick="if(event.target===this)cerrarModalCompartir()">

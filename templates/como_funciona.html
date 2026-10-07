@@ -19,8 +19,8 @@
   {# Contexto por SECCIÓN, no por rol: "Cómo funciona" es una página pública y
      usa SIEMPRE la barra pública, aunque el usuario sea comerciante. Así no se
      arrastran botones ni menús del panel de comercio. #}
-  <header class="w-full bg-stone-900 border-b border-stone-800">
-    <nav class="guia-ayuda-nav flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 max-w-6xl w-full mx-auto gap-3">
+  <header class="publico-header sticky top-0 z-50 w-full bg-stone-900 border-b border-stone-800 shadow-sm">
+    <nav class="guia-ayuda-nav px-4 sm:px-6 py-3 sm:py-4 max-w-6xl w-full mx-auto">
       {% include 'partials/nav_cliente.html' %}
     </nav>
   </header>
