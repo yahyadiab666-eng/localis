@@ -44,18 +44,18 @@
     </div>
 
     <!-- Balance -->
-    <section class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-      <div class="bg-white rounded-2xl border border-stone-200 p-5 text-center shadow-sm">
-        <span class="block text-3xl font-black text-violet-600">{{ premios.puntos or 0 }}</span>
-        <span class="block text-[11px] font-semibold uppercase tracking-wider text-stone-400 mt-1">Puntos disponibles</span>
+    <section class="grid grid-cols-3 gap-2 sm:gap-4">
+      <div class="bg-white rounded-2xl border border-stone-200 p-3 sm:p-5 text-center shadow-sm">
+        <span class="block text-2xl sm:text-3xl font-black text-violet-600">{{ premios.puntos or 0 }}</span>
+        <span class="block text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-stone-400 mt-1 leading-tight">Puntos disponibles</span>
       </div>
-      <div class="bg-white rounded-2xl border border-stone-200 p-5 text-center shadow-sm">
-        <span class="block text-3xl font-black text-stone-900">{{ premios.referidos_total or 0 }}</span>
-        <span class="block text-[11px] font-semibold uppercase tracking-wider text-stone-400 mt-1">Comercios referidos</span>
+      <div class="bg-white rounded-2xl border border-stone-200 p-3 sm:p-5 text-center shadow-sm">
+        <span class="block text-2xl sm:text-3xl font-black text-stone-900">{{ premios.referidos_total or 0 }}</span>
+        <span class="block text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-stone-400 mt-1 leading-tight">Comercios referidos</span>
       </div>
-      <div class="bg-white rounded-2xl border border-stone-200 p-5 text-center shadow-sm">
-        <span class="block text-3xl font-black text-amber-600">{{ premios.canjes_total or 0 }}</span>
-        <span class="block text-[11px] font-semibold uppercase tracking-wider text-stone-400 mt-1">Destacados canjeados</span>
+      <div class="bg-white rounded-2xl border border-stone-200 p-3 sm:p-5 text-center shadow-sm">
+        <span class="block text-2xl sm:text-3xl font-black text-amber-600">{{ premios.canjes_total or 0 }}</span>
+        <span class="block text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-stone-400 mt-1 leading-tight">Destacados canjeados</span>
       </div>
     </section>
 
@@ -94,12 +94,12 @@
         </select>
         {% if (premios.puntos or 0) >= (premios.puntos_minimos or 3) %}
         <button type="submit"
-                class="btn-touch inline-flex items-center justify-center gap-2 bg-violet-600 text-white font-bold px-5 py-2.5 rounded-xl text-sm hover:bg-violet-500 transition">
+                class="btn-touch w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-violet-600 text-white font-bold px-5 py-2.5 rounded-xl text-sm hover:bg-violet-500 transition">
           <i data-lucide="gift" style="width:16px;height:16px;"></i> Canjear y destacar
         </button>
         {% else %}
         <button type="button" disabled
-                class="inline-flex items-center justify-center gap-2 bg-stone-200 text-stone-500 font-bold px-5 py-2.5 rounded-xl text-sm cursor-not-allowed"
+                class="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-stone-200 text-stone-500 font-bold px-5 py-2.5 rounded-xl text-sm cursor-not-allowed"
                 title="Necesitas más puntos">
           Puntos insuficientes
         </button>

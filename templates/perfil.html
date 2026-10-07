@@ -137,6 +137,11 @@
           <i data-lucide="home" style="width:15px;height:15px;"></i> Volver al catálogo
         </a>
 
+        <a href="{{ whatsapp_url | default('https://wa.me/584125970507', true) }}" target="_blank" rel="noopener"
+           class="btn-touch inline-flex items-center justify-center gap-2 text-sm font-semibold text-emerald-700 border border-emerald-200 rounded-full px-4 py-2 hover:bg-emerald-50 transition">
+          <i data-lucide="life-buoy" style="width:15px;height:15px;"></i> Soporte técnico
+        </a>
+
         {% if es_admin %}
         <a href="{{ url_for('panel_admin') }}"
            class="btn-touch inline-flex items-center justify-center gap-2 text-sm font-semibold text-stone-700 border border-stone-300 rounded-full px-4 py-2 hover:bg-stone-50 transition">

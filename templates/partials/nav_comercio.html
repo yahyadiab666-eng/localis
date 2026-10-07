@@ -154,6 +154,10 @@
            class="nav-comercio-drawer__link {% if nav_activo == 'perfil' %}is-active{% endif %}">
           <i data-lucide="user" style="width:18px;height:18px;"></i> Mi perfil
         </a>
+        <a href="{{ whatsapp_url | default('https://wa.me/584125970507', true) }}" target="_blank" rel="noopener"
+           class="nav-comercio-drawer__link">
+          <i data-lucide="life-buoy" style="width:18px;height:18px;"></i> Soporte técnico
+        </a>
       </nav>
 
       <div class="nav-comercio-drawer__foot">

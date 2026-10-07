@@ -75,13 +75,24 @@
         <article class="guia-ayuda-paso rounded-xl border border-stone-100 bg-stone-50/80 p-4 sm:p-5">
           <h3 class="font-bold text-gray-900 text-sm sm:text-base flex items-center gap-2">
             <span class="guia-ayuda-numero">2</span>
-            Detalle del producto e ir a la tienda
+            Ver el detalle de un producto
           </h3>
           <p class="text-stone-600 text-sm mt-2 leading-relaxed">
-            Al presionar cualquier producto del catálogo se abrirá una <strong>ventana con la información detallada</strong>
-            del artículo: imagen, nombre, descripción, comercio y precio en USD y bolívares.
-            Desde esa vista también tendrás la <strong>opción de ir directamente a la tienda</strong> del comercio con el botón
-            <strong>«Ir a la Tienda»</strong>, para ver más productos del mismo negocio.
+            En el <strong>inicio</strong>, al tocar un producto se abre una <strong>ventana con su información</strong>
+            (imagen, nombre, descripción, comercio y precio en USD y bolívares). Desde esa ventana puedes pasar a la
+            tienda del comercio con <strong>«Ir a la Tienda»</strong>.
+          </p>
+        </article>
+
+        <article class="guia-ayuda-paso rounded-xl border border-stone-100 bg-stone-50/80 p-4 sm:p-5">
+          <h3 class="font-bold text-gray-900 text-sm sm:text-base flex items-center gap-2">
+            <span class="guia-ayuda-numero">3</span>
+            Dentro de una tienda pública
+          </h3>
+          <p class="text-stone-600 text-sm mt-2 leading-relaxed">
+            La <strong>tienda pública</strong> de cada comercio muestra su catálogo completo. Usa
+            <strong>«Buscar en esta tienda»</strong> para filtrar, y los botones de cada tarjeta para
+            <strong>escribir por WhatsApp</strong> al comercio o <strong>compartir</strong> el producto.
           </p>
         </article>
       </div>
@@ -106,7 +117,13 @@
             <span class="inline-flex items-center gap-2 font-bold text-gray-900">
               <i data-lucide="layout-dashboard" class="text-amber-600" style="width:16px;height:16px;"></i> Panel
             </span>
-            <p class="text-stone-600 mt-1.5 leading-relaxed">Vista general de tu comercio: perfil, inventario, importador CSV y accesos rápidos.</p>
+            <p class="text-stone-600 mt-1.5 leading-relaxed">Vista general de tu comercio: inventario, importador CSV/Excel y accesos rápidos.</p>
+          </li>
+          <li class="guia-ayuda-item rounded-xl border border-stone-100 p-4">
+            <span class="inline-flex items-center gap-2 font-bold text-gray-900">
+              <i data-lucide="gift" class="text-amber-600" style="width:16px;height:16px;"></i> Premios y Puntos
+            </span>
+            <p class="text-stone-600 mt-1.5 leading-relaxed">Recomienda Localis a otros comercios y canjea tus puntos por días de destacado gratis.</p>
           </li>
           <!-- RESTAURAR_PAGOS_INICIO -->
           {% if not pagos_congelados %}
@@ -129,6 +146,18 @@
               <i data-lucide="store" class="text-amber-600" style="width:16px;height:16px;"></i> Ver tienda
             </span>
             <p class="text-stone-600 mt-1.5 leading-relaxed">Abre la vitrina pública tal como la ven tus clientes en Localis.</p>
+          </li>
+          <li class="guia-ayuda-item rounded-xl border border-stone-100 p-4">
+            <span class="inline-flex items-center gap-2 font-bold text-gray-900">
+              <i data-lucide="user" class="text-amber-600" style="width:16px;height:16px;"></i> Mi perfil
+            </span>
+            <p class="text-stone-600 mt-1.5 leading-relaxed">Datos de tu cuenta de usuario y acceso directo al soporte técnico.</p>
+          </li>
+          <li class="guia-ayuda-item rounded-xl border border-stone-100 p-4">
+            <span class="inline-flex items-center gap-2 font-bold text-gray-900">
+              <i data-lucide="home" class="text-amber-600" style="width:16px;height:16px;"></i> Inicio
+            </span>
+            <p class="text-stone-600 mt-1.5 leading-relaxed">Vuelve al catálogo público sin cerrar sesión. En el móvil, el botón de menú agrupa todas estas opciones.</p>
           </li>
           <!-- RESTAURAR_PAGOS_INICIO -->
           {% if not pagos_congelados %}
@@ -157,7 +186,7 @@
           </article>
           <article class="guia-ayuda-paso rounded-xl border border-stone-200 bg-stone-50 p-4 sm:p-5">
             <h4 class="font-bold text-gray-900 flex items-center gap-2 text-sm sm:text-base">
-              <i data-lucide="file-spreadsheet" style="width:18px;height:18px;"></i> Carga masiva (CSV)
+              <i data-lucide="file-spreadsheet" style="width:18px;height:18px;"></i> Carga masiva (CSV/Excel)
             </h4>
             <p class="text-stone-600 text-sm mt-2 leading-relaxed">
               En la sección <strong>Importador Inteligente</strong> sube un archivo <strong>CSV</strong> (o Excel)
@@ -176,10 +205,7 @@
         <h2 class="font-display text-xl sm:text-2xl font-bold">Soporte técnico</h2>
       </div>
       <p class="text-stone-300 text-sm leading-relaxed max-w-2xl">
-        Si tienes dudas sobre tu cuenta, tu plan o el uso de la plataforma, nuestro equipo puede ayudarte por WhatsApp.
-      </p>
-      <p class="text-amber-100 text-sm font-medium border-t border-white/10 pt-4">
-        Al final de la página hay la opción de soporte técnico.
+        Si tienes dudas sobre tu cuenta o el uso de la plataforma, nuestro equipo puede ayudarte por WhatsApp.
       </p>
       <a href="{{ whatsapp_url }}" target="_blank" rel="noopener"
          class="btn-touch inline-flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-stone-900 font-bold px-5 py-3 rounded-full text-sm transition">
