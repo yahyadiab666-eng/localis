@@ -911,6 +911,80 @@ def error_archivo_demasiado_grande(e):
     return redirect(request.referrer or url_for(destino_panel_usuario()))
 
 
+# ==========================================
+# CUMPLIMIENTO PLAY STORE / PWA
+# (rutas nuevas de soporte; no modifican la lógica existente)
+# ==========================================
+
+
+@app.route('/sw.js')
+def service_worker():
+    """Sirve el Service Worker en la RAÍZ para que su scope sea '/'.
+
+    Necesario para que la PWA sea instalable y cubra toda la app (no solo
+    /static/). Nunca cachea zonas privadas (ver static/sw.js).
+    """
+    ruta = os.path.join(BASE_DIR, 'static', 'sw.js')
+    try:
+        with open(ruta, 'r', encoding='utf-8') as archivo:
+            contenido = archivo.read()
+    except OSError:
+        return Response('', status=404, mimetype='application/javascript')
+    respuesta = Response(contenido, mimetype='application/javascript')
+    respuesta.headers['Service-Worker-Allowed'] = '/'
+    respuesta.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return respuesta
+
+
+@app.route('/offline')
+def offline():
+    """Página de respaldo sin conexión (la usa el Service Worker)."""
+    return render_template('offline.html')
+
+
+@app.route('/privacidad')
+def privacidad():
+    """Política de privacidad pública (requisito de Google Play)."""
+    return render_template('privacidad.html', whatsapp_url=WHATSAPP_SOPORTE_URL)
+
+
+@app.route('/eliminar-cuenta')
+def eliminar_cuenta():
+    """URL pública de eliminación de cuenta y datos (requisito de Google Play).
+
+    Describe el proceso y ofrece una solicitud directa por WhatsApp con los
+    datos de la cuenta en sesión. No borra nada por GET.
+    """
+    return render_template('eliminar_cuenta.html', whatsapp_url=WHATSAPP_SOPORTE_URL)
+
+
+@app.route('/.well-known/assetlinks.json')
+def assetlinks():
+    """Digital Asset Links para la vinculación TWA <-> dominio (si se usa TWA).
+
+    Configura en Render:
+      PLAY_ASSETLINKS_PACKAGE  (por defecto com.localis.app)
+      PLAY_ASSETLINKS_SHA256   huella(s) SHA-256 de Play App Signing (separadas por coma).
+    """
+    paquete = (os.getenv('PLAY_ASSETLINKS_PACKAGE') or 'com.localis.app').strip()
+    huella = (os.getenv('PLAY_ASSETLINKS_SHA256') or '').strip()
+    huellas = [h.strip() for h in huella.split(',') if h.strip()] or [
+        'REEMPLAZAR_CON_SHA256_DE_PLAY_APP_SIGNING'
+    ]
+    return jsonify(
+        [
+            {
+                'relation': ['delegate_permission/common.handle_all_urls'],
+                'target': {
+                    'namespace': 'android_app',
+                    'package_name': paquete,
+                    'sha256_cert_fingerprints': huellas,
+                },
+            }
+        ]
+    )
+
+
 @app.route('/health')
 def health_check():
     """Estado consolidado (BD + Supabase) para monitoreo (Render, uptime, etc.)."""

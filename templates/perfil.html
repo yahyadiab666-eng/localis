@@ -2,8 +2,13 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Localis - Mi perfil</title>
+  <!-- PWA -->
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <meta name="theme-color" content="#F59E0B">
+  <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='images/favicon-32.png') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='images/apple-touch-icon-180.png') }}">
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700;900&display=swap" rel="stylesheet">
@@ -140,6 +145,14 @@
         <a href="{{ whatsapp_url | default('https://wa.me/584125970507', true) }}" target="_blank" rel="noopener"
            class="btn-touch inline-flex items-center justify-center gap-2 text-sm font-semibold text-emerald-700 border border-emerald-200 rounded-full px-4 py-2 hover:bg-emerald-50 transition">
           <i data-lucide="life-buoy" style="width:15px;height:15px;"></i> Soporte técnico
+        </a>
+        <a href="{{ url_for('privacidad') }}"
+           class="btn-touch inline-flex items-center justify-center gap-2 text-sm font-semibold text-stone-700 border border-stone-300 rounded-full px-4 py-2 hover:bg-stone-50 transition">
+          <i data-lucide="shield-check" style="width:15px;height:15px;"></i> Privacidad
+        </a>
+        <a href="{{ url_for('eliminar_cuenta') }}"
+           class="btn-touch inline-flex items-center justify-center gap-2 text-sm font-semibold text-stone-700 border border-stone-300 rounded-full px-4 py-2 hover:bg-stone-50 transition">
+          <i data-lucide="trash-2" style="width:15px;height:15px;"></i> Eliminar mi cuenta
         </a>
 
         {% if es_admin %}

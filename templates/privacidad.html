@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Política de Privacidad — Localis</title>
+  <meta name="theme-color" content="#F59E0B">
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700;900&display=swap" rel="stylesheet">
+  <style>body { font-family: 'DM Sans', sans-serif; } .font-display { font-family: 'Fraunces', serif; }</style>
+</head>
+<body class="w-full min-h-screen" style="background: rgb(254, 251, 246);">
+
+  <header class="bg-stone-900 text-white">
+    <nav class="max-w-4xl mx-auto px-4 sm:px-6 py-4">
+      {% include 'partials/nav_cliente.html' %}
+    </nav>
+  </header>
+
+  <main class="max-w-3xl mx-auto px-4 sm:px-6 py-8 sm:py-12 space-y-6">
+    <header class="space-y-2">
+      <p class="text-amber-600 text-xs font-bold uppercase tracking-wider">Legal</p>
+      <h1 class="font-display text-3xl sm:text-4xl font-bold text-stone-900">Política de Privacidad</h1>
+      <p class="text-stone-500 text-sm">Última actualización: 7 de octubre de 2026</p>
+    </header>
+
+    <section class="bg-white rounded-2xl border border-stone-200 p-5 sm:p-7 space-y-3 text-sm text-stone-700 leading-relaxed">
+      <p>Localis es un directorio digital de tiendas y productos locales. Esta política explica qué datos recopilamos, con qué finalidad y qué derechos tienes al usar la aplicación web y móvil.</p>
+
+      <h2 class="font-display text-xl font-bold text-stone-900 pt-2">1. Responsable</h2>
+      <p>El responsable del tratamiento es el equipo de <strong>Localis</strong>. Para cualquier consulta contáctanos por WhatsApp de soporte.</p>
+
+      <h2 class="font-display text-xl font-bold text-stone-900 pt-2">2. Datos que recopilamos</h2>
+      <ul class="list-disc pl-5 space-y-1">
+        <li><strong>Cuenta:</strong> nombre, correo electrónico y foto de perfil (si inicias sesión con Google).</li>
+        <li><strong>Comercio:</strong> nombre, descripción, teléfono, dirección, categoría, logos e imágenes del catálogo que publiques.</li>
+        <li><strong>Uso:</strong> métricas agregadas de interés (visitas a tiendas, clics en productos/WhatsApp/Maps) asociadas al comercio, no perfiles personales.</li>
+        <li><strong>Ubicación (opcional):</strong> solo si pulsas "usar mi ubicación actual" para autocompletar una dirección; no se rastrea en segundo plano.</li>
+      </ul>
+
+      <h2 class="font-display text-xl font-bold text-stone-900 pt-2">3. Finalidad</h2>
+      <p>Prestar el servicio (mostrar tu tienda y catálogo), permitir el contacto con clientes vía WhatsApp, gestionar tu cuenta y mejorar la plataforma con estadísticas agregadas.</p>
+
+      <h2 class="font-display text-xl font-bold text-stone-900 pt-2">4. Terceros</h2>
+      <p>Usamos proveedores que tratan datos por cuenta nuestra: <strong>Google</strong> (inicio de sesión OAuth), <strong>Supabase</strong> (almacenamiento de imágenes) y <strong>Render</strong> (hosting). Los enlaces de WhatsApp/Google Maps se abren en servicios de terceros con sus propias políticas.</p>
+
+      <h2 class="font-display text-xl font-bold text-stone-900 pt-2">5. Conservación</h2>
+      <p>Conservamos los datos mientras mantengas tu cuenta. Si solicitas la eliminación, borramos tu cuenta, comercios, productos e imágenes, salvo registros que debamos conservar por obligación legal.</p>
+
+      <h2 class="font-display text-xl font-bold text-stone-900 pt-2">6. Tus derechos</h2>
+      <p>Puedes solicitar acceso, rectificación, supresión, oposición o portabilidad de tus datos. Para eliminar tu cuenta usa la página <a href="{{ url_for('eliminar_cuenta') }}" class="text-amber-700 font-semibold underline">Eliminar mi cuenta</a>.</p>
+
+      <h2 class="font-display text-xl font-bold text-stone-900 pt-2">7. Seguridad</h2>
+      <p>Aplicamos conexión cifrada (HTTPS), acceso autenticado y control de sesiones. Ningún sistema es 100 % infalible, pero trabajamos para proteger tu información.</p>
+
+      <h2 class="font-display text-xl font-bold text-stone-900 pt-2">8. Contacto</h2>
+      <p>Para ejercer tus derechos o resolver dudas, escríbenos por el soporte de WhatsApp disponible en la app.</p>
+    </section>
+
+    <div class="flex flex-wrap gap-3">
+      <a href="{{ url_for('eliminar_cuenta') }}" class="btn-touch inline-flex items-center gap-2 bg-stone-900 text-white font-bold px-4 py-2.5 rounded-full text-sm">Eliminar mi cuenta</a>
+      <a href="{{ url_for('index') }}" class="btn-touch inline-flex items-center gap-2 border border-stone-300 text-stone-700 font-semibold px-4 py-2.5 rounded-full text-sm">Volver al inicio</a>
+    </div>
+  </main>
+</body>
+</html>

@@ -135,3 +135,13 @@
     });
   })();
 </script>
+
+<script>
+  // PWA: registra el Service Worker en la raíz (scope '/') desde cualquier
+  // página pública, para que la app sea instalable y funcione offline.
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
+    });
+  }
+</script>
