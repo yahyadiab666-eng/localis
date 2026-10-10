@@ -675,6 +675,12 @@ def _completar_imagenes_productos(productos, con_maestro=True):
     imagen_urls_para_catalogo(productos, con_maestro=con_maestro)
     for fila in productos:
         _aplicar_url_imagen_producto(fila)
+    # Categoría calculada en runtime (retrocompatible, no toca la BD).
+    try:
+        from backend.categorias_producto import anotar_categorias_productos
+        anotar_categorias_productos(productos)
+    except Exception:
+        pass
     return productos
 
 

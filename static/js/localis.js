@@ -45,9 +45,9 @@
   // ---------------------------------------------------------------------------
   // Analítica de interés por comercio (beacon, no bloquea la navegación)
   // ---------------------------------------------------------------------------
-  window.registrarInteraccion = function registrarInteraccion(comercioId, tipo, productoId) {
+  window.registrarInteraccion = function registrarInteraccion(comercioId, tipo, productoId, origen) {
     if (!comercioId || !tipo) return;
-    var cuerpo = JSON.stringify({ tipo: tipo, producto_id: productoId || null });
+    var cuerpo = JSON.stringify({ tipo: tipo, producto_id: productoId || null, origen: origen || undefined });
     var url = '/api/comercio/' + encodeURIComponent(comercioId) + '/interaccion';
     try {
       if (navigator.sendBeacon) {
@@ -70,13 +70,19 @@
     }
   };
 
+  function origenPagina() {
+    var b = document.querySelector('[data-interaccion-origen]');
+    return b ? b.getAttribute('data-interaccion-origen') : undefined;
+  }
+
   function inicializarInteracciones() {
     var auto = document.querySelector('[data-interaccion-auto]');
     if (auto) {
       window.registrarInteraccion(
         auto.getAttribute('data-interaccion-comercio'),
         auto.getAttribute('data-interaccion-auto') || 'visita_tienda',
-        null
+        null,
+        auto.getAttribute('data-interaccion-origen') || origenPagina()
       );
     }
 
@@ -90,7 +96,8 @@
         window.registrarInteraccion(
           el.getAttribute('data-interaccion-comercio'),
           el.getAttribute('data-interaccion'),
-          el.getAttribute('data-interaccion-producto')
+          el.getAttribute('data-interaccion-producto'),
+          el.getAttribute('data-interaccion-origen') || origenPagina()
         );
       },
       true

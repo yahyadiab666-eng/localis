@@ -1194,6 +1194,7 @@ def tienda_publica(comercio_id):
         return redirect(url_for('index'))
 
     palabra_clave = request.args.get('q', '').strip()
+    origen = (request.args.get('origen') or 'web').strip().lower()[:20]
     productos = buscar_y_filtrar_productos(
         palabra_clave=palabra_clave,
         comercio_id=comercio_id,
@@ -1244,6 +1245,7 @@ def tienda_publica(comercio_id):
         productos=productos,
         tasa=tasa_actual,
         q=palabra_clave,
+        origen=origen,
     )
 
 
@@ -1536,13 +1538,19 @@ def _productos_desde_filas(productos_db, tasa_actual):
         productos.append({
             'id': p.get('id'),
             'nombre': p.get('nombre') or '',
-            'descripcion': p.get('descripcion') or 'Sin descripción',
+            'descripcion': (p.get('descripcion') or '').strip(),
             'precio_usd': precio_usd,
             'precio_bs': round(precio_usd * tasa_actual, 2),
             'codigo_barras': '' if p.get('codigo_barras') is None else p.get('codigo_barras'),
             'imagen_url': p.get('imagen_url') or '',
             'imagen_estado': (p.get('imagen_estado') or 'pendiente'),
         })
+    # Categoría runtime para el panel (chips / filtrado), sin tocar la BD.
+    try:
+        from backend.categorias_producto import anotar_categorias_productos
+        anotar_categorias_productos(productos)
+    except Exception:
+        pass
     return productos
 
 
@@ -2484,12 +2492,14 @@ def comercio_premios():
     )
 
 
-def _url_tienda_externa(comercio_id):
+def _url_tienda_externa(comercio_id, origen=None):
     """URL pública absoluta de la tienda (https detrás del proxy de Render)."""
     url = url_for('tienda_publica', comercio_id=comercio_id, _external=True)
     proto = (request.headers.get('X-Forwarded-Proto') or '').split(',')[0].strip().lower()
     if proto == 'https' and url.startswith('http://'):
         url = 'https://' + url[len('http://'):]
+    if origen:
+        url = f'{url}{"&" if "?" in url else "?"}origen={origen}'
     return url
 
 
@@ -2506,7 +2516,7 @@ def tienda_qr_png(comercio_id):
         return Response('Código QR no disponible.', status=503)
 
     try:
-        png = generar_qr_png(_url_tienda_externa(comercio_id))
+        png = generar_qr_png(_url_tienda_externa(comercio_id, origen='qr'))
     except Exception as error:
         print(f'[Localis QR] generación fallida: {error}')
         return Response('No se pudo generar el código QR.', status=500)

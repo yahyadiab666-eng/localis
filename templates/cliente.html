@@ -159,7 +159,7 @@
                   {% endif %}
                   <p class="text-amber-600 text-[11px] font-bold uppercase tracking-wider mb-1">{{ producto.comercio_nombre }}</p>
                   <h4 class="font-medium text-sm text-gray-900 line-clamp-1">{{ producto.nombre }}</h4>
-                  <p class="text-xs text-gray-500 line-clamp-2 mt-1">{{ producto.descripcion or 'Sin descripción disponible.' }}</p>
+                  <p class="text-xs text-gray-500 line-clamp-2 mt-1">{{ (producto.descripcion | default('', true) | trim) or 'Producto verificado disponible en tienda' }}</p>
                 </div>
                 <div class="mt-3 pt-2 border-t border-gray-100 flex items-center justify-between gap-2">
                   <span class="text-sm font-bold text-amber-600">${{ "%.2f"|format(producto.precio_usd) }}</span>
@@ -302,7 +302,9 @@
         modalImg.src = imgUrl;
         document.getElementById('modal-comercio').textContent = p.comercio_nombre || '';
         document.getElementById('modal-nombre').textContent = p.nombre || '';
-        document.getElementById('modal-descripcion').textContent = p.descripcion || 'Sin descripción.';
+        var _desc = (p.descripcion || '').trim();
+        document.getElementById('modal-descripcion').textContent =
+          _desc || 'Producto verificado disponible en tienda';
         const badgeDestacado = document.getElementById('modal-destacado');
         if (badgeDestacado) {
           badgeDestacado.style.display = p.destacado ? 'inline-flex' : 'none';

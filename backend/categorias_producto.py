@@ -213,3 +213,44 @@ def imagen_para_categoria(categoria):
     if cat != 'otros' and puntaje > 0:
         return f'{PLACEHOLDER_BASE}{cat}.svg'
     return f'{PLACEHOLDER_BASE}otros.svg'
+
+
+# Etiquetas legibles para chips de filtrado (clave -> nombre mostrado)
+ETIQUETAS_CATEGORIA = {
+    'ferreteria': 'Ferretería', 'tecnologia': 'Tecnología',
+    'automotriz': 'Automotriz', 'bebidas': 'Bebidas', 'belleza': 'Belleza',
+    'salud': 'Salud', 'bebes': 'Bebés', 'mascotas': 'Mascotas',
+    'juguetes': 'Juguetes', 'deportes': 'Deportes', 'papeleria': 'Papelería',
+    'ropa': 'Ropa', 'hogar': 'Hogar', 'alimentos': 'Alimentos', 'otros': 'Otros',
+}
+
+
+def etiqueta_categoria(categoria):
+    return ETIQUETAS_CATEGORIA.get(str(categoria or '').strip().lower(), 'Otros')
+
+
+def anotar_categoria_producto(producto):
+    """Inyecta categoria_id/categoria_nombre en runtime sin tocar la BD.
+
+    Retrocompatible: si el dict ya trae una categoría válida, se respeta.
+    """
+    try:
+        existente = str(producto.get('categoria_id') or '').strip().lower()
+        if existente and existente in CLAVES_CATEGORIA:
+            producto.setdefault('categoria_nombre', etiqueta_categoria(existente))
+            return producto
+        categoria = clasificar_categoria(
+            nombre=producto.get('nombre'),
+            descripcion=producto.get('descripcion'),
+            marca=producto.get('marca'),
+        )
+        producto['categoria_id'] = categoria
+        producto['categoria_nombre'] = etiqueta_categoria(categoria)
+    except Exception:
+        producto.setdefault('categoria_id', 'otros')
+        producto.setdefault('categoria_nombre', 'Otros')
+    return producto
+
+
+def anotar_categorias_productos(productos):
+    return [anotar_categoria_producto(p) for p in (productos or [])]
