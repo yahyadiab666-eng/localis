@@ -187,6 +187,67 @@ def _boost_disponible():
     return _BOOST_DISPONIBLE
 
 
+_DESTACADO_DISPONIBLE = None
+
+
+def _destacado_disponible():
+    """True si ``productos.destacado`` existe (cacheado). Degradación segura.
+
+    Igual que ``_activo_disponible``/``_boost_disponible``: si la migración aún
+    no se aplicó, intenta crear la columna de forma idempotente.
+    """
+    global _DESTACADO_DISPONIBLE
+    if _DESTACADO_DISPONIBLE is not None:
+        return _DESTACADO_DISPONIBLE
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'productos' AND column_name = 'destacado'
+                LIMIT 1
+                """
+            )
+            existe = cursor.fetchone() is not None
+    except Exception:
+        _DESTACADO_DISPONIBLE = False
+        return False
+    if not existe:
+        try:
+            with get_db_connection() as conexion:
+                cursor = conexion.cursor()
+                cursor.execute(
+                    'ALTER TABLE productos '
+                    'ADD COLUMN IF NOT EXISTS destacado INTEGER DEFAULT 0'
+                )
+                conexion.commit()
+            existe = True
+            print('[Localis] columna productos.destacado creada (auto-saneo)', flush=True)
+        except Exception as error:
+            print(f'[Localis] no se pudo crear productos.destacado: {type(error).__name__}')
+    _DESTACADO_DISPONIBLE = bool(existe)
+    return _DESTACADO_DISPONIBLE
+
+
+def _expresion_destacado(alias='p'):
+    """SQL booleano de "destacado" combinando boost de pago y flag manual.
+
+    Retrocompatible: si ninguna fuente existe, devuelve ``FALSE``.
+    """
+    partes = []
+    if _boost_disponible():
+        partes.append(
+            f'({alias}.boost_fin IS NOT NULL AND {alias}.boost_fin > CURRENT_TIMESTAMP)'
+        )
+    if _destacado_disponible():
+        partes.append(f'COALESCE({alias}.destacado, 0) = 1')
+    if not partes:
+        return 'FALSE'
+    return '(' + ' OR '.join(partes) + ')'
+
+
 _CONFIG_TTL_SEG = 120
 _POOL_MUESTRA_ALEATORIA = 400
 # Autorreparación de imágenes por importación (0 desactiva).
@@ -437,6 +498,7 @@ def registrar_comercio_completo(
                     )
 
             conexion.commit()
+            asegurar_slug_comercio(nuevo_id, nombre)
             return True, 'Comercio registrado con éxito.'
 
     except psycopg2.IntegrityError as e:
@@ -554,6 +616,71 @@ def obtener_comercio_por_id(comercio_id, solo_visible=True):
         return None
 
 
+def obtener_comercio_por_slug(slug, solo_visible=True):
+    """Comercio público por slug (URL amigable). ``None`` si no existe."""
+    valor = str(slug or '').strip().lower()
+    if not valor:
+        return None
+    try:
+        with get_db_connection(row_factory=sqlite3.Row) as conexion:
+            cursor = conexion.cursor()
+            query = """
+                SELECT c.*, cat.nombre AS categoria_nombre
+                FROM comercios c
+                LEFT JOIN categorias cat ON c.categoria_id = cat.id
+                WHERE LOWER(TRIM(c.slug)) = ?
+            """
+            if solo_visible:
+                query += _filtro_comercio_publico()
+            query += ' LIMIT 1'
+            cursor.execute(query, (valor,))
+            fila = cursor.fetchone()
+            return normalizar_fila_comercio(dict(fila)) if fila else None
+    except Exception as e:
+        print(f'Error al obtener comercio por slug: {e}')
+        return None
+
+
+def _asegurar_slug(tabla, entidad_id, nombre=None):
+    """Asigna slug a una fila si le falta. Nunca lanza (columna opcional)."""
+    from backend.utils import generar_slug
+
+    if not entidad_id:
+        return None
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            if not nombre:
+                cursor.execute(f'SELECT nombre FROM {tabla} WHERE id = ?', (int(entidad_id),))
+                fila = cursor.fetchone()
+                if not fila:
+                    return None
+                nombre = fila.get('nombre') if isinstance(fila, dict) else fila[0]
+            slug = generar_slug(nombre)
+            if not slug:
+                return None
+            cursor.execute(
+                f"UPDATE {tabla} SET slug = ? "
+                "WHERE id = ? AND (slug IS NULL OR TRIM(slug) = '')",
+                (slug, int(entidad_id)),
+            )
+            conexion.commit()
+            return slug
+    except Exception as error:
+        print(f'[Localis Slug] {tabla}.{entidad_id}: {error}', flush=True)
+        return None
+
+
+def asegurar_slug_comercio(comercio_id, nombre=None):
+    """Asigna slug a un comercio recién creado (si falta)."""
+    return _asegurar_slug('comercios', comercio_id, nombre)
+
+
+def asegurar_slug_producto(producto_id, nombre=None):
+    """Asigna slug a un producto recién creado (si falta)."""
+    return _asegurar_slug('productos', producto_id, nombre)
+
+
 def listar_comercios_por_usuario(usuario_id):
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
@@ -648,6 +775,53 @@ def buscar_y_filtrar_comercios(
         return []
 
 
+def listar_comercios_publicos_para_sitemap():
+    """Comercios visibles (id, slug, nombre) para el sitemap.xml."""
+    try:
+        with get_db_connection(row_factory=sqlite3.Row, read_only=True) as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT c.id, c.slug, c.nombre
+                FROM comercios c
+                WHERE 1=1
+                """
+                + _filtro_comercio_publico()
+                + ' ORDER BY c.id ASC'
+            )
+            return [dict(f) for f in cursor.fetchall()]
+    except Exception as e:
+        print(f'Error al listar comercios para sitemap: {e}')
+        return []
+
+
+def listar_productos_publicos_para_sitemap(limite=5000):
+    """Productos visibles (id, slug, comercio_id) para el sitemap.xml."""
+    try:
+        tope = max(1, int(limite or 5000))
+    except (TypeError, ValueError):
+        tope = 5000
+    try:
+        with get_db_connection(row_factory=sqlite3.Row, read_only=True) as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT p.id, p.slug, p.comercio_id
+                FROM comercios c
+                JOIN productos p ON p.comercio_id = c.id
+                WHERE 1=1
+                """
+                + _filtro_comercio_publico()
+                + _filtro_producto_publico()
+                + ' ORDER BY p.id DESC LIMIT ?',
+                (tope,),
+            )
+            return [dict(f) for f in cursor.fetchall()]
+    except Exception as e:
+        print(f'Error al listar productos para sitemap: {e}')
+        return []
+
+
 # ==========================================
 # GESTIÓN DE PRODUCTOS
 # ==========================================
@@ -695,19 +869,10 @@ def _base_query_productos_publicos(con_maestro=True, con_categoria=False):
     else:
         cat_select = 'NULL::text AS categoria_nombre'
         cat_join = ''
-    # Destacados / Boosts: el estado depende estricta e inequívocamente del ID
-    # del producto (``p.id`` -> ``p.boost_fin``) y de que la fecha no haya
-    # expirado. No se hereda el boost de la tienda (evita "fantasmas").
-    if _boost_disponible():
-        boost_select = (
-            'p.boost_fin AS boost_fin, '
-            '(p.boost_fin IS NOT NULL AND p.boost_fin > CURRENT_TIMESTAMP) AS destacado_producto'
-        )
-    else:
-        boost_select = (
-            'NULL::timestamp AS boost_fin, '
-            'FALSE AS destacado_producto'
-        )
+    # Destacados: boost de pago vigente OR flag manual del panel admin.
+    # No se hereda el boost de la tienda (evita "fantasmas").
+    boost_col = 'p.boost_fin AS boost_fin, ' if _boost_disponible() else 'NULL::timestamp AS boost_fin, '
+    boost_select = f'{boost_col}{_expresion_destacado("p")} AS destacado_producto'
     return f"""
         SELECT
             p.id,
@@ -790,8 +955,12 @@ def _aplicar_filtros_productos(query, parametros, palabra_clave, categoria_nombr
         parametros.extend(params_palabras)
 
     if categoria_nombre:
-        query += ' AND cat.nombre = ?'
-        parametros.append(categoria_nombre)
+        # Comparación tolerante a mayúsculas/espacios: los chips vienen de la BD
+        # y el usuario puede llegar con "Tecnología ", "tecnologia", etc.
+        categoria_limpia = str(categoria_nombre).strip()
+        if categoria_limpia:
+            query += ' AND LOWER(TRIM(cat.nombre)) = LOWER(TRIM(?))'
+            parametros.append(categoria_limpia)
 
     return query, parametros
 
@@ -923,12 +1092,11 @@ def _buscar_y_filtrar_productos_once(
             query, parametros = _aplicar_filtros_productos(
                 query, parametros, palabra_clave, categoria_nombre, comercio_id
             )
-            # Destacados / Boosts primero (solo por ID/fecha del producto),
-            # luego por novedad (sin sobrecarga; usa idx_productos_boost_fin).
-            if _boost_disponible():
+            # Destacados (boost vigente o flag manual) primero, luego novedad.
+            if _boost_disponible() or _destacado_disponible():
                 query += (
                     ' ORDER BY '
-                    'CASE WHEN (p.boost_fin IS NOT NULL AND p.boost_fin > CURRENT_TIMESTAMP) '
+                    f'CASE WHEN {_expresion_destacado("p")} '
                     'THEN 0 ELSE 1 END, p.id DESC'
                 )
             else:
@@ -983,16 +1151,16 @@ def listar_portada_hibrida(limit, offset=0):
 
             # 1) Destacados: fijos arriba (estables).
             destacados_ids = []
-            if _boost_disponible():
+            destacado_disponible = _boost_disponible() or _destacado_disponible()
+            if destacado_disponible:
                 cursor.execute(
                     f"""
                     SELECT p.id AS id
                     FROM comercios c
                     JOIN productos p ON p.comercio_id = c.id
                     WHERE 1=1 {filtros}
-                      AND p.boost_fin IS NOT NULL
-                      AND p.boost_fin > CURRENT_TIMESTAMP
-                    ORDER BY p.boost_fin DESC, p.id DESC
+                      AND {_expresion_destacado('p')}
+                    ORDER BY p.id DESC
                     LIMIT ?
                     """,
                     (pool,),
@@ -1006,10 +1174,8 @@ def listar_portada_hibrida(limit, offset=0):
             # 2) No destacados: tope por comercio (equidad) y mezcla aleatoria.
             cap = _cap_productos_por_comercio(cursor, pool)
             excluir_destacados = ''
-            if _boost_disponible():
-                excluir_destacados = (
-                    ' AND (p.boost_fin IS NULL OR p.boost_fin <= CURRENT_TIMESTAMP)'
-                )
+            if destacado_disponible:
+                excluir_destacados = f' AND NOT {_expresion_destacado("p")}'
             cursor.execute(
                 f"""
                 SELECT id FROM (
@@ -1082,13 +1248,8 @@ def obtener_producto_publico(producto_id):
     """Producto con datos de tienda para modal/vista pública."""
     try:
         tasa = obtener_tasa_dolar() or 1.0
-        if _boost_disponible():
-            # Solo el ID del producto y su fecha; nunca el boost de la tienda.
-            boost_select = (
-                '(p.boost_fin IS NOT NULL AND p.boost_fin > CURRENT_TIMESTAMP) AS destacado_producto'
-            )
-        else:
-            boost_select = 'FALSE AS destacado_producto'
+        # Destacado = boost vigente o flag manual del panel admin.
+        boost_select = f'{_expresion_destacado("p")} AS destacado_producto'
         with get_db_connection(row_factory=sqlite3.Row, read_only=True) as conexion:
             cursor = conexion.cursor()
             cursor.execute(
@@ -1127,6 +1288,42 @@ def obtener_producto_publico(producto_id):
     except Exception as e:
         print(f'Error al obtener producto público: {e}')
         return None
+
+
+def obtener_producto_publico_por_slug(slug):
+    """Producto público por slug (URL amigable). ``None`` si no existe.
+
+    Si dos productos comparten slug, resuelve el más reciente visible.
+    """
+    valor = str(slug or '').strip().lower()
+    if not valor:
+        return None
+    producto_id = None
+    try:
+        with get_db_connection(row_factory=sqlite3.Row, read_only=True) as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                f"""
+                SELECT p.id
+                FROM comercios c
+                JOIN productos p ON p.comercio_id = c.id
+                WHERE LOWER(TRIM(p.slug)) = ?
+                {_filtro_comercio_publico()}{_filtro_producto_publico()}
+                ORDER BY p.id DESC
+                LIMIT 1
+                """,
+                (valor,),
+            )
+            fila = cursor.fetchone()
+            if not fila:
+                return None
+            producto_id = _valor_fila(fila, 'id', 0)
+    except Exception as e:
+        print(f'Error al obtener producto por slug: {e}')
+        return None
+    if producto_id is None:
+        return None
+    return obtener_producto_publico(producto_id)
 
 
 def obtener_producto_por_id(producto_id, comercio_id=None):

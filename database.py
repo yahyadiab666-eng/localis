@@ -143,6 +143,7 @@ COLUMNAS_ESQUEMA = {
     'comercios': [
         ('usuario_id', 'INTEGER'),
         ('nombre', 'TEXT'),
+        ('slug', 'TEXT'),
         ('descripcion', 'TEXT'),
         ('telefono', 'TEXT'),
         ('documento_identidad', 'TEXT'),
@@ -183,6 +184,7 @@ COLUMNAS_ESQUEMA = {
     'productos': [
         ('comercio_id', 'INTEGER'),
         ('nombre', 'TEXT'),
+        ('slug', 'TEXT'),
         ('precio_usd', 'DOUBLE PRECISION'),
         ('descripcion', 'TEXT'),
         ('imagen_url', 'TEXT'),
@@ -195,6 +197,8 @@ COLUMNAS_ESQUEMA = {
         ('stock', 'INTEGER DEFAULT 0'),
         ('codigo_barras', 'TEXT'),
         ('activo', 'INTEGER DEFAULT 1'),
+        # Destacado manual (interruptor del panel admin). Independiente del boost.
+        ('destacado', 'INTEGER DEFAULT 0'),
         # Destacados / Boosts (micro-pago) a nivel de producto. UTC estricto.
         ('boost_inicio', 'TIMESTAMPTZ'),
         ('boost_fin', 'TIMESTAMPTZ'),
@@ -1615,10 +1619,79 @@ def _asignar_plan_id_existentes(cursor):
         )
 
 
+def _backfill_slugs(cursor):
+    """Rellena ``slug`` de comercios y productos existentes (idempotente).
+
+    No toca filas con slug. Garantiza unicidad por tabla añadiendo un sufijo
+    numérico cuando dos entidades comparten el mismo nombre base.
+    """
+    try:
+        from backend.utils import generar_slug
+    except Exception:
+        return
+
+    for tabla in ('comercios', 'productos'):
+        if not _tabla_existe(cursor, tabla):
+            continue
+        if not _columna_existe(cursor, tabla, 'slug'):
+            continue
+        try:
+            cursor.execute(
+                f"SELECT id, nombre FROM {tabla} "
+                "WHERE slug IS NULL OR TRIM(slug) = '' ORDER BY id ASC"
+            )
+            pendientes = cursor.fetchall() or []
+        except Exception as error:
+            print(f'[Localis Slug] no se pudo leer {tabla}: {error}', flush=True)
+            continue
+        if not pendientes:
+            continue
+        try:
+            cursor.execute(
+                f"SELECT slug FROM {tabla} "
+                "WHERE slug IS NOT NULL AND TRIM(slug) <> ''"
+            )
+            usados = set()
+            for fila in cursor.fetchall() or []:
+                valor = fila.get('slug') if isinstance(fila, dict) else fila[0]
+                if valor:
+                    usados.add(str(valor).strip().lower())
+        except Exception:
+            usados = set()
+        actualizados = 0
+        for fila in pendientes:
+            if isinstance(fila, dict):
+                entidad_id, nombre = fila.get('id'), fila.get('nombre')
+            else:
+                entidad_id, nombre = fila[0], fila[1]
+            base = generar_slug(nombre) or f'{tabla[:-1]}-{entidad_id}'
+            slug = base
+            n = 2
+            while slug.lower() in usados:
+                slug = f'{base}-{n}'
+                n += 1
+            usados.add(slug.lower())
+            try:
+                cursor.execute(
+                    f'UPDATE {tabla} SET slug = ? WHERE id = ?',
+                    (slug, entidad_id),
+                )
+                actualizados += 1
+            except Exception as error:
+                print(f'[Localis Slug] {tabla}.{entidad_id}: {error}', flush=True)
+        if actualizados:
+            print(
+                f'[Localis Slug] {tabla}: {actualizados} slugs generados',
+                flush=True,
+            )
+
+
 def _crear_indices(cursor):
     indices = [
         'CREATE INDEX IF NOT EXISTS idx_productos_comercio_id ON productos(comercio_id)',
         'CREATE INDEX IF NOT EXISTS idx_productos_comercio_id_desc ON productos(comercio_id, id DESC)',
+        'CREATE INDEX IF NOT EXISTS idx_comercios_slug ON comercios(slug)',
+        'CREATE INDEX IF NOT EXISTS idx_productos_slug ON productos(slug)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_publicos ON comercios(visible, estado_pago)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_vencimiento ON comercios(fecha_vencimiento)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_plan_pendiente ON comercios(plan_pendiente) WHERE plan_pendiente IS NOT NULL',
@@ -1756,6 +1829,7 @@ def init_db():
             try:
                 _crear_tablas(cursor)
                 _migrar_columnas(cursor)
+                _backfill_slugs(cursor)
                 _reconciliar_estados_imagenes(cursor)
                 conexion.commit()
 

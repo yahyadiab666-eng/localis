@@ -3,7 +3,29 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>{{ comercio.nombre }} - Localis</title>
+  {% set og_img = (producto_seleccionado.imagen_url if producto_seleccionado else None) or comercio.banner_completo or comercio.logo_completo or default_banner %}
+  {% set og_img_abs = og_img if og_img.startswith('http') else request.url_root.rstrip('/') ~ og_img %}
+  {% if producto_seleccionado %}
+    {% set seo_titulo = producto_seleccionado.nombre ~ ' — ' ~ comercio.nombre ~ ' | Localis' %}
+    {% set seo_desc = (producto_seleccionado.descripcion | default('', true) | trim) or ('Consulta ' ~ producto_seleccionado.nombre ~ ' en ' ~ comercio.nombre ~ ' a través de Localis.') %}
+  {% else %}
+    {% set seo_titulo = comercio.nombre ~ ' | Localis' %}
+    {% set seo_desc = (comercio.descripcion | default('', true) | trim) or ('Catálogo de ' ~ comercio.nombre ~ ' en Localis: productos y precios en dólares y bolívares.') %}
+  {% endif %}
+  <title>{{ seo_titulo }}</title>
+  {% set canonical_url = request.url_root.rstrip('/') ~ (url_for('tienda_publica', slug=comercio.slug) if comercio.slug else url_for('tienda_publica', comercio_id=comercio.id)) %}
+  <link rel="canonical" href="{{ canonical_url }}">
+  <meta name="description" content="{{ seo_desc }}">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Localis">
+  <meta property="og:title" content="{{ seo_titulo }}">
+  <meta property="og:description" content="{{ seo_desc }}">
+  <meta property="og:url" content="{{ canonical_url }}">
+  <meta property="og:image" content="{{ og_img_abs }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ seo_titulo }}">
+  <meta name="twitter:description" content="{{ seo_desc }}">
+  <meta name="twitter:image" content="{{ og_img_abs }}">
   <!-- PWA -->
   <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
   <meta name="theme-color" content="#F59E0B">

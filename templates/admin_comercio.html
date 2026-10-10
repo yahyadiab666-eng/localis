@@ -59,6 +59,16 @@
         .banner-mini { width: 100%; max-height: 110px; object-fit: cover; border-radius: 6px; margin-bottom: 12px; }
         .logo-mini { width: 42px; height: 42px; object-fit: cover; border-radius: 8px; border: 1px solid #e1e4e8; }
         .muted { color: #6b7280; font-size: 0.82rem; }
+        .toggle-destacado {
+            width: 42px; height: 22px; border-radius: 999px; border: none;
+            background: #cbd5e1; position: relative; cursor: pointer; vertical-align: middle;
+        }
+        .toggle-destacado .knob {
+            position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+            border-radius: 50%; background: #fff; transition: left .15s ease;
+        }
+        .toggle-destacado.activo { background: #f59e0b; }
+        .toggle-destacado.activo .knob { left: 22px; }
     </style>
 </head>
 <body>
@@ -69,7 +79,9 @@
             <a href="{{ url_for('panel_admin') }}">&larr; Volver al panel</a>
             <a href="{{ url_for('admin_usuarios') }}">Usuarios</a>
             {% if comercio.id %}
-            <a href="{{ url_for('tienda_publica', comercio_id=comercio.id) }}" target="_blank" rel="noopener">Ver tienda pública</a>
+            <a href="{{ url_for('admin_editar_comercio', comercio_id=comercio.id) }}">Editar tienda</a>
+            <a href="{{ url_for('admin_nuevo_producto', comercio_id=comercio.id) }}">Añadir producto</a>
+            <a href="{{ url_for('tienda_publica', slug=comercio.slug) if comercio.slug else url_for('tienda_publica', comercio_id=comercio.id) }}" target="_blank" rel="noopener">Ver tienda pública</a>
             {% endif %}
             <form method="POST" action="{{ url_for('logout') }}" style="display:inline;"
                   onsubmit="return confirm('¿Seguro que quieres cerrar sesión?');">
@@ -78,6 +90,10 @@
             </form>
         </div>
     </header>
+    <div style="max-width:1200px;margin:0.75rem auto 0;padding:0 1rem;font-size:0.85rem;color:#6b7280;">
+        Comercio: <strong>{{ comercio.nombre }}</strong> (ID {{ comercio.id }})
+        {% if comercio.slug %}&middot; <span class="muted">/tienda/{{ comercio.slug }}</span>{% endif %}
+    </div>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -283,6 +299,7 @@
                                 <th>Precio Bs</th>
                                 <th>Código</th>
                                 <th>Estado</th>
+                                <th>Destacado</th>
                                 <th>Acción</th>
                             </tr>
                         </thead>
@@ -307,6 +324,22 @@
                                     <br><small class="muted">{{ producto.imagen_estado or 'pendiente' }}</small>
                                 </td>
                                 <td>
+                                    {% set es_destacado = (producto.destacado or 0) == 1 %}
+                                    <form action="{{ url_for('admin_destacar_producto', producto_id=producto.id) }}" method="POST" style="display:inline;"
+                                          onsubmit="this.querySelector('button').disabled=true;">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="comercio_id" value="{{ comercio.id }}">
+                                        <input type="hidden" name="destacado" value="{{ 0 if es_destacado else 1 }}">
+                                        <button type="submit" class="toggle-destacado {{ 'activo' if es_destacado else '' }}"
+                                                title="{{ 'Quitar destacado' if es_destacado else 'Marcar como destacado' }}"
+                                                aria-pressed="{{ 'true' if es_destacado else 'false' }}"
+                                                aria-label="Cambiar destacado de {{ producto.nombre }}">
+                                            <span class="knob"></span>
+                                        </button>
+                                    </form>
+                                    <br><small class="muted">{{ 'Destacado' if es_destacado else 'Normal' }}</small>
+                                </td>
+                                <td>
                                     <a href="{{ url_for('admin_editar_producto', comercio_id=comercio.id, producto_id=producto.id) }}"
                                        class="btn-accion-tabla btn-resolver" style="text-decoration:none;display:inline-block;margin-bottom:4px;"
                                        title="Editar producto">Editar</a>
@@ -320,7 +353,7 @@
                             </tr>
                             {% else %}
                             <tr>
-                                <td colspan="8" style="text-align:center;padding:2rem;color:#666;">Este comercio no tiene productos en su catálogo.</td>
+                                <td colspan="9" style="text-align:center;padding:2rem;color:#666;">Este comercio no tiene productos en su catálogo.</td>
                             </tr>
                             {% endfor %}
                         </tbody>

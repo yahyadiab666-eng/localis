@@ -500,20 +500,70 @@ def obtener_productos_admin(comercio_id):
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
-            cursor.execute(
-                """
-                SELECT id, nombre, descripcion, precio_usd, codigo_barras, stock,
-                       imagen_url, imagen_estado, activo
-                FROM productos
-                WHERE comercio_id = ?
-                ORDER BY id DESC
-                """,
-                (int(comercio_id),),
-            )
-            return [dict(f) for f in cursor.fetchall()]
+            try:
+                cursor.execute(
+                    """
+                    SELECT id, nombre, descripcion, precio_usd, codigo_barras, stock,
+                           imagen_url, imagen_estado, activo, destacado
+                    FROM productos
+                    WHERE comercio_id = ?
+                    ORDER BY id DESC
+                    """,
+                    (int(comercio_id),),
+                )
+                return [dict(f) for f in cursor.fetchall()]
+            except Exception:
+                # Degradación: si ``destacado`` aún no existe, no romper el listado.
+                try:
+                    conexion.rollback()
+                except Exception:
+                    pass
+                cursor.execute(
+                    """
+                    SELECT id, nombre, descripcion, precio_usd, codigo_barras, stock,
+                           imagen_url, imagen_estado, activo
+                    FROM productos
+                    WHERE comercio_id = ?
+                    ORDER BY id DESC
+                    """,
+                    (int(comercio_id),),
+                )
+                return [dict(f) for f in cursor.fetchall()]
     except Exception as e:
         print(f'Error al listar productos admin (comercio={comercio_id}): {e}')
         return []
+
+
+def alternar_destacado_producto(admin_id, producto_id, destacado):
+    """Activa/desactiva el flag manual ``productos.destacado`` (panel admin).
+
+    Independiente del boost de pago: la vista pública combina ambos. Retorna
+    ``(exito, mensaje, nuevo_estado)``.
+    """
+    valor = str(destacado).strip().lower()
+    nuevo = 1 if valor in ('1', 'true', 'on', 'si', 'sí', 'yes') else 0
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                'UPDATE productos SET destacado = ? WHERE id = ?',
+                (nuevo, int(producto_id)),
+            )
+            if cursor.rowcount == 0:
+                conexion.rollback()
+                return False, 'Producto no encontrado.', None
+            _registrar_auditoria_admin(
+                cursor,
+                admin_id,
+                'Cambio de destacado (admin)',
+                f'Producto {int(producto_id)} '
+                f'{"destacado" if nuevo else "no destacado"} por el administrador.',
+            )
+            conexion.commit()
+        mensaje = 'Producto destacado.' if nuevo else 'Producto ya no está destacado.'
+        return True, mensaje, bool(nuevo)
+    except Exception as e:
+        return False, f'Error al cambiar el destacado: {e}', None
 
 
 def eliminar_producto_admin(producto_id, admin_id, comercio_id=None):

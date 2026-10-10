@@ -127,6 +127,7 @@ from backend.admin import (
     actualizar_comercio_admin,
     actualizar_producto_admin,
     actualizar_tasa_dolar,
+    alternar_destacado_producto,
     cambiar_plan_comercio,
     cambiar_visibilidad_comercio,
     confirmar_pago_suscripcion,
@@ -221,14 +222,20 @@ from backend.import_queue import (
 from backend.stores import (
     actualizar_datos_comercio,
     actualizar_producto,
+    asegurar_slug_comercio,
+    asegurar_slug_producto,
     buscar_y_filtrar_productos,
     eliminar_producto,
     listar_comercios_por_usuario,
+    listar_comercios_publicos_para_sitemap,
     listar_portada_hibrida,
+    listar_productos_publicos_para_sitemap,
     obtener_comercio_por_id,
+    obtener_comercio_por_slug,
     obtener_comercio_por_usuario,
     obtener_config,
     obtener_producto_publico,
+    obtener_producto_publico_por_slug,
     obtener_productos_comercio,
     obtener_tasa_dolar,
     registrar_comercio_completo,
@@ -1028,7 +1035,6 @@ def index():
     categoria = request.args.get('categoria', '').strip()
 
     hay_filtros = bool(palabra_clave or categoria)
-
     try:
         crudo_pagina = (
             os.getenv('LOCALIS_CATALOGO_PAGINA')
@@ -1090,10 +1096,17 @@ def index():
         banner_url = DEFAULT_BANNER_URL
         whatsapp = WHATSAPP_SOPORTE
 
+    # Fase 1: chips de categorías dinámicos (obtenidos de la BD).
+    try:
+        categorias = obtener_categorias_admin()
+    except Exception:
+        categorias = []
+
     _debug_imagenes_antes_de_render(productos, 'index')
     return render_template(
         'cliente.html',
         productos=productos,
+        categorias=categorias,
         tasa=tasa_actual,
         q=palabra_clave,
         categoria_actual=categoria,
@@ -1167,32 +1180,51 @@ def imagen_producto_respaldo():
 
 
 @app.route('/producto/<int:producto_id>')
-def producto_publico(producto_id):
-    """URL individual y canónica de un producto.
+@app.route('/producto/<string:slug>')
+def producto_publico(producto_id=None, slug=None):
+    """URL individual y canónica de un producto (por ID o por slug SEO).
 
-    Estructura limpia: ``/producto/<id>`` redirige a la ficha del producto
-    dentro de su tienda pública (``/tienda/<comercio_id>?producto=<id>#producto-<id>``)
-    para que se abra resaltada y lista para compartir.
+    ``/producto/<id>`` y ``/producto/<slug>`` redirigen a la ficha del producto
+    dentro de su tienda pública para que se abra resaltada y lista para compartir.
     """
-    producto = obtener_producto_publico(producto_id)
+    if producto_id is None and slug:
+        producto = obtener_producto_publico_por_slug(slug)
+    else:
+        producto = obtener_producto_publico(producto_id)
     if not producto or not producto.get('comercio_id'):
         flash('Producto no encontrado o no disponible.', 'error')
         return redirect(url_for('index'))
-    destino = url_for(
-        'tienda_publica',
-        comercio_id=producto['comercio_id'],
-        producto=producto_id,
-    )
-    return redirect(destino + f'#producto-{producto_id}')
+    producto_id_real = producto.get('id') or producto_id
+    # Destino amigable: se prefiere el slug de la tienda si existe.
+    tienda_slug = None
+    try:
+        comercio = obtener_comercio_por_id(producto['comercio_id'])
+        tienda_slug = (comercio or {}).get('slug')
+    except Exception:
+        tienda_slug = None
+    if tienda_slug:
+        destino = url_for('tienda_publica', slug=tienda_slug, producto=producto_id_real)
+    else:
+        destino = url_for(
+            'tienda_publica',
+            comercio_id=producto['comercio_id'],
+            producto=producto_id_real,
+        )
+    return redirect(destino + f'#producto-{producto_id_real}')
 
 
 @app.route('/tienda/<int:comercio_id>')
-def tienda_publica(comercio_id):
-    comercio = obtener_comercio_por_id(comercio_id, solo_visible=True)
+@app.route('/tienda/<string:slug>')
+def tienda_publica(comercio_id=None, slug=None):
+    if comercio_id is None and slug:
+        comercio = obtener_comercio_por_slug(slug)
+    else:
+        comercio = obtener_comercio_por_id(comercio_id, solo_visible=True)
     if not comercio:
         flash('Tienda no encontrada o no disponible.', 'error')
         return redirect(url_for('index'))
 
+    comercio_id = comercio.get('id') or comercio_id
     palabra_clave = request.args.get('q', '').strip()
     origen = (request.args.get('origen') or 'web').strip().lower()[:20]
     productos = buscar_y_filtrar_productos(
@@ -1238,11 +1270,21 @@ def tienda_publica(comercio_id):
         for producto in productos:
             producto['whatsapp_url'] = None
 
+    # SEO: si la URL trae ?producto=<id>, se usan sus metadatos para Open Graph.
+    producto_seleccionado = None
+    producto_param = request.args.get('producto')
+    if producto_param and str(producto_param).strip().isdigit():
+        try:
+            producto_seleccionado = obtener_producto_publico(int(producto_param))
+        except Exception:
+            producto_seleccionado = None
+
     _debug_imagenes_antes_de_render(productos, 'tienda_publica')
     return render_template(
         'tienda_publica.html',
         comercio=comercio,
         productos=productos,
+        producto_seleccionado=producto_seleccionado,
         tasa=tasa_actual,
         q=palabra_clave,
         origen=origen,
@@ -2018,6 +2060,7 @@ def nuevo_producto():
                 producto_id = fila[0] if fila else None
             _sincronizar_foto_local_si_aplica(producto_id, imagen_url)
             _registrar_imagen_manual(producto_id, imagen_url)
+            asegurar_slug_producto(producto_id, nombre)
             flash('Producto agregado con éxito.', 'exito')
             return redirect(url_for('panel_comercio'))
         except Exception as e:
@@ -2612,6 +2655,7 @@ def api_crear_producto():
 
     _sincronizar_foto_local_si_aplica(producto_id, imagen_url)
     _registrar_imagen_manual(producto_id, imagen_url)
+    asegurar_slug_producto(producto_id, nombre)
     return jsonify(
         {
             'ok': True,
@@ -3082,6 +3126,7 @@ def admin_nuevo_producto(comercio_id):
         if exito:
             _sincronizar_foto_local_si_aplica(producto_id, imagen_url)
             _registrar_imagen_manual(producto_id, imagen_url)
+            asegurar_slug_producto(producto_id, nombre)
         flash(mensaje, 'exito' if exito else 'error')
         return redirect(url_for('admin_comercio_detalle', comercio_id=comercio_id))
 
@@ -3287,6 +3332,70 @@ def admin_eliminar_producto_ruta(producto_id):
             url_for('admin_comercio_detalle', comercio_id=comercio_id)
         )
     return redirect(url_for('panel_admin'))
+
+
+@app.route('/admin/producto/destacar/<int:producto_id>', methods=['POST'])
+@admin_requerido
+def admin_destacar_producto(producto_id):
+    """Activa/desactiva el destacado manual de un producto (toggle de un clic)."""
+    valor = request.form.get('destacado', request.form.get('nuevo_estado'))
+    if valor is None:
+        datos = request.get_json(silent=True) if request.is_json else None
+        if datos:
+            valor = datos.get('destacado', datos.get('nuevo_estado'))
+    if valor is None:
+        producto = obtener_producto_admin(producto_id)
+        if not producto:
+            if _peticion_acepta_json():
+                return jsonify({'ok': False, 'error': 'Producto no encontrado.'}), 404
+            flash('Producto no encontrado.', 'error')
+            return redirect(url_for('panel_admin'))
+        valor = 0 if str(producto.get('destacado') or 0) in ('1', 'true', 'True') else 1
+
+    exito, mensaje, nuevo = alternar_destacado_producto(
+        session.get('usuario_id'), producto_id, valor
+    )
+    if _peticion_acepta_json():
+        return (
+            jsonify({'ok': exito, 'mensaje': mensaje, 'destacado': bool(nuevo)}),
+            200 if exito else 400,
+        )
+    flash(mensaje, 'exito' if exito else 'error')
+    comercio_id = request.form.get('comercio_id', type=int)
+    if comercio_id:
+        return redirect(url_for('admin_comercio_detalle', comercio_id=comercio_id))
+    return redirect(url_for('panel_admin'))
+
+
+@app.route('/sitemap.xml')
+def sitemap_xml():
+    """Mapa del sitio XML (tiendas y productos públicos) para Search Console."""
+    from xml.sax.saxutils import escape as _xml_escape
+
+    base = request.url_root.rstrip('/')
+    urls = []
+    try:
+        for comercio in listar_comercios_publicos_para_sitemap() or []:
+            slug = str(comercio.get('slug') or '').strip()
+            ruta = f'/tienda/{slug}' if slug else f"/tienda/{comercio.get('id')}"
+            urls.append(f'{base}{ruta}')
+    except Exception:
+        traceback.print_exc()
+    try:
+        for producto in listar_productos_publicos_para_sitemap() or []:
+            slug = str(producto.get('slug') or '').strip()
+            ruta = f'/producto/{slug}' if slug else f"/producto/{producto.get('id')}"
+            urls.append(f'{base}{ruta}')
+    except Exception:
+        traceback.print_exc()
+
+    lineas = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ]
+    lineas.extend(f'  <url><loc>{_xml_escape(u)}</loc></url>' for u in urls)
+    lineas.append('</urlset>')
+    return Response('\n'.join(lineas), mimetype='application/xml')
 
 
 @app.route('/admin/comercio/plan/<int:comercio_id>', methods=['POST'])

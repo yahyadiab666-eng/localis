@@ -1,6 +1,7 @@
 """Utilidades compartidas para URLs, contacto y fechas."""
 
 import re
+import unicodedata
 from datetime import date, datetime
 from urllib.parse import quote
 
@@ -328,6 +329,31 @@ def normalizar_nombre_producto(valor):
     if not texto or texto in _VALORES_CODIGO_VACIOS:
         return None
     return ' '.join(texto.split()) or None
+
+
+def generar_slug(texto, maximo=80, sufijo=None):
+    """Convierte texto libre en un slug limpio para URLs SEO amigables.
+
+    - Elimina acentos/diacríticos (NFKD) y pasa a minúsculas.
+    - Reemplaza cualquier caracter no alfanumérico por guiones.
+    - Colapsa guiones repetidos y recorta extremos.
+    - ``sufijo`` (p. ej. el id) evita colisiones.
+
+    Retorna ``None`` si no queda ningún carácter válido.
+    """
+    if texto is None:
+        return None
+    normalizado = unicodedata.normalize('NFKD', str(texto))
+    normalizado = ''.join(c for c in normalizado if not unicodedata.combining(c))
+    slug = re.sub(r'[^a-z0-9]+', '-', normalizado.lower()).strip('-')
+    slug = re.sub(r'-{2,}', '-', slug)
+    if sufijo is not None and str(sufijo).strip():
+        sufijo_slug = re.sub(r'[^a-z0-9]+', '-', str(sufijo).lower()).strip('-')
+        if sufijo_slug:
+            slug = f'{slug}-{sufijo_slug}' if slug else sufijo_slug
+    if not slug:
+        return None
+    return slug[:maximo].strip('-') or None
 
 
 def normalizar_clave_imagen_catalogo(nombre, descripcion=None):
