@@ -157,7 +157,14 @@
                     <i data-lucide="sparkles" style="width:10px;height:10px;"></i> Destacado
                   </span>
                   {% endif %}
-                  <p class="text-amber-600 text-[11px] font-bold uppercase tracking-wider mb-1">{{ producto.comercio_nombre }}</p>
+                  <div class="flex items-center justify-between gap-1.5 mb-1">
+                    <p class="text-amber-600 text-[11px] font-bold uppercase tracking-wider truncate">{{ producto.comercio_nombre }}</p>
+                    {# Categoría calculada en runtime (backend.categorias_producto). Fallback: se omite. #}
+                    {% set categoria_producto = (producto.categoria_nombre | default('', true) | trim) %}
+                    {% if categoria_producto and categoria_producto | lower != 'otros' %}
+                      <span class="localis-chip-categoria shrink-0 inline-flex items-center text-[9px] font-semibold text-stone-500 bg-stone-100 rounded-full px-2 py-0.5">{{ categoria_producto }}</span>
+                    {% endif %}
+                  </div>
                   <h4 class="font-medium text-sm text-gray-900 line-clamp-1">{{ producto.nombre }}</h4>
                   <p class="text-xs text-gray-500 line-clamp-2 mt-1">{{ (producto.descripcion | default('', true) | trim) or 'Producto verificado disponible en tienda' }}</p>
                 </div>
@@ -226,7 +233,10 @@
              decoding="async" referrerpolicy="no-referrer">
       </div>
       <div class="p-6 space-y-3">
-        <p id="modal-comercio" class="text-amber-600 text-xs font-bold uppercase tracking-wider"></p>
+        <div class="flex items-center gap-2 flex-wrap">
+          <p id="modal-comercio" class="text-amber-600 text-xs font-bold uppercase tracking-wider"></p>
+          <span id="modal-categoria" class="localis-chip-categoria text-[10px] font-semibold text-stone-500 bg-stone-100 rounded-full px-2 py-0.5" style="display:none;"></span>
+        </div>
         <span id="modal-destacado" class="localis-badge-destacado inline-flex items-center gap-1" style="display:none;">
           <i data-lucide="sparkles" style="width:10px;height:10px;"></i> Destacado
         </span>
@@ -301,6 +311,14 @@
         modalImg.alt = p.nombre || '';
         modalImg.src = imgUrl;
         document.getElementById('modal-comercio').textContent = p.comercio_nombre || '';
+        // Categoría runtime del producto (si el backend la expone). Sin ella, el chip se oculta.
+        var _catProducto = (p.categoria_nombre || '').trim();
+        var _chipCategoria = document.getElementById('modal-categoria');
+        if (_chipCategoria) {
+          var _mostrarCat = _catProducto && _catProducto.toLowerCase() !== 'otros';
+          _chipCategoria.textContent = _mostrarCat ? _catProducto : '';
+          _chipCategoria.style.display = _mostrarCat ? 'inline-flex' : 'none';
+        }
         document.getElementById('modal-nombre').textContent = p.nombre || '';
         var _desc = (p.descripcion || '').trim();
         document.getElementById('modal-descripcion').textContent =
