@@ -1,4 +1,4 @@
-package com.localis.app;
+package com.onrender.localis.twa;
 
 import com.getcapacitor.BridgeActivity;
 

@@ -1,10 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace "com.localis.app"
+    namespace "com.onrender.localis.twa"
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.localis.app"
+        applicationId "com.onrender.localis.twa"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

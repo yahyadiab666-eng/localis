@@ -2,6 +2,6 @@
 <resources>
     <string name="app_name">Localis</string>
     <string name="title_activity_main">Localis</string>
-    <string name="package_name">com.localis.app</string>
-    <string name="custom_url_scheme">com.localis.app</string>
+    <string name="package_name">com.onrender.localis.twa</string>
+    <string name="custom_url_scheme">com.onrender.localis.twa</string>
 </resources>

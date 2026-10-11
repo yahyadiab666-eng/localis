@@ -1,4 +1,10 @@
-﻿.env
+﻿# Entorno / secretos (nunca versionar valores reales)
+.env
+.env.*
+!.env.example
+*.env
+*.pem
+*.key
 __pycache__/
 *.pyc
 instance/
