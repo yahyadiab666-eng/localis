@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.onrender.localis.twa",
+      "sha256_cert_fingerprints": [
+        "22:DF:A6:EE:1B:9A:9A:36:8A:08:8E:E6:10:EC:CD:48:2A:27:E3:0A:2B:D9:A9:F1:AD:C0:B3:17:AA:E6:10:E5"
+      ]
+    }
+  }
+]

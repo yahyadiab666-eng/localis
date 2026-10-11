@@ -982,13 +982,24 @@ def eliminar_cuenta():
 
 @app.route('/.well-known/assetlinks.json')
 def assetlinks():
-    """Digital Asset Links para la vinculación TWA <-> dominio (si se usa TWA).
+    """Digital Asset Links para la vinculación TWA <-> dominio.
 
-    Configura en Render:
-      PLAY_ASSETLINKS_PACKAGE  (por defecto com.localis.app)
-      PLAY_ASSETLINKS_SHA256   huella(s) SHA-256 de Play App Signing (separadas por coma).
+    Sirve el archivo versionado ``.well-known/assetlinks.json`` (contenido
+    exacto para la app Android TWA). Si el archivo no existiera, lo genera
+    desde variables de entorno como respaldo:
+      PLAY_ASSETLINKS_PACKAGE  (por defecto com.onrender.localis.twa)
+      PLAY_ASSETLINKS_SHA256   huella(s) SHA-256 (separadas por coma).
     """
-    paquete = (os.getenv('PLAY_ASSETLINKS_PACKAGE') or 'com.localis.app').strip()
+    directorio = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), '.well-known'
+    )
+    ruta = os.path.join(directorio, 'assetlinks.json')
+    if os.path.exists(ruta):
+        with open(ruta, 'r', encoding='utf-8') as archivo:
+            contenido = archivo.read()
+        return Response(contenido, mimetype='application/json')
+
+    paquete = (os.getenv('PLAY_ASSETLINKS_PACKAGE') or 'com.onrender.localis.twa').strip()
     huella = (os.getenv('PLAY_ASSETLINKS_SHA256') or '').strip()
     huellas = [h.strip() for h in huella.split(',') if h.strip()] or [
         'REEMPLAZAR_CON_SHA256_DE_PLAY_APP_SIGNING'
