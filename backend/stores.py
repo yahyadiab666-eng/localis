@@ -1125,14 +1125,45 @@ def _buscar_y_filtrar_productos_once(
 
 
 def listar_portada_hibrida(limit, offset=0):
-    """Portada: destacados fijos arriba + "revoltijo" justo de no destacados.
+    """Portada con reintento defensivo (nunca lanza; degrada a lista vacía).
 
-    - **Destacados** (``p.boost_fin > NOW()``): fijos en las primeras posiciones,
-      con orden estable por fecha de boost (``boost_fin DESC, id DESC``).
-    - **No destacados**: mezcla aleatoria reordenada en cada carga, con un tope
-      por comercio (``ROW_NUMBER``) para que ninguna tienda monopolice.
+    Reintenta ante bloqueos/deadlocks transitorios (p. ej. durante el arranque
+    en frío o un pico de conexiones) para no devolver una portada vacía en la
+    primera carga del cliente. Mismo patrón que ``buscar_y_filtrar_productos()``.
 
-    Retorna ``(productos, hay_mas)``. Nunca lanza: degrada a lista vacía.
+    Retorna ``(productos, hay_mas)``.
+    """
+    ultimo_error = None
+    for intento in range(_MAX_REINTENTOS_LISTADO):
+        try:
+            return _listar_portada_hibrida_once(limit, offset)
+        except Exception as error:
+            ultimo_error = error
+            if intento < _MAX_REINTENTOS_LISTADO - 1 and (
+                es_error_bd_transitorio(error) or _es_deadlock(error)
+            ):
+                print(
+                    f'[Localis] Deadlock/transitorio en portada '
+                    f'(intento {intento + 1}/{_MAX_REINTENTOS_LISTADO}): {error}',
+                    flush=True,
+                )
+                time.sleep(0.5 * (intento + 1))
+                continue
+            print(
+                f'[Localis] portada hibrida fallo: {type(error).__name__}: {error}',
+                flush=True,
+            )
+            traceback.print_exc()
+            return [], False
+    print(f'[Localis] portada hibrida fallo: {ultimo_error}', flush=True)
+    return [], False
+
+
+def _listar_portada_hibrida_once(limit, offset=0):
+    """Una pasada de la portada: destacados fijos + "revoltijo" de no destacados.
+
+    Propaga los errores (no los silencia) para que ``listar_portada_hibrida``
+    pueda reintentar si son transitorios.
     """
     try:
         limit = max(1, int(limit or 1))
@@ -1235,13 +1266,9 @@ def listar_portada_hibrida(limit, offset=0):
             fila['destacado'] = bool(fila.get('destacado_producto'))
             productos.append(fila)
         return productos, hay_mas
-    except Exception as error:
-        print(
-            f'[Localis] portada hibrida fallo: {type(error).__name__}: {error}',
-            flush=True,
-        )
-        traceback.print_exc()
-        return [], False
+    except Exception:
+        # Se propaga para que ``listar_portada_hibrida`` reintente si es transitorio.
+        raise
 
 
 def obtener_producto_publico(producto_id):
