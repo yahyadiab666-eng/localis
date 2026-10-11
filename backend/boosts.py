@@ -26,7 +26,7 @@ Blindaje (fail-safe):
 
 import re
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import psycopg2
 
@@ -88,18 +88,26 @@ def precio_boost(dias):
 
 
 def boost_activo(fecha_fin):
-    """True si ``fecha_fin`` (ISO/UTC o datetime) sigue vigente."""
+    """True si ``fecha_fin`` (ISO/UTC, datetime o date) sigue vigente.
+
+    Tolerante a ``None`` y a formatos variados de Supabase: ante cualquier
+    valor no interpretable degrada a ``False`` (nunca lanza).
+    """
     if not fecha_fin:
         return False
     try:
         if isinstance(fecha_fin, datetime):
             fin = fecha_fin
+        elif isinstance(fecha_fin, date):
+            fin = datetime(
+                fecha_fin.year, fecha_fin.month, fecha_fin.day, tzinfo=timezone.utc
+            )
         else:
             fin = datetime.fromisoformat(str(fecha_fin).replace('Z', '+00:00'))
         if fin.tzinfo is None:
             fin = fin.replace(tzinfo=timezone.utc)
         return fin > _ahora_utc()
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError, OSError):
         return False
 
 

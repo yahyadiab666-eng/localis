@@ -495,21 +495,38 @@ def obtener_comercio_admin(comercio_id):
         return None
 
 
-def obtener_productos_admin(comercio_id):
-    """Catálogo completo de un comercio para auditoría del administrador."""
+def obtener_productos_admin(comercio_id, busqueda=None):
+    """Catálogo de un comercio para el administrador, con búsqueda por nombre.
+
+    ``busqueda`` se normaliza con ``.strip()`` y la comparación es tolerante a
+    mayúsculas/minúsculas. Si la consulta viene vacía, se muestra el inventario
+    completo (nunca lanza).
+    """
+    patron = None
+    if busqueda is not None:
+        texto = str(busqueda).strip()
+        if texto:
+            patron = f'%{texto}%'
+
+    filtro = ''
+    args = [int(comercio_id)]
+    if patron:
+        filtro = ' AND LOWER(TRIM(nombre)) LIKE LOWER(TRIM(?))'
+        args.append(patron)
+
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
             try:
                 cursor.execute(
-                    """
+                    f"""
                     SELECT id, nombre, descripcion, precio_usd, codigo_barras, stock,
                            imagen_url, imagen_estado, activo, destacado
                     FROM productos
-                    WHERE comercio_id = ?
+                    WHERE comercio_id = ?{filtro}
                     ORDER BY id DESC
                     """,
-                    (int(comercio_id),),
+                    tuple(args),
                 )
                 return [dict(f) for f in cursor.fetchall()]
             except Exception:
@@ -519,14 +536,14 @@ def obtener_productos_admin(comercio_id):
                 except Exception:
                     pass
                 cursor.execute(
-                    """
+                    f"""
                     SELECT id, nombre, descripcion, precio_usd, codigo_barras, stock,
                            imagen_url, imagen_estado, activo
                     FROM productos
-                    WHERE comercio_id = ?
+                    WHERE comercio_id = ?{filtro}
                     ORDER BY id DESC
                     """,
-                    (int(comercio_id),),
+                    tuple(args),
                 )
                 return [dict(f) for f in cursor.fetchall()]
     except Exception as e:

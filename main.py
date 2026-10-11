@@ -2964,7 +2964,8 @@ def admin_comercio_detalle(comercio_id):
         flash('Comercio no encontrado.', 'error')
         return redirect(url_for('panel_admin'))
 
-    productos = obtener_productos_admin(comercio_id)
+    busqueda = request.args.get('q', '').strip()
+    productos = obtener_productos_admin(comercio_id, busqueda=busqueda or None)
     comercio = _normalizar_imagenes_comercio(comercio)
     try:
         comercio['maps_link'] = url_maps_comercio(comercio)
@@ -2984,6 +2985,7 @@ def admin_comercio_detalle(comercio_id):
         productos=productos,
         tasa=tasa_actual,
         planes=PLANES,
+        q=busqueda,
     )
 
 

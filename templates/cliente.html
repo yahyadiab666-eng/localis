@@ -69,6 +69,24 @@
       height: 100% !important;
       object-fit: contain !important;
     }
+    /* Fase 2.2: chips de categoría móviles tipo carrusel horizontal. */
+    .chips-categorias {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 0.5rem;
+      overflow-x: auto;
+      overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;        /* Firefox */
+      -ms-overflow-style: none;     /* IE/Edge */
+      padding-bottom: 2px;
+      scroll-behavior: smooth;
+    }
+    .chips-categorias::-webkit-scrollbar { display: none; } /* Chrome/Safari */
+    .chips-categorias > a {
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
   </style>
 </head>
 <body class="w-full min-h-screen" style="background: rgb(254, 251, 246);">
@@ -148,7 +166,7 @@
       {# Fase 1: filtros de categoría dinámicos (desde la BD), sin fallar por
          mayúsculas/espacios: la comparación activa usa trim|lower. #}
       {% if categorias %}
-        <div class="flex flex-wrap gap-2 mb-8" role="tablist" aria-label="Filtrar por categoría">
+        <div class="chips-categorias mb-8" role="tablist" aria-label="Filtrar por categoría">
           {% set cat_activa = (categoria_actual | default('', true) | trim | lower) %}
           <a href="{{ url_for('index', q=q or None) }}"
              role="tab" aria-selected="{{ 'true' if not cat_activa else 'false' }}"

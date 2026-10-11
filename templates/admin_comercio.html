@@ -280,9 +280,21 @@
             <!-- Catálogo -->
             <section class="tabla-box">
                 <div style="padding:1.25rem;border-bottom:1px solid #e1e4e8;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
-                    <h2 style="font-size:1.15rem;">Catálogo del comercio ({{ productos|length }})</h2>
+                    <h2 style="font-size:1.15rem;">Catálogo del comercio ({{ productos|length }}){% if q %} · filtrado por "{{ q }}"{% endif %}</h2>
                     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
                         <span class="muted">Tasa de referencia: {{ tasa }} Bs/USD</span>
+                        <form action="{{ url_for('admin_comercio_detalle', comercio_id=comercio.id) }}" method="GET"
+                              style="display:flex;gap:6px;align-items:center;margin:0;">
+                            <input type="text" name="q" value="{{ q or '' }}"
+                                   placeholder="Buscar producto por nombre..."
+                                   aria-label="Buscar producto por nombre"
+                                   style="padding:0.5rem 0.75rem;border:1px solid #ccc;border-radius:4px;font-size:0.85rem;min-width:200px;">
+                            <button type="submit" class="btn-accion-tabla btn-resolver" title="Buscar">Buscar</button>
+                            {% if q %}
+                            <a href="{{ url_for('admin_comercio_detalle', comercio_id=comercio.id) }}"
+                               class="muted" style="text-decoration:none;">Limpiar</a>
+                            {% endif %}
+                        </form>
                         <a href="{{ url_for('admin_nuevo_producto', comercio_id=comercio.id) }}"
                            class="btn-accion-tabla btn-activar" style="text-decoration:none;display:inline-block;"
                            title="Cargar un producto en este comercio">+ Añadir producto</a>
