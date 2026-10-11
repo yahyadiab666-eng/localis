@@ -1109,12 +1109,14 @@ def index():
         whatsapp = WHATSAPP_SOPORTE
 
     # Fase 1: chips de categorías dinámicos (obtenidos de la BD) + emoji.
+    # OJO: usar una variable distinta a ``categoria`` para no sobrescribir el
+    # filtro de la URL (string) con el dict de cada categoría.
     try:
         categorias = obtener_categorias_admin()
         from backend.categorias_producto import emoji_categoria
 
-        for categoria in categorias:
-            categoria['emoji'] = emoji_categoria(categoria.get('nombre'))
+        for cat in categorias:
+            cat['emoji'] = emoji_categoria(cat.get('nombre'))
     except Exception:
         categorias = []
 

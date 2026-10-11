@@ -3,22 +3,35 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  {% if categoria_actual %}{% set seo_titulo = categoria_actual ~ ' en Localis' %}
-  {% elif q %}{% set seo_titulo = q ~ ' en Localis' %}
-  {% else %}{% set seo_titulo = 'Localis - Tu Comercio Local' %}{% endif %}
+  {# SEO: título/descripción consistentes con la marca.
+     - Categoría: "X | Localis"
+     - Portada:   "Localis | Directorio y Catálogo Comercial en Margarita"
+     Los defaults y el filtro trim evitan fallos si falta categoría/búsqueda. #}
+  {% set categoria_seleccionada = (categoria_actual | default('', true) | trim) %}
+  {% set busqueda_actual = (q | default('', true) | trim) %}
+  {% if categoria_seleccionada %}
+    {% set seo_titulo = categoria_seleccionada ~ ' | Localis' %}
+    {% set seo_descripcion = 'Explora ' ~ categoria_seleccionada ~ ' en tiendas y comercios locales de Margarita. Precios en dólares y bolívares.' %}
+  {% elif busqueda_actual %}
+    {% set seo_titulo = 'Búsqueda: ' ~ busqueda_actual ~ ' | Localis' %}
+    {% set seo_descripcion = 'Resultados de búsqueda para ' ~ busqueda_actual ~ ' en el catálogo de comercios locales de Margarita, en Localis.' %}
+  {% else %}
+    {% set seo_titulo = 'Localis | Directorio y Catálogo Comercial en Margarita' %}
+    {% set seo_descripcion = 'Descubre tiendas, productos y precios en dólares y bolívares en la Isla de Margarita. Contacta directo por WhatsApp con comercios locales.' %}
+  {% endif %}
   <title>{{ seo_titulo }}</title>
   {% set og_imagen = banner_url or default_banner %}
   {% set og_imagen_abs = og_imagen if og_imagen.startswith('http') else request.url_root.rstrip('/') ~ og_imagen %}
-  <meta name="description" content="{% if categoria_actual %}Explora {{ categoria_actual }} en comercios locales de Venezuela.{% elif q %}Resultados de búsqueda para {{ q }} en Localis.{% else %}Descubre productos, precios en dólares y bolívares, y comercios locales cerca de ti.{% endif %}">
+  <meta name="description" content="{{ seo_descripcion }}">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Localis">
   <meta property="og:title" content="{{ seo_titulo }}">
-  <meta property="og:description" content="Descubre productos y comercios locales cerca de ti. Precios en USD y Bs, contacto directo por WhatsApp.">
+  <meta property="og:description" content="{{ seo_descripcion }}">
   <meta property="og:url" content="{{ request.url }}">
   <meta property="og:image" content="{{ og_imagen_abs }}">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{{ seo_titulo }}">
-  <meta name="twitter:description" content="Productos y comercios locales cerca de ti.">
+  <meta name="twitter:description" content="{{ seo_descripcion }}">
   <meta name="twitter:image" content="{{ og_imagen_abs }}">
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
