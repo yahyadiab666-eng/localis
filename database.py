@@ -10,8 +10,12 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from uuid import UUID
 
 import psycopg2
-from psycopg2 import OperationalError, pool
-from psycopg2.extensions import TRANSACTION_STATUS_IDLE, TRANSACTION_STATUS_INERROR
+from psycopg2 import InterfaceError, OperationalError, pool
+from psycopg2.extensions import (
+    TRANSACTION_STATUS_IDLE,
+    TRANSACTION_STATUS_INERROR,
+    TRANSACTION_STATUS_UNKNOWN,
+)
 from psycopg2.extras import RealDictCursor
 from psycopg2.pool import PoolError
 
@@ -33,6 +37,16 @@ DB_STATEMENT_TIMEOUT_MS = int(os.getenv('DB_STATEMENT_TIMEOUT_MS', '120000'))
 DB_RETRY_ATTEMPTS = int(os.getenv('DB_RETRY_ATTEMPTS', '3'))
 DB_RETRY_BASE_DELAY = float(os.getenv('DB_RETRY_BASE_DELAY', '0.08'))
 DB_READ_LOCK_TIMEOUT = os.getenv('DB_READ_LOCK_TIMEOUT', '3s').strip() or '3s'
+# Tras este periodo de inactividad, una conexión devuelta al pool se verifica
+# con un ping barato antes de reutilizarla. Evita conexiones "zombie" (TCP
+# medio abierto / cerradas por el servidor) tras largos periodos sin tráfico,
+# que antes producían portadas vacías hasta recargar la página.
+DB_HEALTHCHECK_IDLE_SECONDS = float(
+    os.getenv('DB_HEALTHCHECK_IDLE_SECONDS', '20')
+)
+DB_HEALTHCHECK_ENABLED = str(
+    os.getenv('DB_HEALTHCHECK_ENABLED', '1')
+).strip().lower() in ('1', 'true', 'yes', 'on')
 # Advisory lock de sesión: un solo worker Gunicorn corre migraciones.
 _INIT_DB_LOCK_KEY = 87261033
 _RE_NOMBRE_INDICE = re.compile(
@@ -42,6 +56,10 @@ _RE_NOMBRE_INDICE = re.compile(
 
 _connection_pool = None
 _pool_lock = threading.Lock()
+# Momento (monotónico) en que cada conexión fue devuelta al pool, por id().
+# Permite decidir cuándo hace falta el health check de inactividad.
+_pool_idle_since = {}
+_pool_idle_lock = threading.Lock()
 
 # Parámetros válidos en URIs libpq/psycopg2. El resto (p. ej. pgbouncer=true) se descarta.
 _PARAMS_URI_PERMITIDOS = frozenset({
@@ -575,21 +593,26 @@ class _PgConnection:
         if self._closed:
             return
         self._closed = True
+        rota = False
         try:
-            if self._conn.get_transaction_status() == TRANSACTION_STATUS_INERROR:
+            estado = self._conn.get_transaction_status()
+            if estado == TRANSACTION_STATUS_INERROR:
                 self._conn.rollback()
+            elif estado == TRANSACTION_STATUS_UNKNOWN:
+                # Conexión perdida (zombie): no reinyectar al pool.
+                rota = True
         except Exception:
-            pass
+            rota = True
         try:
-            if self._from_pool and _connection_pool is not None:
+            if rota:
+                _descartar_conexion_pg(self._conn)
+            elif self._from_pool and _connection_pool is not None:
+                _marcar_conexion_en_pool(self._conn)
                 _connection_pool.putconn(self._conn)
             else:
                 self._conn.close()
         except Exception:
-            try:
-                self._conn.close()
-            except Exception:
-                pass
+            _descartar_conexion_pg(self._conn)
 
     def __enter__(self):
         return self
@@ -618,6 +641,85 @@ def _obtener_pool():
                     connect_timeout=DB_CONNECT_TIMEOUT,
                 )
     return _connection_pool
+
+
+def _marcar_conexion_en_pool(pg_conn):
+    """Registra el instante en que una conexión vuelve al pool (para el ping)."""
+    if pg_conn is None:
+        return
+    try:
+        with _pool_idle_lock:
+            _pool_idle_since[id(pg_conn)] = time.monotonic()
+    except Exception:
+        pass
+
+
+def _descartar_conexion_pg(pg_conn):
+    """Retira del pool y cierra una conexión muerta (no reutilizable)."""
+    if pg_conn is None:
+        return
+    try:
+        with _pool_idle_lock:
+            _pool_idle_since.pop(id(pg_conn), None)
+    except Exception:
+        pass
+    try:
+        if _connection_pool is not None:
+            _connection_pool.putconn(pg_conn, close=True)
+            return
+    except Exception:
+        pass
+    try:
+        pg_conn.close()
+    except Exception:
+        pass
+
+
+def _conexion_pg_requiere_ping(pg_conn):
+    """True si la conexión lleva suficiente tiempo inactiva como para verificarla."""
+    if not DB_HEALTHCHECK_ENABLED:
+        return False
+    try:
+        with _pool_idle_lock:
+            idle_since = _pool_idle_since.get(id(pg_conn))
+    except Exception:
+        idle_since = None
+    if idle_since is None:
+        # Conexión nueva o sin registro: verificar es seguro y barato.
+        return True
+    return (time.monotonic() - idle_since) >= DB_HEALTHCHECK_IDLE_SECONDS
+
+
+def _verificar_conexion_pg(pg_conn):
+    """Ping ligero (``SELECT 1``) para detectar conexiones zombie.
+
+    Una conexión cortada por el servidor (o un TCP medio abierto) reporta
+    ``transaction_status = IDLE`` y ``closed = 0`` hasta la primera consulta,
+    por lo que el ping es la única forma fiable de detectarla antes de usarla.
+    """
+    if pg_conn is None:
+        return False
+    try:
+        if pg_conn.closed:
+            return False
+    except Exception:
+        return False
+    autocommit_previo = None
+    try:
+        autocommit_previo = pg_conn.autocommit
+        pg_conn.autocommit = True
+        with pg_conn.cursor() as cur:
+            cur.execute('SELECT 1')
+            cur.fetchone()
+        return True
+    except Exception:
+        return False
+    finally:
+        if autocommit_previo is not None:
+            try:
+                pg_conn.autocommit = autocommit_previo
+            except Exception:
+                pass
 
 
 def _preparar_conexion_pg(pg_conn, read_only=False):
@@ -653,7 +755,56 @@ def _preparar_conexion_pg(pg_conn, read_only=False):
         pg_conn.autocommit = False
 
 
+# Tokens que evidencian una conexión caída/expirada (no un error lógico).
+_TOKENS_DESCONEXION_BD = (
+    'connection reset',
+    'connection already closed',
+    'connection is closed',
+    'closed the connection',
+    'server closed the connection',
+    'eof detected',
+    'ssl syscall error',
+    'terminating connection',
+    'connection refused',
+    'could not connect',
+    'could not receive data',
+    'no connection to the server',
+    'connection timed out',
+    'network is unreachable',
+    'broken pipe',
+    'consuming input failed',
+    'connection to server',
+)
+
+
+def es_error_conexion_bd(exc):
+    """True si el error indica pérdida de conexión (conviene reconectar).
+
+    Cubre errores ``InterfaceError`` (p. ej. "connection already closed") y
+    ``OperationalError`` de red que antes se escapaban de la clasificación
+    transitoria y terminaban devolviendo listas vacías.
+    """
+    orig = getattr(exc, 'orig', exc)
+    if isinstance(orig, InterfaceError) or isinstance(exc, InterfaceError):
+        return True
+    if not isinstance(orig, OperationalError) and not isinstance(exc, OperationalError):
+        return False
+    pgcode = getattr(orig, 'pgcode', None) or getattr(exc, 'pgcode', None)
+    if pgcode in ('40001', '40P01', '55P03', '57014'):
+        # Bloqueos/serialización: reintentables, pero no son desconexión.
+        return False
+    mensaje = f'{orig} {exc}'.lower()
+    return any(token in mensaje for token in _TOKENS_DESCONEXION_BD)
+
+
 def es_error_bd_transitorio(exc):
+    """Errores recuperables con reintento (bloqueos y desconexiones de red).
+
+    Incluye la pérdida de conexión para que los listados públicos reconecten y
+    reintenten de inmediato en vez de degradar a una lista vacía.
+    """
+    if es_error_conexion_bd(exc):
+        return True
     if not isinstance(exc, OperationalError):
         return False
     pgcode = getattr(exc, 'pgcode', None)
@@ -666,8 +817,6 @@ def es_error_bd_transitorio(exc):
             'deadlock',
             'lock timeout',
             'could not serialize',
-            'connection reset',
-            'server closed the connection',
         )
     )
 
@@ -678,6 +827,10 @@ def get_db_connection(row_factory=None, read_only=False):
     devuelve filas como diccionarios planos con tipos ya normalizados.
     read_only=True marca la transacción de solo lectura y aplica lock_timeout
     corto para no competir con DDL (AccessExclusiveLock) hasta deadlock.
+
+    Antes de entregar una conexión que estuvo inactiva en el pool, se verifica
+    con un ping. Si está muerta se descarta y se obtiene una nueva, evitando
+    respuestas vacías por conexiones zombie tras periodos sin tráfico.
     """
     _require_database_url()
     ultimo_error = None
@@ -685,12 +838,27 @@ def get_db_connection(row_factory=None, read_only=False):
     for intento in range(3):
         try:
             pg_conn = _obtener_pool().getconn()
-            break
         except PoolError as exc:
             # Pico transitorio de concurrencia: se espera un poco y se reintenta
             # en vez de devolver un error 5xx inmediato.
             ultimo_error = exc
             time.sleep(0.15 * (intento + 1))
+            continue
+
+        if _conexion_pg_requiere_ping(pg_conn) and not _verificar_conexion_pg(pg_conn):
+            print(
+                '[Localis] Conexión de BD zombie detectada; se descarta y reconecta.',
+                flush=True,
+            )
+            _descartar_conexion_pg(pg_conn)
+            pg_conn = None
+            ultimo_error = OperationalError(
+                'conexión de base de datos no disponible (zombie)'
+            )
+            time.sleep(0.1 * (intento + 1))
+            continue
+        break
+
     if pg_conn is None:
         raise RuntimeError(
             'No hay conexiones de base de datos disponibles en este momento. '
