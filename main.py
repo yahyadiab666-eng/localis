@@ -132,6 +132,7 @@ from backend.admin import (
     cambiar_visibilidad_comercio,
     confirmar_pago_suscripcion,
     crear_producto_admin,
+    destacar_producto_por_dias,
     eliminar_comercio_definitivo,
     eliminar_producto_admin,
     obtener_banner_principal,
@@ -3354,12 +3355,38 @@ def admin_eliminar_producto_ruta(producto_id):
 @app.route('/admin/producto/destacar/<int:producto_id>', methods=['POST'])
 @admin_requerido
 def admin_destacar_producto(producto_id):
-    """Activa/desactiva el destacado manual de un producto (toggle de un clic)."""
+    """Destacado de un producto: por tiempo (días) o toggle manual.
+
+    - Si llega ``dias`` (p. ej. 3/5/7/30) se asigna duración y se fija
+      ``boost_fin = ahora + dias``; ``dias <= 0`` revoca el destacado.
+    - Si no llega ``dias``, se mantiene el interruptor manual de un clic.
+    """
+    dias = request.form.get('dias', None)
+    if dias is None and request.is_json:
+        datos = request.get_json(silent=True) or {}
+        dias = datos.get('dias')
+
+    if dias is not None and str(dias).strip() != '':
+        exito, mensaje, info = destacar_producto_por_dias(
+            session.get('usuario_id'), producto_id, dias
+        )
+        if _peticion_acepta_json():
+            return (
+                jsonify({'ok': exito, 'mensaje': mensaje, 'info': info}),
+                200 if exito else 400,
+            )
+        flash(mensaje, 'exito' if exito else 'error')
+        comercio_id = request.form.get('comercio_id', type=int)
+        if comercio_id:
+            return redirect(
+                url_for('admin_comercio_detalle', comercio_id=comercio_id)
+            )
+        return redirect(url_for('panel_admin'))
+
     valor = request.form.get('destacado', request.form.get('nuevo_estado'))
-    if valor is None:
-        datos = request.get_json(silent=True) if request.is_json else None
-        if datos:
-            valor = datos.get('destacado', datos.get('nuevo_estado'))
+    if valor is None and request.is_json:
+        datos = request.get_json(silent=True) or {}
+        valor = datos.get('destacado', datos.get('nuevo_estado'))
     if valor is None:
         producto = obtener_producto_admin(producto_id)
         if not producto:
@@ -3413,6 +3440,23 @@ def sitemap_xml():
     lineas.extend(f'  <url><loc>{_xml_escape(u)}</loc></url>' for u in urls)
     lineas.append('</urlset>')
     return Response('\n'.join(lineas), mimetype='application/xml')
+
+
+@app.route('/robots.txt')
+def robots_txt():
+    """Guía de rastreo para buscadores + referencia al sitemap dinámico."""
+    base = request.url_root.rstrip('/')
+    lineas = [
+        'User-agent: *',
+        'Allow: /',
+        'Disallow: /admin',
+        'Disallow: /comercio',
+        'Disallow: /perfil',
+        'Disallow: /api/',
+        'Disallow: /logout',
+        f'Sitemap: {base}/sitemap.xml',
+    ]
+    return Response('\n'.join(lineas), mimetype='text/plain')
 
 
 @app.route('/admin/comercio/plan/<int:comercio_id>', methods=['POST'])

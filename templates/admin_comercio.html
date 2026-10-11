@@ -350,6 +350,19 @@
                                         </button>
                                     </form>
                                     <br><small class="muted">{{ 'Destacado' if es_destacado else 'Normal' }}</small>
+                                    <form action="{{ url_for('admin_destacar_producto', producto_id=producto.id) }}" method="POST"
+                                          class="destacar-dias-form" style="margin-top:6px;">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="comercio_id" value="{{ comercio.id }}">
+                                        <select name="dias" aria-label="Días de destacado de {{ producto.nombre }}"
+                                                style="padding:3px;font-size:0.78rem;border:1px solid #ccc;border-radius:4px;">
+                                            <option value="3">3 días</option>
+                                            <option value="5">5 días</option>
+                                            <option value="7" selected>7 días</option>
+                                            <option value="30">30 días</option>
+                                        </select>
+                                        <button type="submit" class="btn-accion-tabla btn-activar" title="Destacar por el tiempo elegido">Aplicar</button>
+                                    </form>
                                 </td>
                                 <td>
                                     <a href="{{ url_for('admin_editar_producto', comercio_id=comercio.id, producto_id=producto.id) }}"

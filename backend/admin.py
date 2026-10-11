@@ -583,6 +583,78 @@ def alternar_destacado_producto(admin_id, producto_id, destacado):
         return False, f'Error al cambiar el destacado: {e}', None
 
 
+def destacar_producto_por_dias(admin_id, producto_id, dias):
+    """Asigna (o revoca) un destacado con duración en días.
+
+    - ``dias > 0``: activa el boost con ``boost_fin = ahora + dias`` y marca
+      ``destacado = 1`` → el producto queda destacado automáticamente hasta
+      vencer (sin romper la validación temporal existente).
+    - ``dias <= 0``: revoca (``destacado = 0`` y ``boost_fin = NULL``).
+
+    Retorna ``(exito, mensaje, info)``. Nunca lanza.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    try:
+        dias_int = int(str(dias).strip())
+    except (TypeError, ValueError):
+        return False, 'Duración inválida (indica un número de días).', None
+    if dias_int < 0:
+        dias_int = 0
+
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                'SELECT 1 FROM productos WHERE id = ?', (int(producto_id),)
+            )
+            if not cursor.fetchone():
+                conexion.rollback()
+                return False, 'Producto no encontrado.', None
+
+            if dias_int > 0:
+                ahora = datetime.now(timezone.utc)
+                fin = ahora + timedelta(days=dias_int)
+                try:
+                    cursor.execute(
+                        'UPDATE productos SET destacado = 1, '
+                        'boost_inicio = ?, boost_fin = ? WHERE id = ?',
+                        (ahora, fin, int(producto_id)),
+                    )
+                except Exception:
+                    # Degradación: si faltara la columna de boost, al menos el
+                    # flag manual queda activo (nunca rompe).
+                    try:
+                        conexion.rollback()
+                    except Exception:
+                        pass
+                    cursor.execute(
+                        'UPDATE productos SET destacado = 1 WHERE id = ?',
+                        (int(producto_id),),
+                    )
+                mensaje = f'Producto destacado por {dias_int} días.'
+                info = {'dias': dias_int, 'boost_fin': fin}
+            else:
+                cursor.execute(
+                    'UPDATE productos SET destacado = 0, '
+                    'boost_inicio = NULL, boost_fin = NULL WHERE id = ?',
+                    (int(producto_id),),
+                )
+                mensaje = 'Destacado revocado.'
+                info = {'dias': 0, 'boost_fin': None}
+
+            _registrar_auditoria_admin(
+                cursor,
+                admin_id,
+                'Destacado por tiempo (admin)',
+                f'Producto {int(producto_id)}: duración {dias_int} días.',
+            )
+            conexion.commit()
+        return True, mensaje, info
+    except Exception as e:
+        return False, f'Error al asignar destacado: {e}', None
+
+
 def eliminar_producto_admin(producto_id, admin_id, comercio_id=None):
     """Elimina un producto desde el panel admin y registra auditoría."""
     try:
@@ -702,7 +774,7 @@ def _registrar_auditoria_admin(cursor, admin_id, accion, detalles):
     )
 
 
-CATEGORIAS_OCULTAS = frozenset({'servicios', 'tecnologia'})
+CATEGORIAS_OCULTAS = frozenset({'servicios', 'tecnologia', 'ropa'})
 
 
 def _clave_categoria(nombre):

@@ -1513,7 +1513,7 @@ def _asegurar_indices_unicos(cursor):
 
 
 def _sembrar_categorias(cursor):
-    for nombre in ('Alimentos', 'Ropa', 'Tecnología y Electrónica', 'Otros'):
+    for nombre in ('Alimentos', 'Moda y Ropa', 'Tecnología y Electrónica', 'Otros'):
         cursor.execute(
             """
             INSERT INTO categorias (nombre)
@@ -1525,42 +1525,72 @@ def _sembrar_categorias(cursor):
     _desactivar_categorias_obsoletas(cursor)
 
 
+def _clave_categoria_texto(nombre):
+    """Clave normalizada (sin acentos, minúsculas, espacios colapsados)."""
+    texto = unicodedata.normalize('NFKD', str(nombre or ''))
+    texto = ''.join(c for c in texto if not unicodedata.combining(c))
+    return ' '.join(texto.split()).strip().lower()
+
+
 def _desactivar_categorias_obsoletas(cursor):
-    """Marca como inactivas categorías retiradas y duplicadas (no destructivo).
+    """Fusiona y desactiva categorías retiradas/duplicadas (no destructivo).
 
-    - ``Servicios``: la plataforma solo maneja productos físicos.
-    - ``Tecnología``: duplicado de ``Tecnología y Electrónica``.
+    - ``Servicios``: la plataforma solo maneja productos físicos (se retira).
+    - ``Tecnología``: duplicado de ``Tecnología y Electrónica`` (se fusiona).
+    - ``Ropa``: duplicado de ``Moda y Ropa`` (se fusiona).
 
-    Idempotente: solo pone ``activo = 0``; nunca borra filas ni toca FKs de
-    comercios (evita romper datos en producción). Tolerante a acentos/espacios
-    y a la ausencia de la columna ``activo`` (degrada sin lanzar).
+    Idempotente y seguro: reasigna los comercios que apuntaban a la categoría
+    duplicada hacia su categoría canónica y luego marca ``activo = 0``. Nunca
+    borra filas. Tolerante a acentos/espacios y a la ausencia de ``activo``.
     """
     try:
         if not _tabla_existe(cursor, 'categorias'):
             return
         if not _columna_existe(cursor, 'categorias', 'activo'):
             return
-        ocultas = {'servicios', 'tecnologia'}
+
+        # duplicado -> canónico (fusión)
+        fusiones = {
+            'tecnologia': 'tecnologia y electronica',
+            'ropa': 'moda y ropa',
+        }
+        solo_desactivar = {'servicios'}
+
         cursor.execute('SELECT id, nombre FROM categorias')
-        a_desactivar = []
+        por_clave = {}
         for fila in cursor.fetchall() or []:
             if isinstance(fila, dict):
                 cid, nombre = fila.get('id'), fila.get('nombre')
             else:
                 cid, nombre = fila[0], fila[1]
-            texto = unicodedata.normalize('NFKD', str(nombre or ''))
-            texto = ''.join(c for c in texto if not unicodedata.combining(c))
-            if ' '.join(texto.split()).strip().lower() in ocultas:
-                a_desactivar.append(cid)
+            por_clave[_clave_categoria_texto(nombre)] = cid
+
+        reasignados = 0
+        for origen, destino in fusiones.items():
+            id_origen = por_clave.get(origen)
+            id_destino = por_clave.get(destino)
+            if id_origen and id_destino and id_origen != id_destino:
+                cursor.execute(
+                    'UPDATE comercios SET categoria_id = %s WHERE categoria_id = %s',
+                    (id_destino, id_origen),
+                )
+                reasignados += cursor.rowcount or 0
+
+        a_desactivar = [
+            cid
+            for clave in list(fusiones) + list(solo_desactivar)
+            for cid in ([por_clave.get(clave)] if por_clave.get(clave) else [])
+        ]
         for cid in a_desactivar:
             cursor.execute(
-                'UPDATE categorias SET activo = 0 WHERE id = %s AND COALESCE(activo, 1) = 1',
+                'UPDATE categorias SET activo = 0 '
+                'WHERE id = %s AND COALESCE(activo, 1) = 1',
                 (cid,),
             )
-        if a_desactivar:
+        if a_desactivar or reasignados:
             print(
-                f'[Localis Categorias] {len(a_desactivar)} categorias desactivadas '
-                f'(Servicios/Tecnologia)',
+                f'[Localis Categorias] {len(a_desactivar)} desactivadas, '
+                f'{reasignados} comercios reasignados',
                 flush=True,
             )
     except Exception as error:
