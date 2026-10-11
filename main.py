@@ -1002,7 +1002,7 @@ def assetlinks():
     paquete = (os.getenv('PLAY_ASSETLINKS_PACKAGE') or 'com.onrender.localis.twa').strip()
     huella = (os.getenv('PLAY_ASSETLINKS_SHA256') or '').strip()
     huellas = [h.strip() for h in huella.split(',') if h.strip()] or [
-        'REEMPLAZAR_CON_SHA256_DE_PLAY_APP_SIGNING'
+        'E8:FD:FD:CE:EE:F9:4C:30:DA:9E:23:80:7F:DC:F9:32:D3:F0:95:DC:F4:19:4D:C1:31:35:DB:F2:CF:80:A7:61'
     ]
     return jsonify(
         [
