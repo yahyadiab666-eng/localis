@@ -67,8 +67,15 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(request)
         .then((respuesta) => {
-          const copia = respuesta.clone();
-          caches.open(CACHE_PAGINAS).then((cache) => cache.put(request, copia)).catch(() => {});
+          // No cachear respuestas degeneradas (BD no disponible): evita
+          // "envenenar" la portada con una lista vacía tras inactividad.
+          const cacheable =
+            respuesta.status === 200 &&
+            respuesta.headers.get('X-Localis-No-Cache') !== '1';
+          if (cacheable) {
+            const copia = respuesta.clone();
+            caches.open(CACHE_PAGINAS).then((cache) => cache.put(request, copia)).catch(() => {});
+          }
           return respuesta;
         })
         .catch(() =>

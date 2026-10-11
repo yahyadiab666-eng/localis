@@ -163,7 +163,7 @@ from backend.image_lookup import (
     programar_descubrimiento_producto,
 )
 from backend.db import get_db_connection
-from database import init_db, normalize_database_url
+from database import BaseDatosNoDisponible, calentar_pool_bd, init_db, normalize_database_url
 from backend.plans import PLANES, MENSAJE_LIMITE_PRODUCTOS, es_limite_ilimitado, obtener_beneficios_plan
 try:
     from backend.payment_ocr import validar_comprobante_pago_movil
@@ -508,6 +508,9 @@ def _inicializar_aplicacion():
         if db_url:
             print('Base de datos: PostgreSQL (DATABASE_URL).', flush=True)
         init_db()
+        # Warm-up explícito: deja el pool y la conexión verificados antes de
+        # que la primera petición real pague el connect en frío del pooler.
+        calentar_pool_bd()
         print(
             '[Localis] Catálogo maestro: sin relleno ni sincronización al arrancar.',
             flush=True,
@@ -1047,6 +1050,7 @@ def index():
     categoria = request.args.get('categoria', '').strip()
 
     hay_filtros = bool(palabra_clave or categoria)
+    catalogo_degradado = False
     try:
         crudo_pagina = (
             os.getenv('LOCALIS_CATALOGO_PAGINA')
@@ -1079,6 +1083,13 @@ def index():
                 limit=por_pagina,
                 offset=(pagina - 1) * por_pagina,
             )
+        except BaseDatosNoDisponible as error:
+            # BD no disponible tras los reintentos: se renderiza sin productos
+            # pero marcando la respuesta para que el Service Worker NO la
+            # cachee, evitando "envenenar" la portada tras inactividad.
+            print(f'[Localis] portada degradada (BD no disponible): {error}')
+            productos, hay_mas = [], False
+            catalogo_degradado = True
         except Exception as error:
             print(f'[Localis] portada fallo: {type(error).__name__}: {error}')
             traceback.print_exc()
@@ -1121,7 +1132,7 @@ def index():
         categorias = []
 
     _debug_imagenes_antes_de_render(productos, 'index')
-    return render_template(
+    respuesta = render_template(
         'cliente.html',
         productos=productos,
         categorias=categorias,
@@ -1135,6 +1146,11 @@ def index():
         pagina=pagina,
         hay_mas=hay_mas,
     )
+    if catalogo_degradado:
+        # Señal para el Service Worker: no cachear esta respuesta degradada.
+        respuesta.headers['X-Localis-No-Cache'] = '1'
+        respuesta.headers['Retry-After'] = '5'
+    return respuesta
 
 
 @app.route('/como-funciona')
@@ -3459,6 +3475,23 @@ def robots_txt():
         f'Sitemap: {base}/sitemap.xml',
     ]
     return Response('\n'.join(lineas), mimetype='text/plain')
+
+
+@app.route('/googled8035da558d7fadc.html')
+def google_site_verification_file():
+    """Verificación de Google Search Console por archivo HTML en la raíz.
+
+    Sirve ``/googled8035da558d7fadc.html`` con el contenido exacto
+    ``google-site-verification: googled8035da558d7fadc.html``.
+    """
+    directorio = os.path.dirname(os.path.abspath(__file__))
+    ruta = os.path.join(directorio, 'googled8035da558d7fadc.html')
+    if os.path.exists(ruta):
+        with open(ruta, 'r', encoding='utf-8') as archivo:
+            contenido = archivo.read()
+    else:
+        contenido = 'google-site-verification: googled8035da558d7fadc.html\n'
+    return Response(contenido, mimetype='text/html')
 
 
 @app.route('/admin/comercio/plan/<int:comercio_id>', methods=['POST'])

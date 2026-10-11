@@ -105,6 +105,9 @@ def _probar_clasificacion_errores():
     _ok(not database.es_error_conexion_bd(logico), 'error lógico no es desconexión')
     _ok(not database.es_error_bd_transitorio(logico), 'error lógico no es transitorio')
 
+    sin_pool = database.BaseDatosNoDisponible('pool no disponible')
+    _ok(database.es_error_bd_transitorio(sin_pool), 'pool no disponible es reintentable')
+
 
 def _probar_health_check():
     print('\n=== 2. Health check de conexión ===')
@@ -180,12 +183,44 @@ def _probar_portada_reintenta():
     _ok(hay_mas is False, 'hay_mas coherente')
 
 
+def _probar_portada_degradada():
+    print('\n=== 5. Portada persiste el fallo como BaseDatosNoDisponible ===')
+    import database
+    from backend import stores
+
+    intentos = {'n': 0}
+
+    def _once(limit, offset=0):
+        intentos['n'] += 1
+        raise psycopg2.OperationalError('server closed the connection unexpectedly')
+
+    original = stores._listar_portada_hibrida_once
+    original_sleep = stores.time.sleep
+    try:
+        stores._listar_portada_hibrida_once = _once
+        stores.time.sleep = lambda *_: None
+        try:
+            stores.listar_portada_hibrida(limit=10)
+            error = None
+        except database.BaseDatosNoDisponible as exc:
+            error = exc
+    finally:
+        stores._listar_portada_hibrida_once = original
+        stores.time.sleep = original_sleep
+
+    _ok(isinstance(error, database.BaseDatosNoDisponible),
+        'agota reintentos y lanza BaseDatosNoDisponible (no lista vacía)')
+    _ok(intentos['n'] == stores._MAX_REINTENTOS_PORTADA,
+        f'reintenta {stores._MAX_REINTENTOS_PORTADA} veces antes de degradar')
+
+
 def main():
     print('Pruebas de resiliencia de BD (bug de productos vacíos tras inactividad)')
     _probar_clasificacion_errores()
     _probar_health_check()
     _probar_reconexion_automatica()
     _probar_portada_reintenta()
+    _probar_portada_degradada()
     print('')
     if _ERRORES:
         print(f'RESULTADO: {len(_ERRORES)} fallo(s)')

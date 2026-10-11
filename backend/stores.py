@@ -6,7 +6,11 @@ import traceback
 
 import psycopg2
 
-from backend.db import es_error_bd_transitorio, get_db_connection
+from backend.db import (
+    BaseDatosNoDisponible,
+    es_error_bd_transitorio,
+    get_db_connection,
+)
 from backend.runtime_cache import get_or_load, invalidate
 from backend.comercio_schema import (
     normalizar_fila_comercio,
@@ -1124,39 +1128,63 @@ def _buscar_y_filtrar_productos_once(
         return productos
 
 
-def listar_portada_hibrida(limit, offset=0):
-    """Portada con reintento defensivo (nunca lanza; degrada a lista vacía).
+# Reintento de portada ampliado para cubrir el arranque en frío del pooler de
+# Supabase: antes el presupuesto (~1.5 s) era menor que un connect en frío y la
+# primera petición devolvía una lista vacía. Con backoff exponencial se espera a
+# que la conexión esté lista sin exigir un "refresh" manual.
+_MAX_REINTENTOS_PORTADA = max(
+    _MAX_REINTENTOS_LISTADO,
+    int(os.getenv('LOCALIS_PORTADA_REINTENTOS', '6')),
+)
+_PORTADA_BACKOFF_BASE = float(os.getenv('LOCALIS_PORTADA_BACKOFF_SEG', '0.4'))
+_PORTADA_BACKOFF_MAX = float(os.getenv('LOCALIS_PORTADA_BACKOFF_MAX_SEG', '3.0'))
 
-    Reintenta ante bloqueos/deadlocks transitorios (p. ej. durante el arranque
-    en frío o un pico de conexiones) para no devolver una portada vacía en la
-    primera carga del cliente. Mismo patrón que ``buscar_y_filtrar_productos()``.
+
+def listar_portada_hibrida(limit, offset=0):
+    """Portada con reintento defensivo robusto ante arranque en frío.
+
+    Reintenta ante bloqueos/deadlocks y, sobre todo, ante la BD/pool no
+    disponibles tras inactividad, con backoff exponencial acotado. Si agota los
+    intentos por un fallo de BD, lanza ``BaseDatosNoDisponible`` para que la
+    ruta marque la respuesta como no cacheable (evita contaminar el Service
+    Worker con una portada vacía). Errores no relacionados con la BD degradan a
+    lista vacía como antes.
 
     Retorna ``(productos, hay_mas)``.
     """
     ultimo_error = None
-    for intento in range(_MAX_REINTENTOS_LISTADO):
+    for intento in range(_MAX_REINTENTOS_PORTADA):
         try:
             return _listar_portada_hibrida_once(limit, offset)
         except Exception as error:
             ultimo_error = error
-            if intento < _MAX_REINTENTOS_LISTADO - 1 and (
-                es_error_bd_transitorio(error) or _es_deadlock(error)
-            ):
+            recuperable = es_error_bd_transitorio(error) or _es_deadlock(error)
+            if intento < _MAX_REINTENTOS_PORTADA - 1 and recuperable:
+                espera = min(
+                    _PORTADA_BACKOFF_BASE * (2 ** intento),
+                    _PORTADA_BACKOFF_MAX,
+                )
                 print(
-                    f'[Localis] Deadlock/transitorio en portada '
-                    f'(intento {intento + 1}/{_MAX_REINTENTOS_LISTADO}): {error}',
+                    f'[Localis] BD ocupada/fría en portada '
+                    f'(intento {intento + 1}/{_MAX_REINTENTOS_PORTADA}): '
+                    f'{type(error).__name__}: {error}. Reintento en {espera:.1f}s.',
                     flush=True,
                 )
-                time.sleep(0.5 * (intento + 1))
+                time.sleep(espera)
                 continue
             print(
                 f'[Localis] portada hibrida fallo: {type(error).__name__}: {error}',
                 flush=True,
             )
             traceback.print_exc()
+            if recuperable:
+                raise BaseDatosNoDisponible(
+                    'La base de datos no respondió al cargar la portada.'
+                ) from error
             return [], False
-    print(f'[Localis] portada hibrida fallo: {ultimo_error}', flush=True)
-    return [], False
+    raise BaseDatosNoDisponible(
+        'La base de datos no respondió al cargar la portada.'
+    ) from ultimo_error
 
 
 def _listar_portada_hibrida_once(limit, offset=0):

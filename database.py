@@ -47,6 +47,12 @@ DB_HEALTHCHECK_IDLE_SECONDS = float(
 DB_HEALTHCHECK_ENABLED = str(
     os.getenv('DB_HEALTHCHECK_ENABLED', '1')
 ).strip().lower() in ('1', 'true', 'yes', 'on')
+# Intentos de creación del pool ante arranque en frío del servidor/pooler.
+DB_POOL_CREATE_ATTEMPTS = int(os.getenv('DB_POOL_CREATE_ATTEMPTS', '4'))
+# Tope del backoff al crear el pool (segundos).
+DB_POOL_CREATE_BACKOFF_MAX = float(
+    os.getenv('DB_POOL_CREATE_BACKOFF_MAX', '2.5')
+)
 # Advisory lock de sesión: un solo worker Gunicorn corre migraciones.
 _INIT_DB_LOCK_KEY = 87261033
 _RE_NOMBRE_INDICE = re.compile(
@@ -60,6 +66,17 @@ _pool_lock = threading.Lock()
 # Permite decidir cuándo hace falta el health check de inactividad.
 _pool_idle_since = {}
 _pool_idle_lock = threading.Lock()
+
+
+class BaseDatosNoDisponible(RuntimeError):
+    """No se pudo obtener una conexión (arranque en frío, saturación o caída).
+
+    Se comporta como ``RuntimeError`` (compatibilidad) pero es reconocido por
+    la capa de reintentos como un error **recuperable**, de modo que la primera
+    petición tras inactividad puede esperar a que el pool/BD estén listos en
+    lugar de devolver una portada vacía.
+    """
+
 
 # Parámetros válidos en URIs libpq/psycopg2. El resto (p. ej. pgbouncer=true) se descarta.
 _PARAMS_URI_PERMITIDOS = frozenset({
@@ -634,12 +651,35 @@ def _obtener_pool():
         with _pool_lock:
             if _connection_pool is None:
                 _require_database_url()
-                _connection_pool = pool.ThreadedConnectionPool(
-                    minconn=DB_POOL_MIN,
-                    maxconn=DB_POOL_MAX,
-                    dsn=DATABASE_URL,
-                    connect_timeout=DB_CONNECT_TIMEOUT,
-                )
+                ultimo_error = None
+                for intento in range(max(1, DB_POOL_CREATE_ATTEMPTS)):
+                    try:
+                        _connection_pool = pool.ThreadedConnectionPool(
+                            minconn=DB_POOL_MIN,
+                            maxconn=DB_POOL_MAX,
+                            dsn=DATABASE_URL,
+                            connect_timeout=DB_CONNECT_TIMEOUT,
+                        )
+                        break
+                    except Exception as exc:
+                        ultimo_error = exc
+                        if intento < DB_POOL_CREATE_ATTEMPTS - 1:
+                            espera = min(
+                                DB_RETRY_BASE_DELAY * (2 ** intento),
+                                DB_POOL_CREATE_BACKOFF_MAX,
+                            )
+                            print(
+                                '[Localis] Pool de BD no disponible '
+                                f'(intento {intento + 1}/{DB_POOL_CREATE_ATTEMPTS}): '
+                                f'{type(exc).__name__}: {exc}. Reintento en '
+                                f'{espera:.1f}s.',
+                                flush=True,
+                            )
+                            time.sleep(espera)
+                if _connection_pool is None:
+                    raise BaseDatosNoDisponible(
+                        'No se pudo crear el pool de conexiones a la base de datos.'
+                    ) from ultimo_error
     return _connection_pool
 
 
@@ -800,9 +840,11 @@ def es_error_conexion_bd(exc):
 def es_error_bd_transitorio(exc):
     """Errores recuperables con reintento (bloqueos y desconexiones de red).
 
-    Incluye la pérdida de conexión para que los listados públicos reconecten y
-    reintenten de inmediato en vez de degradar a una lista vacía.
+    Incluye la pérdida de conexión y la no disponibilidad del pool para que los
+    listados públicos reconecten y reintenten en vez de degradar a lista vacía.
     """
+    if isinstance(exc, BaseDatosNoDisponible):
+        return True
     if es_error_conexion_bd(exc):
         return True
     if not isinstance(exc, OperationalError):
@@ -860,13 +902,43 @@ def get_db_connection(row_factory=None, read_only=False):
         break
 
     if pg_conn is None:
-        raise RuntimeError(
+        raise BaseDatosNoDisponible(
             'No hay conexiones de base de datos disponibles en este momento. '
             'Intenta de nuevo en unos segundos.'
         ) from ultimo_error
     _preparar_conexion_pg(pg_conn, read_only=read_only)
     usar_dict = row_factory is not None
     return _PgConnection(pg_conn, dict_rows=usar_dict, from_pool=True)
+
+
+def calentar_pool_bd(intentos=None, espera_max=4.0):
+    """Crea el pool y valida una conexión (warm-up de arranque en frío).
+
+    Idempotente y no fatal: devuelve ``True`` si la BD respondió. Se usa al
+    iniciar el worker para que la primera petición real no pague el coste de
+    conexión en frío del pooler de Supabase.
+    """
+    intentos = max(1, int(intentos if intentos is not None else DB_POOL_CREATE_ATTEMPTS))
+    for intento in range(intentos):
+        try:
+            with get_db_connection() as conexion:
+                cursor = conexion.cursor()
+                cursor.execute('SELECT 1')
+                cursor.fetchone()
+            print('[Localis] Pool de BD caliente y verificado.', flush=True)
+            return True
+        except Exception as error:
+            espera = min(0.5 * (2 ** intento), espera_max)
+            print(
+                '[Localis] Warm-up de BD falló '
+                f'(intento {intento + 1}/{intentos}): '
+                f'{type(error).__name__}: {error}. Reintento en {espera:.1f}s.',
+                flush=True,
+            )
+            if intento < intentos - 1:
+                time.sleep(espera)
+    print('[Localis] Warm-up de BD agotado; se reintentará por petición.', flush=True)
+    return False
 
 
 def consultar_uno(query, params=(), row_factory=ROW_AS_DICT):
