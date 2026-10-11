@@ -170,15 +170,15 @@
           {% set cat_activa = (categoria_actual | default('', true) | trim | lower) %}
           <a href="{{ url_for('index', q=q or None) }}"
              role="tab" aria-selected="{{ 'true' if not cat_activa else 'false' }}"
-             class="px-4 py-2 rounded-full text-sm font-semibold border transition {% if not cat_activa %}bg-amber-500 text-white border-amber-500{% else %}bg-white text-stone-600 border-stone-200 hover:border-amber-300 hover:text-amber-700{% endif %}">
-            Todas
+             class="px-4 py-2 rounded-full text-sm font-semibold border transition inline-flex items-center gap-1.5 {% if not cat_activa %}bg-amber-500 text-white border-amber-500{% else %}bg-white text-stone-600 border-stone-200 hover:border-amber-300 hover:text-amber-700{% endif %}">
+            <span aria-hidden="true">🗂️</span> Todas
           </a>
           {% for cat in categorias %}
             {% set activa = cat_activa and (cat.nombre | default('', true) | trim | lower) == cat_activa %}
             <a href="{{ url_for('index', q=q or None, categoria=cat.nombre) }}"
                role="tab" aria-selected="{{ 'true' if activa else 'false' }}"
-               class="px-4 py-2 rounded-full text-sm font-semibold border transition {% if activa %}bg-amber-500 text-white border-amber-500{% else %}bg-white text-stone-600 border-stone-200 hover:border-amber-300 hover:text-amber-700{% endif %}">
-              {{ cat.nombre }}
+               class="px-4 py-2 rounded-full text-sm font-semibold border transition inline-flex items-center gap-1.5 {% if activa %}bg-amber-500 text-white border-amber-500{% else %}bg-white text-stone-600 border-stone-200 hover:border-amber-300 hover:text-amber-700{% endif %}">
+              <span aria-hidden="true">{{ cat.emoji or '📦' }}</span> {{ cat.nombre }}
             </a>
           {% endfor %}
         </div>

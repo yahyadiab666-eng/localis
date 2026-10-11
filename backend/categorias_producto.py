@@ -254,3 +254,48 @@ def anotar_categoria_producto(producto):
 
 def anotar_categorias_productos(productos):
     return [anotar_categoria_producto(p) for p in (productos or [])]
+
+
+# ==========================================
+# Emojis para los chips de categoría (UI)
+# ==========================================
+# Mapeo por subcadena normalizada (sin acentos, minúsculas). El orden importa:
+# el primer término que coincida gana. Categorías nuevas -> emoji por defecto.
+EMOJI_CATEGORIA_POR_DEFECTO = '📦'
+
+EMOJIS_CATEGORIA = (
+    (('restaurant', 'comida', 'aliment', 'viver', 'mercado', 'abarrote'), '🍽️'),
+    (('bebida', 'licor', 'refresc', 'jugo', 'cerveza', 'vino'), '🥤'),
+    (('tecnolog', 'electron', 'informatic', 'celular', 'comput', 'gadget'), '💻'),
+    (('ropa', 'moda', 'textil', 'calzado'), '👕'),
+    (('salud', 'belleza', 'estetic', 'farmac', 'cuidado', 'higiene'), '💊'),
+    (('hogar', 'varios', 'mueble', 'decorac'), '🏠'),
+    (('ferreter', 'construc', 'herramienta'), '🔧'),
+    (('servicio',), '🛠️'),
+    (('juguete', 'nino', 'nina', 'infantil'), '🧸'),
+    (('mascota', 'perro', 'gato'), '🐾'),
+    (('deporte', 'gimnasio', 'fitness'), '⚽'),
+    (('papeler', 'escolar', 'oficina', 'librer'), '✏️'),
+    (('bebe', 'panal', 'matern'), '🍼'),
+    (('automotriz', 'vehiculo', 'carro', 'moto', 'repuesto'), '🚗'),
+    (('otro', 'general'), '🏷️'),
+)
+
+
+def emoji_categoria(nombre):
+    """Emoji representativo de una categoría (por nombre libre).
+
+    Tolerante a acentos, mayúsculas y espacios. Categorías desconocidas o
+    vacías devuelven ``EMOJI_CATEGORIA_POR_DEFECTO`` (📦). Nunca lanza.
+    """
+    try:
+        texto = _texto_plano(nombre)
+        if not texto:
+            return EMOJI_CATEGORIA_POR_DEFECTO
+        for terminos, emoji in EMOJIS_CATEGORIA:
+            for termino in terminos:
+                if termino in texto:
+                    return emoji
+        return EMOJI_CATEGORIA_POR_DEFECTO
+    except Exception:
+        return EMOJI_CATEGORIA_POR_DEFECTO

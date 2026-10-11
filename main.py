@@ -1096,9 +1096,13 @@ def index():
         banner_url = DEFAULT_BANNER_URL
         whatsapp = WHATSAPP_SOPORTE
 
-    # Fase 1: chips de categorías dinámicos (obtenidos de la BD).
+    # Fase 1: chips de categorías dinámicos (obtenidos de la BD) + emoji.
     try:
         categorias = obtener_categorias_admin()
+        from backend.categorias_producto import emoji_categoria
+
+        for categoria in categorias:
+            categoria['emoji'] = emoji_categoria(categoria.get('nombre'))
     except Exception:
         categorias = []
 
