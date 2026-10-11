@@ -264,9 +264,9 @@ def anotar_categorias_productos(productos):
 EMOJI_CATEGORIA_POR_DEFECTO = '📦'
 
 EMOJIS_CATEGORIA = (
-    (('restaurant', 'comida', 'aliment', 'viver', 'mercado', 'abarrote'), '🍽️'),
+    (('restaurant', 'comida', 'aliment', 'viver', 'mercado', 'abarrote'), '🍔'),
     (('bebida', 'licor', 'refresc', 'jugo', 'cerveza', 'vino'), '🥤'),
-    (('tecnolog', 'electron', 'informatic', 'celular', 'comput', 'gadget'), '💻'),
+    (('tecnolog', 'electron', 'informatic', 'celular', 'comput', 'gadget'), '📱'),
     (('ropa', 'moda', 'textil', 'calzado'), '👕'),
     (('salud', 'belleza', 'estetic', 'farmac', 'cuidado', 'higiene'), '💊'),
     (('hogar', 'varios', 'mueble', 'decorac'), '🏠'),

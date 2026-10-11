@@ -343,6 +343,17 @@ def _filtro_fecha_corta(valor):
     return formatear_fecha(valor) or '—'
 
 
+@app.template_filter('emoji_categoria')
+def _filtro_emoji_categoria(nombre):
+    """Emoji representativo de una categoría (defensivo: 📦 por defecto)."""
+    try:
+        from backend.categorias_producto import emoji_categoria
+
+        return emoji_categoria(nombre)
+    except Exception:
+        return '📦'
+
+
 @app.template_filter('url_imagen_producto')
 def _filtro_url_imagen_producto(producto):
     """Storage persistida o placeholder. Nunca None hacia Jinja2."""

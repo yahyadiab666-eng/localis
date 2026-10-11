@@ -3,6 +3,7 @@ import re
 import threading
 import time
 import traceback
+import unicodedata
 from datetime import date, datetime, time as time_of_day
 from decimal import Decimal
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -129,6 +130,7 @@ COLUMNAS_ESQUEMA = {
     ],
     'categorias': [
         ('nombre', 'TEXT'),
+        ('activo', 'INTEGER DEFAULT 1'),
     ],
     'planes': [
         ('codigo', 'TEXT'),
@@ -1511,7 +1513,7 @@ def _asegurar_indices_unicos(cursor):
 
 
 def _sembrar_categorias(cursor):
-    for nombre in ('Alimentos', 'Ropa', 'Tecnología', 'Otros'):
+    for nombre in ('Alimentos', 'Ropa', 'Tecnología y Electrónica', 'Otros'):
         cursor.execute(
             """
             INSERT INTO categorias (nombre)
@@ -1520,6 +1522,49 @@ def _sembrar_categorias(cursor):
             """,
             (nombre,),
         )
+    _desactivar_categorias_obsoletas(cursor)
+
+
+def _desactivar_categorias_obsoletas(cursor):
+    """Marca como inactivas categorías retiradas y duplicadas (no destructivo).
+
+    - ``Servicios``: la plataforma solo maneja productos físicos.
+    - ``Tecnología``: duplicado de ``Tecnología y Electrónica``.
+
+    Idempotente: solo pone ``activo = 0``; nunca borra filas ni toca FKs de
+    comercios (evita romper datos en producción). Tolerante a acentos/espacios
+    y a la ausencia de la columna ``activo`` (degrada sin lanzar).
+    """
+    try:
+        if not _tabla_existe(cursor, 'categorias'):
+            return
+        if not _columna_existe(cursor, 'categorias', 'activo'):
+            return
+        ocultas = {'servicios', 'tecnologia'}
+        cursor.execute('SELECT id, nombre FROM categorias')
+        a_desactivar = []
+        for fila in cursor.fetchall() or []:
+            if isinstance(fila, dict):
+                cid, nombre = fila.get('id'), fila.get('nombre')
+            else:
+                cid, nombre = fila[0], fila[1]
+            texto = unicodedata.normalize('NFKD', str(nombre or ''))
+            texto = ''.join(c for c in texto if not unicodedata.combining(c))
+            if ' '.join(texto.split()).strip().lower() in ocultas:
+                a_desactivar.append(cid)
+        for cid in a_desactivar:
+            cursor.execute(
+                'UPDATE categorias SET activo = 0 WHERE id = %s AND COALESCE(activo, 1) = 1',
+                (cid,),
+            )
+        if a_desactivar:
+            print(
+                f'[Localis Categorias] {len(a_desactivar)} categorias desactivadas '
+                f'(Servicios/Tecnologia)',
+                flush=True,
+            )
+    except Exception as error:
+        print(f'[Localis Categorias] no se pudo desactivar: {error}', flush=True)
 
 
 def _sembrar_planes(cursor):

@@ -702,16 +702,57 @@ def _registrar_auditoria_admin(cursor, admin_id, accion, detalles):
     )
 
 
-def obtener_categorias_admin():
-    """Categorías disponibles para el formulario de edición de tienda."""
+CATEGORIAS_OCULTAS = frozenset({'servicios', 'tecnologia'})
+
+
+def _clave_categoria(nombre):
+    """Clave normalizada (sin acentos, minúsculas, espacios colapsados)."""
+    import unicodedata
+
+    texto = unicodedata.normalize('NFKD', str(nombre or ''))
+    texto = ''.join(c for c in texto if not unicodedata.combining(c))
+    return ' '.join(texto.split()).strip().lower()
+
+
+def obtener_categorias_admin(solo_activas=True):
+    """Categorías para selectores y chips del frontend.
+
+    Excluye categorías retiradas/duplicadas (``Servicios`` y ``Tecnología``) de
+    forma tolerante a acentos y espacios. Si la columna ``activo`` aún no existe,
+    degrada mostrando todas menos las ocultas (nunca lanza).
+    """
+    filas = []
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
-            cursor.execute('SELECT id, nombre FROM categorias ORDER BY nombre ASC')
-            return [dict(f) for f in cursor.fetchall()]
+            try:
+                if solo_activas:
+                    cursor.execute(
+                        'SELECT id, nombre FROM categorias '
+                        'WHERE COALESCE(activo, 1) = 1 ORDER BY nombre ASC'
+                    )
+                else:
+                    cursor.execute(
+                        'SELECT id, nombre FROM categorias ORDER BY nombre ASC'
+                    )
+            except Exception:
+                # Degradación: sin columna ``activo`` (migración pendiente).
+                try:
+                    conexion.rollback()
+                except Exception:
+                    pass
+                cursor.execute(
+                    'SELECT id, nombre FROM categorias ORDER BY nombre ASC'
+                )
+            filas = [dict(f) for f in cursor.fetchall()]
     except Exception as e:
         print(f'Error al listar categorias admin: {e}')
         return []
+    return [
+        fila
+        for fila in filas
+        if _clave_categoria(fila.get('nombre')) not in CATEGORIAS_OCULTAS
+    ]
 
 
 def actualizar_comercio_admin(
