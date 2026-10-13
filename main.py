@@ -972,12 +972,10 @@ def privacidad():
 
 @app.route('/eliminar-cuenta')
 def eliminar_cuenta():
-    """URL pública de eliminación de cuenta y datos (requisito de Google Play).
-
-    Describe el proceso y ofrece una solicitud directa por WhatsApp con los
-    datos de la cuenta en sesión. No borra nada por GET.
-    """
-    return render_template('eliminar_cuenta.html', whatsapp_url=WHATSAPP_SOPORTE_URL)
+    return '''
+    <h2>Eliminación de cuenta - Localis</h2>
+    <p>Para solicitar la eliminación de tu cuenta y datos asociados en Localis, por favor comunícate con nuestro soporte técnico indicando el correo electrónico con el que iniciaste sesión.</p>
+    '''
 
 
 @app.route('/.well-known/assetlinks.json')
