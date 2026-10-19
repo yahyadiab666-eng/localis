@@ -10,10 +10,9 @@ from dotenv import load_dotenv
 # Un .env local (o vacio) no debe pisar SUPABASE_URL de produccion.
 load_dotenv(override=False)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='[%(levelname)s] %(name)s: %(message)s',
-)
+from backend.observabilidad import configurar_logging, registrar_request_logging
+
+configurar_logging()
 _log = logging.getLogger('localis')
 
 
@@ -326,6 +325,7 @@ try:
     app.jinja_env.auto_reload = True
     app.jinja_env.cache.clear()
     csrf = CSRFProtect(app)
+    registrar_request_logging(app)
     registrar_manejadores_errores(app)
 except Exception:
     print('[Localis] Error al configurar Flask (el proceso no se detiene para que Gunicorn enlace el puerto):', flush=True)

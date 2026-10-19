@@ -15,8 +15,8 @@ pasar al siguiente**.
 
 | # | Bloque | Objetivo | Verificación (100%) | Riesgo | Estado |
 |:-:|---|---|---|:--:|:--:|
-| 0 | Red de seguridad (CI + runner local) | Poder cambiar sin miedo | CI verde reproducible + runner local corre todas las pruebas | 🟢 | ⏳ en curso |
-| 1 | Observabilidad y logging | Ver y diagnosticar en prod | App arranca, `/health` 200, logs con request-id, pruebas verdes | 🟢 | ⏳ |
+| 0 | Red de seguridad (CI + runner local) | Poder cambiar sin miedo | CI verde reproducible + runner local corre todas las pruebas | 🟢 | ✅ hecho |
+| 1 | Observabilidad y logging | Ver y diagnosticar en prod | App arranca, `/health` 200, logs con request-id, pruebas verdes | 🟢 | ✅ hecho |
 | 6a | Calidad: ruff + pre-commit | Bajar bugs, estilo consistente | `ruff check` exit 0 y en CI | 🟠 | ⏳ |
 | 5a | Seguridad aditiva | Endurecer sin romper | Cabeceras (ya), CSP report-only, pruebas verdes | 🟡 | ⏳ |
 | 2 | Migraciones versionadas | Esquema auditable y reversible | `schema_migrations` + init_db idempotente contra BD real | 🟠 | ⏳ |
