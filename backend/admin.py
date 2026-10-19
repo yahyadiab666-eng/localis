@@ -994,6 +994,19 @@ def crear_producto_admin(
             else:
                 producto_id = fila[0] if fila else None
 
+            # Código público visible (PROD-00001): independiente de la PK.
+            if producto_id:
+                try:
+                    from backend.codigos_publicos import asignar_codigo_producto
+
+                    asignar_codigo_producto(cursor, producto_id)
+                except Exception as error:
+                    print(
+                        f'[Localis Codigos] producto {producto_id}: '
+                        f'{type(error).__name__}: {error}',
+                        flush=True,
+                    )
+
             _registrar_auditoria_admin(
                 cursor,
                 admin_id,

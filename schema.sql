@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS usuarios (
     correo TEXT UNIQUE NOT NULL,
     contrasena TEXT, -- Opcional para autenticación vía OAuth con Google
     foto_url TEXT,   -- Avatar provisto por Google
-    rol TEXT DEFAULT 'comerciante' -- Opciones: 'cliente', 'comerciante', 'admin'
+    rol TEXT DEFAULT 'user', -- Opciones: 'user'/'comprador', 'comerciante', 'admin'
+    codigo_publico TEXT -- Identificador visible (USR-0001), independiente de la PK
 );
 
 -- ==========================================
@@ -75,6 +76,9 @@ CREATE TABLE IF NOT EXISTS comercios (
     aviso_bienvenida_visto INTEGER DEFAULT 0,
     imagen_portada TEXT,
     visible INTEGER DEFAULT 1,         -- 0 = Oculto, 1 = Visible
+    estado_tienda TEXT DEFAULT 'activa', -- 'activa' | 'pre_cuenta' (sin dueño)
+    owner_email TEXT,                  -- Correo del futuro dueño en fase de pre-cuenta
+    codigo_publico TEXT,               -- Identificador visible (COM-0001)
 
     FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
     FOREIGN KEY (categoria_id) REFERENCES categorias(id) ON DELETE SET NULL,
@@ -105,6 +109,7 @@ CREATE TABLE IF NOT EXISTS productos (
     imagen_fuente TEXT, -- serper | override_manual | placeholder
     stock INTEGER DEFAULT 0,
     codigo_barras TEXT,
+    codigo_publico TEXT, -- Identificador visible (PROD-00001)
     FOREIGN KEY (comercio_id) REFERENCES comercios(id) ON DELETE CASCADE
 );
 

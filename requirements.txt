@@ -8,6 +8,8 @@ psycopg2-binary
 supabase>=2.31.0
 httpx>=0.27.0
 requests
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
 numpy
 rapidocr-onnxruntime
 opencv-python-headless

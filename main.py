@@ -148,6 +148,10 @@ from backend.admin import (
     suspender_comercio_temporal,
 )
 from backend.auth import obtener_o_crear_usuario_google, obtener_usuario_por_id
+from backend.pre_cuentas import (
+    crear_pre_cuenta_admin,
+    transferir_propiedad_comercio,
+)
 from backend.diagnostics import ejecutar_diagnostico_inicio, obtener_estado_sistema
 from backend.error_handlers import registrar_manejadores_errores
 from utils.images import (
@@ -241,6 +245,7 @@ from backend.stores import (
     obtener_tasa_dolar,
     registrar_comercio_completo,
 )
+from backend.tasa_bcv import estado_tasa_bcv, obtener_tasa_bcv
 from backend.analytics import (
     normalizar_tipo,
     producto_pertenece_a_comercio,
@@ -432,6 +437,29 @@ def _injectar_usuario_publico():
             'foto_url': '',
             'es_admin': False,
             'es_comerciante': False,
+        }
+
+
+@app.context_processor
+def _inyectar_tasa_bcv():
+    """Tasa oficial del BCV disponible en TODAS las plantillas como ``tasa_bcv``.
+
+    Usa la caché diaria en memoria (sin coste por petición). El primer render de
+    la jornada no bloquea: el módulo precalienta la caché en segundo plano al
+    arrancar el worker. Nunca rompe el render.
+    """
+    try:
+        return {'tasa_bcv': obtener_tasa_bcv()}
+    except Exception as error:  # defensivo: una tasa ausente no debe tumbar la vista
+        print(f'[Localis Tasa] contexto BCV no disponible: {type(error).__name__}: {error}')
+        return {
+            'tasa_bcv': {
+                'ok': False,
+                'tasa': 1.0,
+                'fecha': None,
+                'fuente': 'fallback',
+                'error': 'tasa BCV no disponible',
+            }
         }
 
 
@@ -1041,6 +1069,27 @@ def health_ready():
     return jsonify(estado), (200 if estado.get('ok') else 503)
 
 
+@app.route('/api/tasa-bcv')
+def api_tasa_bcv_actual():
+    """Tasa vigente en caché (sin forzar red) + metadatos de la caché."""
+    return jsonify({'tasa_bcv': obtener_tasa_bcv(), 'cache': estado_tasa_bcv()}), 200
+
+
+@app.route('/api/actualizar-tasa', methods=['GET', 'POST'])
+@_exento_csrf
+def api_actualizar_tasa():
+    """Fuerza la sincronización manual de la tasa oficial del BCV.
+
+    Devuelve 200 si la tasa es fresca; 503 si se sirvió desde un respaldo
+    (red del BCV caída). Nunca propaga excepciones a Flask.
+    """
+    try:
+        resultado = obtener_tasa_bcv(forzar_actualizacion=True)
+        return jsonify(resultado), (200 if resultado.get('ok') else 503)
+    except Exception as error:
+        return jsonify({'ok': False, 'error': f'{type(error).__name__}: {error}'}), 500
+
+
 def inicializar_base_de_datos():
     if init_db():
         print('\nBase de datos e índices verificados/actualizados.\n')
@@ -1475,7 +1524,7 @@ def google_callback():
         session['username'] = usuario_o_error.get('nombre') or 'Usuario'
         session['correo'] = usuario_o_error.get('correo') or ''
         session['foto_url'] = usuario_o_error.get('foto_url', '') or ''
-        session['rol'] = usuario_o_error.get('rol', 'comerciante')
+        session['rol'] = usuario_o_error.get('rol', 'user')
         session['es_admin'] = usuario_o_error.get('rol') == 'admin'
 
         # --- FASE 1: persistencia real de la sesión -------------------------
@@ -1556,6 +1605,63 @@ def perfil():
         comercios=comercios,
         es_admin=bool(session.get('es_admin')),
         es_comerciante=soy_comerciante,
+        has_store=bool(soy_comerciante),
+        rol=(
+            'admin'
+            if session.get('es_admin')
+            else ('comerciante' if soy_comerciante else (usuario or {}).get('rol') or 'user')
+        ),
+    )
+
+
+@app.route('/api/me')
+@login_requerido_api
+def api_me():
+    """Perfil JSON del usuario autenticado (rol actual y ``has_store``).
+
+    Endpoint aditivo: no reemplaza ``/perfil`` ni altera respuestas existentes.
+    Permite a los clientes saber si deben mostrar interfaces de administración.
+    """
+    usuario_id = session.get('usuario_id')
+    es_admin = bool(session.get('es_admin'))
+
+    usuario = None
+    try:
+        usuario = obtener_usuario_por_id(usuario_id)
+    except Exception as error:
+        print(f'[Localis API] /api/me usuario fallo: {type(error).__name__}: {error}')
+        usuario = None
+
+    has_store = False
+    comercio_id = None
+    if not es_admin:
+        try:
+            has_store = bool(es_usuario_comerciante(usuario_id))
+            if has_store:
+                comercio = obtener_comercio_por_usuario(usuario_id)
+                comercio_id = comercio.get('id') if comercio else None
+        except Exception as error:
+            print(f'[Localis API] /api/me comercio fallo: {type(error).__name__}: {error}')
+            has_store = False
+
+    if es_admin:
+        rol = 'admin'
+    elif has_store:
+        rol = 'comerciante'
+    else:
+        rol = (usuario or {}).get('rol') or session.get('rol') or 'user'
+
+    return jsonify(
+        {
+            'id': usuario_id,
+            'nombre': (usuario or {}).get('nombre') or session.get('username'),
+            'correo': (usuario or {}).get('correo') or session.get('correo'),
+            'foto_url': (usuario or {}).get('foto_url') or session.get('foto_url'),
+            'rol': rol,
+            'es_admin': es_admin,
+            'has_store': bool(has_store),
+            'comercio_id': comercio_id,
+        }
     )
 
 
@@ -2101,6 +2207,17 @@ def nuevo_producto():
                 )
                 fila = cursor.fetchone()
                 producto_id = fila[0] if fila else None
+                if producto_id:
+                    try:
+                        from backend.codigos_publicos import asignar_codigo_producto
+
+                        asignar_codigo_producto(cursor, producto_id)
+                    except Exception as error:
+                        print(
+                            f'[Localis Codigos] producto {producto_id}: '
+                            f'{type(error).__name__}: {error}',
+                            flush=True,
+                        )
             _sincronizar_foto_local_si_aplica(producto_id, imagen_url)
             _registrar_imagen_manual(producto_id, imagen_url)
             asegurar_slug_producto(producto_id, nombre)
@@ -2687,7 +2804,19 @@ def api_crear_producto():
             (tienda_id, nombre, descripcion, precio_usd, codigo_barras, imagen_url),
         )
         fila = cursor.fetchone()
-        return fila[0] if fila else None
+        producto_id = fila[0] if fila else None
+        if producto_id:
+            try:
+                from backend.codigos_publicos import asignar_codigo_producto
+
+                asignar_codigo_producto(cursor, producto_id)
+            except Exception as error:
+                print(
+                    f'[Localis Codigos] producto {producto_id}: '
+                    f'{type(error).__name__}: {error}',
+                    flush=True,
+                )
+        return producto_id
 
     try:
         from backend.db import ejecutar_con_reintentos_bd
@@ -2980,6 +3109,60 @@ def admin_suspender_comercio(comercio_id):
 @admin_requerido
 def admin_reactivar_comercio(comercio_id):
     exito, mensaje = reactivar_comercio(session.get('usuario_id'), comercio_id)
+    flash(mensaje, 'exito' if exito else 'error')
+    return redirect(url_for('panel_admin'))
+
+
+# ==========================================
+# PRE-CUENTAS Y TRASPASO DE PROPIEDAD (ADMIN)
+# ==========================================
+# Aislado: crea tiendas sin dueño y consolida la propiedad por correo. No toca
+# los flujos existentes de registro ni de pagos.
+
+
+@app.route('/admin/pre-cuenta/nueva', methods=['POST'])
+@admin_requerido
+def admin_crear_pre_cuenta():
+    """Pre-crea un comercio (estado ``pre_cuenta``) sin exigir registro previo."""
+    admin_id = session.get('usuario_id')
+    categoria_raw = request.form.get('categoria_id')
+    categoria_id = None
+    if categoria_raw and str(categoria_raw).strip().isdigit():
+        categoria_id = int(categoria_raw)
+    datos = {
+        'nombre': request.form.get('nombre', ''),
+        'owner_email': request.form.get('owner_email', ''),
+        'descripcion': request.form.get('descripcion', ''),
+        'telefono': request.form.get('telefono', ''),
+        'direccion': request.form.get('direccion', ''),
+        'ciudad': request.form.get('ciudad', ''),
+        'zona': request.form.get('zona', ''),
+        'categoria_id': categoria_id,
+    }
+    exito, mensaje, comercio_id = crear_pre_cuenta_admin(admin_id, datos)
+    if _peticion_acepta_json():
+        return (
+            jsonify({'ok': bool(exito), 'mensaje': mensaje, 'comercio_id': comercio_id}),
+            200 if exito else 400,
+        )
+    flash(mensaje, 'exito' if exito else 'error')
+    return redirect(url_for('panel_admin'))
+
+
+@app.route('/admin/comercio/<int:comercio_id>/transferir', methods=['POST'])
+@admin_requerido
+def admin_transferir_comercio(comercio_id):
+    """Consolida/transfiere la propiedad de una tienda a un correo (Gmail)."""
+    admin_id = session.get('usuario_id')
+    email = request.form.get('owner_email', '')
+    exito, mensaje, vinculado = transferir_propiedad_comercio(
+        admin_id, comercio_id, email
+    )
+    if _peticion_acepta_json():
+        return (
+            jsonify({'ok': bool(exito), 'mensaje': mensaje, 'vinculado': bool(vinculado)}),
+            200 if exito else 400,
+        )
     flash(mensaje, 'exito' if exito else 'error')
     return redirect(url_for('panel_admin'))
 

@@ -87,6 +87,9 @@ def _filtro_comercio_publico():
         # con fecha de vencimiento pasada no se muestra en la vista pública.
         " AND (c.fecha_vencimiento IS NULL OR c.fecha_vencimiento >= CURRENT_DATE)"
     )
+    # Pre-cuentas: tiendas sin dueño todavía no se muestran al público.
+    if _estado_tienda_disponible():
+        filtro += " AND LOWER(TRIM(COALESCE(c.estado_tienda, 'activa'))) <> 'pre_cuenta'"
     if not _sandbox_publico_permitido():
         filtro += " AND LEFT(LOWER(TRIM(COALESCE(c.nombre, ''))), 2) <> '__'"
     excluidos = _comercios_excluidos()
@@ -140,6 +143,56 @@ def _activo_disponible():
 
     _ACTIVO_DISPONIBLE = bool(existe)
     return _ACTIVO_DISPONIBLE
+
+
+_ESTADO_TIENDA_DISPONIBLE = None
+
+
+def _estado_tienda_disponible():
+    """True si ``comercios.estado_tienda`` existe (cacheado). Degradación segura.
+
+    Evita ``UndefinedColumn`` en las consultas públicas si la migración aún no
+    se aplicó. Si falta, intenta crearla de forma idempotente (auto-saneo), igual
+    que ``_activo_disponible``.
+    """
+    global _ESTADO_TIENDA_DISPONIBLE
+    if _ESTADO_TIENDA_DISPONIBLE is not None:
+        return _ESTADO_TIENDA_DISPONIBLE
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'comercios'
+                  AND column_name = 'estado_tienda'
+                LIMIT 1
+                """
+            )
+            existe = cursor.fetchone() is not None
+    except Exception:
+        _ESTADO_TIENDA_DISPONIBLE = False
+        return False
+
+    if not existe:
+        try:
+            with get_db_connection() as conexion:
+                cursor = conexion.cursor()
+                cursor.execute(
+                    "ALTER TABLE comercios "
+                    "ADD COLUMN IF NOT EXISTS estado_tienda TEXT DEFAULT 'activa'"
+                )
+                conexion.commit()
+            existe = True
+            print('[Localis] columna comercios.estado_tienda creada (auto-saneo)', flush=True)
+        except Exception as error:
+            print(
+                f'[Localis] no se pudo crear comercios.estado_tienda: {type(error).__name__}'
+            )
+
+    _ESTADO_TIENDA_DISPONIBLE = bool(existe)
+    return _ESTADO_TIENDA_DISPONIBLE
 
 
 def _filtro_producto_publico():
@@ -454,6 +507,35 @@ def registrar_comercio_completo(
                 nuevo_id = fila_id.get('id')
             else:
                 nuevo_id = fila_id[0] if fila_id else None
+
+            # Código público visible (COM-0001): independiente de la PK.
+            if nuevo_id:
+                try:
+                    from backend.codigos_publicos import asignar_codigo_comercio
+
+                    asignar_codigo_comercio(cursor, nuevo_id)
+                except Exception as error:
+                    print(
+                        f'[Localis Codigos] comercio {nuevo_id}: '
+                        f'{type(error).__name__}: {error}',
+                        flush=True,
+                    )
+
+            # El dueño de una tienda pasa a ser comerciante (rol dinámico).
+            if nuevo_id and usuario_id:
+                try:
+                    cursor.execute(
+                        "UPDATE usuarios SET rol = 'comerciante' "
+                        "WHERE id = ? "
+                        "AND LOWER(TRIM(COALESCE(rol, ''))) <> 'admin'",
+                        (int(usuario_id),),
+                    )
+                except Exception as error:
+                    print(
+                        f'[Localis Roles] comercio {nuevo_id}: {error}',
+                        flush=True,
+                    )
+
             if logo_url and nuevo_id:
                 fragmentos, extra = sql_set_imagenes(cursor, logo_url=logo_url)
                 if fragmentos:

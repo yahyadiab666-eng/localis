@@ -161,7 +161,11 @@ COLUMNAS_ESQUEMA = {
         ('correo', 'TEXT'),
         ('contrasena', 'TEXT'),
         ('foto_url', 'TEXT'),
-        ('rol', "TEXT DEFAULT 'comerciante'"),
+        # Rol por defecto para altas nuevas: comprador. El alta real (OAuth) lo
+        # fija explícitamente; este default solo aplica a inserts sin rol.
+        ('rol', "TEXT DEFAULT 'user'"),
+        # Identificador visible (USR-0001) independiente de la PK.
+        ('codigo_publico', 'TEXT'),
     ],
     'categorias': [
         ('nombre', 'TEXT'),
@@ -212,6 +216,14 @@ COLUMNAS_ESQUEMA = {
         ('puntos', 'INTEGER DEFAULT 0'),
         ('referido_por', 'TEXT'),
         ('referente_id', 'INTEGER'),
+        # Pre-cuentas: ciclo de vida de la tienda (activa | pre_cuenta). Separado
+        # de ``estado_pago`` (estado de suscripción/pago) para no mezclar
+        # semánticas. Default 'activa' deja intactas las tiendas existentes.
+        ('estado_tienda', "TEXT DEFAULT 'activa'"),
+        # Correo del futuro dueño durante la fase de pre-cuenta (nullable).
+        ('owner_email', 'TEXT'),
+        # Identificador visible (COM-0001) independiente de la PK.
+        ('codigo_publico', 'TEXT'),
     ],
     'sucursales': [
         ('comercio_id', 'INTEGER'),
@@ -239,6 +251,8 @@ COLUMNAS_ESQUEMA = {
         # Destacados / Boosts (micro-pago) a nivel de producto. UTC estricto.
         ('boost_inicio', 'TIMESTAMPTZ'),
         ('boost_fin', 'TIMESTAMPTZ'),
+        # Identificador visible (PROD-0001) independiente de la PK.
+        ('codigo_publico', 'TEXT'),
     ],
     'boosts': [
         ('comercio_id', 'INTEGER'),
@@ -1365,7 +1379,8 @@ def _crear_tabla_usuarios(cursor):
             correo TEXT UNIQUE NOT NULL,
             contrasena TEXT,
             foto_url TEXT,
-            rol TEXT DEFAULT 'comerciante'
+            rol TEXT DEFAULT 'user',
+            codigo_publico TEXT
         )
         """
     )
@@ -1428,7 +1443,10 @@ def _crear_tabla_comercios(cursor):
             aviso_bienvenida_visto INTEGER DEFAULT 0,
             imagen_portada TEXT,
             visible INTEGER DEFAULT 1,
-            banner_color TEXT DEFAULT 'ambar'
+            banner_color TEXT DEFAULT 'ambar',
+            estado_tienda TEXT DEFAULT 'activa',
+            owner_email TEXT,
+            codigo_publico TEXT
         )
         """
     )
@@ -1465,7 +1483,8 @@ def _crear_tabla_productos(cursor):
             imagen_manual_fuente TEXT,
             stock INTEGER DEFAULT 0,
             codigo_barras TEXT,
-            activo INTEGER DEFAULT 1
+            activo INTEGER DEFAULT 1,
+            codigo_publico TEXT
         )
         """
     )
@@ -1709,6 +1728,23 @@ def _crear_tabla_canjes_puntos(cursor):
     )
 
 
+def _crear_tabla_contadores_publicos(cursor):
+    """Contadores monotónicos para códigos públicos sin huecos (USR-, COM-, PROD-).
+
+    Una fila por namespace. Se incrementa de forma atómica con
+    ``UPDATE ... RETURNING`` (bloqueo de fila), de modo que dos procesos jamás
+    obtienen el mismo valor ni se saltan números por transacciones fallidas.
+    """
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS contadores_publicos (
+            clave TEXT PRIMARY KEY,
+            valor BIGINT NOT NULL DEFAULT 0
+        )
+        """
+    )
+
+
 def _crear_tablas(cursor):
     """Crea tablas faltantes. No reejecuta CREATE TABLE si ya existen (AccessExclusiveLock)."""
     pares = (
@@ -1732,6 +1768,7 @@ def _crear_tablas(cursor):
         ('boosts', _crear_tabla_boosts),
         ('referidos', _crear_tabla_referidos),
         ('canjes_puntos', _crear_tabla_canjes_puntos),
+        ('contadores_publicos', _crear_tabla_contadores_publicos),
     )
     for nombre, fn in pares:
         if _tabla_existe(cursor, nombre):
@@ -2001,6 +2038,55 @@ def _backfill_slugs(cursor):
             )
 
 
+def _asegurar_rol_default_user(cursor):
+    """Ajusta el default de ``usuarios.rol`` a 'user' (aditivo, no toca filas).
+
+    Solo afecta a inserts que no especifiquen rol. El alta real (OAuth) fija el
+    rol explícitamente, por lo que es seguro e idempotente. Si el DDL falla, se
+    degrada silenciosamente (la columna sigue existiendo con su valor previo).
+    """
+    try:
+        if not _tabla_existe(cursor, 'usuarios'):
+            return
+        if not _columna_existe(cursor, 'usuarios', 'rol'):
+            return
+        _ejecutar_ddl_seguro(
+            cursor,
+            "ALTER TABLE usuarios ALTER COLUMN rol SET DEFAULT 'user'",
+        )
+    except Exception as error:
+        print(f'[Localis Roles] default de usuarios.rol no ajustado: {error}', flush=True)
+
+
+def _backfill_codigos_publicos(cursor):
+    """Asigna ``codigo_publico`` (USR-/COM-/PROD-) a filas existentes.
+
+    Idempotente: solo procesa filas con ``codigo_publico`` nulo o vacío. Delega
+    en ``backend.codigos_publicos`` (import perezoso para evitar ciclos, igual que
+    ``_backfill_slugs``). Nunca lanza: si algo falla, se registra y continúa.
+    """
+    try:
+        from backend.codigos_publicos import asignar_codigos_pendientes
+    except Exception as error:
+        print(f'[Localis Codigos] generador no disponible: {error}', flush=True)
+        return
+
+    for tabla in ('usuarios', 'comercios', 'productos'):
+        try:
+            if not _tabla_existe(cursor, tabla):
+                continue
+            if not _columna_existe(cursor, tabla, 'codigo_publico'):
+                continue
+            generados = asignar_codigos_pendientes(cursor, tabla)
+            if generados:
+                print(
+                    f'[Localis Codigos] {tabla}: {generados} códigos generados',
+                    flush=True,
+                )
+        except Exception as error:
+            print(f'[Localis Codigos] {tabla}: {error}', flush=True)
+
+
 def _crear_indices(cursor):
     indices = [
         'CREATE INDEX IF NOT EXISTS idx_productos_comercio_id ON productos(comercio_id)',
@@ -2049,6 +2135,13 @@ def _crear_indices(cursor):
         'CREATE INDEX IF NOT EXISTS idx_referidos_referente ON referidos(referente_comercio_id)',
         'CREATE INDEX IF NOT EXISTS idx_canjes_comercio ON canjes_puntos(comercio_id)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_puntos ON comercios(puntos)',
+        # Códigos públicos visibles (USR-/COM-/PROD-). UNIQUE permite múltiples
+        # NULL en PostgreSQL, así sirve también para ubicar los pendientes.
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_codigo_publico ON usuarios(codigo_publico)',
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_comercios_codigo_publico ON comercios(codigo_publico)',
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_productos_codigo_publico ON productos(codigo_publico)',
+        # Búsqueda de pre-cuentas por correo del futuro dueño (case-insensitive).
+        'CREATE INDEX IF NOT EXISTS idx_comercios_owner_email ON comercios(LOWER(owner_email)) WHERE owner_email IS NOT NULL',
     ]
     for ddl in indices:
         _ejecutar_indice_si_falta(cursor, ddl)
@@ -2144,7 +2237,9 @@ def init_db():
             try:
                 _crear_tablas(cursor)
                 _migrar_columnas(cursor)
+                _asegurar_rol_default_user(cursor)
                 _backfill_slugs(cursor)
+                _backfill_codigos_publicos(cursor)
                 _reconciliar_estados_imagenes(cursor)
                 conexion.commit()
 

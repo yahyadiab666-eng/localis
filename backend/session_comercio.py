@@ -16,6 +16,9 @@ def vincular_comercio_en_sesion(comercio_id):
         # Fase 2: un usuario con comercio cuenta como "comerciante" para las
         # redirecciones. Al registrar/renovar su tienda pasa a ser comerciante.
         session['es_comerciante'] = True
+        # El rol visible también pasa a comerciante (el admin nunca se degrada).
+        if not session.get('es_admin'):
+            session['rol'] = 'comerciante'
         session.modified = True
 
 

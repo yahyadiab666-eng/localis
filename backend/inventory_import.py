@@ -1650,6 +1650,21 @@ def persistir_importacion_upsert(comercio_id, productos, categoria=None, existen
                     )
             actualizados += len(lote)
 
+        # Códigos públicos (PROD-): rellena los productos nuevos, acotado al
+        # comercio. Idempotente y aislado (nunca rompe la importación).
+        try:
+            from backend.codigos_publicos import asignar_codigos_pendientes
+
+            asignar_codigos_pendientes(
+                cursor, 'productos', 'comercio_id = ?', (int(comercio_id),)
+            )
+        except Exception as error:
+            print(
+                f'{LOG_PREFIX} aviso códigos públicos: '
+                f'{type(error).__name__}: {error}',
+                flush=True,
+            )
+
         # --- Sincronización espejo: productos del comercio que YA NO vienen ---
         bajas = 0
         from backend.utils import normalizar_codigo_barras as _ncb
