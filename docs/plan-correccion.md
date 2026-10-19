@@ -21,7 +21,7 @@ pasar al siguiente**.
 | 5a | Seguridad aditiva | Endurecer sin romper | Cabeceras (ya), CSP report-only, pruebas verdes | 🟡 | ⏳ |
 | 2 | Migraciones versionadas | Esquema auditable y reversible | `schema_migrations` + init_db idempotente contra BD real | 🟠 | ✅ hecho |
 | 1b | Migrar `print` → `logging` (núcleo) | Trazas estructuradas | Módulos clave sin `print`, pruebas verdes | 🟠 | ⏳ |
-| 7 | Rendimiento y caché | Latencia y coste | p95 catálogo con caché; invalidación correcta | 🟡 | ⏳ |
+| 7 | Rendimiento y caché | Latencia y coste | p95 catálogo con caché; invalidación correcta | 🟡 | ✅ hecho |
 | 8 | E2E + accesibilidad | Contrato de los refactors | Flujos críticos verdes | 🟢 | ⏳ |
 | — | **Frontera de riesgo (requiere staging/infra)** | | | | |
 | 4 | Blueprints (`main.py`) | Mantener y crecer | E2E verdes, mismo comportamiento | 🔴 | ⛔ gated |

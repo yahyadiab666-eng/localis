@@ -33,6 +33,7 @@ except Exception:
 
 SIN_RED = [
     'test_config_seguridad.py',
+    'test_cache.py',
     'test_clasificador_categorias.py',
     'test_cobertura_universal.py',
 ]

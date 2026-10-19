@@ -1160,11 +1160,30 @@ def index():
     else:
         # Portada: destacados fijos arriba + "revoltijo" justo de no destacados
         # (mezcla aleatoria por carga, con tope por comercio).
+        from backend.runtime_cache import get_or_load
+
         try:
-            productos, hay_mas = listar_portada_hibrida(
+            ttl_portada = max(
+                0, int(os.getenv('LOCALIS_CACHE_PORTADA_SEG', '15') or '15')
+            )
+        except (TypeError, ValueError):
+            ttl_portada = 15
+
+        def _cargar_portada():
+            return listar_portada_hibrida(
                 limit=por_pagina,
                 offset=(pagina - 1) * por_pagina,
             )
+
+        try:
+            if ttl_portada > 0:
+                productos, hay_mas = get_or_load(
+                    f'portada:{por_pagina}:{pagina}',
+                    _cargar_portada,
+                    ttl_portada,
+                )
+            else:
+                productos, hay_mas = _cargar_portada()
         except BaseDatosNoDisponible as error:
             # BD no disponible tras los reintentos: se renderiza sin productos
             # pero marcando la respuesta para que el Service Worker NO la
