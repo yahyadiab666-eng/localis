@@ -95,6 +95,24 @@ def main():
             not _ok(cabecera in texto_main, f'define {cabecera}')
         )
 
+    # 7) Toda ruta /admin va precedida por el guard de administrador.
+    print('=== Rutas /admin protegidas ===')
+    lineas_main = texto_main.splitlines()
+    rutas_admin = 0
+    desprotegidas = []
+    for i, linea in enumerate(lineas_main):
+        if '@app.route(' in linea and "'/admin" in linea:
+            rutas_admin += 1
+            ventana = []
+            for j in range(i + 1, min(i + 6, len(lineas_main))):
+                if lineas_main[j].lstrip().startswith('def '):
+                    break
+                ventana.append(lineas_main[j])
+            if 'admin_requerido' not in '\n'.join(ventana):
+                desprotegidas.append(linea.strip())
+    fallos.append(not _ok(rutas_admin > 0, f'{rutas_admin} rutas /admin detectadas'))
+    fallos.append(not _ok(not desprotegidas, f'rutas sin guard: {desprotegidas}'))
+
     print('\n=== RESULTADO ===')
     total = sum(1 for f in fallos if f)
     if total:
@@ -102,7 +120,6 @@ def main():
         return 1
     print('OK configuracion de seguridad: admins, deps, lock y cabeceras')
     return 0
-
 
 if __name__ == '__main__':
     sys.exit(main())
