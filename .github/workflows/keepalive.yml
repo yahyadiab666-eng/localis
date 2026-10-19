@@ -1,0 +1,25 @@
+name: Keepalive (evita el spin-down de Render)
+
+# Render (plan gratuito) duerme la instancia tras ~15 min sin trafico; el primer
+# usuario espera 30-60 s. Este ping programado cada 10 min la mantiene caliente.
+#
+# Nota: los workflows programados de GitHub pueden retrasarse unos minutos y se
+# desactivan tras 60 dias sin actividad en el repo. Alternativa recomendada:
+# un monitor externo (UptimeRobot/cron-job.org) apuntando a /health/live.
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health/live
+        run: |
+          curl -fsS --retry 2 --retry-delay 10 --max-time 120 \
+            https://localis.onrender.com/health/live
