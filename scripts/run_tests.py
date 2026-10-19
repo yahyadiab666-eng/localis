@@ -41,6 +41,7 @@ INTEGRACION = [
     'test_migraciones.py',
     'test_pre_cuentas_roles.py',
     'test_auth_panel.py',
+    'test_rutas_smoke.py',
 ]
 COMPILAR = [
     'config.py', 'main.py', 'database.py', 'init_db.py',
