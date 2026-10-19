@@ -2,6 +2,10 @@
 # funciona. Antes estaban sin version: un redeploy podia traer una version
 # nueva incompatible y romper el build sin haber cambiado el codigo.
 # Para actualizar, probar en una rama y anotar aqui la version nueva.
+#
+# IMPORTANTE: requiere Python 3.12 (ver .python-version). Ejemplo: numpy 2.3.1
+# NO tiene wheel para Python 3.14; Render, sin pin, usa 3.14 por defecto y el
+# build fallaria intentando compilar numpy desde fuente.
 
 # --- Web / Flask ---
 Flask==3.1.3
@@ -21,7 +25,6 @@ authlib==1.7.2
 
 # --- Base de datos ---
 psycopg2-binary==2.9.12
-
 # --- Supabase / HTTP ---
 supabase==2.31.0
 httpx==0.28.1
