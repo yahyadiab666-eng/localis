@@ -1,17 +1,29 @@
-"""Pre-cuentas (tiendas sin dueño) y traspaso de propiedad.
+"""Pre-cuentas (tiendas sin dueño), transferencia y reasignación de propiedad.
 
-Permite al administrador **pre-crear** un comercio (y su catálogo) sin exigir
-que el comerciante se haya registrado con Google. La tienda queda en
-``estado_tienda = 'pre_cuenta'`` con un ``owner_email`` de referencia y
-``usuario_id`` nulo.
+Flujo pensado para el panel admin:
 
-Al ingresar por primera vez con ese Gmail, ``reclamar_comercios_por_email``
-(enlazada desde ``obtener_o_crear_usuario_google``) vincula el perfil a la tienda
-y la marca ``'activa'``, sin tocar el flujo OAuth existente.
+1. **Pre-cuenta** (``crear_pre_cuenta_admin``): se crea una tienda **sin correo**
+   ni dueño (``usuario_id NULL``, ``owner_email NULL``, ``estado_tienda =
+   'pre_cuenta'``, oculta). Sirve para armar el comercio y su catálogo antes de
+   que el comerciante se registre.
 
-Todo es aditivo y defensivo: usa las columnas nuevas ``estado_tienda`` y
-``owner_email`` (con default/nulos) y no altera PKs, relaciones ni
-``estado_pago``. Nunca lanza: devuelve tuplas/valores seguros.
+2. **Transferencia** (``transferir_propiedad_comercio``): convierte una
+   pre-cuenta en **cuenta normal**, exactamente como si un usuario hubiese
+   creado la tienda desde cero: se le asigna el **plan gratis predeterminado**,
+   la prueba del plan (duración por defecto, sin días extra), se publica y se
+   genera su slug. Aquí se agrega el **correo del dueño**.
+
+3. **Reasignación** (``reasignar_propietario_comercio``): cambia el dueño de una
+   tienda **ya normal** sin tocar plan, fechas ni visibilidad.
+
+En transferencia y reasignación, si el correo indicado todavía **no tiene
+usuario registrado**, se guarda en ``comercios.owner_email`` con
+``usuario_id NULL``. Cuando esa persona inicie sesión por primera vez con ese
+Gmail, ``reclamar_comercios_por_email`` (invocada en el login) enlaza la tienda
+automáticamente.
+
+Todo es aditivo y defensivo: no altera PKs, relaciones ni ``estado_pago`` de
+otros comercios. Nunca lanza: devuelve tuplas/valores seguros.
 """
 
 import re
@@ -51,27 +63,66 @@ def _auditar(cursor, admin_id, accion, detalles):
 
 
 def _plan_gratis():
+    """Datos del plan gratis predeterminado (id, límite y duración en días)."""
     plan = obtener_plan_por_codigo(PLAN_GRATIS_CODIGO) or {}
-    return plan.get('id'), (plan.get('limite_productos') or 50)
+    return {
+        'id': plan.get('id'),
+        'limite': plan.get('limite_productos') or 50,
+        'dias': plan.get('dias_duracion') or 30,
+        'codigo': PLAN_GRATIS_CODIGO,
+    }
+
+
+def _buscar_usuario_por_correo(cursor, correo):
+    """Id del usuario con ese correo (case-insensitive) o ``None``."""
+    cursor.execute(
+        'SELECT id FROM usuarios '
+        'WHERE LOWER(TRIM(correo)) = LOWER(TRIM(?)) '
+        'ORDER BY id ASC LIMIT 1',
+        (correo,),
+    )
+    return _valor_fila(cursor.fetchone(), 'id', 0)
+
+
+def _ascender_a_comerciante(cursor, usuario_id):
+    if not usuario_id:
+        return
+    try:
+        cursor.execute(
+            "UPDATE usuarios SET rol = 'comerciante' "
+            "WHERE id = ? AND LOWER(TRIM(COALESCE(rol, ''))) <> 'admin'",
+            (int(usuario_id),),
+        )
+    except Exception as error:
+        print(f'{LOG_PREFIX} rol usuario {usuario_id}: {error}', flush=True)
+
+
+def _asegurar_slug(comercio_id, nombre=None):
+    """Genera el slug público si falta (idempotente; nunca lanza)."""
+    try:
+        from backend.stores import asegurar_slug_comercio
+
+        asegurar_slug_comercio(comercio_id, nombre)
+    except Exception as error:
+        print(f'{LOG_PREFIX} slug comercio {comercio_id}: {error}', flush=True)
 
 
 def crear_pre_cuenta_admin(admin_id, datos):
-    """Crea un comercio en estado ``pre_cuenta`` (sin dueño).
+    """Crea un comercio en estado ``pre_cuenta`` (**sin correo ni dueño**).
 
-    ``datos`` admite: nombre (obligatorio), owner_email (opcional), descripcion,
-    telefono, direccion, ciudad, zona, categoria_id.
+    ``datos`` admite: nombre (obligatorio), descripcion, telefono, direccion,
+    ciudad, zona, categoria_id. El correo del dueño se agrega después, al
+    transferir la propiedad.
 
     Retorna ``(exito, mensaje, comercio_id)``. Nunca lanza.
     """
     datos = datos or {}
     nombre = (datos.get('nombre') or '').strip()
-    owner_email = (datos.get('owner_email') or '').strip().lower()
     if not nombre:
         return False, 'El nombre del comercio es obligatorio.', None
-    if owner_email and not correo_valido(owner_email):
-        return False, 'El correo del dueño no es válido.', None
 
-    plan_id, limite = _plan_gratis()
+    plan = _plan_gratis()
+    plan_id = plan['id']
     if not plan_id:
         return False, 'El plan gratuito no está configurado en el sistema.', None
 
@@ -100,7 +151,7 @@ def crear_pre_cuenta_admin(admin_id, datos):
                     visible
                 )
                 VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'gratis',
-                        'pre_cuenta', ?, 0)
+                        'pre_cuenta', NULL, 0)
                 RETURNING id
                 """,
                 (
@@ -112,9 +163,8 @@ def crear_pre_cuenta_admin(admin_id, datos):
                     datos.get('zona'),
                     categoria_id,
                     plan_id,
-                    PLAN_GRATIS_CODIGO,
-                    limite,
-                    owner_email or None,
+                    plan['codigo'],
+                    plan['limite'],
                 ),
             )
             comercio_id = _valor_fila(cursor.fetchone(), 'id', 0)
@@ -133,27 +183,149 @@ def crear_pre_cuenta_admin(admin_id, datos):
                 cursor,
                 admin_id,
                 'Alta de pre-cuenta (admin)',
-                f'Comercio {comercio_id} pre-creado para '
-                f'{owner_email or "sin correo (reclamable manualmente)"}.',
+                f'Comercio {comercio_id} pre-creado (sin dueño). '
+                'El correo se asigna al transferir la propiedad.',
             )
             conexion.commit()
+
+        _asegurar_slug(comercio_id, nombre)
         return (
             True,
-            'Pre-cuenta creada. Se activará al iniciar sesión con ese correo.',
+            'Pre-cuenta creada. Al transferir la propiedad se agrega el correo '
+            'del dueño y arranca el plan gratis.',
             comercio_id,
         )
     except Exception as error:
         return False, f'Error al crear la pre-cuenta: {error}', None
 
 
-def transferir_propiedad_comercio(admin_id, comercio_id, nuevo_email):
-    """Consolida la propiedad: fija ``owner_email`` y activa la tienda.
+def _estado_actual_comercio(cursor, comercio_id):
+    cursor.execute(
+        """
+        SELECT id, nombre,
+               COALESCE(estado_tienda, 'activa') AS estado_tienda,
+               usuario_id
+        FROM comercios WHERE id = ?
+        """,
+        (int(comercio_id),),
+    )
+    fila = cursor.fetchone()
+    if not fila:
+        return None
+    return {
+        'id': _valor_fila(fila, 'id', 0),
+        'nombre': _valor_fila(fila, 'nombre', 1),
+        'estado_tienda': _valor_fila(fila, 'estado_tienda', 2),
+        'usuario_id': _valor_fila(fila, 'usuario_id', 3),
+    }
 
-    Si ya existe un usuario con ese correo, se enlaza de inmediato y su rol pasa
-    a ``'comerciante'``. Si no, la tienda queda reclamable y se activará en el
-    primer inicio de sesión con ese Gmail.
+
+def transferir_propiedad_comercio(admin_id, comercio_id, nuevo_email):
+    """Convierte una pre-cuenta en cuenta normal y le asigna el dueño.
+
+    Inicializa la tienda **como si se hubiese creado desde cero**: plan gratis
+    predeterminado, prueba con la duración del plan (sin días extra), publicada
+    y con slug. El correo del dueño se guarda; si aún no tiene usuario
+    registrado, queda reclamable y se enlaza en su primer login.
+
+    Solo aplica a pre-cuentas o tiendas sin dueño (para no reiniciar el plan de
+    un comercio ya activo). Para cambiar el dueño de una tienda activa usa
+    ``reasignar_propietario_comercio``.
 
     Retorna ``(exito, mensaje, vinculado)``. Nunca lanza.
+    """
+    nuevo_email = (nuevo_email or '').strip().lower()
+    if not correo_valido(nuevo_email):
+        return False, 'El correo del dueño no es válido.', False
+
+    plan = _plan_gratis()
+    if not plan['id']:
+        return False, 'El plan gratuito no está configurado en el sistema.', False
+
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+
+            actual = _estado_actual_comercio(cursor, comercio_id)
+            if not actual:
+                return False, 'Comercio no encontrado.', False
+
+            es_pre_cuenta = str(actual['estado_tienda'] or '').lower() == 'pre_cuenta'
+            sin_dueno = actual['usuario_id'] in (None, '')
+            if not es_pre_cuenta and not sin_dueno:
+                return (
+                    False,
+                    'Esta tienda ya es un comercio activo con dueño. Usa '
+                    '"Reasignar dueño" para cambiar la propiedad.',
+                    False,
+                )
+
+            usuario_id = _buscar_usuario_por_correo(cursor, nuevo_email)
+
+            cursor.execute(
+                """
+                UPDATE comercios
+                SET plan_id = ?,
+                    plan_tipo = ?,
+                    limite_productos = ?,
+                    estado_pago = 'activo',
+                    fecha_inicio_suscripcion = CURRENT_TIMESTAMP,
+                    fecha_vencimiento = CURRENT_TIMESTAMP + (? * INTERVAL '1 day'),
+                    plan_pendiente = NULL,
+                    plan_id_pendiente = NULL,
+                    estado_tienda = 'activa',
+                    owner_email = ?,
+                    usuario_id = ?,
+                    visible = 1
+                WHERE id = ?
+                """,
+                (
+                    plan['id'],
+                    plan['codigo'],
+                    plan['limite'],
+                    plan['dias'],
+                    nuevo_email,
+                    usuario_id or None,
+                    int(comercio_id),
+                ),
+            )
+            _ascender_a_comerciante(cursor, usuario_id)
+
+            _auditar(
+                cursor,
+                admin_id,
+                'Transferencia de propiedad (admin)',
+                f'Comercio {int(comercio_id)} -> {nuevo_email} '
+                f'({"vinculado" if usuario_id else "pendiente de primer login"}), '
+                f'plan {plan["codigo"]}.',
+            )
+            conexion.commit()
+
+        _asegurar_slug(comercio_id, actual.get('nombre'))
+
+        if usuario_id:
+            return (
+                True,
+                'Propiedad transferida. La tienda quedó como un comercio nuevo '
+                'con plan gratis.',
+                True,
+            )
+        return (
+            True,
+            'Correo guardado. La tienda quedó lista y se enlazará al dueño en '
+            'su primer inicio de sesión con ese Gmail.',
+            False,
+        )
+    except Exception as error:
+        return False, f'Error al transferir la propiedad: {error}', False
+
+
+def reasignar_propietario_comercio(admin_id, comercio_id, nuevo_email):
+    """Cambia el dueño de una tienda ya normal, **sin tocar plan ni fechas**.
+
+    Si el correo aún no tiene usuario registrado, se guarda y la tienda queda
+    reclamable (se enlaza en el primer login). Retorna
+    ``(exito, mensaje, vinculado)``. Nunca lanza.
     """
     nuevo_email = (nuevo_email or '').strip().lower()
     if not correo_valido(nuevo_email):
@@ -163,67 +335,57 @@ def transferir_propiedad_comercio(admin_id, comercio_id, nuevo_email):
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
 
-            cursor.execute(
-                'SELECT id FROM comercios WHERE id = ?', (int(comercio_id),)
-            )
-            if not cursor.fetchone():
+            actual = _estado_actual_comercio(cursor, comercio_id)
+            if not actual:
                 return False, 'Comercio no encontrado.', False
+            if str(actual['estado_tienda'] or '').lower() == 'pre_cuenta':
+                return (
+                    False,
+                    'Esta tienda es una pre-cuenta. Usa "Transferir propiedad" '
+                    'para activarla y asignarle el plan gratis.',
+                    False,
+                )
 
-            cursor.execute(
-                'SELECT id FROM usuarios '
-                'WHERE LOWER(TRIM(correo)) = ? ORDER BY id ASC LIMIT 1',
-                (nuevo_email,),
-            )
-            usuario_id = _valor_fila(cursor.fetchone(), 'id', 0)
+            usuario_id = _buscar_usuario_por_correo(cursor, nuevo_email)
 
             cursor.execute(
                 """
                 UPDATE comercios
-                SET owner_email = ?,
-                    estado_tienda = 'activa',
-                    usuario_id = COALESCE(usuario_id, ?)
+                SET owner_email = ?, usuario_id = ?
                 WHERE id = ?
                 """,
                 (nuevo_email, usuario_id or None, int(comercio_id)),
             )
-
-            if usuario_id:
-                try:
-                    cursor.execute(
-                        "UPDATE usuarios SET rol = 'comerciante' "
-                        "WHERE id = ? AND LOWER(TRIM(COALESCE(rol, ''))) <> 'admin'",
-                        (int(usuario_id),),
-                    )
-                except Exception as error:
-                    print(f'{LOG_PREFIX} rol usuario {usuario_id}: {error}', flush=True)
+            _ascender_a_comerciante(cursor, usuario_id)
 
             _auditar(
                 cursor,
                 admin_id,
-                'Traspaso de propiedad (admin)',
+                'Reasignación de dueño (admin)',
                 f'Comercio {int(comercio_id)} -> {nuevo_email} '
                 f'({"vinculado" if usuario_id else "pendiente de primer login"}).',
             )
             conexion.commit()
 
         if usuario_id:
-            return True, 'Propiedad transferida y tienda activada.', True
+            return True, 'Dueño reasignado.', True
         return (
             True,
-            'Correo registrado. La tienda se activará en el primer inicio de '
-            'sesión con ese Gmail.',
+            'Correo guardado. El dueño se enlazará en su primer inicio de sesión '
+            'con ese Gmail.',
             False,
         )
     except Exception as error:
-        return False, f'Error al transferir la propiedad: {error}', False
+        return False, f'Error al reasignar el dueño: {error}', False
 
 
 def reclamar_comercios_por_email(cursor, usuario_id, email):
-    """Vincula al usuario las tiendas pre-creadas con su correo.
+    """Vincula al usuario las tiendas cuyo ``owner_email`` coincide.
 
-    Se invoca dentro de la transacción de alta/login de Google. Solo reclama
-    tiendas sin dueño (``usuario_id IS NULL``). Devuelve la lista de
-    ``comercio_id`` reclamados (posiblemente vacía). Nunca lanza.
+    Se invoca dentro de la transacción de alta/login de Google. Solo enlaza
+    tiendas sin dueño (``usuario_id IS NULL``); no activa ni reinicia planes
+    (eso lo hace la transferencia). Devuelve la lista de ``comercio_id``
+    reclamados (posiblemente vacía). Nunca lanza.
     """
     if not usuario_id or not email:
         return []
@@ -235,8 +397,7 @@ def reclamar_comercios_por_email(cursor, usuario_id, email):
         cursor.execute(
             """
             UPDATE comercios
-            SET usuario_id = ?,
-                estado_tienda = 'activa'
+            SET usuario_id = ?
             WHERE usuario_id IS NULL
               AND LOWER(TRIM(owner_email)) = LOWER(TRIM(?))
             RETURNING id

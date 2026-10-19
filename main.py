@@ -150,6 +150,7 @@ from backend.admin import (
 from backend.auth import obtener_o_crear_usuario_google, obtener_usuario_por_id
 from backend.pre_cuentas import (
     crear_pre_cuenta_admin,
+    reasignar_propietario_comercio,
     transferir_propiedad_comercio,
 )
 from backend.diagnostics import ejecutar_diagnostico_inicio, obtener_estado_sistema
@@ -3025,6 +3026,7 @@ def panel_admin():
         whatsapp=whatsapp,
         whatsapp_url=WHATSAPP_SOPORTE_URL,
         planes=PLANES,
+        categorias=obtener_categorias_admin(),
         q=busqueda,
     )
 
@@ -3131,7 +3133,6 @@ def admin_crear_pre_cuenta():
         categoria_id = int(categoria_raw)
     datos = {
         'nombre': request.form.get('nombre', ''),
-        'owner_email': request.form.get('owner_email', ''),
         'descripcion': request.form.get('descripcion', ''),
         'telefono': request.form.get('telefono', ''),
         'direccion': request.form.get('direccion', ''),
@@ -3156,6 +3157,24 @@ def admin_transferir_comercio(comercio_id):
     admin_id = session.get('usuario_id')
     email = request.form.get('owner_email', '')
     exito, mensaje, vinculado = transferir_propiedad_comercio(
+        admin_id, comercio_id, email
+    )
+    if _peticion_acepta_json():
+        return (
+            jsonify({'ok': bool(exito), 'mensaje': mensaje, 'vinculado': bool(vinculado)}),
+            200 if exito else 400,
+        )
+    flash(mensaje, 'exito' if exito else 'error')
+    return redirect(url_for('panel_admin'))
+
+
+@app.route('/admin/comercio/<int:comercio_id>/reasignar', methods=['POST'])
+@admin_requerido
+def admin_reasignar_comercio(comercio_id):
+    """Cambia el dueño de una tienda ya normal (sin reiniciar su plan)."""
+    admin_id = session.get('usuario_id')
+    email = request.form.get('owner_email', '')
+    exito, mensaje, vinculado = reasignar_propietario_comercio(
         admin_id, comercio_id, email
     )
     if _peticion_acepta_json():

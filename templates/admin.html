@@ -58,6 +58,7 @@
         .badge-oculto, .badge-suspendido { background: #f8d7da; color: #721c24; }
         .badge-gratis { background: #fff3cd; color: #856404; }
         .badge-vencido { background: #e2e3e5; color: #383d41; }
+        .badge-pre { background: #cfe2ff; color: #084298; }
         .busqueda-admin { display: flex; gap: 8px; margin-top: 1rem; }
         .busqueda-admin input { flex: 1; padding: 0.6rem; border: 1px solid #ccc; border-radius: 4px; }
         .busqueda-admin button { padding: 0.6rem 1rem; border: none; background: #212529; color: white; border-radius: 4px; cursor: pointer; font-weight: bold; }
@@ -76,6 +77,11 @@
         }
         .plan-form { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
         .plan-form select { padding: 4px; font-size: 0.8rem; }
+        .cuenta-form { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
+        .cuenta-form input[type="email"] {
+            padding: 4px; font-size: 0.8rem; border: 1px solid #ccc; border-radius: 4px;
+            min-width: 160px; flex: 1;
+        }
     </style>
 </head>
 <body>
@@ -130,6 +136,52 @@
                         <input type="file" id="banner" name="banner" accept="image/*" required>
                     </div>
                     <button type="submit" class="btn-primario">Actualizar Banner</button>
+                </form>
+            </aside>
+
+            <aside class="card">
+                <h2>Nueva pre-cuenta</h2>
+                <p style="font-size:0.85rem;color:#666;margin-bottom:1rem;">
+                    Crea una tienda <strong>sin dueño</strong> y arma su catálogo.
+                    El correo del dueño se agrega después con <strong>Transferir</strong>,
+                    y la tienda arranca como un comercio nuevo (plan gratis).
+                </p>
+                <form action="{{ url_for('admin_crear_pre_cuenta') }}" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="form-group">
+                        <label for="pc_nombre">Nombre del comercio *</label>
+                        <input type="text" id="pc_nombre" name="nombre" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="pc_categoria">Categoría</label>
+                        <select id="pc_categoria" name="categoria_id">
+                            <option value="">— Sin categoría —</option>
+                            {% for categoria in categorias %}
+                            <option value="{{ categoria.id }}">{{ categoria.nombre }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="pc_telefono">Teléfono</label>
+                        <input type="text" id="pc_telefono" name="telefono">
+                    </div>
+                    <div class="form-group">
+                        <label for="pc_direccion">Dirección</label>
+                        <input type="text" id="pc_direccion" name="direccion">
+                    </div>
+                    <div class="form-group">
+                        <label for="pc_ciudad">Ciudad</label>
+                        <input type="text" id="pc_ciudad" name="ciudad">
+                    </div>
+                    <div class="form-group">
+                        <label for="pc_zona">Zona</label>
+                        <input type="text" id="pc_zona" name="zona">
+                    </div>
+                    <div class="form-group">
+                        <label for="pc_descripcion">Descripción</label>
+                        <input type="text" id="pc_descripcion" name="descripcion">
+                    </div>
+                    <button type="submit" class="btn-primario">Crear pre-cuenta</button>
                 </form>
             </aside>
 
@@ -202,6 +254,9 @@
                                    style="color:#0d6efd;font-weight:700;text-decoration:none;">
                                     {{ comercio.nombre }}
                                 </a>
+                                {% if comercio.estado_tienda == 'pre_cuenta' %}
+                                    <span class="badge badge-pre">pre-cuenta</span>
+                                {% endif %}
                                 <br><small>{{ comercio.telefono or '' }}</small>
                             </td>
                             <td><small>{{ comercio.correo_dueno or '—' }}</small><br><small>{{ comercio.documento_identidad or '' }}</small></td>
@@ -246,6 +301,22 @@
                                     <button type="submit" class="btn-accion-tabla btn-eliminar" title="Eliminación permanente">Eliminar</button>
                                 </form>
                                 </div>
+
+                                {% if comercio.estado_tienda == 'pre_cuenta' or not comercio.correo_dueno %}
+                                <form action="{{ url_for('admin_transferir_comercio', comercio_id=comercio.id) }}" method="POST" class="cuenta-form"
+                                      onsubmit="return confirm('¿Transferir la propiedad de «{{ comercio.nombre }}» a este correo? La tienda se activará como un comercio nuevo con plan gratis.');">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="email" name="owner_email" placeholder="correo del dueño" required>
+                                    <button type="submit" class="btn-accion-tabla btn-activar">Transferir</button>
+                                </form>
+                                {% else %}
+                                <form action="{{ url_for('admin_reasignar_comercio', comercio_id=comercio.id) }}" method="POST" class="cuenta-form"
+                                      onsubmit="return confirm('¿Reasignar el dueño de «{{ comercio.nombre }}»? Se conserva el plan actual.');">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="email" name="owner_email" placeholder="nuevo correo del dueño" required>
+                                    <button type="submit" class="btn-accion-tabla btn-resolver">Reasignar</button>
+                                </form>
+                                {% endif %}
 
                                 <!-- RESTAURAR_PAGOS_INICIO -->
                                 {% if not pagos_congelados %}

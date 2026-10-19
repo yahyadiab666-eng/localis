@@ -339,6 +339,7 @@ def obtener_todos_comercios_admin(busqueda=None):
                 SELECT c.id, c.nombre, c.telefono, c.visible, c.estado_pago,
                        c.plan_tipo, c.limite_productos, c.fecha_vencimiento,
                        c.documento_identidad, cat.nombre AS categoria,
+                       c.estado_tienda, c.owner_email,
                        u.correo AS correo_dueno,
                        COALESCE(p.nombre, c.plan_tipo) AS plan_nombre
                 FROM comercios c
