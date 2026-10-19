@@ -113,7 +113,6 @@ def slug_marca(marca):
 
 
 def _descargar(url, timeout=10.0):
-    import requests
 
     try:
         respuesta = _http.get(

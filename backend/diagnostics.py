@@ -1,6 +1,5 @@
 """Diagnóstico automático del sistema y alertas por correo ante errores críticos."""
 
-import os
 import smtplib
 import threading
 import traceback

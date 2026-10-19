@@ -18,6 +18,10 @@ jobs:
           cache: pip
       - name: Instalar dependencias (fijadas)
         run: pip install -r requirements.txt
+      - name: Lint (ruff)
+        run: |
+          pip install -r requirements-dev.txt
+          ruff check .
       - name: Compilar y correr pruebas sin red
         run: python scripts/run_tests.py --solo-sin-red
 

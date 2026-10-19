@@ -9,7 +9,6 @@ from decimal import Decimal
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from uuid import UUID
 
-import psycopg2
 from psycopg2 import InterfaceError, OperationalError, pool
 from psycopg2.extensions import (
     TRANSACTION_STATUS_IDLE,

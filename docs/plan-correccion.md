@@ -17,7 +17,7 @@ pasar al siguiente**.
 |:-:|---|---|---|:--:|:--:|
 | 0 | Red de seguridad (CI + runner local) | Poder cambiar sin miedo | CI verde reproducible + runner local corre todas las pruebas | 🟢 | ✅ hecho |
 | 1 | Observabilidad y logging | Ver y diagnosticar en prod | App arranca, `/health` 200, logs con request-id, pruebas verdes | 🟢 | ✅ hecho |
-| 6a | Calidad: ruff + pre-commit | Bajar bugs, estilo consistente | `ruff check` exit 0 y en CI | 🟠 | ⏳ |
+| 6a | Calidad: ruff + pre-commit | Bajar bugs, estilo consistente | `ruff check` exit 0 y en CI | 🟠 | ✅ hecho |
 | 5a | Seguridad aditiva | Endurecer sin romper | Cabeceras (ya), CSP report-only, pruebas verdes | 🟡 | ⏳ |
 | 2 | Migraciones versionadas | Esquema auditable y reversible | `schema_migrations` + init_db idempotente contra BD real | 🟠 | ⏳ |
 | 1b | Migrar `print` → `logging` (núcleo) | Trazas estructuradas | Módulos clave sin `print`, pruebas verdes | 🟠 | ⏳ |

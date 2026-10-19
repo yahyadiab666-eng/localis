@@ -71,7 +71,6 @@ from functools import wraps
 from backend.supabase_client import (
     SUPABASE_BUCKET_IMAGENES,
     obtener_cliente_storage,
-    supabase,
     supabase_storage_habilitado,
 )
 from backend.supabase_storage import (
@@ -206,10 +205,8 @@ from backend.utils import (
     parsear_precio_form,
     parsear_entero_form,
     parsear_visible_form,
-    url_estatica_existe,
     url_maps_comercio,
     url_whatsapp_comercio,
-    normalizar_url_imagen,
 )
 from backend.session_comercio import (
     asegurar_contexto_comercio,
@@ -228,7 +225,6 @@ from backend.import_queue import (
 from backend.stores import (
     actualizar_datos_comercio,
     actualizar_producto,
-    asegurar_slug_comercio,
     asegurar_slug_producto,
     buscar_y_filtrar_productos,
     eliminar_producto,
@@ -2110,8 +2106,6 @@ def editar_comercio():
     comercio, redireccion = _requiere_comercio()
     if redireccion:
         return redireccion
-
-    usuario_id = session.get('usuario_id')
 
     if request.method == 'POST':
         nombre = request.form.get('nombre', '').strip()
