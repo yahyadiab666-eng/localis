@@ -13,6 +13,7 @@ Devuelve 0 si todo pasa; distinto de 0 si algo falla.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 
 import requests
@@ -112,6 +113,33 @@ def main() -> int:
         )
     except Exception as e:
         fallos.append(not _ok(False, f'POST /api/actualizar-tasa: {type(e).__name__}: {e}'))
+
+    print('=== Descubrimiento desde la portada ===')
+    try:
+        home = pedir('GET', '/')
+        texto = home.text
+        productos = re.findall(r'["\'](/producto/[^"\']+)["\']', texto)
+        if productos:
+            r = pedir('GET', productos[0], allow_redirects=True)
+            ok_prod = r.status_code == 200 and ('/producto/' in r.url or '/tienda/' in r.url)
+            fallos.append(not _ok(ok_prod, f'GET {productos[0]} -> {r.status_code} {r.url}'))
+        else:
+            print('  SKIP  sin productos en la portada (BD vacia)')
+        tiendas = re.findall(r'["\'](/tienda/[^"\']+)["\']', texto)
+        if tiendas:
+            r = pedir('GET', tiendas[0], allow_redirects=True)
+            ok_tie = r.status_code == 200 and '/tienda/' in r.url
+            fallos.append(not _ok(ok_tie, f'GET {tiendas[0]} -> {r.status_code} {r.url}'))
+        else:
+            print('  SKIP  sin tiendas en la portada')
+        assets = re.findall(r'href="(/static/[^"]+\.css)"', texto)
+        if assets:
+            r = pedir('GET', assets[0])
+            fallos.append(not _ok(r.status_code == 200, f'GET {assets[0]} -> {r.status_code}'))
+        else:
+            print('  SKIP  sin asset CSS enlazado')
+    except Exception as e:
+        fallos.append(not _ok(False, f'descubrimiento: {type(e).__name__}: {e}'))
 
     print('\n=== RESULTADO ===')
     total = sum(1 for f in fallos if f)
