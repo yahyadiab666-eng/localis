@@ -10,7 +10,6 @@ TIPOS_REPORTES_PERMITIDOS = {'soporte', 'reportar_tienda', 'reportar_articulo'}
 
 
 def validar_correo(correo):
-    patron = r'^[\w\.-]+@[\w\.-]+\.\.\w+$'
     return re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', correo) is not None
 
 

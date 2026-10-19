@@ -1549,7 +1549,7 @@ def persistir_importacion_upsert(comercio_id, productos, categoria=None, existen
     ``LOCALIS_CSV_BAJAS``. Retorna ``(insertados, actualizados, omitidos,
     bajas)``.
     """
-    from backend.db import ejecutar_con_reintentos_bd, get_db_connection
+    from backend.db import ejecutar_con_reintentos_bd
 
     existentes = existentes or _cargar_existentes_comercio(comercio_id)
     nuevos = []

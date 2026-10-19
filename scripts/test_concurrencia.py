@@ -87,7 +87,6 @@ def _probar_cola_concurrente():
 
 def _probar_asignacion_paralela():
     print('\n=== Asignación instantánea en paralelo (2.000 productos) ===')
-    from unittest.mock import patch
 
     from backend.catalogo_maestro_index import IndiceMaestro
     from backend.inventory_import import asignar_imagenes_instantaneas

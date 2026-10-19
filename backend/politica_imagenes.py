@@ -8,13 +8,8 @@ Toda la lógica (enrutamiento por sector, whitelist y excepción segura) está e
 from __future__ import annotations
 
 from backend.motor_imagenes import (
-    CATEGORIAS_ESTRUCTURADAS,
-    FUENTES_CATALOGO,
-    FUENTES_LOGO,
-    FUENTES_WEB,
     es_estructurado,
     evaluar_candidato,
-    sector_de,
 )
 
 

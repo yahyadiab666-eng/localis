@@ -10,10 +10,9 @@ from dotenv import load_dotenv
 # Un .env local (o vacio) no debe pisar SUPABASE_URL de produccion.
 load_dotenv(override=False)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='[%(levelname)s] %(name)s: %(message)s',
-)
+from backend.observabilidad import configurar_logging, registrar_request_logging
+
+configurar_logging()
 _log = logging.getLogger('localis')
 
 
@@ -72,7 +71,6 @@ from functools import wraps
 from backend.supabase_client import (
     SUPABASE_BUCKET_IMAGENES,
     obtener_cliente_storage,
-    supabase,
     supabase_storage_habilitado,
 )
 from backend.supabase_storage import (
@@ -100,6 +98,7 @@ from config import (
     WHATSAPP_SOPORTE,
     WHATSAPP_SOPORTE_URL,
     aplicar_config_sesion_flask,
+    es_entorno_produccion,
     obtener_secret_key,
     pagos_habilitados,
     validar_config_arranque,
@@ -206,10 +205,8 @@ from backend.utils import (
     parsear_precio_form,
     parsear_entero_form,
     parsear_visible_form,
-    url_estatica_existe,
     url_maps_comercio,
     url_whatsapp_comercio,
-    normalizar_url_imagen,
 )
 from backend.session_comercio import (
     asegurar_contexto_comercio,
@@ -228,7 +225,6 @@ from backend.import_queue import (
 from backend.stores import (
     actualizar_datos_comercio,
     actualizar_producto,
-    asegurar_slug_comercio,
     asegurar_slug_producto,
     buscar_y_filtrar_productos,
     eliminar_producto,
@@ -325,6 +321,7 @@ try:
     app.jinja_env.auto_reload = True
     app.jinja_env.cache.clear()
     csrf = CSRFProtect(app)
+    registrar_request_logging(app)
     registrar_manejadores_errores(app)
 except Exception:
     print('[Localis] Error al configurar Flask (el proceso no se detiene para que Gunicorn enlace el puerto):', flush=True)
@@ -664,6 +661,32 @@ def agregar_cache_estaticos(response):
         )
         if request.path.lower().endswith(extensiones_cache):
             response.headers['Cache-Control'] = 'public, max-age=604800'
+    return response
+
+
+@app.after_request
+def agregar_cabeceras_seguridad(response):
+    """Cabeceras de seguridad HTTP (endurecimiento aditivo y reversible).
+
+    No activa Content-Security-Policy por defecto porque las plantillas usan
+    estilos y onclick inline; se puede probar con LOCALIS_CSP en el entorno.
+    HSTS solo se envia en produccion (requiere HTTPS).
+    """
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+    response.headers.setdefault(
+        'Referrer-Policy', 'strict-origin-when-cross-origin'
+    )
+    response.headers.setdefault(
+        'Permissions-Policy', 'geolocation=(), microphone=(), camera=()'
+    )
+    if es_entorno_produccion():
+        response.headers.setdefault(
+            'Strict-Transport-Security', 'max-age=31536000; includeSubDomains'
+        )
+    csp = (os.environ.get('LOCALIS_CSP') or '').strip()
+    if csp:
+        response.headers.setdefault('Content-Security-Policy', csp)
     return response
 
 oauth = OAuth(app)
@@ -2083,8 +2106,6 @@ def editar_comercio():
     comercio, redireccion = _requiere_comercio()
     if redireccion:
         return redireccion
-
-    usuario_id = session.get('usuario_id')
 
     if request.method == 'POST':
         nombre = request.form.get('nombre', '').strip()

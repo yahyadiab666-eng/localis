@@ -115,7 +115,6 @@ def obtener_automatica(clave):
     if not clave:
         return None
     try:
-        from backend.db import get_db_connection
 
         with _conexion() as conexion:
             cursor = conexion.cursor()
@@ -158,7 +157,6 @@ def registrar_automatica(
         return False
     hallada = 1 if (url and encontrada is None) or encontrada is True else int(bool(encontrada))
     try:
-        from backend.db import get_db_connection
 
         with _conexion() as conexion:
             cursor = conexion.cursor()
@@ -233,7 +231,6 @@ def _imagen_conservable(url, fuente=None):
 def resolver_activa(producto_id):
     """Recalcula ``productos.imagen_url`` (manual → automática → conserva la actual)."""
     try:
-        from backend.db import get_db_connection
 
         with _conexion() as conexion:
             cursor = conexion.cursor()
@@ -309,7 +306,6 @@ def resolver_activa(producto_id):
 
 def tiene_manual(producto_id):
     try:
-        from backend.db import get_db_connection
 
         with _conexion() as conexion:
             cursor = conexion.cursor()
@@ -329,7 +325,6 @@ def tiene_manual(producto_id):
 def obtener_manual(producto_id):
     """URL de la imagen manual del producto, o ``None``."""
     try:
-        from backend.db import get_db_connection
 
         with _conexion() as conexion:
             cursor = conexion.cursor()
@@ -424,7 +419,6 @@ def marcar_manual(producto_id, url, fuente='manual'):
         return eliminar_manual(producto_id)
     anterior = None
     try:
-        from backend.db import get_db_connection
 
         with _conexion() as conexion:
             cursor = conexion.cursor()
@@ -460,7 +454,6 @@ def eliminar_manual(producto_id, *, purgar=True):
     """Quita la manual, la borra de storage y revierte a la automática."""
     anterior = None
     try:
-        from backend.db import get_db_connection
 
         with _conexion() as conexion:
             cursor = conexion.cursor()

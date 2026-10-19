@@ -9,7 +9,6 @@ from decimal import Decimal
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from uuid import UUID
 
-import psycopg2
 from psycopg2 import InterfaceError, OperationalError, pool
 from psycopg2.extensions import (
     TRANSACTION_STATUS_IDLE,
@@ -2271,20 +2270,17 @@ def _bool_sql(fila):
     return bool(fila[0])
 
 
-def _liberar_lock_init_db(cursor, conexion):
-    try:
-        cursor.execute('SELECT pg_advisory_unlock(%s)', (_INIT_DB_LOCK_KEY,))
-        conexion.commit()
-    except Exception:
-        try:
-            conexion.rollback()
-            cursor.execute('SELECT pg_advisory_unlock(%s)', (_INIT_DB_LOCK_KEY,))
-            conexion.commit()
-        except Exception as error_unlock:
-            print(
-                f'[Localis] aviso al liberar lock init_db: {error_unlock}',
-                flush=True,
-            )
+def _tomar_lock_migracion(cursor):
+    """Toma el lock de migracion con alcance de TRANSACCION (no de sesion).
+
+    ``pg_try_advisory_xact_lock`` se libera solo al hacer commit/rollback, de
+    modo que nunca queda retenido por un backend idle del pooler (pgbouncer).
+    Antes se usaba ``pg_advisory_lock`` de sesion, que podia quedar "pegado" y
+    hacer que init_db se saltara en un despliegue limpio (columnas nuevas sin
+    aplicar). Retorna True si este proceso obtuvo el lock.
+    """
+    cursor.execute('SELECT pg_try_advisory_xact_lock(%s)', (_INIT_DB_LOCK_KEY,))
+    return _bool_sql(cursor.fetchone())
 
 
 def init_db():
@@ -2298,8 +2294,7 @@ def init_db():
 
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
-            cursor.execute('SELECT pg_try_advisory_lock(%s)', (_INIT_DB_LOCK_KEY,))
-            if not _bool_sql(cursor.fetchone()):
+            if not _tomar_lock_migracion(cursor):
                 print(
                     '[Localis] init_db omitido: otro proceso ya migra el esquema.',
                     flush=True,
@@ -2313,7 +2308,11 @@ def init_db():
                 _backfill_slugs(cursor)
                 _backfill_codigos_publicos(cursor)
                 _reconciliar_estados_imagenes(cursor)
+                # El commit libera el lock de transaccion; se vuelve a tomar
+                # antes de cada lote para seguir siendo un unico migrador.
                 conexion.commit()
+                if not _tomar_lock_migracion(cursor):
+                    return True
 
                 _asegurar_indices_unicos(cursor)
                 _sembrar_categorias(cursor)
@@ -2321,6 +2320,8 @@ def init_db():
                 _backfill_comercios(cursor)
                 _asignar_plan_id_existentes(cursor)
                 conexion.commit()
+                if not _tomar_lock_migracion(cursor):
+                    return True
 
                 _asegurar_claves_foraneas(cursor)
                 _crear_vista_tiendas(cursor)
@@ -2333,8 +2334,6 @@ def init_db():
                 except Exception:
                     pass
                 raise
-            finally:
-                _liberar_lock_init_db(cursor, conexion)
 
         print(
             '[Localis] init_db: sin relleno automático del catálogo maestro.',

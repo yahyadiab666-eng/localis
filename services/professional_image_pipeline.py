@@ -55,12 +55,10 @@ import os
 import re
 import threading
 import time
-import unicodedata
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
-import requests
 
 from backend import http_client as _http
 from backend.activos_verificados import fuente_verificada
@@ -808,7 +806,6 @@ def _buscar_web_bing(consulta, limite=15):
 
 def _buscar_web_ddg(consulta, limite=15):
     try:
-        sesion = requests.Session()
         inicio = _http.get(
             'https://duckduckgo.com/',
             params={'q': consulta, 'iax': 'images', 'ia': 'images'},
@@ -1423,7 +1420,6 @@ def _quitar_fondo_rembg(data):
 
 def _recorte_fondo_claro(data):
     """Respaldo sin rembg: recorta el fondo claro uniforme (foto de estudio)."""
-    from PIL import Image
 
     imagen = _abrir_imagen(data).convert('RGB')
     ancho, alto = imagen.size

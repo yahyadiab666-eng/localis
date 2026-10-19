@@ -1,0 +1,56 @@
+name: CI
+
+# Red de seguridad: compila, corre las pruebas sin red y (con PostgreSQL)
+# las de integracion. Se ejecuta en cada push y pull request.
+on:
+  push:
+  pull_request:
+
+jobs:
+  sin-red:
+    name: Compilar + pruebas sin red
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Instalar dependencias (fijadas)
+        run: pip install -r requirements.txt
+      - name: Lint (ruff)
+        run: |
+          pip install -r requirements-dev.txt
+          ruff check .
+      - name: Compilar y correr pruebas sin red
+        run: python scripts/run_tests.py --solo-sin-red
+
+  integracion:
+    name: Integracion (PostgreSQL efimero)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: localis
+          POSTGRES_PASSWORD: localis
+          POSTGRES_DB: localis
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: "postgresql://localis:localis@localhost:5432/localis"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Instalar dependencias (fijadas)
+        run: pip install -r requirements.txt
+      - name: Compilar y correr pruebas (incluye integracion con init_db)
+        run: python scripts/run_tests.py

@@ -1,0 +1,25 @@
+# Config de lint del proyecto (ruff). Define que se exige de forma determinista,
+# sin depender de configuraciones externas.
+
+target-version = "py311"
+line-length = 100
+
+exclude = [
+    "android",
+    "node_modules",
+    "static",
+    "instance",
+    "www",
+    ".git",
+    "__pycache__",
+]
+
+[lint]
+# Errores de sintaxis/runtime (E9) y deteccion de bugs con pyflakes (F).
+# No se activan reglas de estilo ni BLE/S: el proyecto usa a proposito
+# `print` y `except Exception` en el camino de request (convencion defensiva).
+select = ["E9", "F"]
+
+[lint.per-file-ignores]
+# Scripts de diagnostico/tests: pueden importar de mas para inspeccionar.
+"scripts/*" = ["F401", "F841"]
