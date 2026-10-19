@@ -1,0 +1,42 @@
+name: CI
+
+# Red de seguridad: compila todo y ejecuta las pruebas que NO necesitan
+# base de datos ni red. Se ejecuta en cada push y en cada pull request.
+on:
+  push:
+  pull_request:
+
+jobs:
+  compilar:
+    name: Compilar (sin dependencias)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: py_compile de todos los modulos Python
+        run: |
+          python -m compileall -q config.py main.py database.py init_db.py backend services scripts
+
+  pruebas-sin-red:
+    name: Pruebas sin red
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Instalar dependencias (fijadas)
+        run: pip install -r requirements.txt
+      - name: Ejecutar pruebas que no requieren BD ni red
+        env:
+          # DATABASE_URL ficticia: los modulos la leen al importar, pero estas
+          # pruebas no abren conexiones reales.
+          DATABASE_URL: "postgresql://user:pass@127.0.0.1:1/none"
+          LOCALIS_TEST_SKIP_INIT_DB: "1"
+        run: |
+          python -u scripts/test_clasificador_categorias.py
+          python -u scripts/test_cobertura_universal.py
+          python -u scripts/test_config_seguridad.py
