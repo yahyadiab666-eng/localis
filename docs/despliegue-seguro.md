@@ -56,3 +56,21 @@ producción **sin corromper el sistema**, y para revertir rápido si algo falla.
 
 Dashboard Render → servicio → *Deploys* → elegir deploy anterior → *Redeploy*.
 Es una operación de un clic y no requiere recompilar en local.
+
+## Disponibilidad: evitar el spin-down (plan gratuito)
+
+Render duerme la instancia tras ~15 min sin tráfico; el primer usuario espera
+30–60 s. Para evitarlo:
+
+- **Incluido en el repo:** `.github/workflows/keepalive.yml` hace ping a
+  `/health/live` cada 10 minutos (GitHub Actions). Limitación: los cron de
+  GitHub pueden retrasarse y se desactivan tras 60 días sin actividad del repo.
+- **Recomendado:** monitor externo (UptimeRobot / cron-job.org) cada 5–10 min
+  a `https://localis.onrender.com/health/live`. Más fiable que el cron de GH.
+- **Definitivo:** plan pago *always-on* de Render.
+
+## E2E (contrato de los refactors)
+
+`python scripts/e2e_smoke.py --base-url https://localis.onrender.com` valida las
+rutas críticas por HTTP (salud, portada, login, tasa, admin sin sesión, endpoint
+de tasa endurecido). Debe pasar **antes y después** del refactor de Blueprints.
