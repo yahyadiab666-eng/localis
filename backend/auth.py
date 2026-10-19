@@ -3,9 +3,7 @@ import sqlite3
 import psycopg2
 
 from backend.db import get_db_connection
-
-# Correo asignado como Administrador del sistema
-ADMIN_EMAIL = "ydiab.t@gmail.com"
+from config import es_correo_admin
 
 
 def _fila_a_dict(fila):
@@ -76,7 +74,7 @@ def obtener_o_crear_usuario_google(google_info):
     if not email:
         return False, "No se pudo obtener el correo de la cuenta de Google."
 
-    es_admin = email.lower() == ADMIN_EMAIL.lower()
+    es_admin = es_correo_admin(email)
     # Rol por defecto de toda alta nueva: comprador. Se asciende a
     # ``comerciante`` solo al vincular/crear una tienda (ver _resolver_rol...).
     rol_base = "admin" if es_admin else "user"
@@ -115,13 +113,12 @@ def obtener_o_crear_usuario_google(google_info):
                     nombre = EXCLUDED.nombre,
                     foto_url = EXCLUDED.foto_url,
                     rol = CASE
-                        WHEN LOWER(usuarios.correo) = LOWER(?)
-                        THEN EXCLUDED.rol
+                        WHEN ? THEN EXCLUDED.rol
                         ELSE usuarios.rol
                     END
                 RETURNING *
                 """,
-                (nombre, email, foto_url, rol_base, ADMIN_EMAIL),
+                (nombre, email, foto_url, rol_base, es_admin),
             )
             nuevo_usuario = _fila_a_dict(cursor.fetchone())
             if not nuevo_usuario or not nuevo_usuario.get("id"):

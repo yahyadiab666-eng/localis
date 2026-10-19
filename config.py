@@ -89,6 +89,39 @@ SMTP_FROM = os.environ.get('SMTP_FROM', SMTP_USER or 'localis@noreply.local')
 SMTP_USE_TLS = os.environ.get('SMTP_USE_TLS', 'true').lower() in ('1', 'true', 'yes')
 ERROR_EMAIL_COOLDOWN_SEC = int(os.environ.get('ERROR_EMAIL_COOLDOWN_SEC', '120'))
 
+
+def _correos_admin_desde_entorno():
+    """Correos administradores, separados por coma (LOCALIS_ADMIN_EMAILS).
+
+    Se acepta tambien ``;`` como separador. Si no se define nada se conserva el
+    correo historico para no romper despliegues existentes. Asi se pueden tener
+    varios admins y cambiarlos sin desplegar codigo.
+    """
+    crudo = (
+        os.environ.get('LOCALIS_ADMIN_EMAILS')
+        or os.environ.get('LOCALIS_ADMIN_EMAIL')
+        or ''
+    )
+    correos = [
+        c.strip().lower()
+        for c in crudo.replace(';', ',').split(',')
+        if c.strip()
+    ]
+    if not correos:
+        correos = ['ydiab.t@gmail.com']
+    return tuple(dict.fromkeys(correos))
+
+
+ADMIN_EMAILS = _correos_admin_desde_entorno()
+
+
+def es_correo_admin(email):
+    """True si el correo pertenece a un administrador configurado."""
+    if not email:
+        return False
+    return str(email).strip().lower() in ADMIN_EMAILS
+
+
 _DEV_SECRET_KEY = 'clave_secreta_localis_desarrollo'
 
 

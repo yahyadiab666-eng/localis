@@ -100,6 +100,7 @@ from config import (
     WHATSAPP_SOPORTE,
     WHATSAPP_SOPORTE_URL,
     aplicar_config_sesion_flask,
+    es_entorno_produccion,
     obtener_secret_key,
     pagos_habilitados,
     validar_config_arranque,
@@ -664,6 +665,32 @@ def agregar_cache_estaticos(response):
         )
         if request.path.lower().endswith(extensiones_cache):
             response.headers['Cache-Control'] = 'public, max-age=604800'
+    return response
+
+
+@app.after_request
+def agregar_cabeceras_seguridad(response):
+    """Cabeceras de seguridad HTTP (endurecimiento aditivo y reversible).
+
+    No activa Content-Security-Policy por defecto porque las plantillas usan
+    estilos y onclick inline; se puede probar con LOCALIS_CSP en el entorno.
+    HSTS solo se envia en produccion (requiere HTTPS).
+    """
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+    response.headers.setdefault(
+        'Referrer-Policy', 'strict-origin-when-cross-origin'
+    )
+    response.headers.setdefault(
+        'Permissions-Policy', 'geolocation=(), microphone=(), camera=()'
+    )
+    if es_entorno_produccion():
+        response.headers.setdefault(
+            'Strict-Transport-Security', 'max-age=31536000; includeSubDomains'
+        )
+    csp = (os.environ.get('LOCALIS_CSP') or '').strip()
+    if csp:
+        response.headers.setdefault('Content-Security-Policy', csp)
     return response
 
 oauth = OAuth(app)
