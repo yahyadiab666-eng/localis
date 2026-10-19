@@ -11,8 +11,23 @@ producción **sin corromper el sistema**, y para revertir rápido si algo falla.
 - [ ] Variables nuevas definidas en el panel de Render:
       `LOCALIS_ADMIN_EMAILS` (correos admin) y, opcional, `LOCALIS_LOG_JSON=1`,
       `LOCALIS_LOG_LEVEL=INFO`.
+- [ ] **Versión de Python:** el repo fija `3.12.8` en `.python-version`.
+      Si en Render hay una variable `PYTHON_VERSION` definida, debe ser `3.12.8`
+      (tiene **más prioridad** que el archivo). Con Python 3.14 el build falla
+      porque `numpy==2.3.1` no tiene wheel para esa versión.
 - [ ] Ventana de **baja actividad** (madrugada).
 - [ ] Saber el commit anterior desplegado (para rollback).
+
+## Diagnóstico de un despliegue fallido
+
+- **Falla el BUILD:** revisar el log de pip. Causa típica: versión de Python
+  distinta de 3.12 → wheels faltantes (numpy/onnxruntime). Solución: fijar
+  `PYTHON_VERSION=3.12.8` o eliminar esa variable y dejar `.python-version`.
+- **Falla el HEALTH CHECK:** Render debe apuntar a `/health/live` (no a
+  `/health`, que devuelve 503 si la BD aún calienta).
+- **Saber qué quedó desplegado:** `GET /health/live` devuelve `commit` y
+  `branch` (variables de Render). Si están vacíos, el servicio no está
+  desplegando desde este repo/rama.
 
 ## Despliegue recomendado (incremental)
 
