@@ -24,6 +24,7 @@ import os
 import sys
 import time
 import traceback
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -102,7 +103,7 @@ def main() -> int:
     from backend import pre_cuentas
     from backend.admin import crear_producto_admin
 
-    token = f'zz_precuenta_{int(time.time())}'
+    token = f'zz_precuenta_{int(time.time())}_{uuid.uuid4().hex[:8]}'
     correo_pend = f'{token}_pend@example.com'
     correo_demo = f'{token}_dueno@example.com'
     correo_otro = f'{token}_otro@example.com'
@@ -252,6 +253,21 @@ def main() -> int:
         _ok(fila_res.get('owner_email') == correo_otro, 'correo reservado guardado')
         _ok(fila_res.get('usuario_id') in (None, ''), 'reservado sin usuario aún')
 
+        print('\n=== Slug único (dedupe) ===')
+        _, _, cid_a = pre_cuentas.crear_pre_cuenta_admin(
+            uid_admin, {'nombre': f'Duplicada {token}'}
+        )
+        _, _, cid_b = pre_cuentas.crear_pre_cuenta_admin(
+            uid_admin, {'nombre': f'Duplicada {token}'}
+        )
+        creados['comercios'].extend([cid_a, cid_b])
+        slug_a = _leer_comercio(cid_a).get('slug')
+        slug_b = _leer_comercio(cid_b).get('slug')
+        _ok(
+            bool(slug_a) and bool(slug_b) and slug_a != slug_b,
+            f'slugs distintos con mismo nombre: {slug_a} / {slug_b}',
+        )
+
         print('\n=== Código público de producto ===')
         exito_p, msg_p, producto_id = crear_producto_admin(
             uid_admin, cid, f'Producto {token}', 'desc', 5.0
@@ -299,6 +315,17 @@ def main() -> int:
         )
         _ok(correo_otro in html, 'correo reservado visible en el panel')
         _ok('pendiente de login' in html, 'badge "pendiente de login" presente')
+
+        print('\n=== Ficha del comercio: render con acciones y código ===')
+        r_ficha = cliente.get(f'/admin/comercio/{int(cid2)}')
+        _ok(r_ficha.status_code == 200, f'GET /admin/comercio/{cid2} -> {r_ficha.status_code}')
+        html_f = r_ficha.get_data(as_text=True)
+        _ok(
+            ('Transferir propiedad' in html_f) or ('Reasignar dueño' in html_f),
+            'ficha muestra acción Transferir/Reasignar',
+        )
+        cod_res = _leer_comercio(cid2).get('codigo_publico') or ''
+        _ok(cod_res and cod_res in html_f, f'ficha muestra codigo_publico {cod_res!r}')
     except Exception:
         traceback.print_exc()
         _ok(False, 'la prueba no lanzó excepciones')

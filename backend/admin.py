@@ -338,7 +338,7 @@ def obtener_todos_comercios_admin(busqueda=None):
     panel vacío. La búsqueda cubre también el correo reservado del dueño.
     """
     def _construir(con_extra):
-        columnas_extra = 'c.estado_tienda, c.owner_email,' if con_extra else ''
+        columnas_extra = 'c.estado_tienda, c.owner_email, c.codigo_publico,' if con_extra else ''
         query = f"""
             SELECT c.id, c.nombre, c.telefono, c.visible, c.estado_pago,
                    c.plan_tipo, c.limite_productos, c.fecha_vencimiento,

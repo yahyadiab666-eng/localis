@@ -60,6 +60,8 @@
         .badge-vencido { background: #e2e3e5; color: #383d41; }
         .badge-pre { background: #cfe2ff; color: #084298; }
         .badge-pend { background: #ffe8cc; color: #8a5a00; }
+        .codigo-pub { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #084298; }
+        .btn-copiar { border: none; background: #eef2f7; color: #084298; border-radius: 4px; font-size: 0.7rem; padding: 2px 6px; cursor: pointer; margin-left: 4px; }
         .busqueda-admin { display: flex; gap: 8px; margin-top: 1rem; }
         .busqueda-admin input { flex: 1; padding: 0.6rem; border: 1px solid #ccc; border-radius: 4px; }
         .busqueda-admin button { padding: 0.6rem 1rem; border: none; background: #212529; color: white; border-radius: 4px; cursor: pointer; font-weight: bold; }
@@ -259,6 +261,11 @@
                                     <span class="badge badge-pre">pre-cuenta</span>
                                 {% endif %}
                                 <br><small>{{ comercio.telefono or '' }}</small>
+                                {% if comercio.codigo_publico %}
+                                <br><small class="codigo-pub">{{ comercio.codigo_publico }}</small>
+                                <button type="button" class="btn-copiar" data-codigo="{{ comercio.codigo_publico }}"
+                                    onclick="var b=this,c=b.getAttribute('data-codigo');if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(c);}b.textContent='¡Copiado!';setTimeout(function(){b.textContent='Copiar';},1200);">Copiar</button>
+                                {% endif %}
                             </td>
                             <td>
                                 {% if comercio.correo_dueno %}

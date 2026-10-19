@@ -1635,15 +1635,14 @@ def api_me():
 
     has_store = False
     comercio_id = None
-    if not es_admin:
-        try:
-            has_store = bool(es_usuario_comerciante(usuario_id))
-            if has_store:
-                comercio = obtener_comercio_por_usuario(usuario_id)
-                comercio_id = comercio.get('id') if comercio else None
-        except Exception as error:
-            print(f'[Localis API] /api/me comercio fallo: {type(error).__name__}: {error}')
-            has_store = False
+    try:
+        has_store = bool(es_usuario_comerciante(usuario_id))
+        if has_store:
+            comercio = obtener_comercio_por_usuario(usuario_id)
+            comercio_id = comercio.get('id') if comercio else None
+    except Exception as error:
+        print(f'[Localis API] /api/me comercio fallo: {type(error).__name__}: {error}')
+        has_store = False
 
     if es_admin:
         rol = 'admin'

@@ -727,8 +727,21 @@ def obtener_comercio_por_slug(slug, solo_visible=True):
         return None
 
 
+def _slug_en_uso(cursor, tabla, slug, entidad_id):
+    cursor.execute(
+        f"SELECT 1 FROM {tabla} "
+        "WHERE LOWER(TRIM(slug)) = ? AND id <> ? LIMIT 1",
+        (str(slug).lower(), int(entidad_id)),
+    )
+    return cursor.fetchone() is not None
+
+
 def _asegurar_slug(tabla, entidad_id, nombre=None):
-    """Asigna slug a una fila si le falta. Nunca lanza (columna opcional)."""
+    """Asigna slug a una fila si le falta. Nunca lanza (columna opcional).
+
+    Deduplica: si el slug base ya lo usa otra fila, añade sufijo ``-2``, ``-3``…
+    Así dos comercios/productos con el mismo nombre no comparten URL pública.
+    """
     from backend.utils import generar_slug
 
     if not entidad_id:
@@ -742,9 +755,17 @@ def _asegurar_slug(tabla, entidad_id, nombre=None):
                 if not fila:
                     return None
                 nombre = fila.get('nombre') if isinstance(fila, dict) else fila[0]
-            slug = generar_slug(nombre)
-            if not slug:
+            base = generar_slug(nombre)
+            if not base:
                 return None
+            slug = base
+            n = 2
+            while _slug_en_uso(cursor, tabla, slug, entidad_id):
+                slug = f'{base}-{n}'
+                n += 1
+                if n > 50:  # salvaguarda ante colisiones masivas
+                    slug = f'{base}-{entidad_id}'
+                    break
             cursor.execute(
                 f"UPDATE {tabla} SET slug = ? "
                 "WHERE id = ? AND (slug IS NULL OR TRIM(slug) = '')",

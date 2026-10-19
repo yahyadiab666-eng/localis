@@ -1143,12 +1143,68 @@ def _vista_existe(cursor, nombre):
     return cursor.fetchone() is not None
 
 
-def _ejecutar_indice_si_falta(cursor, ddl):
-    """No corre CREATE INDEX si ya existe: IF NOT EXISTS igual toma ShareLock."""
+def _primer_valor(fila):
+    if fila is None:
+        return None
+    if isinstance(fila, dict):
+        return next(iter(fila.values()), None)
+    return fila[0]
+
+
+def _tablas_existentes(cursor):
+    """Nombres de tablas de ``public`` en una sola consulta (evita N queries)."""
+    cursor.execute(
+        "SELECT table_name FROM information_schema.tables "
+        "WHERE table_schema = 'public'"
+    )
+    return {
+        str(_primer_valor(f)) for f in (cursor.fetchall() or []) if _primer_valor(f)
+    }
+
+
+def _columnas_existentes(cursor):
+    """Mapa ``tabla -> set(columnas)`` de ``public`` en una sola consulta."""
+    cursor.execute(
+        "SELECT table_name, column_name FROM information_schema.columns "
+        "WHERE table_schema = 'public'"
+    )
+    mapa = {}
+    for fila in cursor.fetchall() or []:
+        if isinstance(fila, dict):
+            tabla, col = fila.get('table_name'), fila.get('column_name')
+        else:
+            tabla, col = fila[0], fila[1]
+        if tabla:
+            mapa.setdefault(tabla, set()).add(col)
+    return mapa
+
+
+def _indices_existentes(cursor):
+    """Nombres de índices de ``public`` en una sola consulta."""
+    cursor.execute("SELECT indexname FROM pg_indexes WHERE schemaname = 'public'")
+    return {
+        str(_primer_valor(f)) for f in (cursor.fetchall() or []) if _primer_valor(f)
+    }
+
+
+def _ejecutar_indice_si_falta(cursor, ddl, existentes=None):
+    """No corre CREATE INDEX si ya existe: IF NOT EXISTS igual toma ShareLock.
+
+    ``existentes`` (set) evita una consulta por índice; se actualiza al crear.
+    """
     match = _RE_NOMBRE_INDICE.search(ddl)
-    if match and _indice_existe(cursor, match.group(1)):
+    nombre = match.group(1) if match else None
+    if nombre:
+        if existentes is not None:
+            if nombre in existentes:
+                return False
+        elif _indice_existe(cursor, nombre):
+            return False
+    if not _ejecutar_ddl_seguro(cursor, ddl):
         return False
-    return _ejecutar_ddl_seguro(cursor, ddl)
+    if nombre and existentes is not None:
+        existentes.add(nombre)
+    return True
 
 
 def _ejecutar_ddl_seguro(cursor, sql):
@@ -1191,16 +1247,28 @@ def _agregar_columna_citada_si_falta(cursor, tabla, nombre, tipo_sql):
 
 
 def _migrar_columnas(cursor):
+    # Una sola consulta de columnas (antes: una por columna/ tabla).
+    existentes = _columnas_existentes(cursor)
     for tabla, columnas in COLUMNAS_ESQUEMA.items():
-        if not _tabla_existe(cursor, tabla):
-            continue
+        cols = existentes.get(tabla)
+        if cols is None:
+            continue  # tabla ausente (no debería: _crear_tablas ya corrió)
         for nombre, tipo_sql in columnas:
+            if nombre in cols:
+                continue
             # Aislamiento por columna: un fallo en una columna no debe abortar el
             # resto de migraciones (evita dejar el esquema a medias tras un error).
             try:
                 cursor.execute('SAVEPOINT migrar_columna')
-                _agregar_columna_si_falta(cursor, tabla, nombre, tipo_sql)
+                _validar_identificador(tabla)
+                _validar_identificador(nombre)
+                if tabla not in TABLAS_PERMITIDAS:
+                    raise ValueError(f'Tabla no permitida: {tabla}')
+                cursor.execute(
+                    f'ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS {nombre} {tipo_sql}'
+                )
                 cursor.execute('RELEASE SAVEPOINT migrar_columna')
+                cols.add(nombre)
             except Exception as error:
                 try:
                     cursor.execute('ROLLBACK TO SAVEPOINT migrar_columna')
@@ -1770,13 +1838,16 @@ def _crear_tablas(cursor):
         ('canjes_puntos', _crear_tabla_canjes_puntos),
         ('contadores_publicos', _crear_tabla_contadores_publicos),
     )
+    existentes = _tablas_existentes(cursor)
     for nombre, fn in pares:
-        if _tabla_existe(cursor, nombre):
+        if nombre in existentes:
             continue
         fn(cursor)
+        existentes.add(nombre)
 
 
 def _asegurar_indices_unicos(cursor):
+    existentes = _indices_existentes(cursor)
     indices = [
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_correo ON usuarios(correo)',
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_categorias_nombre ON categorias(nombre)',
@@ -1786,7 +1857,7 @@ def _asegurar_indices_unicos(cursor):
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_imagenes_automaticas_clave ON imagenes_automaticas(clave)',
     ]
     for ddl in indices:
-        _ejecutar_indice_si_falta(cursor, ddl)
+        _ejecutar_indice_si_falta(cursor, ddl, existentes)
 
 
 def _sembrar_categorias(cursor):
@@ -2088,6 +2159,7 @@ def _backfill_codigos_publicos(cursor):
 
 
 def _crear_indices(cursor):
+    existentes = _indices_existentes(cursor)
     indices = [
         'CREATE INDEX IF NOT EXISTS idx_productos_comercio_id ON productos(comercio_id)',
         'CREATE INDEX IF NOT EXISTS idx_productos_comercio_id_desc ON productos(comercio_id, id DESC)',
@@ -2144,7 +2216,7 @@ def _crear_indices(cursor):
         'CREATE INDEX IF NOT EXISTS idx_comercios_owner_email ON comercios(LOWER(owner_email)) WHERE owner_email IS NOT NULL',
     ]
     for ddl in indices:
-        _ejecutar_indice_si_falta(cursor, ddl)
+        _ejecutar_indice_si_falta(cursor, ddl, existentes)
 
 
 def _sembrar_configuracion(cursor):

@@ -350,6 +350,12 @@ def transferir_propiedad_comercio(admin_id, comercio_id, nuevo_email):
             conexion.commit()
 
         _asegurar_slug(comercio_id, actual.get('nombre'))
+        try:
+            from backend.correo import notificar_propietario_tienda
+
+            notificar_propietario_tienda(actual.get('nombre'), nuevo_email, bool(usuario_id))
+        except Exception as error:
+            print(f'{LOG_PREFIX} aviso notificación: {error}', flush=True)
 
         if usuario_id:
             return (
@@ -404,6 +410,13 @@ def reasignar_propietario_comercio(admin_id, comercio_id, nuevo_email):
                 )
 
             dueno_anterior = actual.get('usuario_id')
+            correo_anterior = None
+            if dueno_anterior:
+                cursor.execute(
+                    'SELECT correo FROM usuarios WHERE id = ?',
+                    (int(dueno_anterior),),
+                )
+                correo_anterior = _valor_fila(cursor.fetchone(), 'correo', 0)
             cursor.execute(
                 """
                 UPDATE comercios
@@ -425,6 +438,19 @@ def reasignar_propietario_comercio(admin_id, comercio_id, nuevo_email):
                 f'({"vinculado" if usuario_id else "pendiente de primer login"}).',
             )
             conexion.commit()
+
+        _asegurar_slug(comercio_id, actual.get('nombre'))
+        try:
+            from backend.correo import (
+                notificar_dueno_anterior,
+                notificar_propietario_tienda,
+            )
+
+            notificar_propietario_tienda(actual.get('nombre'), nuevo_email, bool(usuario_id))
+            if correo_anterior and correo_anterior.lower() != nuevo_email:
+                notificar_dueno_anterior(actual.get('nombre'), correo_anterior)
+        except Exception as error:
+            print(f'{LOG_PREFIX} aviso notificación: {error}', flush=True)
 
         if usuario_id:
             return True, 'Dueño reasignado.', True
