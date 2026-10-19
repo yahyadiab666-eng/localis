@@ -1083,7 +1083,17 @@ def health_live():
     Es el endpoint recomendado para el *health check* de Render: no depende de
     la base de datos y evita reinicios por un pico transitorio de PostgreSQL.
     """
-    return jsonify({'ok': True, 'servicio': 'localis', 'tipo': 'liveness'}), 200
+    return jsonify(
+        {
+            'ok': True,
+            'servicio': 'localis',
+            'tipo': 'liveness',
+            # Render inyecta estas variables: permiten verificar exactamente
+            # que commit y que rama estan desplegados en produccion.
+            'commit': (os.environ.get('RENDER_GIT_COMMIT') or '')[:7],
+            'branch': os.environ.get('RENDER_GIT_BRANCH') or '',
+        }
+    ), 200
 
 
 @app.route('/health/ready')
