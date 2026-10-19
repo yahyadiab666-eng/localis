@@ -1,9 +1,11 @@
+import os
 import re
 import sqlite3
 
 from backend.comercio_schema import sql_set_imagenes
 from backend.db import get_db_connection
 from backend.plans import PLANES, limite_para_plan, obtener_plan_por_codigo
+from backend.runtime_cache import get_or_load
 from backend.utils import parsear_visible_form, url_banner_principal
 
 TIPOS_REPORTES_PERMITIDOS = {'soporte', 'reportar_tienda', 'reportar_articulo'}
@@ -807,8 +809,8 @@ def _clave_categoria(nombre):
     return ' '.join(texto.split()).strip().lower()
 
 
-def obtener_categorias_admin(solo_activas=True):
-    """Categorías para selectores y chips del frontend.
+def _cargar_categorias_admin(solo_activas=True):
+    """Categorías para selectores y chips del frontend (consulta directa).
 
     Excluye categorías retiradas/duplicadas (``Servicios`` y ``Tecnología``) de
     forma tolerante a acentos y espacios. Si la columna ``activo`` aún no existe,
@@ -846,6 +848,26 @@ def obtener_categorias_admin(solo_activas=True):
         for fila in filas
         if _clave_categoria(fila.get('nombre')) not in CATEGORIAS_OCULTAS
     ]
+
+
+# TTL de la cache de categorias (cambian poco). Configurable por entorno.
+_CATEGORIAS_TTL_SEG = int(
+    os.environ.get('LOCALIS_CACHE_CATEGORIAS_SEG', '300') or '300'
+)
+
+
+def obtener_categorias_admin(solo_activas=True):
+    """Version cacheada de ``_cargar_categorias_admin`` (chips y selectores).
+
+    Evita un round-trip a la BD en cada carga de la portada. TTL corto y
+    configurable; se puede invalidar con ``runtime_cache.invalidate``.
+    """
+    clave = f'categorias_admin:{1 if solo_activas else 0}'
+    return get_or_load(
+        clave,
+        lambda: _cargar_categorias_admin(solo_activas),
+        _CATEGORIAS_TTL_SEG,
+    )
 
 
 def actualizar_comercio_admin(

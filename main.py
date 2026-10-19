@@ -1083,7 +1083,17 @@ def health_live():
     Es el endpoint recomendado para el *health check* de Render: no depende de
     la base de datos y evita reinicios por un pico transitorio de PostgreSQL.
     """
-    return jsonify({'ok': True, 'servicio': 'localis', 'tipo': 'liveness'}), 200
+    return jsonify(
+        {
+            'ok': True,
+            'servicio': 'localis',
+            'tipo': 'liveness',
+            # Render inyecta estas variables: permiten verificar exactamente
+            # que commit y que rama estan desplegados en produccion.
+            'commit': (os.environ.get('RENDER_GIT_COMMIT') or '')[:7],
+            'branch': os.environ.get('RENDER_GIT_BRANCH') or '',
+        }
+    ), 200
 
 
 @app.route('/health/ready')
@@ -1099,14 +1109,18 @@ def api_tasa_bcv_actual():
     return jsonify({'tasa_bcv': obtener_tasa_bcv(), 'cache': estado_tasa_bcv()}), 200
 
 
-@app.route('/api/actualizar-tasa', methods=['GET', 'POST'])
+@app.route('/api/actualizar-tasa', methods=['POST'])
 @_exento_csrf
 def api_actualizar_tasa():
-    """Fuerza la sincronización manual de la tasa oficial del BCV.
+    """Fuerza la sincronizacion manual de la tasa oficial del BCV (solo POST).
 
-    Devuelve 200 si la tasa es fresca; 503 si se sirvió desde un respaldo
-    (red del BCV caída). Nunca propaga excepciones a Flask.
+    Requiere sesion iniciada. Antes aceptaba GET sin autenticacion, lo que
+    permitia dispararlo desde un `<img>`/enlace (abuso de recursos). Devuelve
+    200 si la tasa es fresca; 503 si se sirvio desde un respaldo. Nunca
+    propaga excepciones a Flask.
     """
+    if 'usuario_id' not in session:
+        return jsonify({'ok': False, 'error': 'No autorizado.'}), 401
     try:
         resultado = obtener_tasa_bcv(forzar_actualizacion=True)
         return jsonify(resultado), (200 if resultado.get('ok') else 503)
@@ -1160,11 +1174,30 @@ def index():
     else:
         # Portada: destacados fijos arriba + "revoltijo" justo de no destacados
         # (mezcla aleatoria por carga, con tope por comercio).
+        from backend.runtime_cache import get_or_load
+
         try:
-            productos, hay_mas = listar_portada_hibrida(
+            ttl_portada = max(
+                0, int(os.getenv('LOCALIS_CACHE_PORTADA_SEG', '15') or '15')
+            )
+        except (TypeError, ValueError):
+            ttl_portada = 15
+
+        def _cargar_portada():
+            return listar_portada_hibrida(
                 limit=por_pagina,
                 offset=(pagina - 1) * por_pagina,
             )
+
+        try:
+            if ttl_portada > 0:
+                productos, hay_mas = get_or_load(
+                    f'portada:{por_pagina}:{pagina}',
+                    _cargar_portada,
+                    ttl_portada,
+                )
+            else:
+                productos, hay_mas = _cargar_portada()
         except BaseDatosNoDisponible as error:
             # BD no disponible tras los reintentos: se renderiza sin productos
             # pero marcando la respuesta para que el Service Worker NO la

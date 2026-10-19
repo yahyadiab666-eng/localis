@@ -2283,6 +2283,83 @@ def _tomar_lock_migracion(cursor):
     return _bool_sql(cursor.fetchone())
 
 
+# --- Migraciones versionadas -------------------------------------------------
+# El esquema base lo crea init_db (aditivo e idempotente). Los cambios
+# posteriores se anaden aqui como migraciones numeradas y se registran en
+# ``schema_migrations``: asi hay historial auditable, idempotencia y rollback
+# por version, sin depender de ``schema.sql`` (que es solo referencia).
+MIGRACIONES = [
+    # (version, descripcion, funcion(cursor))
+    ('0001', 'base inicial (el esquema lo crea init_db)', lambda cursor: None),
+]
+
+
+def _asegurar_tabla_migraciones(cursor):
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version TEXT PRIMARY KEY,
+            descripcion TEXT,
+            aplicada_en TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
+def _migraciones_aplicadas(cursor):
+    cursor.execute('SELECT version FROM schema_migrations')
+    return {
+        str(_primer_valor(fila))
+        for fila in (cursor.fetchall() or [])
+        if _primer_valor(fila) is not None
+    }
+
+
+def _aplicar_migraciones(cursor):
+    """Aplica las migraciones pendientes y las registra.
+
+    Cada migracion corre en un SAVEPOINT: si falla, no se registra y no deja el
+    esquema a medias. Nunca silencia el error (se propaga para abortar init_db).
+    """
+    _asegurar_tabla_migraciones(cursor)
+    aplicadas = _migraciones_aplicadas(cursor)
+    nuevas = 0
+    for version, descripcion, funcion in MIGRACIONES:
+        if version in aplicadas:
+            continue
+        try:
+            cursor.execute('SAVEPOINT migracion')
+            funcion(cursor)
+            cursor.execute(
+                'INSERT INTO schema_migrations (version, descripcion) '
+                'VALUES (%s, %s)',
+                (version, descripcion),
+            )
+            cursor.execute('RELEASE SAVEPOINT migracion')
+            nuevas += 1
+            print(
+                f'[Localis Migraciones] aplicada {version}: {descripcion}',
+                flush=True,
+            )
+        except Exception as error:
+            try:
+                cursor.execute('ROLLBACK TO SAVEPOINT migracion')
+            except Exception:
+                pass
+            print(
+                f'[Localis Migraciones] fallo {version}: '
+                f'{type(error).__name__}: {error}',
+                flush=True,
+            )
+            raise
+    if nuevas:
+        print(
+            f'[Localis Migraciones] {nuevas} migracion(es) aplicada(s).',
+            flush=True,
+        )
+    return nuevas
+
+
 def init_db():
     """
     Inicializa o actualiza la base PostgreSQL sin destruir datos.
@@ -2304,6 +2381,7 @@ def init_db():
             try:
                 _crear_tablas(cursor)
                 _migrar_columnas(cursor)
+                _aplicar_migraciones(cursor)
                 _asegurar_rol_default_user(cursor)
                 _backfill_slugs(cursor)
                 _backfill_codigos_publicos(cursor)
