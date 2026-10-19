@@ -1099,14 +1099,18 @@ def api_tasa_bcv_actual():
     return jsonify({'tasa_bcv': obtener_tasa_bcv(), 'cache': estado_tasa_bcv()}), 200
 
 
-@app.route('/api/actualizar-tasa', methods=['GET', 'POST'])
+@app.route('/api/actualizar-tasa', methods=['POST'])
 @_exento_csrf
 def api_actualizar_tasa():
-    """Fuerza la sincronización manual de la tasa oficial del BCV.
+    """Fuerza la sincronizacion manual de la tasa oficial del BCV (solo POST).
 
-    Devuelve 200 si la tasa es fresca; 503 si se sirvió desde un respaldo
-    (red del BCV caída). Nunca propaga excepciones a Flask.
+    Requiere sesion iniciada. Antes aceptaba GET sin autenticacion, lo que
+    permitia dispararlo desde un `<img>`/enlace (abuso de recursos). Devuelve
+    200 si la tasa es fresca; 503 si se sirvio desde un respaldo. Nunca
+    propaga excepciones a Flask.
     """
+    if 'usuario_id' not in session:
+        return jsonify({'ok': False, 'error': 'No autorizado.'}), 401
     try:
         resultado = obtener_tasa_bcv(forzar_actualizacion=True)
         return jsonify(resultado), (200 if resultado.get('ok') else 503)

@@ -113,6 +113,18 @@ def main():
     fallos.append(not _ok(rutas_admin > 0, f'{rutas_admin} rutas /admin detectadas'))
     fallos.append(not _ok(not desprotegidas, f'rutas sin guard: {desprotegidas}'))
 
+    # 8) El endpoint de sincronizacion de tasa es solo POST y requiere sesion.
+    print('=== Endpoint de tasa endurecido ===')
+    fallos.append(
+        not _ok(
+            "@app.route('/api/actualizar-tasa', methods=['POST'])" in texto_main,
+            'solo acepta POST',
+        )
+    )
+    fallos.append(
+        not _ok('No autorizado.' in texto_main, 'requiere sesion (guard 401)')
+    )
+
     print('\n=== RESULTADO ===')
     total = sum(1 for f in fallos if f)
     if total:
