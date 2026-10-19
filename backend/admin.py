@@ -331,37 +331,58 @@ def cambiar_plan_comercio(admin_id, comercio_id, plan_tipo, estado_pago=None):
 
 
 def obtener_todos_comercios_admin(busqueda=None):
-    """Lista comercios para el panel admin, con filtro opcional por texto."""
+    """Lista comercios para el panel admin, con filtro opcional por texto.
+
+    Degradación segura: si las columnas nuevas (``estado_tienda``/``owner_email``)
+    aún no existen (migración pendiente), reintenta sin ellas para no dejar el
+    panel vacío. La búsqueda cubre también el correo reservado del dueño.
+    """
+    def _construir(con_extra):
+        columnas_extra = 'c.estado_tienda, c.owner_email,' if con_extra else ''
+        query = f"""
+            SELECT c.id, c.nombre, c.telefono, c.visible, c.estado_pago,
+                   c.plan_tipo, c.limite_productos, c.fecha_vencimiento,
+                   c.documento_identidad, cat.nombre AS categoria,
+                   {columnas_extra}
+                   u.correo AS correo_dueno,
+                   COALESCE(p.nombre, c.plan_tipo) AS plan_nombre
+            FROM comercios c
+            LEFT JOIN categorias cat ON c.categoria_id = cat.id
+            LEFT JOIN usuarios u ON c.usuario_id = u.id
+            LEFT JOIN planes p ON c.plan_id = p.id
+        """
+        parametros = []
+        if busqueda:
+            termino = f'%{busqueda.strip()}%'
+            query += """
+                WHERE c.nombre ILIKE ?
+                   OR u.correo ILIKE ?
+                   OR c.documento_identidad ILIKE ?
+                   OR c.telefono ILIKE ?
+            """
+            parametros.extend([termino, termino, termino, termino])
+            if con_extra:
+                query += ' OR c.owner_email ILIKE ?'
+                parametros.append(termino)
+        query += ' ORDER BY c.id DESC'
+        return query, parametros
+
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
-            query = """
-                SELECT c.id, c.nombre, c.telefono, c.visible, c.estado_pago,
-                       c.plan_tipo, c.limite_productos, c.fecha_vencimiento,
-                       c.documento_identidad, cat.nombre AS categoria,
-                       c.estado_tienda, c.owner_email,
-                       u.correo AS correo_dueno,
-                       COALESCE(p.nombre, c.plan_tipo) AS plan_nombre
-                FROM comercios c
-                LEFT JOIN categorias cat ON c.categoria_id = cat.id
-                LEFT JOIN usuarios u ON c.usuario_id = u.id
-                LEFT JOIN planes p ON c.plan_id = p.id
-            """
-            parametros = []
-
-            if busqueda:
-                termino = f'%{busqueda.strip()}%'
-                query += """
-                    WHERE c.nombre ILIKE ?
-                       OR u.correo ILIKE ?
-                       OR c.documento_identidad ILIKE ?
-                       OR c.telefono ILIKE ?
-                """
-                parametros.extend([termino, termino, termino, termino])
-
-            query += ' ORDER BY c.id DESC'
-            cursor.execute(query, parametros)
-            return [dict(f) for f in cursor.fetchall()]
+            query, parametros = _construir(True)
+            try:
+                cursor.execute(query, parametros)
+                return [dict(f) for f in cursor.fetchall()]
+            except Exception:
+                # Degradación: migración pendiente (columnas nuevas ausentes).
+                try:
+                    conexion.rollback()
+                except Exception:
+                    pass
+                query, parametros = _construir(False)
+                cursor.execute(query, parametros)
+                return [dict(f) for f in cursor.fetchall()]
     except Exception as e:
         print(f'Error al listar comercios: {e}')
         return []

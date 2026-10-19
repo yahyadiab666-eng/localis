@@ -123,6 +123,10 @@
                         <p>{{ comercio.propietario_correo or 'Sin correo' }}</p>
                     </div>
                 </div>
+                {% if not comercio.propietario_id and comercio.owner_email %}
+                <div class="dato"><span>Correo reservado</span><span>{{ comercio.owner_email }}</span></div>
+                {% endif %}
+                <div class="dato"><span>Estado tienda</span><span>{{ comercio.estado_tienda or 'activa' }}</span></div>
                 <div class="dato"><span>Usuario ID</span><span>{{ comercio.propietario_id or '—' }}</span></div>
                 <div class="dato"><span>Rol</span><span>{{ comercio.propietario_rol or '—' }}</span></div>
                 <div class="dato"><span>Comercios del dueño</span><span>{{ comercio.total_comercios_dueno or 0 }}</span></div>

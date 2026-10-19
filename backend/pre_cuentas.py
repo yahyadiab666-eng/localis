@@ -97,6 +97,47 @@ def _ascender_a_comerciante(cursor, usuario_id):
         print(f'{LOG_PREFIX} rol usuario {usuario_id}: {error}', flush=True)
 
 
+def _usuario_tiene_tienda(cursor, usuario_id, excluir_comercio_id=None):
+    """True si el usuario ya posee alguna tienda (regla: 1 tienda por usuario)."""
+    if not usuario_id:
+        return False
+    try:
+        if excluir_comercio_id:
+            cursor.execute(
+                'SELECT 1 FROM comercios WHERE usuario_id = ? AND id <> ? LIMIT 1',
+                (int(usuario_id), int(excluir_comercio_id)),
+            )
+        else:
+            cursor.execute(
+                'SELECT 1 FROM comercios WHERE usuario_id = ? LIMIT 1',
+                (int(usuario_id),),
+            )
+        return cursor.fetchone() is not None
+    except Exception as error:
+        print(f'{LOG_PREFIX} no se pudo verificar tiendas de {usuario_id}: {error}', flush=True)
+        return False
+
+
+def _recalcular_rol_usuario(cursor, usuario_id):
+    """Alinea ``usuarios.rol`` con la realidad (comerciante si tiene tienda).
+
+    No degrada ni toca al admin. Se usa al reasignar para no dejar un rol
+    ``comerciante`` obsoleto en quien perdió su única tienda.
+    """
+    if not usuario_id:
+        return
+    try:
+        tiene = _usuario_tiene_tienda(cursor, usuario_id)
+        nuevo = 'comerciante' if tiene else 'user'
+        cursor.execute(
+            "UPDATE usuarios SET rol = ? "
+            "WHERE id = ? AND LOWER(TRIM(COALESCE(rol, ''))) <> 'admin'",
+            (nuevo, int(usuario_id)),
+        )
+    except Exception as error:
+        print(f'{LOG_PREFIX} recálculo rol {usuario_id}: {error}', flush=True)
+
+
 def _asegurar_slug(comercio_id, nombre=None):
     """Genera el slug público si falta (idempotente; nunca lanza)."""
     try:
@@ -261,6 +302,13 @@ def transferir_propiedad_comercio(admin_id, comercio_id, nuevo_email):
                 )
 
             usuario_id = _buscar_usuario_por_correo(cursor, nuevo_email)
+            if _usuario_tiene_tienda(cursor, usuario_id, excluir_comercio_id=comercio_id):
+                return (
+                    False,
+                    'Ese correo ya tiene una tienda asignada. Un usuario solo '
+                    'puede tener una tienda.',
+                    False,
+                )
 
             cursor.execute(
                 """
@@ -347,7 +395,15 @@ def reasignar_propietario_comercio(admin_id, comercio_id, nuevo_email):
                 )
 
             usuario_id = _buscar_usuario_por_correo(cursor, nuevo_email)
+            if _usuario_tiene_tienda(cursor, usuario_id, excluir_comercio_id=comercio_id):
+                return (
+                    False,
+                    'Ese correo ya tiene una tienda asignada. Un usuario solo '
+                    'puede tener una tienda.',
+                    False,
+                )
 
+            dueno_anterior = actual.get('usuario_id')
             cursor.execute(
                 """
                 UPDATE comercios
@@ -357,6 +413,9 @@ def reasignar_propietario_comercio(admin_id, comercio_id, nuevo_email):
                 (nuevo_email, usuario_id or None, int(comercio_id)),
             )
             _ascender_a_comerciante(cursor, usuario_id)
+            # Si el dueño anterior perdió su única tienda, se alinea su rol.
+            if dueno_anterior and int(dueno_anterior) != int(usuario_id or 0):
+                _recalcular_rol_usuario(cursor, dueno_anterior)
 
             _auditar(
                 cursor,
@@ -389,6 +448,9 @@ def reclamar_comercios_por_email(cursor, usuario_id, email):
     """
     if not usuario_id or not email:
         return []
+    # Regla 1 tienda por usuario: si ya posee una, no se enlaza otra.
+    if _usuario_tiene_tienda(cursor, usuario_id):
+        return []
     try:
         cursor.execute('SAVEPOINT reclamar_precuenta')
     except Exception:
@@ -398,8 +460,13 @@ def reclamar_comercios_por_email(cursor, usuario_id, email):
             """
             UPDATE comercios
             SET usuario_id = ?
-            WHERE usuario_id IS NULL
-              AND LOWER(TRIM(owner_email)) = LOWER(TRIM(?))
+            WHERE id = (
+                SELECT id FROM comercios
+                WHERE usuario_id IS NULL
+                  AND LOWER(TRIM(owner_email)) = LOWER(TRIM(?))
+                ORDER BY id ASC
+                LIMIT 1
+            )
             RETURNING id
             """,
             (int(usuario_id), email),

@@ -59,6 +59,7 @@
         .badge-gratis { background: #fff3cd; color: #856404; }
         .badge-vencido { background: #e2e3e5; color: #383d41; }
         .badge-pre { background: #cfe2ff; color: #084298; }
+        .badge-pend { background: #ffe8cc; color: #8a5a00; }
         .busqueda-admin { display: flex; gap: 8px; margin-top: 1rem; }
         .busqueda-admin input { flex: 1; padding: 0.6rem; border: 1px solid #ccc; border-radius: 4px; }
         .busqueda-admin button { padding: 0.6rem 1rem; border: none; background: #212529; color: white; border-radius: 4px; cursor: pointer; font-weight: bold; }
@@ -259,7 +260,17 @@
                                 {% endif %}
                                 <br><small>{{ comercio.telefono or '' }}</small>
                             </td>
-                            <td><small>{{ comercio.correo_dueno or '—' }}</small><br><small>{{ comercio.documento_identidad or '' }}</small></td>
+                            <td>
+                                {% if comercio.correo_dueno %}
+                                    <small>{{ comercio.correo_dueno }}</small>
+                                {% elif comercio.owner_email %}
+                                    <small>{{ comercio.owner_email }}</small>
+                                    <br><span class="badge badge-pend">pendiente de login</span>
+                                {% else %}
+                                    <small>—</small>
+                                {% endif %}
+                                <br><small>{{ comercio.documento_identidad or '' }}</small>
+                            </td>
                             <td>{{ comercio.categoria or '—' }}</td>
                             <!-- RESTAURAR_PAGOS_INICIO -->
                             {% if not pagos_congelados %}

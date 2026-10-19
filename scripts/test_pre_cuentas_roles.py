@@ -214,8 +214,14 @@ def main() -> int:
             cur.execute('SELECT rol FROM usuarios WHERE id = ?', (int(uid_demo),))
             rol_demo = dict(cur.fetchone()).get('rol')
         _ok((rol_demo or '').lower() == 'comerciante', f'rol nuevo dueño={rol_demo!r}')
+        # El dueño anterior (uid_pend) perdió su única tienda -> rol 'user'.
+        with get_db_connection(row_factory=True) as c:
+            cur = c.cursor()
+            cur.execute('SELECT rol FROM usuarios WHERE id = ?', (int(uid_pend),))
+            rol_ant = dict(cur.fetchone()).get('rol')
+        _ok((rol_ant or '').lower() == 'user', f'rol dueño anterior recalculado={rol_ant!r}')
 
-        print('\n=== Guardas ===')
+        print('\n=== Guardas (1 tienda por usuario) ===')
         exito_g, msg_g, _ = pre_cuentas.transferir_propiedad_comercio(
             uid_admin, cid, correo_otro
         )
@@ -228,6 +234,23 @@ def main() -> int:
             uid_admin, cid2, correo_demo
         )
         _ok(not exito_g3, f'reasignar pre-cuenta rechazado: {msg_g3}')
+        # Transferir a un correo que YA tiene tienda (uid_demo posee cid).
+        exito_g4, msg_g4, cid4 = pre_cuentas.crear_pre_cuenta_admin(
+            uid_admin, {'nombre': f'Tienda4 {token}'}
+        )
+        creados['comercios'].append(cid4)
+        exito_g5, msg_g5, _ = pre_cuentas.transferir_propiedad_comercio(
+            uid_admin, cid4, correo_demo
+        )
+        _ok(not exito_g5, f'transferir a dueño con tienda rechazado: {msg_g5}')
+        # Transferir a un correo NUEVO (queda reservado para la UI).
+        exito_g6, msg_g6, _ = pre_cuentas.transferir_propiedad_comercio(
+            uid_admin, cid2, correo_otro
+        )
+        _ok(exito_g6, f'transferencia a correo sin usuario: {msg_g6}')
+        fila_res = _leer_comercio(cid2)
+        _ok(fila_res.get('owner_email') == correo_otro, 'correo reservado guardado')
+        _ok(fila_res.get('usuario_id') in (None, ''), 'reservado sin usuario aún')
 
         print('\n=== Código público de producto ===')
         exito_p, msg_p, producto_id = crear_producto_admin(
@@ -274,6 +297,8 @@ def main() -> int:
             ('Transferir' in html) or ('Reasignar' in html),
             'acciones Transferir/Reasignar presentes',
         )
+        _ok(correo_otro in html, 'correo reservado visible en el panel')
+        _ok('pendiente de login' in html, 'badge "pendiente de login" presente')
     except Exception:
         traceback.print_exc()
         _ok(False, 'la prueba no lanzó excepciones')
