@@ -37,6 +37,7 @@ SIN_RED = [
     'test_cobertura_universal.py',
 ]
 INTEGRACION = [
+    'test_migraciones.py',
     'test_pre_cuentas_roles.py',
     'test_auth_panel.py',
 ]

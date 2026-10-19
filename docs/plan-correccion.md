@@ -19,7 +19,7 @@ pasar al siguiente**.
 | 1 | Observabilidad y logging | Ver y diagnosticar en prod | App arranca, `/health` 200, logs con request-id, pruebas verdes | 🟢 | ✅ hecho |
 | 6a | Calidad: ruff + pre-commit | Bajar bugs, estilo consistente | `ruff check` exit 0 y en CI | 🟠 | ✅ hecho |
 | 5a | Seguridad aditiva | Endurecer sin romper | Cabeceras (ya), CSP report-only, pruebas verdes | 🟡 | ⏳ |
-| 2 | Migraciones versionadas | Esquema auditable y reversible | `schema_migrations` + init_db idempotente contra BD real | 🟠 | ⏳ |
+| 2 | Migraciones versionadas | Esquema auditable y reversible | `schema_migrations` + init_db idempotente contra BD real | 🟠 | ✅ hecho |
 | 1b | Migrar `print` → `logging` (núcleo) | Trazas estructuradas | Módulos clave sin `print`, pruebas verdes | 🟠 | ⏳ |
 | 7 | Rendimiento y caché | Latencia y coste | p95 catálogo con caché; invalidación correcta | 🟡 | ⏳ |
 | 8 | E2E + accesibilidad | Contrato de los refactors | Flujos críticos verdes | 🟢 | ⏳ |
