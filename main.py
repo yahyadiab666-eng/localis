@@ -66,7 +66,6 @@ if not GOOGLE_CLIENT_ID:
 else:
     print('Google OAuth configurado correctamente.')
 
-from functools import wraps
 
 from backend.supabase_client import (
     SUPABASE_BUCKET_IMAGENES,
@@ -215,6 +214,15 @@ from backend.session_comercio import (
     limpiar_contexto_comercio,
     vincular_comercio_en_sesion,
 )
+from backend.web_seguridad import (
+    admin_requerido,
+    admin_requerido_api,
+    exento_csrf as _exento_csrf,
+    login_requerido,
+    login_requerido_api,
+    peticion_acepta_json as _peticion_acepta_json,
+    registrar_csrf,
+)
 from backend.inventory_import import cargar_archivo_inventario
 from backend.import_queue import (
     ColaImportacionLlena,
@@ -321,6 +329,7 @@ try:
     app.jinja_env.auto_reload = True
     app.jinja_env.cache.clear()
     csrf = CSRFProtect(app)
+    registrar_csrf(csrf)
     registrar_request_logging(app)
     registrar_manejadores_errores(app)
 except Exception:
@@ -849,88 +858,11 @@ def _requiere_comercio():
     return comercio, None
 
 
-def _sesion_usuario_activa():
-    """Verifica que el usuario de la sesión siga existiendo en PostgreSQL."""
-    usuario_id = session.get('usuario_id')
-    if not usuario_id:
-        return False
-    try:
-        with get_db_connection() as conexion:
-            cursor = conexion.cursor()
-            cursor.execute('SELECT id FROM usuarios WHERE id = ?', (usuario_id,))
-            return cursor.fetchone() is not None
-    except psycopg2.Error:
-        raise
-    except Exception:
-        return False
+# _sesion_usuario_activa, login_requerido y login_requerido_api viven ahora en
+# backend/web_seguridad.py (para reutilizarlos desde los blueprints).
 
 
-def login_requerido(f):
-
-    @wraps(f)
-    def decorada(*args, **kwargs):
-        if 'usuario_id' not in session:
-            flash('Debes iniciar sesión para acceder a esta sección.', 'error')
-            return redirect(url_for('login'))
-        if not _sesion_usuario_activa():
-            session.clear()
-            flash(
-                'Tu sesión expiró o ya no es válida. Inicia sesión nuevamente.',
-                'error',
-            )
-            return redirect(url_for('login'))
-        asegurar_contexto_comercio(session.get('usuario_id'))
-        return f(*args, **kwargs)
-
-    return decorada
-
-
-def login_requerido_api(f):
-
-    @wraps(f)
-    def decorada(*args, **kwargs):
-        if 'usuario_id' not in session:
-            return jsonify({'error': 'Debes iniciar sesión.'}), 401
-        if not _sesion_usuario_activa():
-            session.clear()
-            return jsonify({'error': 'Sesión inválida o expirada.'}), 401
-        asegurar_contexto_comercio(session.get('usuario_id'))
-        return f(*args, **kwargs)
-
-    return decorada
-
-
-def admin_requerido(f):
-
-    @wraps(f)
-    def decorada(*args, **kwargs):
-        if 'usuario_id' not in session or not session.get('es_admin'):
-            flash(
-                'Acceso denegado. Se requieren permisos de administrador.',
-                'error',
-            )
-            return redirect(url_for('login'))
-        if not _sesion_usuario_activa():
-            session.clear()
-            flash('Tu sesión expiró. Inicia sesión nuevamente.', 'error')
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
-
-    return decorada
-
-
-def admin_requerido_api(f):
-
-    @wraps(f)
-    def decorada(*args, **kwargs):
-        if 'usuario_id' not in session or not session.get('es_admin'):
-            return jsonify({'ok': False, 'mensaje': 'Acceso denegado.'}), 403
-        if not _sesion_usuario_activa():
-            session.clear()
-            return jsonify({'ok': False, 'mensaje': 'Sesión inválida o expirada.'}), 401
-        return f(*args, **kwargs)
-
-    return decorada
+# admin_requerido y admin_requerido_api viven ahora en backend/web_seguridad.py
 
 
 def _bloquear_gestion_inventario(comercio, redirect_url='panel_comercio'):
@@ -946,20 +878,7 @@ def _bloquear_gestion_inventario(comercio, redirect_url='panel_comercio'):
     return redirect(url_for('comercio_planes', abrir_pago='pro'))
 
 
-def _peticion_acepta_json():
-    """True si la petición viene de fetch()/AJAX y espera JSON (no HTML)."""
-    if request.headers.get('X-Requested-With') == 'fetch':
-        return True
-    acepta = (request.headers.get('Accept') or '').lower()
-    return 'application/json' in acepta and 'text/html' not in acepta
-
-
-def _exento_csrf(funcion):
-    """Marca una ruta pública como exenta de CSRF (con fallback si csrf es None)."""
-    try:
-        return csrf.exempt(funcion)
-    except Exception:
-        return funcion
+# _peticion_acepta_json y _exento_csrf viven ahora en backend/web_seguridad.py
 
 
 @app.errorhandler(CSRFError)
