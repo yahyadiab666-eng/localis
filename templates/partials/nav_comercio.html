@@ -18,26 +18,26 @@
         <i data-lucide="home" style="width:15px;height:15px;"></i>
         <span>Inicio</span>
       </a>
-      <a href="{{ url_for('panel_comercio') }}"
+      <a href="{{ url_for('comercio.panel_comercio') }}"
          class="nav-comercio-link {% if nav_activo == 'panel' %}is-active{% endif %}">
         <i data-lucide="layout-dashboard" style="width:15px;height:15px;"></i>
         <span>Panel</span>
       </a>
-      <a href="{{ url_for('comercio_premios') }}"
+      <a href="{{ url_for('comercio.comercio_premios') }}"
          class="nav-comercio-link {% if nav_activo == 'premios' %}is-active-violet{% endif %}">
         <i data-lucide="gift" style="width:15px;height:15px;"></i>
         <span>Premios</span>
       </a>
       <!-- RESTAURAR_PAGOS_INICIO -->
       {% if not pagos_congelados %}
-      <a href="{{ url_for('comercio_planes') }}"
+      <a href="{{ url_for('comercio.comercio_planes') }}"
          class="nav-comercio-link {% if nav_activo == 'planes' %}is-active-amber{% endif %}">
         <i data-lucide="credit-card" style="width:15px;height:15px;"></i>
         <span>Planes</span>
       </a>
       {% endif %}
       <!-- RESTAURAR_PAGOS_FIN -->
-      <a href="{{ url_for('editar_comercio') }}"
+      <a href="{{ url_for('comercio.editar_comercio') }}"
          class="nav-comercio-link {% if nav_activo == 'editar' %}is-active{% endif %}">
         <i data-lucide="settings" style="width:15px;height:15px;"></i>
         <span>Editar</span>
@@ -120,23 +120,23 @@
       </div>
 
       <nav class="nav-comercio-drawer__links">
-        <a href="{{ url_for('panel_comercio') }}"
+        <a href="{{ url_for('comercio.panel_comercio') }}"
            class="nav-comercio-drawer__link {% if nav_activo == 'panel' %}is-active{% endif %}">
           <i data-lucide="layout-dashboard" style="width:18px;height:18px;"></i> Panel
         </a>
-        <a href="{{ url_for('comercio_premios') }}"
+        <a href="{{ url_for('comercio.comercio_premios') }}"
            class="nav-comercio-drawer__link {% if nav_activo == 'premios' %}is-active{% endif %}">
           <i data-lucide="gift" style="width:18px;height:18px;"></i> Premios
         </a>
         <!-- RESTAURAR_PAGOS_INICIO -->
         {% if not pagos_congelados %}
-        <a href="{{ url_for('comercio_planes') }}"
+        <a href="{{ url_for('comercio.comercio_planes') }}"
            class="nav-comercio-drawer__link {% if nav_activo == 'planes' %}is-active{% endif %}">
           <i data-lucide="credit-card" style="width:18px;height:18px;"></i> Planes
         </a>
         {% endif %}
         <!-- RESTAURAR_PAGOS_FIN -->
-        <a href="{{ url_for('editar_comercio') }}"
+        <a href="{{ url_for('comercio.editar_comercio') }}"
            class="nav-comercio-drawer__link {% if nav_activo == 'editar' %}is-active{% endif %}">
           <i data-lucide="settings" style="width:18px;height:18px;"></i> Editar tienda
         </a>

@@ -86,7 +86,7 @@ def destino_panel_usuario():
     if session.get('usuario_id'):
         asegurar_contexto_comercio(session.get('usuario_id'))
         if es_usuario_comerciante():
-            return 'panel_comercio'
+            return 'comercio.panel_comercio'
         return 'index'
     return 'index'
 
