@@ -45,14 +45,14 @@ def login_requerido(f):
     def decorada(*args, **kwargs):
         if 'usuario_id' not in session:
             flash('Debes iniciar sesión para acceder a esta sección.', 'error')
-            return redirect(url_for('login'))
+            return redirect(url_for('auth.login'))
         if not sesion_usuario_activa():
             session.clear()
             flash(
                 'Tu sesión expiró o ya no es válida. Inicia sesión nuevamente.',
                 'error',
             )
-            return redirect(url_for('login'))
+            return redirect(url_for('auth.login'))
         asegurar_contexto_comercio(session.get('usuario_id'))
         return f(*args, **kwargs)
 
@@ -81,11 +81,11 @@ def admin_requerido(f):
                 'Acceso denegado. Se requieren permisos de administrador.',
                 'error',
             )
-            return redirect(url_for('login'))
+            return redirect(url_for('auth.login'))
         if not sesion_usuario_activa():
             session.clear()
             flash('Tu sesión expiró. Inicia sesión nuevamente.', 'error')
-            return redirect(url_for('login'))
+            return redirect(url_for('auth.login'))
         return f(*args, **kwargs)
 
     return decorada

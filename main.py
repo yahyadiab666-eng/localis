@@ -82,7 +82,6 @@ else:
     )
 
 
-from authlib.integrations.flask_client import OAuth
 from config import (
     DEFAULT_BANNER_URL,
     MAX_UPLOAD_BYTES,
@@ -116,7 +115,6 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 from backend.admin import (
     obtener_categorias_admin,
 )
-from backend.auth import obtener_o_crear_usuario_google, obtener_usuario_por_id
 from backend.diagnostics import ejecutar_diagnostico_inicio, obtener_estado_sistema
 from backend.error_handlers import registrar_manejadores_errores
 from utils.images import (
@@ -152,16 +150,12 @@ from backend.utils import (
 from backend.session_comercio import (
     asegurar_contexto_comercio,
     destino_panel_usuario,
-    es_usuario_comerciante,
-    limpiar_contexto_comercio,
-    vincular_comercio_en_sesion,
 )
 from backend.web_seguridad import (
-    login_requerido,
     peticion_acepta_json as _peticion_acepta_json,
     registrar_csrf,
 )
-from backend.rate_limit import configurar_rate_limit, limite
+from backend.rate_limit import configurar_rate_limit
 from backend.vistas_imagenes import (
     debug_imagenes_antes_de_render as _debug_imagenes_antes_de_render,
     normalizar_imagenes_comercio as _normalizar_imagenes_comercio,
@@ -174,13 +168,11 @@ from backend.import_queue import (
 )
 from backend.stores import (
     buscar_y_filtrar_productos,
-    listar_comercios_por_usuario,
     listar_comercios_publicos_para_sitemap,
     listar_portada_hibrida,
     listar_productos_publicos_para_sitemap,
     obtener_comercio_por_id,
     obtener_comercio_por_slug,
-    obtener_comercio_por_usuario,
     obtener_producto_publico,
     obtener_producto_publico_por_slug,
     obtener_tasa_dolar,
@@ -586,17 +578,11 @@ def agregar_cabeceras_seguridad(response):
         response.headers.setdefault('Content-Security-Policy', csp)
     return response
 
-oauth = OAuth(app)
-google = None
+# El cliente OAuth de Google vive en backend/oauth_google.py (lo usa el
+# blueprint auth). Se inicializa aqui, tras crear la app.
+from backend.oauth_google import crear_oauth
 
-if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
-    google = oauth.register(
-        name='google',
-        client_id=GOOGLE_CLIENT_ID,
-        client_secret=GOOGLE_CLIENT_SECRET,
-        server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
-        client_kwargs={'scope': 'openid email profile'},
-    )
+google = crear_oauth(app)
 
 
 def _url_imagen_comercio_usable(valor):
@@ -1076,254 +1062,25 @@ def tienda_publica(comercio_id=None, slug=None):
     )
 
 
-@app.route('/login')
-def login():
-    if session.get('usuario_id'):
-        # Fase 2: admin -> /admin; comerciante con negocio -> /comercio;
-        # cliente sin negocio -> catálogo público (no al panel de comercio).
-        if session.get('es_admin'):
-            return redirect(url_for('admin.panel_admin'))
-        if es_usuario_comerciante():
-            return redirect(url_for('comercio.panel_comercio'))
-        return redirect(url_for('index'))
-    return render_template('login.html')
 
 
-@app.route('/registro')
-def registro_legacy():
-    """Ruta legacy: el registro de comercio pasa por login Google + /comercio/crear."""
-    return redirect(url_for('login'))
 
 
-def _oauth_debug_activo():
-    """Permite ver el traceback OAuth en la respuesta (LOCALIS_OAUTH_DEBUG=0 lo oculta)."""
-    valor = str(os.getenv('LOCALIS_OAUTH_DEBUG', '1')).strip().lower()
-    return valor not in ('0', 'false', 'no', 'off')
 
 
-def _oauth_error(etapa, error):
-    """Registra y (por defecto) devuelve el traceback exacto en texto plano.
-
-    Sustituye la página genérica de Error 500 por el detalle real de Python para
-    diagnosticar el callback de Google. Es aislado: solo se usa en estas rutas.
-    """
-    traza = traceback.format_exc()
-    print(f'[Localis OAuth] fallo en {etapa}: {type(error).__name__}: {error}', flush=True)
-    print(traza, flush=True)
-    logging.getLogger('localis.oauth').error(
-        'OAuth %s: %s', etapa, error, exc_info=True
-    )
-    if _oauth_debug_activo():
-        try:
-            from database import diagnosticar_postgresql
-
-            diag_bd = diagnosticar_postgresql()
-        except Exception as error_diag:
-            diag_bd = {'error': f'{type(error_diag).__name__}: {error_diag}'}
-        cuerpo = (
-            f'Localis · Error 500 en autenticación Google\n'
-            f'Etapa: {etapa}\n'
-            f'Tipo: {type(error).__name__}\n'
-            f'Mensaje: {error}\n\n'
-            f'===== TRACEBACK COMPLETO =====\n{traza}\n'
-            f'===== ESTADO DE BASE DE DATOS =====\n{diag_bd}\n'
-            '===== FIN =====\n'
-            'Para ocultar este detalle y volver a un mensaje amable: LOCALIS_OAUTH_DEBUG=0\n'
-        )
-        return Response(cuerpo, status=500, mimetype='text/plain; charset=utf-8')
-    flash('No se pudo iniciar sesión con Google. Intenta de nuevo.', 'error')
-    return redirect(url_for('login'))
 
 
-def _oauth_redirect_uri():
-    """Redirect URI correcto detrás del proxy de Render (https).
-
-    Sin esto, ``url_for(_external=True)`` puede devolver ``http://`` detrás del
-    proxy TLS, y la cookie de sesión ``Secure`` (que guarda el ``state``) no se
-    envía en el callback → ``MismatchingStateError``. Aislado al flujo OAuth.
-    """
-    uri = url_for('google_callback', _external=True)
-    proto = (request.headers.get('X-Forwarded-Proto') or '').split(',')[0].strip().lower()
-    if proto == 'https' and uri.startswith('http://'):
-        uri = 'https://' + uri[len('http://'):]
-    return uri
 
 
-@app.route('/login/google')
-@limite('30 per minute')
-def login_google():
-    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-        print('[Localis OAuth] GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET ausentes.', flush=True)
-        flash('Inicio de sesión con Google no está configurado.', 'error')
-        return redirect(url_for('login'))
-    if google is None:
-        print('[Localis OAuth] cliente OAuth no inicializado.', flush=True)
-        flash('No se pudo inicializar el cliente OAuth de Google.', 'error')
-        return redirect(url_for('login'))
-    try:
-        redirect_uri = _oauth_redirect_uri()
-        print(f'[Localis OAuth] authorize_redirect uri={redirect_uri}', flush=True)
-        return google.authorize_redirect(redirect_uri)
-    except Exception as error:
-        return _oauth_error('authorize_redirect', error)
 
 
-@app.route('/login/google/callback')
-def google_callback():
-    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-        print('[Localis OAuth] callback sin credenciales configuradas.', flush=True)
-        flash('Inicio de sesión con Google no está configurado.', 'error')
-        return redirect(url_for('login'))
-    if google is None:
-        print('[Localis OAuth] callback sin cliente OAuth.', flush=True)
-        flash('No se pudo inicializar el cliente OAuth de Google.', 'error')
-        return redirect(url_for('login'))
-
-    # 1) Intercambio del código por token (errores de red/estado/token).
-    try:
-        token = google.authorize_access_token()
-    except Exception as error:
-        return _oauth_error('authorize_access_token', error)
-
-    # 2) Perfil del usuario (con respaldo por si el token no trae ``userinfo``).
-    try:
-        google_info = token.get('userinfo') if token else None
-        if not google_info:
-            try:
-                google_info = google.userinfo(token=token) if token else None
-            except Exception as error_perfil:
-                print(
-                    f'[Localis OAuth] userinfo fallback fallo: '
-                    f'{type(error_perfil).__name__}: {error_perfil}',
-                    flush=True,
-                )
-                traceback.print_exc()
-                google_info = None
-        if not google_info:
-            flash('No se recibió información de perfil desde Google.', 'error')
-            return redirect(url_for('login'))
-    except Exception as error:
-        return _oauth_error('userinfo', error)
-
-    # 3) Alta/actualización del usuario y sesión.
-    try:
-        exito, usuario_o_error = obtener_o_crear_usuario_google(google_info)
-
-        if not exito or not isinstance(usuario_o_error, dict) or not usuario_o_error.get('id'):
-            # Se muestra el motivo real (p. ej. error de Supabase) en lugar de la
-            # página genérica: ayuda a diagnosticar la causa exacta.
-            return _oauth_error('usuario', RuntimeError(str(usuario_o_error)))
-
-        session['usuario_id'] = usuario_o_error['id']
-        session['username'] = usuario_o_error.get('nombre') or 'Usuario'
-        session['correo'] = usuario_o_error.get('correo') or ''
-        session['foto_url'] = usuario_o_error.get('foto_url', '') or ''
-        session['rol'] = usuario_o_error.get('rol', 'user')
-        session['es_admin'] = usuario_o_error.get('rol') == 'admin'
-
-        # --- FASE 1: persistencia real de la sesión -------------------------
-        # Marca la sesión como permanente para que la cookie respete
-        # PERMANENT_SESSION_LIFETIME (14 días) y no muera al cerrar el navegador/app.
-        session.permanent = True
-        session.modified = True
-
-        flash(f"¡Bienvenido, {session['username']}!", 'exito')
-
-        # --- FASE 2: redirección por capacidad ------------------------------
-        # 1) Admin -> panel de administración.
-        if session['es_admin']:
-            return redirect(url_for('admin.panel_admin'))
-
-        # 2) Comerciante CON negocio registrado -> panel de comercio.
-        comercio = None
-        try:
-            comercio = obtener_comercio_por_usuario(usuario_o_error['id'])
-        except Exception as error_comercio:
-            print(
-                f'[Localis OAuth] comercio no resuelto: '
-                f'{type(error_comercio).__name__}: {error_comercio}',
-                flush=True,
-            )
-            traceback.print_exc()
-
-        if comercio:
-            # Al vincular el comercio se marca es_comerciante = True.
-            vincular_comercio_en_sesion(comercio['id'])
-            return redirect(url_for('comercio.panel_comercio'))
-
-        # 3) Cliente SIN negocio -> catálogo público (no forzar el alta de tienda).
-        session['es_comerciante'] = False
-        session.modified = True
-        return redirect(url_for('index'))
-    except Exception as error:
-        return _oauth_error('usuario/sesion', error)
 
 
-@app.route('/perfil')
-@login_requerido
-def perfil():
-    """Vista de cuenta del usuario autenticado.
-
-    Separada por completo del panel de comercios: solo lee el perfil del
-    usuario (sin contraseña) y, si es comerciante, sus tiendas vinculadas.
-    """
-    usuario_id = session.get('usuario_id')
-    usuario = None
-    try:
-        usuario = obtener_usuario_por_id(usuario_id)
-    except Exception as error:
-        print(f'[Localis] perfil usuario fallo: {type(error).__name__}: {error}')
-        traceback.print_exc()
-
-    if not usuario:
-        # La sesión apunta a un usuario que ya no existe: se limpia y se
-        # redirige al login (mismo criterio que ``login_requerido``).
-        session.clear()
-        flash('Tu sesión expiró. Inicia sesión nuevamente.', 'error')
-        return redirect(url_for('login'))
-
-    soy_comerciante = False
-    comercios = []
-    try:
-        soy_comerciante = es_usuario_comerciante(usuario_id)
-        if soy_comerciante:
-            comercios = listar_comercios_por_usuario(usuario_id) or []
-    except Exception as error:
-        print(f'[Localis] perfil comercios fallo: {type(error).__name__}: {error}')
-        traceback.print_exc()
-        comercios = []
-
-    return render_template(
-        'perfil.html',
-        usuario=usuario,
-        comercios=comercios,
-        es_admin=bool(session.get('es_admin')),
-        es_comerciante=soy_comerciante,
-        has_store=bool(soy_comerciante),
-        rol=(
-            'admin'
-            if session.get('es_admin')
-            else ('comerciante' if soy_comerciante else (usuario or {}).get('rol') or 'user')
-        ),
-    )
 
 
 # api_me vive ahora en backend/blueprints/api.py
 
 
-@app.route('/logout', methods=['GET', 'POST'])
-def logout():
-    """Cierra la sesión del usuario.
-
-    La interfaz usa POST + token CSRF (todas las barras envían un formulario),
-    que es el flujo seguro y con confirmación. Se acepta también GET para no
-    romper enlaces/llamadas heredados ni devolver un 405 inesperado a un
-    usuario con sesión activa. No toca ninguna ruta de pagos ni de comercio.
-    """
-    limpiar_contexto_comercio()
-    session.clear()
-    flash('Sesión cerrada correctamente.', 'info')
-    return redirect(url_for('index'))
 
 
 # api_registrar_interaccion vive ahora en backend/blueprints/api.py
@@ -1495,10 +1252,12 @@ def google_site_verification_file():
 from backend.blueprints.api import bp as _api_bp
 from backend.blueprints.admin import bp as _admin_bp
 from backend.blueprints.comercio import bp as _comercio_bp
+from backend.blueprints.auth import bp as _auth_bp
 
 app.register_blueprint(_api_bp)
 app.register_blueprint(_admin_bp)
 app.register_blueprint(_comercio_bp)
+app.register_blueprint(_auth_bp)
 
 
 port = int(os.environ.get('PORT', 10000))
