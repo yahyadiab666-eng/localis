@@ -26,3 +26,7 @@ android/keystore.properties
 .capacitor/
 
 instance/
+
+# Respaldos locales de la base (scripts/backup_bd.py)
+backups/
+*.dump

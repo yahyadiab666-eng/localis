@@ -118,6 +118,7 @@ from backend.admin import (
 )
 from backend.diagnostics import ejecutar_diagnostico_inicio, obtener_estado_sistema
 from backend.error_handlers import registrar_manejadores_errores
+from backend.error_tracking import iniciar_error_tracking
 from utils.images import (
     PLACEHOLDER_PRODUCTO,
     url_hero_inicio,
@@ -243,6 +244,7 @@ try:
     configurar_rate_limit(app)
     registrar_request_logging(app)
     registrar_manejadores_errores(app)
+    iniciar_error_tracking(app)
 except Exception:
     logger.error('[Localis] Error al configurar Flask (el proceso no se detiene para que Gunicorn enlace el puerto):')
     traceback.print_exc()
@@ -558,9 +560,11 @@ def agregar_cache_estaticos(response):
 def agregar_cabeceras_seguridad(response):
     """Cabeceras de seguridad HTTP (endurecimiento aditivo y reversible).
 
-    No activa Content-Security-Policy por defecto porque las plantillas usan
-    estilos y onclick inline; se puede probar con LOCALIS_CSP en el entorno.
-    HSTS solo se envia en produccion (requiere HTTPS).
+    No activa Content-Security-Policy *enforcing* por defecto porque las
+    plantillas usan estilos y onclick inline. Para medir el impacto SIN riesgo:
+    define ``LOCALIS_CSP_REPORT_ONLY`` con la politica y se envia como
+    ``Content-Security-Policy-Report-Only`` (el navegador solo reporta, no
+    bloquea). Para imponerla: ``LOCALIS_CSP``. HSTS solo en produccion.
     """
     response.headers.setdefault('X-Content-Type-Options', 'nosniff')
     response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
@@ -577,6 +581,11 @@ def agregar_cabeceras_seguridad(response):
     csp = (os.environ.get('LOCALIS_CSP') or '').strip()
     if csp:
         response.headers.setdefault('Content-Security-Policy', csp)
+    csp_report_only = (os.environ.get('LOCALIS_CSP_REPORT_ONLY') or '').strip()
+    if csp_report_only:
+        response.headers.setdefault(
+            'Content-Security-Policy-Report-Only', csp_report_only
+        )
     return response
 
 # El cliente OAuth de Google vive en backend/oauth_google.py (lo usa el
@@ -766,6 +775,19 @@ def health_ready():
     """Readiness: 200 solo si la base de datos responde."""
     estado = obtener_estado_sistema()
     return jsonify(estado), (200 if estado.get('ok') else 503)
+
+
+@app.route('/metrics')
+def metrics_prometheus():
+    """Metricas Prometheus (contadores y latencia). Solo si LOCALIS_METRICS=1."""
+    from backend import metricas
+
+    if not metricas.habilitado():
+        return jsonify({'ok': False, 'error': 'metricas deshabilitadas'}), 404
+    return Response(
+        metricas.render_prometheus(),
+        mimetype='text/plain; version=0.0.4; charset=utf-8',
+    )
 
 
 # /api/tasa-bcv y /api/actualizar-tasa viven ahora en backend/blueprints/api.py

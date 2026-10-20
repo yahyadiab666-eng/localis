@@ -18,6 +18,8 @@ import uuid
 
 from flask import g, request
 
+from backend import metricas
+
 
 class JsonFormatter(logging.Formatter):
     """Formatea cada registro como una linea JSON (facil de ingerir en prod)."""
@@ -76,6 +78,7 @@ def registrar_request_logging(app):
             duracion = (time.perf_counter() - inicio) * 1000 if inicio else 0.0
             rid = getattr(g, 'request_id', '-')
             response.headers.setdefault('X-Request-ID', rid)
+            metricas.registrar(response.status_code, duracion)
             if not request.path.startswith('/static/'):
                 log.info(
                     '%s %s -> %s %.1fms rid=%s',

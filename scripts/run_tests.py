@@ -34,6 +34,8 @@ except Exception:
 SIN_RED = [
     'test_config_seguridad.py',
     'test_estructura_blueprints.py',
+    'test_metricas.py',
+    'test_backup_utilidades.py',
     'test_cache.py',
     'test_clasificador_categorias.py',
     'test_cobertura_universal.py',
@@ -43,6 +45,7 @@ INTEGRACION = [
     'test_pre_cuentas_roles.py',
     'test_auth_panel.py',
     'test_rutas_smoke.py',
+    'test_observabilidad_http.py',
     'test_rate_limit.py',
 ]
 COMPILAR = [
