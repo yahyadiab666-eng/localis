@@ -42,6 +42,7 @@ INTEGRACION = [
     'test_pre_cuentas_roles.py',
     'test_auth_panel.py',
     'test_rutas_smoke.py',
+    'test_rate_limit.py',
 ]
 COMPILAR = [
     'config.py', 'main.py', 'database.py', 'init_db.py',

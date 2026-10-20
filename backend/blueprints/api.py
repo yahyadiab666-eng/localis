@@ -15,6 +15,8 @@ from flask import Blueprint, jsonify, request, session
 
 from config import MENSAJE_PAGOS_CONGELADOS, pagos_habilitados
 
+from backend.rate_limit import limite
+
 from backend.admin import confirmar_pago_suscripcion
 from backend.analytics import (
     normalizar_tipo,
@@ -76,6 +78,7 @@ def api_tasa_bcv_actual():
 
 
 @bp.route('/actualizar-tasa', methods=['POST'])
+@limite('10 per minute')
 @exento_csrf
 def api_actualizar_tasa():
     """Fuerza la sincronizacion manual de la tasa oficial del BCV (solo POST).
@@ -201,6 +204,7 @@ def api_registrar_interaccion(comercio_id):
 
 
 @bp.route('/suscripcion/confirmar-pago', methods=['POST'])
+@limite('10 per minute')
 @admin_requerido_api
 def api_confirmar_pago():
     """Confirmación manual de pago — solo administradores."""
@@ -238,6 +242,7 @@ def api_cotizacion_pago():
 
 
 @bp.route('/pagos/programar-cambio', methods=['POST'])
+@limite('10 per minute')
 @login_requerido_api
 def api_programar_cambio_plan():
     comercio = comercio_sesion_validado()
@@ -270,6 +275,7 @@ def api_programar_cambio_plan():
 
 
 @bp.route('/productos/crear', methods=['POST'])
+@limite('30 per minute')
 @login_requerido_api
 def api_crear_producto():
     comercio = comercio_sesion_validado()
@@ -367,6 +373,7 @@ def api_crear_producto():
 
 
 @bp.route('/boost/verificar', methods=['POST'])
+@limite('10 per minute')
 @login_requerido_api
 def api_verificar_boost():
     """Valida el pago móvil y activa el destacado de un producto.
@@ -493,6 +500,7 @@ def api_verificar_boost():
 
 
 @bp.route('/pagos/verificar', methods=['POST'])
+@limite('10 per minute')
 @login_requerido_api
 def api_verificar_pago():
     comercio = comercio_sesion_validado()
