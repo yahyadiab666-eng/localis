@@ -13,6 +13,7 @@
     {% set seo_desc = (comercio.descripcion | default('', true) | trim) or ('Catálogo de ' ~ comercio.nombre ~ ' en Localis: productos y precios en dólares y bolívares.') %}
   {% endif %}
   <title>{{ seo_titulo }}</title>
+  {% if preview %}<meta name="robots" content="noindex, nofollow">{% endif %}
   {% set canonical_url = request.url_root.rstrip('/') ~ (url_for('tienda_publica', slug=comercio.slug) if comercio.slug else url_for('tienda_publica', comercio_id=comercio.id)) %}
   <link rel="canonical" href="{{ canonical_url }}">
   <meta name="description" content="{{ seo_desc }}">
@@ -70,7 +71,13 @@
   </style>
 </head>
 <body class="min-h-screen" style="background: rgb(254, 251, 246);"
-      data-interaccion-auto="visita_tienda" data-interaccion-comercio="{{ comercio.id }}" data-interaccion-origen="{{ origen or 'web' }}">
+      {% if preview %}data-localis-preview="1"{% else %}data-interaccion-auto="visita_tienda" data-interaccion-comercio="{{ comercio.id }}" data-interaccion-origen="{{ origen or 'web' }}"{% endif %}>
+
+{% if preview %}
+<div class="w-full bg-amber-100 text-amber-900 text-center text-xs sm:text-sm px-3 py-2 border-b border-amber-200">
+  <strong>Vista previa</strong> &middot; así se verá la tienda cuando se publique. Solo lectura. No compartas este enlace públicamente.
+</div>
+{% endif %}
 
   <header class="publico-header sticky top-0 z-50 bg-stone-900 text-white shadow-sm transition-transform duration-300 ease-out will-change-transform">
     <nav class="max-w-6xl mx-auto px-4 sm:px-6 py-3 sm:py-4 w-full">

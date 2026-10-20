@@ -259,6 +259,9 @@
                                 </a>
                                 {% if comercio.estado_tienda == 'pre_cuenta' %}
                                     <span class="badge badge-pre">pre-cuenta</span>
+                                    <a href="{{ url_vista_previa(comercio.id) }}" target="_blank" rel="noopener"
+                                       class="btn-accion-tabla btn-resolver" style="text-decoration:none;display:inline-block;"
+                                       title="Vista previa de solo lectura para compartir con el comercio">Vista previa</a>
                                 {% endif %}
                                 <br><small>{{ comercio.telefono or '' }}</small>
                                 {% if comercio.codigo_publico %}

@@ -46,6 +46,8 @@
   // Analítica de interés por comercio (beacon, no bloquea la navegación)
   // ---------------------------------------------------------------------------
   window.registrarInteraccion = function registrarInteraccion(comercioId, tipo, productoId, origen) {
+    // En vista previa (enlace para compartir) no se registra analítica.
+    if (document.body && document.body.dataset.localisPreview === '1') return;
     if (!comercioId || !tipo) return;
     var cuerpo = JSON.stringify({ tipo: tipo, producto_id: productoId || null, origen: origen || undefined });
     var url = '/api/comercio/' + encodeURIComponent(comercioId) + '/interaccion';

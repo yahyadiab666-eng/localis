@@ -28,6 +28,10 @@ otros comercios. Nunca lanza: devuelve tuplas/valores seguros.
 import logging
 logger = logging.getLogger('localis.pre_cuentas')
 
+import base64
+import hashlib
+import hmac
+import os
 import re
 
 from backend.db import get_db_connection
@@ -518,3 +522,40 @@ def reclamar_comercios_por_email(cursor, usuario_id, email):
         if comercio_id is not None:
             reclamados.append(comercio_id)
     return reclamados
+
+
+# ===========================================================================
+# Vista previa de pre-cuenta (compartir con el comercio, SOLO lectura)
+# ===========================================================================
+# La pre-cuenta está oculta al público hasta la transferencia, así que no hay
+# forma de "mostrarla" con un enlace normal. Este token firmado permite generar
+# una URL de vista previa que el admin comparte con el comercio. Es determinista
+# (HMAC con secreto), no adivinable y no requiere columnas nuevas. Para revocar
+# todas las vistas previas, cambia ``LOCALIS_PREVIEW_SECRET`` (o reordena el
+# secreto de la app).
+
+_PREFIJO_TOKEN_PREVIEW = 'vista-previa'
+
+
+def _secreto_preview():
+    return (
+        os.environ.get('LOCALIS_PREVIEW_SECRET')
+        or os.environ.get('LOCALIS_SECRET_KEY')
+        or 'localis-preview-dev'
+    ).strip()
+
+
+def token_vista_previa(comercio_id):
+    """Token firmado (URL-safe) para la vista previa de un comercio."""
+    mensaje = f'{_PREFIJO_TOKEN_PREVIEW}:{int(comercio_id)}'.encode('utf-8')
+    firma = hmac.new(_secreto_preview().encode('utf-8'), mensaje, hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(firma).decode('ascii').rstrip('=')[:32]
+
+
+def token_vista_previa_valido(comercio_id, token):
+    """True si el token corresponde al comercio (comparación en tiempo constante)."""
+    try:
+        esperado = token_vista_previa(comercio_id)
+        return hmac.compare_digest(str(token or ''), esperado)
+    except (TypeError, ValueError):
+        return False
