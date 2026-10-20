@@ -75,7 +75,6 @@ from backend.supabase_client import (
 from backend.supabase_storage import (
     intentar_subir_bytes,
     intentar_subir_imagen,
-    programar_sincronizacion_storage,
 )
 if supabase_storage_habilitado():
     print('Supabase Storage configurado con SUPABASE_SERVICE_ROLE_KEY.')
@@ -162,11 +161,10 @@ from utils.images import (
 from backend.image_lookup import (
     obtener_imagen_url_producto,
     persistir_imagen_producto_hibrida,
-    programar_descubrimiento_producto,
 )
 from backend.db import get_db_connection
 from database import BaseDatosNoDisponible, calentar_pool_bd, init_db, normalize_database_url
-from backend.plans import PLANES, MENSAJE_LIMITE_PRODUCTOS, es_limite_ilimitado, obtener_beneficios_plan
+from backend.plans import PLANES, obtener_beneficios_plan
 try:
     from backend.payment_ocr import validar_comprobante_pago_movil
 except Exception:
@@ -183,11 +181,9 @@ from backend.subscriptions import (
     calcular_monto_pago_plan,
     comercio_puede_gestionar_inventario,
     comprobante_ya_usado,
-    contar_productos_comercio,
     marcar_bienvenida_vista,
     obtener_avisos_suscripcion,
     obtener_datos_pago_movil,
-    obtener_limite_productos_comercio,
     programar_downgrade_plan,
     puede_agregar_producto,
     rechazar_renovacion_vencida,
@@ -219,6 +215,11 @@ from backend.web_seguridad import (
     login_requerido_api,
     peticion_acepta_json as _peticion_acepta_json,
     registrar_csrf,
+)
+from backend.vistas_imagenes import (
+    quitar_imagen_manual as _quitar_imagen_manual,
+    registrar_imagen_manual as _registrar_imagen_manual,
+    sincronizar_foto_local_si_aplica as _sincronizar_foto_local_si_aplica,
 )
 from backend.inventory_import import cargar_archivo_inventario
 from backend.import_queue import (
@@ -795,44 +796,8 @@ def procesar_imagen_para_producto(
     )
 
 
-def _sincronizar_foto_local_si_aplica(producto_id, imagen_url, carpeta='productos'):
-    """Si la foto quedó en disco, intenta copiarla al bucket sin bloquear la respuesta."""
-    if not producto_id:
-        return
-    if imagen_url:
-        try:
-            programar_sincronizacion_storage(producto_id, imagen_url, carpeta=carpeta)
-        except Exception as error:
-            print(f'[Localis Imagen] sync diferida no programada: {error}')
-        return
-    try:
-        programar_descubrimiento_producto(producto_id)
-    except Exception as error:
-        print(f'[Localis Imagen] descubrimiento no programado: {error}')
-
-
-def _registrar_imagen_manual(producto_id, imagen_url, fuente='manual'):
-    """Registra la subida manual y borra la manual anterior del producto."""
-    if not producto_id or not imagen_url:
-        return
-    try:
-        from backend.imagenes_producto import marcar_manual
-
-        marcar_manual(producto_id, imagen_url, fuente)
-    except Exception as error:
-        print(f'[Localis Imagen] no se registró la imagen manual: {error}')
-
-
-def _quitar_imagen_manual(producto_id):
-    """Descarta la manual (la borra) y revierte a la imagen automática."""
-    if not producto_id:
-        return
-    try:
-        from backend.imagenes_producto import eliminar_manual
-
-        eliminar_manual(producto_id)
-    except Exception as error:
-        print(f'[Localis Imagen] no se pudo quitar la imagen manual: {error}')
+# _sincronizar_foto_local_si_aplica / _registrar_imagen_manual /
+# _quitar_imagen_manual viven ahora en backend/vistas_imagenes.py
 
 
 # _comercio_sesion_validado vive ahora en backend/web_seguridad.py
@@ -2583,104 +2548,7 @@ def tienda_qr_png(comercio_id):
 # ==========================================
 
 
-@app.route('/api/productos/crear', methods=['POST'])
-@login_requerido_api
-def api_crear_producto():
-    comercio = _comercio_sesion_validado()
-    if not comercio:
-        return jsonify({'error': 'Selecciona un comercio válido en tu cuenta.'}), 403
-
-    tienda_id = comercio['id']
-    # --- RESTAURAR_PAGOS_INICIO ---
-    # Sin límites de plan durante la fase gratuita.
-    if pagos_habilitados():
-        limite = obtener_limite_productos_comercio(tienda_id)
-        total_productos = contar_productos_comercio(tienda_id)
-
-        if not es_limite_ilimitado(limite) and total_productos >= limite:
-            return jsonify({'error': MENSAJE_LIMITE_PRODUCTOS}), 400
-
-        ok_estado, msg_estado = puede_agregar_producto(tienda_id)
-        if not ok_estado:
-            return jsonify({'error': msg_estado}), 400
-    # --- RESTAURAR_PAGOS_FIN ---
-
-    nombre = (request.form.get('nombre') or '').strip()
-    descripcion = (request.form.get('descripcion') or '').strip()
-    precio_raw = request.form.get('precio_usd')
-    codigo_barras = normalizar_codigo_barras(request.form.get('codigo_barras'))
-    imagen_archivo = request.files.get('imagen')
-    imagen_url_form = request.form.get('imagen_url')
-
-    if not nombre or not nombre.strip():
-        return jsonify({'error': 'El nombre es obligatorio.'}), 400
-
-    precio_usd, error_precio = parsear_precio_form(precio_raw)
-    if error_precio:
-        return jsonify({'error': error_precio}), 400
-
-    aviso_img = None
-    imagen_url = None
-    try:
-        imagen_url, aviso_img = persistir_imagen_producto_hibrida(
-            file_storage=imagen_archivo,
-            codigo_barras=codigo_barras,
-            nombre=nombre,
-            descripcion=descripcion,
-            comercio_id=tienda_id,
-            imagen_url_form=imagen_url_form,
-        )
-        if aviso_img:
-            print(f'[Localis Imagen] api producto aviso: {aviso_img}')
-    except Exception as error:
-        print(f'[Localis Imagen] api producto hibrido: {error}')
-        traceback.print_exc()
-        imagen_url = imagen_url_para_persistir(imagen_url_form)
-
-    def _insertar(conexion):
-        cursor = conexion.cursor()
-        cursor.execute(
-            '''
-            INSERT INTO productos (comercio_id, nombre, descripcion, precio_usd, codigo_barras, imagen_url)
-            VALUES (?, ?, ?, ?, ?, ?)
-            RETURNING id
-            ''',
-            (tienda_id, nombre, descripcion, precio_usd, codigo_barras, imagen_url),
-        )
-        fila = cursor.fetchone()
-        producto_id = fila[0] if fila else None
-        if producto_id:
-            try:
-                from backend.codigos_publicos import asignar_codigo_producto
-
-                asignar_codigo_producto(cursor, producto_id)
-            except Exception as error:
-                print(
-                    f'[Localis Codigos] producto {producto_id}: '
-                    f'{type(error).__name__}: {error}',
-                    flush=True,
-                )
-        return producto_id
-
-    try:
-        from backend.db import ejecutar_con_reintentos_bd
-
-        producto_id = ejecutar_con_reintentos_bd(_insertar)
-    except Exception as error:
-        return jsonify({'error': f'Error al agregar producto: {error}'}), 500
-
-    _sincronizar_foto_local_si_aplica(producto_id, imagen_url)
-    _registrar_imagen_manual(producto_id, imagen_url)
-    asegurar_slug_producto(producto_id, nombre)
-    return jsonify(
-        {
-            'ok': True,
-            'mensaje': 'Producto agregado con éxito.',
-            'producto_id': producto_id,
-            'imagen_url': imagen_url,
-            **({'aviso': aviso_img} if aviso_img else {}),
-        }
-    ), 201
+# api_crear_producto vive ahora en backend/blueprints/api.py
 
 
 # api_cotizacion_pago vive ahora en backend/blueprints/api.py

@@ -18,16 +18,35 @@ from config import MENSAJE_PAGOS_CONGELADOS, pagos_habilitados
 from backend.admin import confirmar_pago_suscripcion
 from backend.analytics import normalizar_tipo, registrar_interaccion
 from backend.auth import obtener_usuario_por_id
+from backend.image_lookup import persistir_imagen_producto_hibrida
+from backend.plans import MENSAJE_LIMITE_PRODUCTOS, es_limite_ilimitado
 from backend.session_comercio import es_usuario_comerciante
-from backend.stores import obtener_comercio_por_usuario, obtener_producto_publico
+from backend.stores import (
+    asegurar_slug_producto,
+    obtener_comercio_por_usuario,
+    obtener_producto_publico,
+)
 from backend.subscriptions import (
     calcular_cotizacion_cambio_plan,
     calcular_monto_pago_plan,
+    contar_productos_comercio,
     obtener_datos_pago_movil,
+    obtener_limite_productos_comercio,
     programar_downgrade_plan,
+    puede_agregar_producto,
 )
 from backend.tasa_bcv import estado_tasa_bcv, obtener_tasa_bcv
-from backend.utils import parsear_entero_form, url_whatsapp_comercio
+from backend.utils import (
+    imagen_url_para_persistir,
+    normalizar_codigo_barras,
+    parsear_entero_form,
+    parsear_precio_form,
+    url_whatsapp_comercio,
+)
+from backend.vistas_imagenes import (
+    registrar_imagen_manual,
+    sincronizar_foto_local_si_aplica,
+)
 from backend.web_seguridad import (
     admin_requerido_api,
     comercio_sesion_validado,
@@ -237,3 +256,100 @@ def api_programar_cambio_plan():
         return jsonify({'error': mensaje}), 400
 
     return jsonify({'ok': True, 'mensaje': mensaje, **(datos or {})}), 200
+
+
+@bp.route('/productos/crear', methods=['POST'])
+@login_requerido_api
+def api_crear_producto():
+    comercio = comercio_sesion_validado()
+    if not comercio:
+        return jsonify({'error': 'Selecciona un comercio válido en tu cuenta.'}), 403
+
+    tienda_id = comercio['id']
+    # --- RESTAURAR_PAGOS_INICIO ---
+    if pagos_habilitados():
+        limite = obtener_limite_productos_comercio(tienda_id)
+        total_productos = contar_productos_comercio(tienda_id)
+        if not es_limite_ilimitado(limite) and total_productos >= limite:
+            return jsonify({'error': MENSAJE_LIMITE_PRODUCTOS}), 400
+        ok_estado, msg_estado = puede_agregar_producto(tienda_id)
+        if not ok_estado:
+            return jsonify({'error': msg_estado}), 400
+    # --- RESTAURAR_PAGOS_FIN ---
+
+    nombre = (request.form.get('nombre') or '').strip()
+    descripcion = (request.form.get('descripcion') or '').strip()
+    precio_raw = request.form.get('precio_usd')
+    codigo_barras = normalizar_codigo_barras(request.form.get('codigo_barras'))
+    imagen_archivo = request.files.get('imagen')
+    imagen_url_form = request.form.get('imagen_url')
+
+    if not nombre or not nombre.strip():
+        return jsonify({'error': 'El nombre es obligatorio.'}), 400
+
+    precio_usd, error_precio = parsear_precio_form(precio_raw)
+    if error_precio:
+        return jsonify({'error': error_precio}), 400
+
+    aviso_img = None
+    imagen_url = None
+    try:
+        imagen_url, aviso_img = persistir_imagen_producto_hibrida(
+            file_storage=imagen_archivo,
+            codigo_barras=codigo_barras,
+            nombre=nombre,
+            descripcion=descripcion,
+            comercio_id=tienda_id,
+            imagen_url_form=imagen_url_form,
+        )
+        if aviso_img:
+            print(f'[Localis Imagen] api producto aviso: {aviso_img}')
+    except Exception as error:
+        print(f'[Localis Imagen] api producto hibrido: {error}')
+        traceback.print_exc()
+        imagen_url = imagen_url_para_persistir(imagen_url_form)
+
+    def _insertar(conexion):
+        cursor = conexion.cursor()
+        cursor.execute(
+            '''
+            INSERT INTO productos (comercio_id, nombre, descripcion, precio_usd, codigo_barras, imagen_url)
+            VALUES (?, ?, ?, ?, ?, ?)
+            RETURNING id
+            ''',
+            (tienda_id, nombre, descripcion, precio_usd, codigo_barras, imagen_url),
+        )
+        fila = cursor.fetchone()
+        producto_id = fila[0] if fila else None
+        if producto_id:
+            try:
+                from backend.codigos_publicos import asignar_codigo_producto
+
+                asignar_codigo_producto(cursor, producto_id)
+            except Exception as error:
+                print(
+                    f'[Localis Codigos] producto {producto_id}: '
+                    f'{type(error).__name__}: {error}',
+                    flush=True,
+                )
+        return producto_id
+
+    try:
+        from backend.db import ejecutar_con_reintentos_bd
+
+        producto_id = ejecutar_con_reintentos_bd(_insertar)
+    except Exception as error:
+        return jsonify({'error': f'Error al agregar producto: {error}'}), 500
+
+    sincronizar_foto_local_si_aplica(producto_id, imagen_url)
+    registrar_imagen_manual(producto_id, imagen_url)
+    asegurar_slug_producto(producto_id, nombre)
+    return jsonify(
+        {
+            'ok': True,
+            'mensaje': 'Producto agregado con éxito.',
+            'producto_id': producto_id,
+            'imagen_url': imagen_url,
+            **({'aviso': aviso_img} if aviso_img else {}),
+        }
+    ), 201
