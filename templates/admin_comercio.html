@@ -80,8 +80,8 @@
             <a href="{{ url_for('admin.panel_admin') }}">&larr; Volver al panel</a>
             <a href="{{ url_for('admin.admin_usuarios') }}">Usuarios</a>
             {% if comercio.id %}
-            <a href="{{ url_for('admin_editar_comercio', comercio_id=comercio.id) }}">Editar tienda</a>
-            <a href="{{ url_for('admin_nuevo_producto', comercio_id=comercio.id) }}">Añadir producto</a>
+            <a href="{{ url_for('admin.admin_editar_comercio', comercio_id=comercio.id) }}">Editar tienda</a>
+            <a href="{{ url_for('admin.admin_nuevo_producto', comercio_id=comercio.id) }}">Añadir producto</a>
             <a href="{{ url_for('tienda_publica', slug=comercio.slug) if comercio.slug else url_for('tienda_publica', comercio_id=comercio.id) }}" target="_blank" rel="noopener">Ver tienda pública</a>
             {% endif %}
             <form method="POST" action="{{ url_for('logout') }}" style="display:inline;"
@@ -151,7 +151,7 @@
             <aside class="card">
                 <h2>Acciones de gestión</h2>
                 <div class="acciones-grid">
-                    <a href="{{ url_for('admin_editar_comercio', comercio_id=comercio.id) }}"
+                    <a href="{{ url_for('admin.admin_editar_comercio', comercio_id=comercio.id) }}"
                        class="btn-accion-tabla btn-resolver"
                        style="text-decoration:none;display:inline-block;"
                        title="Editar perfil, contacto, categoría y visibilidad">Editar tienda</a>
@@ -284,9 +284,9 @@
                     exactamente como el importador del comerciante.
                 </p>
                 <form id="form-admin-csv"
-                      action="{{ url_for('admin_cargar_csv', comercio_id=comercio.id) }}"
+                      action="{{ url_for('admin.admin_cargar_csv', comercio_id=comercio.id) }}"
                       method="POST" enctype="multipart/form-data"
-                      data-estado-url="{{ url_for('admin_estado_importacion', comercio_id=comercio.id, job_id='__JOB__') }}"
+                      data-estado-url="{{ url_for('admin.admin_estado_importacion', comercio_id=comercio.id, job_id='__JOB__') }}"
                       style="display:flex;flex-direction:column;gap:10px;margin-top:12px;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="file" name="archivo_csv" accept=".csv,.xlsx,.xls" required
@@ -318,7 +318,7 @@
                                class="muted" style="text-decoration:none;">Limpiar</a>
                             {% endif %}
                         </form>
-                        <a href="{{ url_for('admin_nuevo_producto', comercio_id=comercio.id) }}"
+                        <a href="{{ url_for('admin.admin_nuevo_producto', comercio_id=comercio.id) }}"
                            class="btn-accion-tabla btn-activar" style="text-decoration:none;display:inline-block;"
                            title="Cargar un producto en este comercio">+ Añadir producto</a>
                     </div>
@@ -360,7 +360,7 @@
                                 </td>
                                 <td>
                                     {% set es_destacado = (producto.destacado or 0) == 1 %}
-                                    <form action="{{ url_for('admin_destacar_producto', producto_id=producto.id) }}" method="POST" style="display:inline;"
+                                    <form action="{{ url_for('admin.admin_destacar_producto', producto_id=producto.id) }}" method="POST" style="display:inline;"
                                           onsubmit="this.querySelector('button').disabled=true;">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <input type="hidden" name="comercio_id" value="{{ comercio.id }}">
@@ -373,7 +373,7 @@
                                         </button>
                                     </form>
                                     <br><small class="muted">{{ 'Destacado' if es_destacado else 'Normal' }}</small>
-                                    <form action="{{ url_for('admin_destacar_producto', producto_id=producto.id) }}" method="POST"
+                                    <form action="{{ url_for('admin.admin_destacar_producto', producto_id=producto.id) }}" method="POST"
                                           class="destacar-dias-form" style="margin-top:6px;">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <input type="hidden" name="comercio_id" value="{{ comercio.id }}">
@@ -388,10 +388,10 @@
                                     </form>
                                 </td>
                                 <td>
-                                    <a href="{{ url_for('admin_editar_producto', comercio_id=comercio.id, producto_id=producto.id) }}"
+                                    <a href="{{ url_for('admin.admin_editar_producto', comercio_id=comercio.id, producto_id=producto.id) }}"
                                        class="btn-accion-tabla btn-resolver" style="text-decoration:none;display:inline-block;margin-bottom:4px;"
                                        title="Editar producto">Editar</a>
-                                    <form action="{{ url_for('admin_eliminar_producto_ruta', producto_id=producto.id) }}" method="POST"
+                                    <form action="{{ url_for('admin.admin_eliminar_producto_ruta', producto_id=producto.id) }}" method="POST"
                                           onsubmit="return confirm('¿Eliminar el producto {{ producto.nombre }}? Esta acción no se puede deshacer.');">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <input type="hidden" name="comercio_id" value="{{ comercio.id }}">

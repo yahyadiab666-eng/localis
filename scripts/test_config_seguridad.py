@@ -96,20 +96,36 @@ def main():
         )
 
     # 7) Toda ruta /admin va precedida por el guard de administrador.
+    #    Las rutas viven en main.py o en el blueprint admin (url_prefix=/admin).
     print('=== Rutas /admin protegidas ===')
-    lineas_main = texto_main.splitlines()
-    rutas_admin = 0
-    desprotegidas = []
-    for i, linea in enumerate(lineas_main):
-        if '@app.route(' in linea and "'/admin" in linea:
-            rutas_admin += 1
+
+    def _revisar_rutas(contenido, solo_admin):
+        lineas = contenido.splitlines()
+        total = 0
+        sin_guard = []
+        for i, linea in enumerate(lineas):
+            if '.route(' not in linea:
+                continue
+            if solo_admin and '/admin' not in linea:
+                continue
+            total += 1
             ventana = []
-            for j in range(i + 1, min(i + 6, len(lineas_main))):
-                if lineas_main[j].lstrip().startswith('def '):
+            for j in range(i + 1, min(i + 6, len(lineas))):
+                if lineas[j].lstrip().startswith('def '):
                     break
-                ventana.append(lineas_main[j])
+                ventana.append(lineas[j])
             if 'admin_requerido' not in '\n'.join(ventana):
-                desprotegidas.append(linea.strip())
+                sin_guard.append(linea.strip())
+        return total, sin_guard
+
+    rutas_admin, desprotegidas = _revisar_rutas(texto_main, solo_admin=True)
+    texto_admin_bp = (
+        RAIZ / 'backend' / 'blueprints' / 'admin.py'
+    ).read_text(encoding='utf-8', errors='ignore')
+    n_bp, desp_bp = _revisar_rutas(texto_admin_bp, solo_admin=False)
+    rutas_admin += n_bp
+    desprotegidas += desp_bp
+
     fallos.append(not _ok(rutas_admin > 0, f'{rutas_admin} rutas /admin detectadas'))
     fallos.append(not _ok(not desprotegidas, f'rutas sin guard: {desprotegidas}'))
 
