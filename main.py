@@ -73,7 +73,6 @@ from backend.supabase_client import (
     supabase_storage_habilitado,
 )
 from backend.supabase_storage import (
-    intentar_subir_bytes,
     intentar_subir_imagen,
 )
 if supabase_storage_habilitado():
@@ -176,21 +175,16 @@ except Exception:
 
 
 from backend.subscriptions import (
-    activar_suscripcion_por_comprobante,
     calcular_cotizacion_cambio_plan,
-    calcular_monto_pago_plan,
     comercio_puede_gestionar_inventario,
-    comprobante_ya_usado,
     marcar_bienvenida_vista,
     obtener_avisos_suscripcion,
     obtener_datos_pago_movil,
-    programar_downgrade_plan,
     puede_agregar_producto,
     rechazar_renovacion_vencida,
     verificar_vencimiento_comercio,
     verificar_vencimientos_comercios,
 )
-from backend.payments import calcular_hash_comprobante
 from backend.utils import (
     formatear_fecha,
     imagen_url_para_persistir,
@@ -212,7 +206,6 @@ from backend.web_seguridad import (
     admin_requerido,
     comercio_sesion_validado as _comercio_sesion_validado,
     login_requerido,
-    login_requerido_api,
     peticion_acepta_json as _peticion_acepta_json,
     registrar_csrf,
 )
@@ -250,7 +243,6 @@ from backend.stores import (
 )
 from backend.tasa_bcv import obtener_tasa_bcv
 from backend.analytics import (
-    producto_pertenece_a_comercio,
     resumen_interacciones,
 )
 from backend.apariencia import (
@@ -260,10 +252,8 @@ from backend.apariencia import (
     opciones_banner,
 )
 from backend.boosts import (
-    activar_boost_producto,
     estado_boosts_productos,
     opciones_boost,
-    precio_boost,
 )
 from backend.referidos import (
     PUNTOS_POR_DESTACADO,
@@ -2331,126 +2321,7 @@ def suscripcion_solicitar_pago():
 # ==========================================
 
 
-@app.route('/api/boost/verificar', methods=['POST'])
-@login_requerido_api
-def api_verificar_boost():
-    """Valida el pago móvil y activa el destacado de un producto.
-
-    Réplica EXACTA del flujo de mensualidades (``/api/pagos/verificar``):
-    comprobante + OCR antifraude (banco nacional, RIF/cédula y teléfono destino,
-    monto exacto y fecha reciente) + anti-reutilización de referencia/comprobante.
-    """
-    comercio = _comercio_sesion_validado()
-    if not comercio:
-        return jsonify({'error': 'Selecciona un comercio válido en tu cuenta.'}), 403
-
-    producto_raw = request.form.get('producto_id')
-    try:
-        producto_id = int(str(producto_raw).strip())
-    except (TypeError, ValueError):
-        return jsonify({'error': 'Producto no válido.'}), 400
-
-    dias_raw = request.form.get('dias')
-    try:
-        dias = int(str(dias_raw).strip())
-    except (TypeError, ValueError):
-        return jsonify({'error': 'Duración no válida. Elige 3, 5 o 7 días.'}), 400
-
-    precio_usd = precio_boost(dias)
-    if not precio_usd:
-        return jsonify({'error': 'Duración no válida. Elige 3, 5 o 7 días.'}), 400
-
-    # a) Propiedad inequívoca: el producto debe ser del comercio de la sesión.
-    if not producto_pertenece_a_comercio(producto_id, comercio['id']):
-        return jsonify({'error': 'El producto no pertenece a tu comercio.'}), 403
-
-    archivo = request.files.get('comprobante')
-    if not archivo or not archivo.filename:
-        return jsonify({'error': 'Debes adjuntar la captura del comprobante de pago.'}), 400
-
-    from backend.images import ImageProcessingError, comprimir_bytes_a_bytes, leer_bytes_limitados
-
-    data_bytes, error_lectura = leer_bytes_limitados(archivo)
-    if error_lectura:
-        return jsonify({'error': error_lectura}), 400
-
-    hash_comprobante = calcular_hash_comprobante(data_bytes)
-    if comprobante_ya_usado(hash_comprobante):
-        return jsonify({'error': 'Este comprobante ya fue registrado en el sistema.'}), 400
-
-    try:
-        tasa = float(obtener_tasa_dolar() or 1.0)
-    except (TypeError, ValueError):
-        tasa = 1.0
-    monto_bs = round(float(precio_usd) * tasa, 2)
-
-    # b) OCR estricto: banco nacional, RIF/cédula y teléfono destino,
-    #    monto exacto y fecha reciente.
-    ocr = validar_comprobante_pago_movil(data_bytes, monto_bs)
-    if not ocr.get('ok'):
-        return (
-            jsonify(
-                {
-                    'error': ' '.join(ocr.get('errores') or ['Comprobante no válido.']),
-                    'ocr_ms': round(ocr.get('ms', 0), 1),
-                }
-            ),
-            400,
-        )
-
-    referencia = ocr['referencia']
-    comprobante_url = None
-    aviso_pago = None
-    try:
-        comprimido = comprimir_bytes_a_bytes(
-            data_bytes,
-            prefijo=f'boost_{comercio["id"]}',
-            max_dimension=1920,
-        )
-        payload, content_type, filename = comprimido
-        comprobante_url, aviso_pago = intentar_subir_bytes(
-            payload,
-            filename=filename,
-            content_type=content_type,
-            carpeta='pagos',
-        )
-        if aviso_pago:
-            print(f'[Localis Storage] comprobante boost en modo hibrido: {aviso_pago}')
-    except ImageProcessingError as error:
-        return jsonify({'error': str(error)}), 400
-    except Exception as error:
-        print(f'[Localis Boost] no se pudo subir el comprobante: {error}')
-
-    # c) Activación atómica: auditoría + referencia única + boost del producto.
-    exito, mensaje = activar_boost_producto(
-        comercio['id'],
-        producto_id,
-        dias,
-        referencia,
-        comprobante_url=comprobante_url,
-        comprobante_hash=hash_comprobante,
-    )
-    if not exito:
-        return jsonify({'error': mensaje, 'ocr_ms': round(ocr.get('ms', 0), 1)}), 400
-
-    return (
-        jsonify(
-            {
-                'ok': True,
-                'mensaje': mensaje,
-                'producto_id': producto_id,
-                'dias': dias,
-                'referencia': referencia,
-                'monto_usd': float(precio_usd),
-                'monto_bs': monto_bs,
-                'tasa': tasa,
-                'fecha_comprobante': ocr.get('fecha_comprobante'),
-                'ocr_ms': round(ocr.get('ms', 0), 1),
-                **({'aviso': aviso_pago} if aviso_pago else {}),
-            }
-        ),
-        200,
-    )
+# api_verificar_boost vive ahora en backend/blueprints/api.py
 
 
 @app.route('/comercio/boost/canjear', methods=['POST'])
@@ -2557,119 +2428,7 @@ def tienda_qr_png(comercio_id):
 # api_programar_cambio_plan vive ahora en backend/blueprints/api.py
 
 
-@app.route('/api/pagos/verificar', methods=['POST'])
-@login_requerido_api
-def api_verificar_pago():
-    comercio = _comercio_sesion_validado()
-    if not comercio:
-        return jsonify({'error': 'Selecciona un comercio válido en tu cuenta.'}), 403
-
-    # --- RESTAURAR_PAGOS_INICIO ---
-    # No se activan planes de pago. El flujo de comprobante (OCR) permanece
-    # intacto en el código de abajo.
-    if not pagos_habilitados():
-        return jsonify(
-            {
-                'error': (
-                    MENSAJE_PAGOS_CONGELADOS
-                    + ' No necesitas subir ningún comprobante de pago.'
-                )
-            }
-        ), 400
-    # --- RESTAURAR_PAGOS_FIN ---
-
-    plan_tipo = (request.form.get('plan_tipo') or 'basica').lower()
-    cotizacion = calcular_cotizacion_cambio_plan(comercio, plan_tipo)
-    if not cotizacion:
-        return jsonify({'error': 'Plan no válido para pago.'}), 400
-
-    if cotizacion['tipo_cambio'] == 'downgrade':
-        exito, mensaje, datos = programar_downgrade_plan(comercio['id'], plan_tipo)
-        if not exito:
-            return jsonify({'error': mensaje}), 400
-        return jsonify({'ok': True, 'mensaje': mensaje, **(datos or {})}), 200
-
-    archivo = request.files.get('comprobante')
-
-    if not archivo or not archivo.filename:
-        return jsonify({'error': 'Debes adjuntar la captura del comprobante de pago.'}), 400
-
-    from backend.images import ImageProcessingError, comprimir_bytes_a_bytes, leer_bytes_limitados
-
-    data_bytes, error_lectura = leer_bytes_limitados(archivo)
-    if error_lectura:
-        return jsonify({'error': error_lectura}), 400
-
-    hash_comprobante = calcular_hash_comprobante(data_bytes)
-    if comprobante_ya_usado(hash_comprobante):
-        return jsonify(
-            {'error': 'Este comprobante ya fue registrado en el sistema.'}
-        ), 400
-
-    montos = calcular_monto_pago_plan(plan_tipo, comercio)
-    if not montos:
-        return jsonify({'error': 'Plan no válido para pago.'}), 400
-
-    ocr = validar_comprobante_pago_movil(data_bytes, montos['monto_bs'])
-
-    if not ocr.get('ok'):
-        return jsonify(
-            {
-                'error': ' '.join(ocr.get('errores') or ['Comprobante no válido.']),
-                'ocr_ms': round(ocr.get('ms', 0), 1),
-            }
-        ), 400
-
-    referencia = ocr['referencia']
-    aviso_pago = None
-    comprobante_url = None
-
-    try:
-        comprimido = comprimir_bytes_a_bytes(
-            data_bytes,
-            prefijo=f'pago_{comercio["id"]}',
-            max_dimension=1920,
-        )
-        payload, content_type, filename = comprimido
-        comprobante_url, aviso_pago = intentar_subir_bytes(
-            payload,
-            filename=filename,
-            content_type=content_type,
-            carpeta='pagos',
-        )
-        if aviso_pago:
-            print(f'[Localis Storage] comprobante en modo hibrido: {aviso_pago}')
-    except ImageProcessingError as error:
-        return jsonify({'error': str(error)}), 400
-
-    exito, mensaje, datos = activar_suscripcion_por_comprobante(
-        comercio['id'],
-        plan_tipo,
-        referencia,
-        comprobante_url=comprobante_url,
-        monto_ocr_bs=ocr.get('monto_bs'),
-        comprobante_hash=hash_comprobante,
-    )
-
-    if not exito:
-        return jsonify({'error': mensaje, 'ocr_ms': round(ocr.get('ms', 0), 1)}), 400
-
-    respuesta = {
-        'ok': True,
-        'mensaje': mensaje,
-        'referencia': referencia,
-        'ocr_ms': round(ocr.get('ms', 0), 1),
-        'fecha_comprobante': ocr.get('fecha_comprobante'),
-        'estado': datos.get('estado', 'activo'),
-        'fecha_vencimiento': datos.get('fecha_vencimiento'),
-        'plan_tipo': datos.get('plan_tipo', plan_tipo),
-        'monto_usd': datos.get('monto_usd'),
-        'monto_bs': datos.get('monto_bs'),
-        'tasa': datos.get('tasa'),
-        'comprobante_url': comprobante_url,
-        **({'aviso': aviso_pago} if aviso_pago else {}),
-    }
-    return jsonify(respuesta), 200
+# api_verificar_pago vive ahora en backend/blueprints/api.py
 
 
 # ==========================================
