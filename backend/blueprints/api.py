@@ -8,6 +8,8 @@ Se importa y registra al FINAL de main.py, despues de que exista el objeto CSRF
 """
 
 from __future__ import annotations
+import logging
+logger = logging.getLogger('localis.blueprints.api')
 
 import traceback
 
@@ -134,7 +136,7 @@ def api_me():
     try:
         usuario = obtener_usuario_por_id(usuario_id)
     except Exception as error:
-        print(f'[Localis API] /api/me usuario fallo: {type(error).__name__}: {error}')
+        logger.error(f'[Localis API] /api/me usuario fallo: {type(error).__name__}: {error}')
         usuario = None
 
     has_store = False
@@ -145,7 +147,7 @@ def api_me():
             comercio = obtener_comercio_por_usuario(usuario_id)
             comercio_id = comercio.get('id') if comercio else None
     except Exception as error:
-        print(f'[Localis API] /api/me comercio fallo: {type(error).__name__}: {error}')
+        logger.error(f'[Localis API] /api/me comercio fallo: {type(error).__name__}: {error}')
         has_store = False
 
     if es_admin:
@@ -320,9 +322,9 @@ def api_crear_producto():
             imagen_url_form=imagen_url_form,
         )
         if aviso_img:
-            print(f'[Localis Imagen] api producto aviso: {aviso_img}')
+            logger.info(f'[Localis Imagen] api producto aviso: {aviso_img}')
     except Exception as error:
-        print(f'[Localis Imagen] api producto hibrido: {error}')
+        logger.error(f'[Localis Imagen] api producto hibrido: {error}')
         traceback.print_exc()
         imagen_url = imagen_url_para_persistir(imagen_url_form)
 
@@ -461,11 +463,11 @@ def api_verificar_boost():
             carpeta='pagos',
         )
         if aviso_pago:
-            print(f'[Localis Storage] comprobante boost en modo hibrido: {aviso_pago}')
+            logger.info(f'[Localis Storage] comprobante boost en modo hibrido: {aviso_pago}')
     except ImageProcessingError as error:
         return jsonify({'error': str(error)}), 400
     except Exception as error:
-        print(f'[Localis Boost] no se pudo subir el comprobante: {error}')
+        logger.error(f'[Localis Boost] no se pudo subir el comprobante: {error}')
 
     # c) Activación atómica: auditoría + referencia única + boost del producto.
     exito, mensaje = activar_boost_producto(
@@ -581,7 +583,7 @@ def api_verificar_pago():
             carpeta='pagos',
         )
         if aviso_pago:
-            print(f'[Localis Storage] comprobante en modo hibrido: {aviso_pago}')
+            logger.info(f'[Localis Storage] comprobante en modo hibrido: {aviso_pago}')
     except ImageProcessingError as error:
         return jsonify({'error': str(error)}), 400
 

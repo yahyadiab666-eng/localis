@@ -1,6 +1,8 @@
 """Sanitización de SUPABASE_URL y pruebas de conectividad HTTP/DNS (sin depender del SDK)."""
 
 from __future__ import annotations
+import logging
+logger = logging.getLogger('localis.supabase_connectivity')
 
 import os
 import re
@@ -257,16 +259,16 @@ def imprimir_alerta_supabase_url(resultado: ResultadoUrlSupabase, url_raw: str |
     raw = _limpiar_texto_env(url_raw)
     if resultado.valida and not resultado.errores:
         for aviso in resultado.advertencias:
-            print(f'{LOG_PREFIX} URL: {aviso}')
+            logger.info(f'{LOG_PREFIX} URL: {aviso}')
         return
 
-    print(f'{LOG_PREFIX} ===== REVISION SUPABASE_URL =====')
+    logger.info(f'{LOG_PREFIX} ===== REVISION SUPABASE_URL =====')
     if raw and raw != resultado.url:
-        print(f'{LOG_PREFIX} Valor en entorno (raw): {raw}')
+        logger.info(f'{LOG_PREFIX} Valor en entorno (raw): {raw}')
     if resultado.url:
-        print(f'{LOG_PREFIX} URL sanitizada: {resultado.url}')
+        logger.info(f'{LOG_PREFIX} URL sanitizada: {resultado.url}')
     if resultado.project_ref:
-        print(f'{LOG_PREFIX} ID de proyecto detectado: {resultado.project_ref}')
+        logger.info(f'{LOG_PREFIX} ID de proyecto detectado: {resultado.project_ref}')
     if resultado.id_sospechoso:
         print(
             f'{LOG_PREFIX} ID/host sospechoso: el valor de Render tenia prefijo '
@@ -274,9 +276,9 @@ def imprimir_alerta_supabase_url(resultado: ResultadoUrlSupabase, url_raw: str |
         )
 
     for error in resultado.errores:
-        print(f'{LOG_PREFIX} ERROR: {error}')
+        logger.error(f'{LOG_PREFIX} ERROR: {error}')
     for aviso in resultado.advertencias:
-        print(f'{LOG_PREFIX} AVISO: {aviso}')
+        logger.info(f'{LOG_PREFIX} AVISO: {aviso}')
 
     recomendada = resultado.url_recomendada or resultado.url
     if recomendada:
@@ -291,7 +293,7 @@ def imprimir_alerta_supabase_url(resultado: ResultadoUrlSupabase, url_raw: str |
             'Project URL y copia exactamente https://TU_REF.supabase.co en Render '
             '(variable SUPABASE_URL, sin comillas ni /rest/v1).'
         )
-    print(f'{LOG_PREFIX} =================================')
+    logger.info(f'{LOG_PREFIX} =================================')
 
 
 def leer_supabase_url_entorno() -> str:
@@ -694,9 +696,9 @@ def imprimir_diagnostico_conectividad(informe: dict[str, Any]) -> None:
         f'| {informe.get("recomendacion") or ""}'
     )
     for aviso in informe.get('advertencias_config') or []:
-        print(f'{LOG_PREFIX} Aviso config: {aviso}')
+        logger.info(f'{LOG_PREFIX} Aviso config: {aviso}')
     for err in informe.get('errores_config') or []:
-        print(f'{LOG_PREFIX} Error config: {err}')
+        logger.error(f'{LOG_PREFIX} Error config: {err}')
     for prueba in ('dns', 'http_rest', 'http_storage', 'sdk_storage'):
         detalle = informe.get(prueba)
         if detalle and not detalle.get('ok'):

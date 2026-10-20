@@ -6,6 +6,8 @@ secundarios devuelven un valor por defecto en lugar de propagar el error.
 """
 
 from __future__ import annotations
+import logging
+logger = logging.getLogger('localis.vistas_comercio')
 
 import sqlite3
 import traceback
@@ -112,7 +114,7 @@ def cargar_datos_comercio_usuario(usuario_id):
                 comercio_raw = dict(comercio_db)
     except Exception:
         # Se registra el rastro real (antes se silenciaba -> 503 opaco).
-        print('[Localis] panel_comercio consulta principal fallo:', flush=True)
+        logger.error('[Localis] panel_comercio consulta principal fallo:')
         traceback.print_exc()
         try:
             with get_db_connection(row_factory=sqlite3.Row) as conn:

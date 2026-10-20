@@ -18,6 +18,8 @@ Decisiones de diseño (seguridad en producción):
 Las funciones devuelven ``None``/``0`` ante error (degradación segura) y se
 invocan desde los puntos de inserción y desde el backfill de ``init_db``.
 """
+import logging
+logger = logging.getLogger('localis.codigos_publicos')
 
 # tabla -> (clave del contador, prefijo, ancho de ceros)
 CONFIG_CODIGOS = {
@@ -200,7 +202,7 @@ def asignar_codigos_pendientes(cursor, tabla, filtro_sql=None, params=()):
         _cerrar_savepoint(cursor)
         return pendientes
     except Exception as error:
-        print(f'{LOG_PREFIX} no se pudo asignar en {tabla}: {error}', flush=True)
+        logger.error(f'{LOG_PREFIX} no se pudo asignar en {tabla}: {error}')
         _revertir_savepoint_lote(cursor)
         return 0
 

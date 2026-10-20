@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger('localis.auth')
 import sqlite3
 
 import psycopg2
@@ -36,7 +38,7 @@ def obtener_usuario_por_id(usuario_id):
     except psycopg2.Error:
         raise
     except Exception as error:
-        print(f'Error al obtener usuario {usuario_id}: {error}')
+        logger.error(f'Error al obtener usuario {usuario_id}: {error}')
         return None
 
 
@@ -56,7 +58,7 @@ def _resolver_rol_tras_reclamo(cursor, usuario_id, email, rol_actual, es_admin):
 
         reclamados = reclamar_comercios_por_email(cursor, usuario_id, email)
     except Exception as error:
-        print(f'[Localis Auth] reclamo de pre-cuenta falló: {error}', flush=True)
+        logger.error(f'[Localis Auth] reclamo de pre-cuenta falló: {error}')
         return rol_actual
     if reclamados:
         return "comerciante"
@@ -132,7 +134,7 @@ def obtener_o_crear_usuario_google(google_info):
                 if codigo:
                     nuevo_usuario["codigo_publico"] = codigo
             except Exception as error:
-                print(f'[Localis Codigos] usuario {nuevo_usuario["id"]}: {error}', flush=True)
+                logger.error(f'[Localis Codigos] usuario {nuevo_usuario["id"]}: {error}')
 
             # Reclama pre-cuentas creadas con este correo; si hay alguna,
             # persiste el ascenso a comerciante (sin tocar al admin).

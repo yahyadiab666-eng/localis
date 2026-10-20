@@ -7,8 +7,9 @@ actualizan en el mismo cambio. El proveedor OAuth vive en
 """
 
 from __future__ import annotations
-
 import logging
+logger = logging.getLogger('localis.blueprints.auth')
+
 import os
 import traceback
 
@@ -69,8 +70,8 @@ def _oauth_error(etapa, error):
     diagnosticar el callback de Google. Es aislado: solo se usa en estas rutas.
     """
     traza = traceback.format_exc()
-    print(f'[Localis OAuth] fallo en {etapa}: {type(error).__name__}: {error}', flush=True)
-    print(traza, flush=True)
+    logger.error(f'[Localis OAuth] fallo en {etapa}: {type(error).__name__}: {error}')
+    logger.info(traza)
     logging.getLogger('localis.oauth').error(
         'OAuth %s: %s', etapa, error, exc_info=True
     )
@@ -115,16 +116,16 @@ def _oauth_redirect_uri():
 def login_google():
     google = obtener_google()
     if not google_configurado():
-        print('[Localis OAuth] GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET ausentes.', flush=True)
+        logger.error('[Localis OAuth] GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET ausentes.')
         flash('Inicio de sesión con Google no está configurado.', 'error')
         return redirect(url_for('auth.login'))
     if google is None:
-        print('[Localis OAuth] cliente OAuth no inicializado.', flush=True)
+        logger.info('[Localis OAuth] cliente OAuth no inicializado.')
         flash('No se pudo inicializar el cliente OAuth de Google.', 'error')
         return redirect(url_for('auth.login'))
     try:
         redirect_uri = _oauth_redirect_uri()
-        print(f'[Localis OAuth] authorize_redirect uri={redirect_uri}', flush=True)
+        logger.info(f'[Localis OAuth] authorize_redirect uri={redirect_uri}')
         return google.authorize_redirect(redirect_uri)
     except Exception as error:
         return _oauth_error('authorize_redirect', error)
@@ -134,11 +135,11 @@ def login_google():
 def google_callback():
     google = obtener_google()
     if not google_configurado():
-        print('[Localis OAuth] callback sin credenciales configuradas.', flush=True)
+        logger.info('[Localis OAuth] callback sin credenciales configuradas.')
         flash('Inicio de sesión con Google no está configurado.', 'error')
         return redirect(url_for('auth.login'))
     if google is None:
-        print('[Localis OAuth] callback sin cliente OAuth.', flush=True)
+        logger.info('[Localis OAuth] callback sin cliente OAuth.')
         flash('No se pudo inicializar el cliente OAuth de Google.', 'error')
         return redirect(url_for('auth.login'))
 
@@ -235,7 +236,7 @@ def perfil():
     try:
         usuario = obtener_usuario_por_id(usuario_id)
     except Exception as error:
-        print(f'[Localis] perfil usuario fallo: {type(error).__name__}: {error}')
+        logger.error(f'[Localis] perfil usuario fallo: {type(error).__name__}: {error}')
         traceback.print_exc()
 
     if not usuario:
@@ -252,7 +253,7 @@ def perfil():
         if soy_comerciante:
             comercios = listar_comercios_por_usuario(usuario_id) or []
     except Exception as error:
-        print(f'[Localis] perfil comercios fallo: {type(error).__name__}: {error}')
+        logger.error(f'[Localis] perfil comercios fallo: {type(error).__name__}: {error}')
         traceback.print_exc()
         comercios = []
 

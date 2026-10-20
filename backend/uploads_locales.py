@@ -8,6 +8,8 @@ catálogo automático (OpenFoodFacts).
 """
 
 from __future__ import annotations
+import logging
+logger = logging.getLogger('localis.uploads_locales')
 
 import re
 from pathlib import Path
@@ -78,10 +80,10 @@ def guardar_bytes_upload(data, filename, carpeta='productos'):
         ruta = destino_dir / nombre
         ruta.write_bytes(data)
     except OSError as error:
-        print(f'{_LOG} no se pudo escribir {carpeta_segura}/{nombre}: {error}')
+        logger.error(f'{_LOG} no se pudo escribir {carpeta_segura}/{nombre}: {error}')
         return None
     url = f'{PREFIJO_PUBLICO}{carpeta_segura}/{nombre}'
-    print(f'{_LOG} foto local {url} ({len(data)} bytes)')
+    logger.info(f'{_LOG} foto local {url} ({len(data)} bytes)')
     return url
 
 

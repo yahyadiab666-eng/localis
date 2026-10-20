@@ -1,4 +1,6 @@
 """Importador inteligente de inventario (CSV / Excel) con detección flexible de columnas."""
+import logging
+logger = logging.getLogger('localis.inventory_import')
 
 import csv
 import io
@@ -281,7 +283,7 @@ def recortar_mensaje_importacion(mensaje):
 
 
 def _registrar_fallo_importacion(etapa, exc):
-    print(f'{LOG_PREFIX} FALLO etapa={etapa} {type(exc).__name__}: {exc}')
+    logger.error(f'{LOG_PREFIX} FALLO etapa={etapa} {type(exc).__name__}: {exc}')
     traceback.print_exc()
 
 
@@ -1213,12 +1215,12 @@ def asignar_imagenes_instantaneas(productos, snapshot_imagenes=None, categoria=N
 
         indice = obtener_indice()
     except Exception as exc:
-        print(f'{LOG_PREFIX} índice maestro no disponible: {type(exc).__name__}: {exc}')
+        logger.error(f'{LOG_PREFIX} índice maestro no disponible: {type(exc).__name__}: {exc}')
 
     try:
         from backend.categorias_producto import clasificar_categoria
     except Exception as exc:
-        print(f'{LOG_PREFIX} clasificador de categorías no disponible: {exc}')
+        logger.error(f'{LOG_PREFIX} clasificador de categorías no disponible: {exc}')
 
         def clasificar_categoria(nombre=None, descripcion=None, marca=None, categoria_hint=None):
             return 'otros'
@@ -1577,7 +1579,7 @@ def persistir_importacion_upsert(comercio_id, productos, categoria=None, existen
         try:
             asignar_imagenes_instantaneas(nuevos, snapshot_imagenes, categoria)
         except Exception as exc:
-            print(f'{LOG_PREFIX} aviso imágenes de productos nuevos: {exc}')
+            logger.info(f'{LOG_PREFIX} aviso imágenes de productos nuevos: {exc}')
 
     # Se resuelve ANTES de abrir la transacción: `_hay_columna_activo()` puede
     # consultar/crear la columna con otra conexión del pool y no debe ejecutarse

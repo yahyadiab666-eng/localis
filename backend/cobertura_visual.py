@@ -18,6 +18,8 @@ Uso CLI::
 """
 
 from __future__ import annotations
+import logging
+logger = logging.getLogger('localis.cobertura_visual')
 
 import sys
 from dataclasses import dataclass, field
@@ -258,15 +260,15 @@ def main(argv=None):
             verificar_storage=verificar_storage,
             muestra_storage=None if verificar_storage else 0,
         )
-        print(reporte.resumen())
+        logger.info(reporte.resumen())
         for problema in reporte.problemas[:10]:
-            print(f'   - {problema}')
+            logger.info(f'   - {problema}')
         if reporte.problemas or (minimo > 0 and reporte.porcentaje < minimo):
             fallos += 1
     if fallos:
-        print(f'ASSETS INVÁLIDOS en {fallos} comercio(s)')
+        logger.error(f'ASSETS INVÁLIDOS en {fallos} comercio(s)')
         return 1
-    print('OK integridad de assets (sin fabricados ni roto; los faltantes son estados neutros)')
+    logger.info('OK integridad de assets (sin fabricados ni roto; los faltantes son estados neutros)')
     return 0
 
 

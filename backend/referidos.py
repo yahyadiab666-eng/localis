@@ -7,6 +7,8 @@ Reglas de negocio:
 Todas las operaciones son defensivas (``try-except``) y transaccionales para
 no romper el flujo de registro ni el panel del comerciante.
 """
+import logging
+logger = logging.getLogger('localis.referidos')
 
 import sqlite3
 
@@ -88,7 +90,7 @@ def resolver_referente_cursor(cursor, nombre, excluir_id=None):
             return None
         return {'id': _valor(fila, 'id', 0), 'nombre': _valor(fila, 'nombre', 1)}
     except Exception as error:
-        print(f'[Localis Referidos] no se pudo resolver referente: {error}', flush=True)
+        logger.error(f'[Localis Referidos] no se pudo resolver referente: {error}')
         return None
 
 
@@ -133,7 +135,7 @@ def saldo_puntos(comercio_id):
                 return 0
             return int(_valor(fila, 'puntos', 0) or 0)
     except Exception as error:
-        print(f'[Localis Referidos] saldo no disponible: {error}', flush=True)
+        logger.error(f'[Localis Referidos] saldo no disponible: {error}')
         return 0
 
 
@@ -191,7 +193,7 @@ def resumen_premios(comercio_id):
             fila = cursor.fetchone()
             resumen['canjes_total'] = int(fila['n'] or 0) if fila else 0
     except Exception as error:
-        print(f'[Localis Referidos] resumen no disponible: {error}', flush=True)
+        logger.error(f'[Localis Referidos] resumen no disponible: {error}')
     return resumen
 
 

@@ -1,4 +1,6 @@
 """Diagnóstico automático del sistema y alertas por correo ante errores críticos."""
+import logging
+logger = logging.getLogger('localis.diagnostics')
 
 import smtplib
 import threading
@@ -66,7 +68,7 @@ def _diagnostico_supabase_red(*, forzar: bool = False):
         _cache_diagnostico_supabase = informe
         return informe
     except Exception as error:
-        print(f'[Localis Supabase Red] No se pudo ejecutar diagnóstico: {error}')
+        logger.error(f'[Localis Supabase Red] No se pudo ejecutar diagnóstico: {error}')
         _cache_diagnostico_supabase = {'ok': False, 'error': str(error)}
         return _cache_diagnostico_supabase
 
@@ -108,7 +110,7 @@ def ejecutar_diagnostico_inicio():
 
     supabase = estado.get('supabase') or {}
     if supabase.get('omitido'):
-        print('[Localis Diagnóstico] Supabase: omitido (URL no configurada).')
+        logger.info('[Localis Diagnóstico] Supabase: omitido (URL no configurada).')
     elif supabase.get('ok'):
         print(
             f"[Localis Diagnóstico] Supabase OK "
@@ -213,22 +215,22 @@ def reportar_error_critico(exc, request=None):
     clave = _clave_error(exc, ruta)
     cuerpo = _construir_cuerpo_correo(exc, request)
 
-    print(f'[Localis ERROR CRÍTICO] {type(exc).__name__} en {ruta}: {exc}')
-    print(cuerpo)
+    logger.error(f'[Localis ERROR CRÍTICO] {type(exc).__name__} en {ruta}: {exc}')
+    logger.info(cuerpo)
 
     if not _puede_enviar(clave):
-        print('[Localis] Alerta omitida (cooldown activo para este tipo de error).')
+        logger.error('[Localis] Alerta omitida (cooldown activo para este tipo de error).')
         return
 
     asunto = f'[Localis {APP_ENV}] {type(exc).__name__} — {ruta}'
     try:
         ok, detalle = _enviar_correo_smtp(asunto, cuerpo)
         if ok:
-            print(f'[Localis] Reporte enviado a {ERROR_REPORT_EMAIL}')
+            logger.error(f'[Localis] Reporte enviado a {ERROR_REPORT_EMAIL}')
         else:
-            print(f'[Localis] No se envió correo: {detalle}. Traceback registrado arriba.')
+            logger.error(f'[Localis] No se envió correo: {detalle}. Traceback registrado arriba.')
     except Exception as error_envio:
-        print(f'[Localis] Fallo al enviar correo de error: {error_envio}')
+        logger.error(f'[Localis] Fallo al enviar correo de error: {error_envio}')
 
 
 def reportar_error_critico_async(exc, request=None):

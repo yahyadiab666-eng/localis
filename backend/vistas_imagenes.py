@@ -5,6 +5,8 @@ Extraidos de ``main.py`` (Bloque 4) para reutilizarlos desde las rutas de
 """
 
 from __future__ import annotations
+import logging
+logger = logging.getLogger('localis.vistas_imagenes')
 
 import os
 import traceback
@@ -27,12 +29,12 @@ def sincronizar_foto_local_si_aplica(producto_id, imagen_url, carpeta='productos
         try:
             programar_sincronizacion_storage(producto_id, imagen_url, carpeta=carpeta)
         except Exception as error:
-            print(f'[Localis Imagen] sync diferida no programada: {error}')
+            logger.error(f'[Localis Imagen] sync diferida no programada: {error}')
         return
     try:
         programar_descubrimiento_producto(producto_id)
     except Exception as error:
-        print(f'[Localis Imagen] descubrimiento no programado: {error}')
+        logger.error(f'[Localis Imagen] descubrimiento no programado: {error}')
 
 
 def registrar_imagen_manual(producto_id, imagen_url, fuente='manual'):
@@ -42,7 +44,7 @@ def registrar_imagen_manual(producto_id, imagen_url, fuente='manual'):
     try:
         marcar_manual(producto_id, imagen_url, fuente)
     except Exception as error:
-        print(f'[Localis Imagen] no se registró la imagen manual: {error}')
+        logger.error(f'[Localis Imagen] no se registró la imagen manual: {error}')
 
 
 def quitar_imagen_manual(producto_id):
@@ -52,7 +54,7 @@ def quitar_imagen_manual(producto_id):
     try:
         eliminar_manual(producto_id)
     except Exception as error:
-        print(f'[Localis Imagen] no se pudo quitar la imagen manual: {error}')
+        logger.error(f'[Localis Imagen] no se pudo quitar la imagen manual: {error}')
 
 
 def procesar_imagen_subida(
@@ -115,7 +117,7 @@ def debug_imagenes_antes_de_render(productos, origen):
         return
     try:
         lista = list(productos or [])
-        print(f'[Localis Imagen] render origen={origen} productos={len(lista)}')
+        logger.info(f'[Localis Imagen] render origen={origen} productos={len(lista)}')
         for prod in lista[:50]:
             if hasattr(prod, 'get'):
                 nombre = prod.get('nombre')
@@ -131,6 +133,6 @@ def debug_imagenes_antes_de_render(productos, origen):
                 f'url_bd={url_bd!r} vista={url!r}'
             )
         if len(lista) > 50:
-            print(f'[Localis Imagen] ... {len(lista) - 50} producto(s) mas')
+            logger.info(f'[Localis Imagen] ... {len(lista) - 50} producto(s) mas')
     except Exception:
         traceback.print_exc()

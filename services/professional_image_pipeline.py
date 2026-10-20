@@ -47,6 +47,8 @@ Variables de entorno relevantes (todas opcionales)::
 """
 
 from __future__ import annotations
+import logging
+logger = logging.getLogger('localis.services.professional_image_pipeline')
 
 import hashlib
 import html
@@ -347,7 +349,7 @@ class ResultadoProcesamiento:
 # Logging
 # ---------------------------------------------------------------------------
 def _log(mensaje):
-    print(f'{_LOG} {mensaje}', flush=True)
+    logger.info(f'{_LOG} {mensaje}')
 
 
 def _log_pipeline(producto_id, ean, resultado, fuente=None, motivo=None):

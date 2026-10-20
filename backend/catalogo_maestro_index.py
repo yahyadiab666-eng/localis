@@ -19,6 +19,8 @@ se encola para completar su imagen real en segundo plano.
 """
 
 from __future__ import annotations
+import logging
+logger = logging.getLogger('localis.catalogo_maestro_index')
 
 import os
 import re
@@ -215,7 +217,7 @@ def _cargar_filas_maestro():
             ultimo_error = error
             continue
     if ultimo_error is not None:
-        print(f'{_LOG} no se pudo cargar el catálogo maestro: {type(ultimo_error).__name__}')
+        logger.error(f'{_LOG} no se pudo cargar el catálogo maestro: {type(ultimo_error).__name__}')
     return []
 
 
@@ -253,7 +255,7 @@ def _construir_indice():
         indice.filas = len(filas)
     except Exception as error:
         indice.error = f'{type(error).__name__}: {error}'
-        print(f'{_LOG} error construyendo índice: {indice.error}')
+        logger.error(f'{_LOG} error construyendo índice: {indice.error}')
     duracion = (time.perf_counter() - inicio) * 1000
     print(
         f'{_LOG} índice listo filas={indice.filas} '
@@ -344,5 +346,5 @@ def categoria_de_comercio(comercio_id):
             return fila.get('nombre')
         return fila[0]
     except Exception as error:
-        print(f'{_LOG} categoría comercio={comercio_id} no resuelta: {type(error).__name__}')
+        logger.error(f'{_LOG} categoría comercio={comercio_id} no resuelta: {type(error).__name__}')
         return None

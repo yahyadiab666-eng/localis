@@ -25,6 +25,8 @@ automáticamente.
 Todo es aditivo y defensivo: no altera PKs, relaciones ni ``estado_pago`` de
 otros comercios. Nunca lanza: devuelve tuplas/valores seguros.
 """
+import logging
+logger = logging.getLogger('localis.pre_cuentas')
 
 import re
 
@@ -59,7 +61,7 @@ def _auditar(cursor, admin_id, accion, detalles):
             (admin_id, accion, detalles),
         )
     except Exception as error:
-        print(f'{LOG_PREFIX} aviso auditoría: {error}', flush=True)
+        logger.error(f'{LOG_PREFIX} aviso auditoría: {error}')
 
 
 def _plan_gratis():
@@ -94,7 +96,7 @@ def _ascender_a_comerciante(cursor, usuario_id):
             (int(usuario_id),),
         )
     except Exception as error:
-        print(f'{LOG_PREFIX} rol usuario {usuario_id}: {error}', flush=True)
+        logger.error(f'{LOG_PREFIX} rol usuario {usuario_id}: {error}')
 
 
 def _usuario_tiene_tienda(cursor, usuario_id, excluir_comercio_id=None):
@@ -114,7 +116,7 @@ def _usuario_tiene_tienda(cursor, usuario_id, excluir_comercio_id=None):
             )
         return cursor.fetchone() is not None
     except Exception as error:
-        print(f'{LOG_PREFIX} no se pudo verificar tiendas de {usuario_id}: {error}', flush=True)
+        logger.error(f'{LOG_PREFIX} no se pudo verificar tiendas de {usuario_id}: {error}')
         return False
 
 
@@ -135,7 +137,7 @@ def _recalcular_rol_usuario(cursor, usuario_id):
             (nuevo, int(usuario_id)),
         )
     except Exception as error:
-        print(f'{LOG_PREFIX} recálculo rol {usuario_id}: {error}', flush=True)
+        logger.error(f'{LOG_PREFIX} recálculo rol {usuario_id}: {error}')
 
 
 def _asegurar_slug(comercio_id, nombre=None):
@@ -145,7 +147,7 @@ def _asegurar_slug(comercio_id, nombre=None):
 
         asegurar_slug_comercio(comercio_id, nombre)
     except Exception as error:
-        print(f'{LOG_PREFIX} slug comercio {comercio_id}: {error}', flush=True)
+        logger.error(f'{LOG_PREFIX} slug comercio {comercio_id}: {error}')
 
 
 def crear_pre_cuenta_admin(admin_id, datos):
@@ -218,7 +220,7 @@ def crear_pre_cuenta_admin(admin_id, datos):
 
                 asignar_codigo_comercio(cursor, comercio_id)
             except Exception as error:
-                print(f'{LOG_PREFIX} código comercio {comercio_id}: {error}', flush=True)
+                logger.error(f'{LOG_PREFIX} código comercio {comercio_id}: {error}')
 
             _auditar(
                 cursor,
@@ -355,7 +357,7 @@ def transferir_propiedad_comercio(admin_id, comercio_id, nuevo_email):
 
             notificar_propietario_tienda(actual.get('nombre'), nuevo_email, bool(usuario_id))
         except Exception as error:
-            print(f'{LOG_PREFIX} aviso notificación: {error}', flush=True)
+            logger.error(f'{LOG_PREFIX} aviso notificación: {error}')
 
         if usuario_id:
             return (
@@ -450,7 +452,7 @@ def reasignar_propietario_comercio(admin_id, comercio_id, nuevo_email):
             if correo_anterior and correo_anterior.lower() != nuevo_email:
                 notificar_dueno_anterior(actual.get('nombre'), correo_anterior)
         except Exception as error:
-            print(f'{LOG_PREFIX} aviso notificación: {error}', flush=True)
+            logger.error(f'{LOG_PREFIX} aviso notificación: {error}')
 
         if usuario_id:
             return True, 'Dueño reasignado.', True
@@ -503,7 +505,7 @@ def reclamar_comercios_por_email(cursor, usuario_id, email):
         except Exception:
             pass
     except Exception as error:
-        print(f'{LOG_PREFIX} no se pudo reclamar por correo: {error}', flush=True)
+        logger.error(f'{LOG_PREFIX} no se pudo reclamar por correo: {error}')
         try:
             cursor.execute('ROLLBACK TO SAVEPOINT reclamar_precuenta')
         except Exception:

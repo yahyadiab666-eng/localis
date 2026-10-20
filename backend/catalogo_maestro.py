@@ -1,4 +1,6 @@
 """Catálogo maestro de imágenes: PostgreSQL directo (preferido) + PostgREST httpx opcional."""
+import logging
+logger = logging.getLogger('localis.catalogo_maestro')
 
 import os
 
@@ -86,9 +88,9 @@ def _url_maestro_valida(valor):
 def _error_imagen(mensaje, error=None):
     """Siempre escribe el error real; no traga fallos de BD/red en silencio."""
     if error is not None:
-        print(f'{_LOG} ERROR {mensaje}: {type(error).__name__}: {error}')
+        logger.error(f'{_LOG} ERROR {mensaje}: {type(error).__name__}: {error}')
         return
-    print(f'{_LOG} ERROR {mensaje}')
+    logger.error(f'{_LOG} ERROR {mensaje}')
 
 
 def _postgresql_directo_disponible() -> bool:
@@ -404,7 +406,7 @@ def guardar_imagen_maestro(codigo_barras, url_imagen, *, nombre=None, marca=None
                 codigo, url, nombre=nombre, marca=marca, categoria=categoria
             )
     except Exception as error:
-        print(f'Error al guardar en catálogo maestro ({codigo}): {error}')
+        logger.error(f'Error al guardar en catálogo maestro ({codigo}): {error}')
         return False
 
     if guardado:
@@ -517,5 +519,5 @@ def sembrar_catalogo_maestro_imagenes(*, rellenar=False):
     except Exception as error:
         _error_imagen('politicas storage', error)
     if rellenar:
-        print(f'{_LOG} relleno masivo omitido (pipeline de pago por consumo)')
+        logger.info(f'{_LOG} relleno masivo omitido (pipeline de pago por consumo)')
     return True

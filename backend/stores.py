@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger('localis.stores')
 import os
 import random
 import sqlite3
@@ -135,9 +137,9 @@ def _activo_disponible():
                 )
                 conexion.commit()
             existe = True
-            print('[Localis] columna productos.activo creada (auto-saneo)', flush=True)
+            logger.info('[Localis] columna productos.activo creada (auto-saneo)')
         except Exception as error:
-            print(f'[Localis] no se pudo crear productos.activo: {type(error).__name__}')
+            logger.error(f'[Localis] no se pudo crear productos.activo: {type(error).__name__}')
 
     _ACTIVO_DISPONIBLE = bool(existe)
     return _ACTIVO_DISPONIBLE
@@ -183,7 +185,7 @@ def _estado_tienda_disponible():
                 )
                 conexion.commit()
             existe = True
-            print('[Localis] columna comercios.estado_tienda creada (auto-saneo)', flush=True)
+            logger.info('[Localis] columna comercios.estado_tienda creada (auto-saneo)')
         except Exception as error:
             print(
                 f'[Localis] no se pudo crear comercios.estado_tienda: {type(error).__name__}'
@@ -279,9 +281,9 @@ def _destacado_disponible():
                 )
                 conexion.commit()
             existe = True
-            print('[Localis] columna productos.destacado creada (auto-saneo)', flush=True)
+            logger.info('[Localis] columna productos.destacado creada (auto-saneo)')
         except Exception as error:
-            print(f'[Localis] no se pudo crear productos.destacado: {type(error).__name__}')
+            logger.error(f'[Localis] no se pudo crear productos.destacado: {type(error).__name__}')
     _DESTACADO_DISPONIBLE = bool(existe)
     return _DESTACADO_DISPONIBLE
 
@@ -696,7 +698,7 @@ def obtener_comercio_por_id(comercio_id, solo_visible=True):
             fila = cursor.fetchone()
             return normalizar_fila_comercio(dict(fila)) if fila else None
     except Exception as e:
-        print(f'Error al obtener comercio: {e}')
+        logger.error(f'Error al obtener comercio: {e}')
         return None
 
 
@@ -721,7 +723,7 @@ def obtener_comercio_por_slug(slug, solo_visible=True):
             fila = cursor.fetchone()
             return normalizar_fila_comercio(dict(fila)) if fila else None
     except Exception as e:
-        print(f'Error al obtener comercio por slug: {e}')
+        logger.error(f'Error al obtener comercio por slug: {e}')
         return None
 
 
@@ -772,7 +774,7 @@ def _asegurar_slug(tabla, entidad_id, nombre=None):
             conexion.commit()
             return slug
     except Exception as error:
-        print(f'[Localis Slug] {tabla}.{entidad_id}: {error}', flush=True)
+        logger.error(f'[Localis Slug] {tabla}.{entidad_id}: {error}')
         return None
 
 
@@ -804,7 +806,7 @@ def listar_comercios_por_usuario(usuario_id):
     except psycopg2.Error:
         raise
     except Exception as error:
-        print(f'Error al listar comercios del usuario {usuario_id}: {error}')
+        logger.error(f'Error al listar comercios del usuario {usuario_id}: {error}')
         raise
 
 
@@ -845,7 +847,7 @@ def obtener_comercio_por_usuario(usuario_id, comercio_id=None):
     except psycopg2.Error:
         raise
     except Exception as error:
-        print(f'Error al obtener comercio por usuario {usuario_id}: {error}')
+        logger.error(f'Error al obtener comercio por usuario {usuario_id}: {error}')
         raise
 
 
@@ -876,7 +878,7 @@ def buscar_y_filtrar_comercios(
             cursor.execute(query, parametros)
             return normalizar_filas_comercio([dict(f) for f in cursor.fetchall()])
     except Exception as e:
-        print(f'Error al filtrar comercios: {e}')
+        logger.error(f'Error al filtrar comercios: {e}')
         return []
 
 
@@ -896,7 +898,7 @@ def listar_comercios_publicos_para_sitemap():
             )
             return [dict(f) for f in cursor.fetchall()]
     except Exception as e:
-        print(f'Error al listar comercios para sitemap: {e}')
+        logger.error(f'Error al listar comercios para sitemap: {e}')
         return []
 
 
@@ -923,7 +925,7 @@ def listar_productos_publicos_para_sitemap(limite=5000):
             )
             return [dict(f) for f in cursor.fetchall()]
     except Exception as e:
-        print(f'Error al listar productos para sitemap: {e}')
+        logger.error(f'Error al listar productos para sitemap: {e}')
         return []
 
 
@@ -1105,10 +1107,10 @@ def buscar_y_filtrar_productos(
                 )
                 time.sleep(0.05 * (intento + 1))
                 continue
-            print(f'Error en la búsqueda de productos: {e}')
+            logger.error(f'Error en la búsqueda de productos: {e}')
             traceback.print_exc()
             return []
-    print(f'Error en la búsqueda de productos: {ultimo_error}')
+    logger.error(f'Error en la búsqueda de productos: {ultimo_error}')
     return []
 
 
@@ -1442,7 +1444,7 @@ def obtener_producto_publico(producto_id):
         _completar_imagenes_productos([d])
         return d
     except Exception as e:
-        print(f'Error al obtener producto público: {e}')
+        logger.error(f'Error al obtener producto público: {e}')
         return None
 
 
@@ -1475,7 +1477,7 @@ def obtener_producto_publico_por_slug(slug):
                 return None
             producto_id = _valor_fila(fila, 'id', 0)
     except Exception as e:
-        print(f'Error al obtener producto por slug: {e}')
+        logger.error(f'Error al obtener producto por slug: {e}')
         return None
     if producto_id is None:
         return None
@@ -1527,7 +1529,7 @@ def obtener_producto_por_id(producto_id, comercio_id=None):
         _completar_imagenes_productos([producto])
         return producto
     except Exception as e:
-        print(f'Error al obtener producto: {e}')
+        logger.error(f'Error al obtener producto: {e}')
         return None
 
 
@@ -1559,7 +1561,7 @@ def obtener_productos_comercio(comercio_id):
         _completar_imagenes_productos(productos, con_maestro=False)
         return productos
     except Exception as e:
-        print(f'Error al listar productos del comercio: {e}')
+        logger.error(f'Error al listar productos del comercio: {e}')
         traceback.print_exc()
         return []
 
@@ -1697,18 +1699,18 @@ def procesar_csv_productos(comercio_id, archivo_csv):
     etapa = 'inicio'
     persistido = False
     nombre_archivo = getattr(archivo_csv, 'filename', None)
-    print(f'{CSV_LOG} inicio comercio={comercio_id} archivo={nombre_archivo!r}')
+    logger.info(f'{CSV_LOG} inicio comercio={comercio_id} archivo={nombre_archivo!r}')
     try:
         etapa = 'leer_archivo'
         data, extension, error_lectura = cargar_archivo_inventario(archivo_csv)
         if error_lectura:
-            print(f'{CSV_LOG} rechazo etapa={etapa}: {error_lectura}')
+            logger.error(f'{CSV_LOG} rechazo etapa={etapa}: {error_lectura}')
             return False, recortar_mensaje_importacion(error_lectura), None
 
         etapa = 'permiso_inventario'
         ok, msg = comercio_puede_gestionar_inventario(comercio_id)
         if not ok:
-            print(f'{CSV_LOG} rechazo etapa={etapa}: {msg}')
+            logger.error(f'{CSV_LOG} rechazo etapa={etapa}: {msg}')
             return False, recortar_mensaje_importacion(msg), None
 
         etapa = 'tasa_dolar'
@@ -1719,7 +1721,7 @@ def procesar_csv_productos(comercio_id, archivo_csv):
             data, extension
         )
         if error_analisis:
-            print(f'{CSV_LOG} rechazo etapa={etapa}: {error_analisis}')
+            logger.error(f'{CSV_LOG} rechazo etapa={etapa}: {error_analisis}')
             return False, recortar_mensaje_importacion(error_analisis), None
 
         meta = {'precio_en_bs': False}
@@ -1747,7 +1749,7 @@ def procesar_csv_productos(comercio_id, archivo_csv):
             productos.extend(lote)
 
         if not productos:
-            print(f'{CSV_LOG} rechazo etapa={etapa}: sin filas válidas')
+            logger.error(f'{CSV_LOG} rechazo etapa={etapa}: sin filas válidas')
             return False, recortar_mensaje_importacion(
                 'No se encontraron filas válidas con nombre/descripción de producto. '
                 'Revisa que el archivo tenga esa columna y vuelve a intentarlo.'
@@ -1800,7 +1802,7 @@ def procesar_csv_productos(comercio_id, archivo_csv):
                 comercio_id, limite=_MAX_REPARAR_IMAGENES
             )
         except Exception as exc_rep:
-            print(f'{CSV_LOG} aviso etapa={etapa}: {type(exc_rep).__name__}: {exc_rep}')
+            logger.info(f'{CSV_LOG} aviso etapa={etapa}: {type(exc_rep).__name__}: {exc_rep}')
 
         # El pipeline de imágenes corre SIEMPRE en segundo plano (no bloquea la
         # subida del archivo). El ahorro por EAN es por producto, no por archivo.
@@ -1891,7 +1893,7 @@ def procesar_csv_productos(comercio_id, archivo_csv):
         return True, recortar_mensaje_importacion(mensaje), meta_imagenes
 
     except Exception as exc:
-        print(f'{CSV_LOG} FALLO etapa={etapa} {type(exc).__name__}: {exc}')
+        logger.error(f'{CSV_LOG} FALLO etapa={etapa} {type(exc).__name__}: {exc}')
         traceback.print_exc()
         if persistido:
             # El inventario ya se guardó: no se reporta como error. Cualquier
@@ -1929,7 +1931,7 @@ def _contar_estados_imagenes(comercio_id):
             )
             filas = cursor.fetchall()
     except Exception as error:
-        print(f'{CSV_LOG} no se pudo contar estados de imagen: {type(error).__name__}: {error}')
+        logger.error(f'{CSV_LOG} no se pudo contar estados de imagen: {type(error).__name__}: {error}')
         return {}
 
     conteos = {}

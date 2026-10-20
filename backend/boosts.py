@@ -23,6 +23,8 @@ Blindaje (fail-safe):
   - Fechas en UTC estricto (columnas ``TIMESTAMPTZ``).
   - Pago + auditoría + activación en una única transacción (rollback total).
 """
+import logging
+logger = logging.getLogger('localis.boosts')
 
 import re
 import sqlite3
@@ -134,7 +136,7 @@ def referencia_ya_usada_boost(referencia):
             )
             return cursor.fetchone() is not None
     except Exception as error:
-        print(f'[Localis Boost] no se pudo auditar la referencia: {error}', flush=True)
+        logger.error(f'[Localis Boost] no se pudo auditar la referencia: {error}')
         return False
 
 
@@ -156,7 +158,7 @@ def _registrar_intento_rechazado(comercio_id, producto_id, referencia, motivo):
             )
             conexion.commit()
     except Exception as error:
-        print(f'[Localis Boost] no se pudo auditar rechazo: {error}', flush=True)
+        logger.error(f'[Localis Boost] no se pudo auditar rechazo: {error}')
 
 
 # ==========================================
@@ -206,7 +208,7 @@ def activar_boost_producto(
             )
             return False, 'Esta referencia de pago ya fue registrada en el sistema.'
     except Exception as error:
-        print(f'[Localis Boost] no se pudo validar la referencia: {error}', flush=True)
+        logger.error(f'[Localis Boost] no se pudo validar la referencia: {error}')
         return False, 'No se pudo validar la referencia de pago. Intenta de nuevo.'
 
     precio_usd = PRECIOS_BOOST_USD[dias]
@@ -405,5 +407,5 @@ def estado_boosts_productos(comercio_id):
                     'activo': boost_activo(fila.get('boost_fin')),
                 }
     except Exception as error:
-        print(f'[Localis Boost] estado no disponible: {error}', flush=True)
+        logger.error(f'[Localis Boost] estado no disponible: {error}')
     return resultado

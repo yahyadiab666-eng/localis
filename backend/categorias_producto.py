@@ -15,6 +15,8 @@ Categorías soportadas:
 """
 
 from __future__ import annotations
+import logging
+logger = logging.getLogger('localis.categorias_producto')
 
 import os
 import re
@@ -160,7 +162,7 @@ _DEBUG_CATEGORIA = str(os.getenv('LOCALIS_DEBUG_CATEGORIA', '')).strip().lower()
 
 def _debug_categoria(mensaje):
     if _DEBUG_CATEGORIA:
-        print(f'[Localis Categoria] {mensaje}')
+        logger.info(f'[Localis Categoria] {mensaje}')
 
 
 def _texto_plano(valor):
