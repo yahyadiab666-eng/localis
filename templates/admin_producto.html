@@ -71,7 +71,7 @@
             <p class="muted">Comercio: <strong>{{ comercio.nombre }}</strong> (#{{ comercio.id }}) · carga asistida de inventario.</p>
 
             {% set img_producto = (producto|url_imagen_producto) if producto else placeholder_producto %}
-            <form action="{% if producto %}{{ url_for('admin_editar_producto', comercio_id=comercio.id, producto_id=producto.id) }}{% else %}{{ url_for('admin_nuevo_producto', comercio_id=comercio.id) }}{% endif %}"
+            <form action="{% if producto %}{{ url_for('admin.admin_editar_producto', comercio_id=comercio.id, producto_id=producto.id) }}{% else %}{{ url_for('admin.admin_nuevo_producto', comercio_id=comercio.id) }}{% endif %}"
                   method="POST" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 

@@ -77,7 +77,7 @@
             <h2>Onboarding asistido · {{ comercio.nombre }}</h2>
             <p class="muted">Edita el perfil de esta tienda tal como lo haría el comerciante.</p>
 
-            <form action="{{ url_for('admin_editar_comercio', comercio_id=comercio.id) }}"
+            <form action="{{ url_for('admin.admin_editar_comercio', comercio_id=comercio.id) }}"
                   method="POST" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
