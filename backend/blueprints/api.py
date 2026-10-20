@@ -11,14 +11,20 @@ from __future__ import annotations
 
 import traceback
 
-from flask import Blueprint, jsonify, session
+from flask import Blueprint, jsonify, request, session
 
+from backend.admin import confirmar_pago_suscripcion
+from backend.analytics import normalizar_tipo, registrar_interaccion
 from backend.auth import obtener_usuario_por_id
 from backend.session_comercio import es_usuario_comerciante
 from backend.stores import obtener_comercio_por_usuario, obtener_producto_publico
 from backend.tasa_bcv import estado_tasa_bcv, obtener_tasa_bcv
-from backend.utils import url_whatsapp_comercio
-from backend.web_seguridad import exento_csrf, login_requerido_api
+from backend.utils import parsear_entero_form, url_whatsapp_comercio
+from backend.web_seguridad import (
+    admin_requerido_api,
+    exento_csrf,
+    login_requerido_api,
+)
 from utils.images import PLACEHOLDER_PRODUCTO, url_imagen_producto_segura
 
 bp = Blueprint('api', __name__, url_prefix='/api')
@@ -119,3 +125,55 @@ def api_me():
             'comercio_id': comercio_id,
         }
     )
+
+
+@bp.route('/comercio/<int:comercio_id>/interaccion', methods=['POST'])
+@exento_csrf
+def api_registrar_interaccion(comercio_id):
+    """Beacon público de interés (visitas y clics) ligado al comercio.
+
+    Respuesta 204 sin cuerpo: nunca bloquea ni rompe la navegación del cliente.
+    """
+    cuerpo = request.get_json(silent=True)
+    if not isinstance(cuerpo, dict):
+        cuerpo = request.form
+    tipo = normalizar_tipo(cuerpo.get('tipo') if hasattr(cuerpo, 'get') else '')
+    if not tipo:
+        return ('', 204)
+    producto_raw = cuerpo.get('producto_id') if hasattr(cuerpo, 'get') else None
+    origen = cuerpo.get('origen') if hasattr(cuerpo, 'get') else ''
+
+    producto_id = None
+    if producto_raw not in (None, '', 'null', 'None'):
+        try:
+            producto_id = int(producto_raw)
+        except (TypeError, ValueError):
+            producto_id = None
+
+    huella = f'{request.remote_addr}|{(request.headers.get("User-Agent") or "")[:40]}'
+    registrar_interaccion(
+        comercio_id,
+        tipo,
+        producto_id=producto_id,
+        origen=origen,
+        huella=huella,
+    )
+    return ('', 204)
+
+
+@bp.route('/suscripcion/confirmar-pago', methods=['POST'])
+@admin_requerido_api
+def api_confirmar_pago():
+    """Confirmación manual de pago — solo administradores."""
+    data = request.get_json(silent=True) or {}
+    comercio_id = data.get('comercio_id')
+    plan_tipo = data.get('plan_tipo', 'basica')
+    meses, error_meses = parsear_entero_form(data.get('meses', 1), default=1, minimo=1)
+    if error_meses:
+        return jsonify({'ok': False, 'mensaje': error_meses}), 400
+
+    if not comercio_id:
+        return jsonify({'ok': False, 'mensaje': 'comercio_id requerido'}), 400
+
+    exito, mensaje = confirmar_pago_suscripcion(comercio_id, plan_tipo, meses)
+    return jsonify({'ok': exito, 'mensaje': mensaje}), 200 if exito else 400

@@ -128,7 +128,6 @@ from backend.admin import (
     alternar_destacado_producto,
     cambiar_plan_comercio,
     cambiar_visibilidad_comercio,
-    confirmar_pago_suscripcion,
     crear_producto_admin,
     destacar_producto_por_dias,
     eliminar_comercio_definitivo,
@@ -202,7 +201,6 @@ from backend.utils import (
     normalizar_codigo_barras,
     normalizar_telefono_whatsapp,
     parsear_precio_form,
-    parsear_entero_form,
     parsear_visible_form,
     url_maps_comercio,
     url_whatsapp_comercio,
@@ -216,8 +214,6 @@ from backend.session_comercio import (
 )
 from backend.web_seguridad import (
     admin_requerido,
-    admin_requerido_api,
-    exento_csrf as _exento_csrf,
     login_requerido,
     login_requerido_api,
     peticion_acepta_json as _peticion_acepta_json,
@@ -252,9 +248,7 @@ from backend.stores import (
 )
 from backend.tasa_bcv import obtener_tasa_bcv
 from backend.analytics import (
-    normalizar_tipo,
     producto_pertenece_a_comercio,
-    registrar_interaccion,
     resumen_interacciones,
 )
 from backend.apariencia import (
@@ -1566,38 +1560,7 @@ def logout():
     return redirect(url_for('index'))
 
 
-@app.route('/api/comercio/<int:comercio_id>/interaccion', methods=['POST'])
-@_exento_csrf
-def api_registrar_interaccion(comercio_id):
-    """Beacon público de interés (visitas y clics) ligado al comercio.
-
-    Respuesta 204 sin cuerpo: nunca bloquea ni rompe la navegación del cliente.
-    """
-    cuerpo = request.get_json(silent=True)
-    if not isinstance(cuerpo, dict):
-        cuerpo = request.form
-    tipo = normalizar_tipo(cuerpo.get('tipo') if hasattr(cuerpo, 'get') else '')
-    if not tipo:
-        return ('', 204)
-    producto_raw = cuerpo.get('producto_id') if hasattr(cuerpo, 'get') else None
-    origen = cuerpo.get('origen') if hasattr(cuerpo, 'get') else ''
-
-    producto_id = None
-    if producto_raw not in (None, '', 'null', 'None'):
-        try:
-            producto_id = int(producto_raw)
-        except (TypeError, ValueError):
-            producto_id = None
-
-    huella = f'{request.remote_addr}|{(request.headers.get("User-Agent") or "")[:40]}'
-    registrar_interaccion(
-        comercio_id,
-        tipo,
-        producto_id=producto_id,
-        origen=origen,
-        huella=huella,
-    )
-    return ('', 204)
+# api_registrar_interaccion vive ahora en backend/blueprints/api.py
 
 
 # ==========================================
@@ -3608,22 +3571,7 @@ def admin_resolver_ticket(ticket_id):
     return redirect(url_for('panel_admin'))
 
 
-@app.route('/api/suscripcion/confirmar-pago', methods=['POST'])
-@admin_requerido_api
-def api_confirmar_pago():
-    """Confirmación manual de pago — solo administradores."""
-    data = request.get_json(silent=True) or {}
-    comercio_id = data.get('comercio_id')
-    plan_tipo = data.get('plan_tipo', 'basica')
-    meses, error_meses = parsear_entero_form(data.get('meses', 1), default=1, minimo=1)
-    if error_meses:
-        return jsonify({'ok': False, 'mensaje': error_meses}), 400
-
-    if not comercio_id:
-        return jsonify({'ok': False, 'mensaje': 'comercio_id requerido'}), 400
-
-    exito, mensaje = confirmar_pago_suscripcion(comercio_id, plan_tipo, meses)
-    return jsonify({'ok': exito, 'mensaje': mensaje}), 200 if exito else 400
+# api_confirmar_pago vive ahora en backend/blueprints/api.py
 
 
 # --- Bloque 4: registrar blueprints (al final, tras definir el CSRF) ---
