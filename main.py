@@ -209,6 +209,7 @@ from backend.web_seguridad import (
     peticion_acepta_json as _peticion_acepta_json,
     registrar_csrf,
 )
+from backend.rate_limit import configurar_rate_limit, limite
 from backend.vistas_imagenes import (
     quitar_imagen_manual as _quitar_imagen_manual,
     registrar_imagen_manual as _registrar_imagen_manual,
@@ -316,6 +317,7 @@ try:
     app.jinja_env.cache.clear()
     csrf = CSRFProtect(app)
     registrar_csrf(csrf)
+    configurar_rate_limit(app)
     registrar_request_logging(app)
     registrar_manejadores_errores(app)
 except Exception:
@@ -1337,6 +1339,7 @@ def _oauth_redirect_uri():
 
 
 @app.route('/login/google')
+@limite('30 per minute')
 def login_google():
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
         print('[Localis OAuth] GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET ausentes.', flush=True)
@@ -2155,6 +2158,7 @@ def eliminar_producto_ruta(producto_id):
 
 
 @app.route('/comercio/productos/cargar-csv', methods=['POST'])
+@limite('10 per minute')
 @login_requerido
 def cargar_csv():
     """Encola la importación y responde 202 sin bloquear la petición HTTP.
