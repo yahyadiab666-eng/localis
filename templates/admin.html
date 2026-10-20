@@ -253,7 +253,7 @@
                         <tr>
                             <td>{{ comercio.id }}</td>
                             <td>
-                                <a href="{{ url_for('admin_comercio_detalle', comercio_id=comercio.id) }}"
+                                <a href="{{ url_for('admin.admin_comercio_detalle', comercio_id=comercio.id) }}"
                                    style="color:#0d6efd;font-weight:700;text-decoration:none;">
                                     {{ comercio.nombre }}
                                 </a>
@@ -297,7 +297,7 @@
                             </td>
                             <td>
                                 <div class="acciones-comercio">
-                                <a href="{{ url_for('admin_comercio_detalle', comercio_id=comercio.id) }}"
+                                <a href="{{ url_for('admin.admin_comercio_detalle', comercio_id=comercio.id) }}"
                                    class="btn-accion-tabla btn-resolver"
                                    style="text-decoration:none;display:inline-block;"
                                    title="Ver perfil, catálogo y gestionar">Gestionar</a>

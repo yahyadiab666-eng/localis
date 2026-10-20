@@ -28,6 +28,8 @@ from backend.admin import (
     obtener_bandeja_tecnica,
     obtener_banner_principal,
     obtener_categorias_admin,
+    obtener_comercio_admin,
+    obtener_productos_admin,
     obtener_todos_comercios_admin,
     obtener_usuarios_admin,
     reactivar_comercio,
@@ -41,8 +43,15 @@ from backend.pre_cuentas import (
     transferir_propiedad_comercio,
 )
 from backend.stores import obtener_config, obtener_tasa_dolar
-from backend.utils import parsear_visible_form
-from backend.vistas_imagenes import procesar_imagen_subida
+from backend.utils import (
+    parsear_visible_form,
+    url_maps_comercio,
+    url_whatsapp_comercio,
+)
+from backend.vistas_imagenes import (
+    normalizar_imagenes_comercio,
+    procesar_imagen_subida,
+)
 from backend.web_seguridad import admin_requerido, peticion_acepta_json
 from utils.images import url_hero_inicio
 
@@ -250,3 +259,41 @@ def admin_resolver_ticket(ticket_id):
     exito, mensaje = resolver_ticket_soporte(ticket_id)
     flash(mensaje, 'exito' if exito else 'error')
     return redirect(url_for('admin.panel_admin'))
+
+
+@bp.route('/comercio/<int:comercio_id>')
+@admin_requerido
+def admin_comercio_detalle(comercio_id):
+    """Ficha de acceso total: tienda + perfil del dueño + catálogo.
+
+    Permite al administrador visualizar y auditar cualquier comercio registrado
+    y gestionar su estado, plan y productos sin depender del comerciante.
+    """
+    comercio = obtener_comercio_admin(comercio_id)
+    if not comercio:
+        flash('Comercio no encontrado.', 'error')
+        return redirect(url_for('admin.panel_admin'))
+
+    busqueda = request.args.get('q', '').strip()
+    productos = obtener_productos_admin(comercio_id, busqueda=busqueda or None)
+    comercio = normalizar_imagenes_comercio(comercio)
+    try:
+        comercio['maps_link'] = url_maps_comercio(comercio)
+    except Exception:
+        comercio['maps_link'] = None
+    try:
+        comercio['telefono_whatsapp_url'] = url_whatsapp_comercio(
+            comercio.get('telefono'), 'Hola, te escribimos desde Localis.'
+        )
+    except Exception:
+        comercio['telefono_whatsapp_url'] = None
+
+    tasa_actual = obtener_tasa_dolar()
+    return render_template(
+        'admin_comercio.html',
+        comercio=comercio,
+        productos=productos,
+        tasa=tasa_actual,
+        planes=PLANES,
+        q=busqueda,
+    )

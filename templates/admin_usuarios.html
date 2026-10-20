@@ -98,7 +98,7 @@
                                     <ul class="lista-comercios">
                                         {% for comercio in usuario.comercios %}
                                         <li>
-                                            <a class="enlace" href="{{ url_for('admin_comercio_detalle', comercio_id=comercio.id) }}">
+                                            <a class="enlace" href="{{ url_for('admin.admin_comercio_detalle', comercio_id=comercio.id) }}">
                                                 {{ comercio.nombre }} (#{{ comercio.id }})
                                             </a>
                                             <span class="badge badge-{{ 'visible' if comercio.visible == 1 else 'oculto' }}">{{ 'Visible' if comercio.visible == 1 else 'Oculto' }}</span>

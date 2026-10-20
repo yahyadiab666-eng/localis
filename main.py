@@ -125,14 +125,12 @@ from backend.admin import (
     obtener_categorias_admin,
     obtener_comercio_admin,
     obtener_producto_admin,
-    obtener_productos_admin,
 )
 from backend.auth import obtener_o_crear_usuario_google, obtener_usuario_por_id
 from backend.diagnostics import ejecutar_diagnostico_inicio, obtener_estado_sistema
 from backend.error_handlers import registrar_manejadores_errores
 from utils.images import (
     PLACEHOLDER_PRODUCTO,
-    enriquecer_comercio_imagenes,
     url_hero_inicio,
     url_imagen_producto_segura,
     url_storage_o_vacio,
@@ -190,6 +188,7 @@ from backend.web_seguridad import (
 )
 from backend.rate_limit import configurar_rate_limit, limite
 from backend.vistas_imagenes import (
+    normalizar_imagenes_comercio as _normalizar_imagenes_comercio,
     procesar_imagen_subida,
     quitar_imagen_manual as _quitar_imagen_manual,
     registrar_imagen_manual as _registrar_imagen_manual,
@@ -688,43 +687,8 @@ def _url_imagen_comercio_usable(valor):
         return None
 
 
-def _normalizar_imagenes_comercio(comercio):
-    """Normaliza logo, banner y fechas para plantillas. Las imágenes no bloquean."""
-    if not comercio:
-        return comercio
-    try:
-        comercio = enriquecer_comercio_imagenes(comercio)
-    except Exception:
-        traceback.print_exc()
-        comercio = dict(comercio)
-        comercio.setdefault('logo_completo', None)
-        comercio.setdefault('banner_completo', None)
-        comercio.setdefault('tiene_banner', False)
-
-    for campo in (
-        'fecha_vencimiento',
-        'fecha_registro',
-        'fecha_inicio_suscripcion',
-    ):
-        if comercio.get(campo) is not None:
-            try:
-                comercio[campo] = formatear_fecha(comercio[campo])
-            except Exception:
-                pass
-
-    visible = comercio.get('visible', 1)
-    if isinstance(visible, bool):
-        comercio['visible'] = 1 if visible else 0
-    else:
-        try:
-            comercio['visible'] = int(visible)
-        except (TypeError, ValueError):
-            comercio['visible'] = 1
-    return comercio
-
-
-def _normalizar_logo_completo(comercio):
-    return _normalizar_imagenes_comercio(comercio)
+# _normalizar_imagenes_comercio / _normalizar_logo_completo viven en
+# backend/vistas_imagenes.py
 
 
 # procesar_imagen_subida vive ahora en backend/vistas_imagenes.py
@@ -2412,42 +2376,7 @@ def tienda_qr_png(comercio_id):
 # backend/blueprints/admin.py
 
 
-@app.route('/admin/comercio/<int:comercio_id>')
-@admin_requerido
-def admin_comercio_detalle(comercio_id):
-    """Ficha de acceso total: tienda + perfil del dueño + catálogo.
-
-    Permite al administrador visualizar y auditar cualquier comercio registrado
-    y gestionar su estado, plan y productos sin depender del comerciante.
-    """
-    comercio = obtener_comercio_admin(comercio_id)
-    if not comercio:
-        flash('Comercio no encontrado.', 'error')
-        return redirect(url_for('admin.panel_admin'))
-
-    busqueda = request.args.get('q', '').strip()
-    productos = obtener_productos_admin(comercio_id, busqueda=busqueda or None)
-    comercio = _normalizar_imagenes_comercio(comercio)
-    try:
-        comercio['maps_link'] = url_maps_comercio(comercio)
-    except Exception:
-        comercio['maps_link'] = None
-    try:
-        comercio['telefono_whatsapp_url'] = url_whatsapp_comercio(
-            comercio.get('telefono'), 'Hola, te escribimos desde Localis.'
-        )
-    except Exception:
-        comercio['telefono_whatsapp_url'] = None
-
-    tasa_actual = obtener_tasa_dolar()
-    return render_template(
-        'admin_comercio.html',
-        comercio=comercio,
-        productos=productos,
-        tasa=tasa_actual,
-        planes=PLANES,
-        q=busqueda,
-    )
+# admin_comercio_detalle vive ahora en backend/blueprints/admin.py
 
 
 @app.route('/admin/comercio/<int:comercio_id>/editar', methods=['GET', 'POST'])
@@ -2522,7 +2451,7 @@ def admin_editar_comercio(comercio_id):
             banner_url=banner_url,
         )
         flash(mensaje, 'exito' if exito else 'error')
-        return redirect(url_for('admin_comercio_detalle', comercio_id=comercio_id))
+        return redirect(url_for('admin.admin_comercio_detalle', comercio_id=comercio_id))
 
     comercio = _normalizar_imagenes_comercio(comercio)
     return render_template(
@@ -2591,7 +2520,7 @@ def admin_nuevo_producto(comercio_id):
             _registrar_imagen_manual(producto_id, imagen_url)
             asegurar_slug_producto(producto_id, nombre)
         flash(mensaje, 'exito' if exito else 'error')
-        return redirect(url_for('admin_comercio_detalle', comercio_id=comercio_id))
+        return redirect(url_for('admin.admin_comercio_detalle', comercio_id=comercio_id))
 
     return render_template(
         'admin_producto.html',
@@ -2616,7 +2545,7 @@ def admin_editar_producto(comercio_id, producto_id):
     producto = obtener_producto_admin(producto_id, comercio_id=comercio_id)
     if not producto:
         flash('El producto no existe para este comercio.', 'error')
-        return redirect(url_for('admin_comercio_detalle', comercio_id=comercio_id))
+        return redirect(url_for('admin.admin_comercio_detalle', comercio_id=comercio_id))
 
     if request.method == 'POST':
         nombre = (request.form.get('nombre') or '').strip()
@@ -2691,7 +2620,7 @@ def admin_editar_producto(comercio_id, producto_id):
             flash(mensaje, 'exito' if exito else 'error')
         except Exception as error:
             flash(f'Error al actualizar producto: {error}', 'error')
-        return redirect(url_for('admin_comercio_detalle', comercio_id=comercio_id))
+        return redirect(url_for('admin.admin_comercio_detalle', comercio_id=comercio_id))
 
     return render_template(
         'admin_producto.html',
@@ -2726,7 +2655,7 @@ def admin_cargar_csv(comercio_id):
         if respuesta_json:
             return jsonify({'ok': False, 'error': error_lectura}), 400
         flash(error_lectura, 'error')
-        return redirect(url_for('admin_comercio_detalle', comercio_id=comercio_id))
+        return redirect(url_for('admin.admin_comercio_detalle', comercio_id=comercio_id))
 
     try:
         job = encolar_importacion(
@@ -2739,12 +2668,12 @@ def admin_cargar_csv(comercio_id):
         if respuesta_json:
             return jsonify({'ok': False, 'error': str(error)}), 503
         flash(str(error), 'error')
-        return redirect(url_for('admin_comercio_detalle', comercio_id=comercio_id))
+        return redirect(url_for('admin.admin_comercio_detalle', comercio_id=comercio_id))
     except ValueError as error:
         if respuesta_json:
             return jsonify({'ok': False, 'error': str(error)}), 400
         flash(str(error), 'error')
-        return redirect(url_for('admin_comercio_detalle', comercio_id=comercio_id))
+        return redirect(url_for('admin.admin_comercio_detalle', comercio_id=comercio_id))
 
     mensaje = 'El catálogo de esta tienda se está procesando en segundo plano.'
     if respuesta_json:
@@ -2766,7 +2695,7 @@ def admin_cargar_csv(comercio_id):
         )
 
     flash(mensaje, 'info')
-    return redirect(url_for('admin_comercio_detalle', comercio_id=comercio_id))
+    return redirect(url_for('admin.admin_comercio_detalle', comercio_id=comercio_id))
 
 
 @app.route(
@@ -2792,7 +2721,7 @@ def admin_eliminar_producto_ruta(producto_id):
     flash(mensaje, 'exito' if exito else 'error')
     if comercio_id:
         return redirect(
-            url_for('admin_comercio_detalle', comercio_id=comercio_id)
+            url_for('admin.admin_comercio_detalle', comercio_id=comercio_id)
         )
     return redirect(url_for('admin.panel_admin'))
 
@@ -2824,7 +2753,7 @@ def admin_destacar_producto(producto_id):
         comercio_id = request.form.get('comercio_id', type=int)
         if comercio_id:
             return redirect(
-                url_for('admin_comercio_detalle', comercio_id=comercio_id)
+                url_for('admin.admin_comercio_detalle', comercio_id=comercio_id)
             )
         return redirect(url_for('admin.panel_admin'))
 
@@ -2852,7 +2781,7 @@ def admin_destacar_producto(producto_id):
     flash(mensaje, 'exito' if exito else 'error')
     comercio_id = request.form.get('comercio_id', type=int)
     if comercio_id:
-        return redirect(url_for('admin_comercio_detalle', comercio_id=comercio_id))
+        return redirect(url_for('admin.admin_comercio_detalle', comercio_id=comercio_id))
     return redirect(url_for('admin.panel_admin'))
 
 

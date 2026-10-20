@@ -6,12 +6,16 @@ Extraidos de ``main.py`` (Bloque 4) para reutilizarlos desde las rutas de
 
 from __future__ import annotations
 
+import traceback
+
 from backend.imagenes_producto import eliminar_manual, marcar_manual
 from backend.image_lookup import programar_descubrimiento_producto
 from backend.supabase_storage import (
     intentar_subir_imagen,
     programar_sincronizacion_storage,
 )
+from backend.utils import formatear_fecha
+from utils.images import enriquecer_comercio_imagenes
 
 
 def sincronizar_foto_local_si_aplica(producto_id, imagen_url, carpeta='productos'):
@@ -62,3 +66,38 @@ def procesar_imagen_subida(
         carpeta=carpeta,
         max_dimension=max_dimension,
     )
+
+
+def normalizar_imagenes_comercio(comercio):
+    """Normaliza logo, banner y fechas para plantillas. Las imagenes no bloquean."""
+    if not comercio:
+        return comercio
+    try:
+        comercio = enriquecer_comercio_imagenes(comercio)
+    except Exception:
+        traceback.print_exc()
+        comercio = dict(comercio)
+        comercio.setdefault('logo_completo', None)
+        comercio.setdefault('banner_completo', None)
+        comercio.setdefault('tiene_banner', False)
+
+    for campo in (
+        'fecha_vencimiento',
+        'fecha_registro',
+        'fecha_inicio_suscripcion',
+    ):
+        if comercio.get(campo) is not None:
+            try:
+                comercio[campo] = formatear_fecha(comercio[campo])
+            except Exception:
+                pass
+
+    visible = comercio.get('visible', 1)
+    if isinstance(visible, bool):
+        comercio['visible'] = 1 if visible else 0
+    else:
+        try:
+            comercio['visible'] = int(visible)
+        except (TypeError, ValueError):
+            comercio['visible'] = 1
+    return comercio
