@@ -54,13 +54,13 @@
         <span>Ver tienda</span>
       </a>
       {% endif %}
-      <a href="{{ url_for('perfil') }}"
+      <a href="{{ url_for('auth.perfil') }}"
          class="nav-comercio-link {% if nav_activo == 'perfil' %}is-active{% endif %}"
          aria-label="Mi perfil" title="Mi perfil">
         <i data-lucide="user" style="width:15px;height:15px;"></i>
         <span>Mi perfil</span>
       </a>
-      <form method="POST" action="{{ url_for('logout') }}" class="inline-flex"
+      <form method="POST" action="{{ url_for('auth.logout') }}" class="inline-flex"
             onsubmit="return confirm('¿Seguro que quieres cerrar sesión?');">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" aria-label="Cerrar sesión" title="Cerrar sesión"
@@ -85,7 +85,7 @@
         <i data-lucide="store" style="width:18px;height:18px;"></i>
       </a>
       {% endif %}
-      <form method="POST" action="{{ url_for('logout') }}" class="inline-flex"
+      <form method="POST" action="{{ url_for('auth.logout') }}" class="inline-flex"
             onsubmit="return confirm('¿Seguro que quieres cerrar sesión?');">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="nav-comercio-icon nav-comercio-icon--salir"
@@ -150,7 +150,7 @@
           <i data-lucide="store" style="width:18px;height:18px;"></i> Ver tienda
         </a>
         {% endif %}
-        <a href="{{ url_for('perfil') }}"
+        <a href="{{ url_for('auth.perfil') }}"
            class="nav-comercio-drawer__link {% if nav_activo == 'perfil' %}is-active{% endif %}">
           <i data-lucide="user" style="width:18px;height:18px;"></i> Mi perfil
         </a>
@@ -161,7 +161,7 @@
       </nav>
 
       <div class="nav-comercio-drawer__foot">
-        <form method="POST" action="{{ url_for('logout') }}"
+        <form method="POST" action="{{ url_for('auth.logout') }}"
               onsubmit="return confirm('¿Seguro que quieres cerrar sesión?');">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="nav-comercio-drawer__salir">

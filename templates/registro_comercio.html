@@ -36,7 +36,7 @@
           <a href="{{ url_for('index') }}" class="text-sm font-medium text-stone-300 hover:text-white transition flex items-center gap-1.5">
             <i data-lucide="arrow-left" style="width:16px;height:16px;"></i> Volver al Inicio
           </a>
-          <form method="POST" action="{{ url_for('logout') }}" class="inline-flex"
+          <form method="POST" action="{{ url_for('auth.logout') }}" class="inline-flex"
                 onsubmit="return confirm('¿Seguro que quieres cerrar sesión?');">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" aria-label="Cerrar sesión"
@@ -196,7 +196,7 @@
         <!-- Salida: permite cambiar de cuenta si eligió un correo incorrecto -->
         <p class="text-center text-xs text-stone-500 pt-1">
           ¿No es tu cuenta?
-          <form method="POST" action="{{ url_for('logout') }}" class="inline"
+          <form method="POST" action="{{ url_for('auth.logout') }}" class="inline"
                 onsubmit="return confirm('¿Seguro que quieres cerrar sesión?');">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="font-bold text-amber-700 hover:text-amber-800 underline">

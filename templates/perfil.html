@@ -162,7 +162,7 @@
         </a>
         {% endif %}
 
-        <form method="POST" action="{{ url_for('logout') }}" class="inline-flex"
+        <form method="POST" action="{{ url_for('auth.logout') }}" class="inline-flex"
               onsubmit="return confirm('¿Seguro que quieres cerrar sesión?');">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" aria-label="Cerrar sesión"
