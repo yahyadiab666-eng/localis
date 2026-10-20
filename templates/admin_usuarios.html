@@ -43,7 +43,7 @@
     <header>
         <h1>Localis | Usuarios registrados</h1>
         <div class="nav-links">
-            <a href="{{ url_for('panel_admin') }}">&larr; Volver al panel</a>
+            <a href="{{ url_for('admin.panel_admin') }}">&larr; Volver al panel</a>
             <form method="POST" action="{{ url_for('logout') }}" style="display:inline;"
                   onsubmit="return confirm('¿Seguro que quieres cerrar sesión?');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -53,11 +53,11 @@
     </header>
 
     <div class="container">
-        <form action="{{ url_for('admin_usuarios') }}" method="GET" class="filtro">
+        <form action="{{ url_for('admin.admin_usuarios') }}" method="GET" class="filtro">
             <input type="text" name="q" value="{{ q or '' }}" placeholder="Buscar por nombre o correo...">
             <button type="submit">Buscar</button>
             {% if q %}
-                <a href="{{ url_for('admin_usuarios') }}" style="align-self:center;font-size:0.85rem;color:#666;">Limpiar</a>
+                <a href="{{ url_for('admin.admin_usuarios') }}" style="align-self:center;font-size:0.85rem;color:#666;">Limpiar</a>
             {% endif %}
         </form>
 

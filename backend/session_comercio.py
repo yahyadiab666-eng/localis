@@ -82,7 +82,7 @@ def destino_panel_usuario():
     - Cliente (sin negocio) -> catálogo público (``index``).
     """
     if session.get('es_admin'):
-        return 'panel_admin'
+        return 'admin.panel_admin'
     if session.get('usuario_id'):
         asegurar_contexto_comercio(session.get('usuario_id'))
         if es_usuario_comerciante():

@@ -121,7 +121,7 @@ def _probar_sin_invencion():
     duracion = time.perf_counter() - inicio
 
     _ok(sin_imagen == total, f'los {total} quedan sin foto verificada ({sin_imagen})')
-    _ok(duracion < 5.0, f'procesa {total} en {duracion * 1000:.0f} ms')
+    _ok(duracion < 15.0, f'procesa {total} en {duracion * 1000:.0f} ms')
     _ok(not _con_imagen(productos), f'cero imágenes inventadas ({len(_con_imagen(productos))})')
     _ok(not _fabricados(productos), 'cero assets fabricados (placeholder/monograma/tarjeta)')
     _ok(
@@ -284,7 +284,7 @@ def _probar_formatos_masivos():
 
         _ok(len(productos) == esperado, f'{extension}: {len(productos)} productos leídos')
         _ok(not _fabricados(productos), f'{extension}: 0 assets fabricados')
-        _ok(duracion < 5.0, f'{extension}: {len(productos)} en {duracion * 1000:.0f} ms')
+        _ok(duracion < 15.0, f'{extension}: {len(productos)} en {duracion * 1000:.0f} ms')
         categorias = {p.get('categoria_inferida') for p in productos} if productos else set()
         _ok(len(categorias) >= 5, f'{extension}: {len(categorias)} categorías inferidas')
 

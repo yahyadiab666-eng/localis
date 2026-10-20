@@ -130,14 +130,10 @@ from backend.admin import (
     destacar_producto_por_dias,
     eliminar_comercio_definitivo,
     eliminar_producto_admin,
-    obtener_banner_principal,
-    obtener_bandeja_tecnica,
     obtener_categorias_admin,
     obtener_comercio_admin,
     obtener_producto_admin,
     obtener_productos_admin,
-    obtener_todos_comercios_admin,
-    obtener_usuarios_admin,
     reactivar_comercio,
     resolver_ticket_soporte,
     suspender_comercio_temporal,
@@ -1271,7 +1267,7 @@ def login():
         # Fase 2: admin -> /admin; comerciante con negocio -> /comercio;
         # cliente sin negocio -> catálogo público (no al panel de comercio).
         if session.get('es_admin'):
-            return redirect(url_for('panel_admin'))
+            return redirect(url_for('admin.panel_admin'))
         if es_usuario_comerciante():
             return redirect(url_for('panel_comercio'))
         return redirect(url_for('index'))
@@ -1421,7 +1417,7 @@ def google_callback():
         # --- FASE 2: redirección por capacidad ------------------------------
         # 1) Admin -> panel de administración.
         if session['es_admin']:
-            return redirect(url_for('panel_admin'))
+            return redirect(url_for('admin.panel_admin'))
 
         # 2) Comerciante CON negocio registrado -> panel de comercio.
         comercio = None
@@ -2440,42 +2436,7 @@ def tienda_qr_png(comercio_id):
 # ==========================================
 
 
-@app.route('/admin')
-@admin_requerido
-def panel_admin():
-    estado_filtro = request.args.get('estado_ticket', None)
-    busqueda = request.args.get('q', '').strip()
-    tickets = obtener_bandeja_tecnica(estado_filtro=estado_filtro)
-    tasa_actual = obtener_tasa_dolar()
-    comercios = obtener_todos_comercios_admin(busqueda=busqueda or None)
-    banner_url = url_hero_inicio(obtener_banner_principal()) or DEFAULT_BANNER_URL
-    whatsapp = obtener_config('whatsapp_soporte', WHATSAPP_SOPORTE)
-
-    return render_template(
-        'admin.html',
-        tasa=tasa_actual,
-        comercios=comercios,
-        tickets=tickets,
-        banner_url=banner_url,
-        whatsapp=whatsapp,
-        whatsapp_url=WHATSAPP_SOPORTE_URL,
-        planes=PLANES,
-        categorias=obtener_categorias_admin(),
-        q=busqueda,
-    )
-
-
-@app.route('/admin/usuarios')
-@admin_requerido
-def admin_usuarios():
-    """Listado de todos los usuarios registrados (auditoría de perfiles)."""
-    busqueda = request.args.get('q', '').strip()
-    usuarios = obtener_usuarios_admin(busqueda=busqueda or None)
-    return render_template(
-        'admin_usuarios.html',
-        usuarios=usuarios,
-        q=busqueda,
-    )
+# panel_admin y admin_usuarios viven ahora en backend/blueprints/admin.py
 
 
 @app.route('/admin/tasa', methods=['POST'])
@@ -2484,7 +2445,7 @@ def actualizar_tasa():
     nueva_tasa = request.form.get('tasa_dolar')
     exito, mensaje = actualizar_tasa_dolar(session.get('usuario_id'), nueva_tasa)
     flash(mensaje, 'exito' if exito else 'error')
-    return redirect(url_for('panel_admin'))
+    return redirect(url_for('admin.panel_admin'))
 
 
 @app.route('/admin/banner', methods=['POST'])
@@ -2511,7 +2472,7 @@ def admin_banner():
         exito, mensaje = False, 'Debes seleccionar una imagen.'
 
     flash(mensaje, 'exito' if exito else 'error')
-    return redirect(url_for('panel_admin'))
+    return redirect(url_for('admin.panel_admin'))
 
 
 @app.route('/admin/comercio/estado/<int:comercio_id>', methods=['POST'])
@@ -2528,7 +2489,7 @@ def cambiar_estado_comercio(comercio_id):
         session.get('usuario_id'), comercio_id, visible, estado_pago
     )
     flash(mensaje, 'exito' if exito else 'error')
-    return redirect(url_for('panel_admin'))
+    return redirect(url_for('admin.panel_admin'))
 
 
 @app.route('/admin/comercio/suspender/<int:comercio_id>', methods=['POST'])
@@ -2538,7 +2499,7 @@ def admin_suspender_comercio(comercio_id):
         session.get('usuario_id'), comercio_id
     )
     flash(mensaje, 'exito' if exito else 'error')
-    return redirect(url_for('panel_admin'))
+    return redirect(url_for('admin.panel_admin'))
 
 
 @app.route('/admin/comercio/reactivar/<int:comercio_id>', methods=['POST'])
@@ -2546,7 +2507,7 @@ def admin_suspender_comercio(comercio_id):
 def admin_reactivar_comercio(comercio_id):
     exito, mensaje = reactivar_comercio(session.get('usuario_id'), comercio_id)
     flash(mensaje, 'exito' if exito else 'error')
-    return redirect(url_for('panel_admin'))
+    return redirect(url_for('admin.panel_admin'))
 
 
 # ==========================================
@@ -2581,7 +2542,7 @@ def admin_crear_pre_cuenta():
             200 if exito else 400,
         )
     flash(mensaje, 'exito' if exito else 'error')
-    return redirect(url_for('panel_admin'))
+    return redirect(url_for('admin.panel_admin'))
 
 
 @app.route('/admin/comercio/<int:comercio_id>/transferir', methods=['POST'])
@@ -2599,7 +2560,7 @@ def admin_transferir_comercio(comercio_id):
             200 if exito else 400,
         )
     flash(mensaje, 'exito' if exito else 'error')
-    return redirect(url_for('panel_admin'))
+    return redirect(url_for('admin.panel_admin'))
 
 
 @app.route('/admin/comercio/<int:comercio_id>/reasignar', methods=['POST'])
@@ -2617,7 +2578,7 @@ def admin_reasignar_comercio(comercio_id):
             200 if exito else 400,
         )
     flash(mensaje, 'exito' if exito else 'error')
-    return redirect(url_for('panel_admin'))
+    return redirect(url_for('admin.panel_admin'))
 
 
 @app.route('/admin/comercio/eliminar/<int:comercio_id>', methods=['POST'])
@@ -2627,7 +2588,7 @@ def admin_eliminar_comercio(comercio_id):
         session.get('usuario_id'), comercio_id
     )
     flash(mensaje, 'exito' if exito else 'error')
-    return redirect(url_for('panel_admin'))
+    return redirect(url_for('admin.panel_admin'))
 
 
 @app.route('/admin/comercio/<int:comercio_id>')
@@ -2641,7 +2602,7 @@ def admin_comercio_detalle(comercio_id):
     comercio = obtener_comercio_admin(comercio_id)
     if not comercio:
         flash('Comercio no encontrado.', 'error')
-        return redirect(url_for('panel_admin'))
+        return redirect(url_for('admin.panel_admin'))
 
     busqueda = request.args.get('q', '').strip()
     productos = obtener_productos_admin(comercio_id, busqueda=busqueda or None)
@@ -2679,7 +2640,7 @@ def admin_editar_comercio(comercio_id):
     comercio = obtener_comercio_admin(comercio_id)
     if not comercio:
         flash('Comercio no encontrado.', 'error')
-        return redirect(url_for('panel_admin'))
+        return redirect(url_for('admin.panel_admin'))
 
     categorias = obtener_categorias_admin()
 
@@ -2759,7 +2720,7 @@ def admin_nuevo_producto(comercio_id):
     comercio = obtener_comercio_admin(comercio_id)
     if not comercio:
         flash('Comercio no encontrado.', 'error')
-        return redirect(url_for('panel_admin'))
+        return redirect(url_for('admin.panel_admin'))
 
     if request.method == 'POST':
         nombre = (request.form.get('nombre') or '').strip()
@@ -2829,7 +2790,7 @@ def admin_editar_producto(comercio_id, producto_id):
     comercio = obtener_comercio_admin(comercio_id)
     if not comercio:
         flash('Comercio no encontrado.', 'error')
-        return redirect(url_for('panel_admin'))
+        return redirect(url_for('admin.panel_admin'))
 
     producto = obtener_producto_admin(producto_id, comercio_id=comercio_id)
     if not producto:
@@ -2934,7 +2895,7 @@ def admin_cargar_csv(comercio_id):
         if _peticion_acepta_json():
             return jsonify({'ok': False, 'error': 'Comercio no encontrado.'}), 404
         flash('Comercio no encontrado.', 'error')
-        return redirect(url_for('panel_admin'))
+        return redirect(url_for('admin.panel_admin'))
 
     respuesta_json = _peticion_acepta_json()
     archivo = request.files.get('archivo_csv')
@@ -3012,7 +2973,7 @@ def admin_eliminar_producto_ruta(producto_id):
         return redirect(
             url_for('admin_comercio_detalle', comercio_id=comercio_id)
         )
-    return redirect(url_for('panel_admin'))
+    return redirect(url_for('admin.panel_admin'))
 
 
 @app.route('/admin/producto/destacar/<int:producto_id>', methods=['POST'])
@@ -3044,7 +3005,7 @@ def admin_destacar_producto(producto_id):
             return redirect(
                 url_for('admin_comercio_detalle', comercio_id=comercio_id)
             )
-        return redirect(url_for('panel_admin'))
+        return redirect(url_for('admin.panel_admin'))
 
     valor = request.form.get('destacado', request.form.get('nuevo_estado'))
     if valor is None and request.is_json:
@@ -3056,7 +3017,7 @@ def admin_destacar_producto(producto_id):
             if _peticion_acepta_json():
                 return jsonify({'ok': False, 'error': 'Producto no encontrado.'}), 404
             flash('Producto no encontrado.', 'error')
-            return redirect(url_for('panel_admin'))
+            return redirect(url_for('admin.panel_admin'))
         valor = 0 if str(producto.get('destacado') or 0) in ('1', 'true', 'True') else 1
 
     exito, mensaje, nuevo = alternar_destacado_producto(
@@ -3071,7 +3032,7 @@ def admin_destacar_producto(producto_id):
     comercio_id = request.form.get('comercio_id', type=int)
     if comercio_id:
         return redirect(url_for('admin_comercio_detalle', comercio_id=comercio_id))
-    return redirect(url_for('panel_admin'))
+    return redirect(url_for('admin.panel_admin'))
 
 
 @app.route('/sitemap.xml')
@@ -3148,7 +3109,7 @@ def admin_cambiar_plan(comercio_id):
         session.get('usuario_id'), comercio_id, plan_tipo, estado_pago
     )
     flash(mensaje, 'exito' if exito else 'error')
-    return redirect(url_for('panel_admin'))
+    return redirect(url_for('admin.panel_admin'))
 
 
 @app.route('/admin/ticket/resolver/<int:ticket_id>', methods=['POST'])
@@ -3156,7 +3117,7 @@ def admin_cambiar_plan(comercio_id):
 def admin_resolver_ticket(ticket_id):
     exito, mensaje = resolver_ticket_soporte(ticket_id)
     flash(mensaje, 'exito' if exito else 'error')
-    return redirect(url_for('panel_admin'))
+    return redirect(url_for('admin.panel_admin'))
 
 
 # api_confirmar_pago vive ahora en backend/blueprints/api.py
@@ -3164,8 +3125,10 @@ def admin_resolver_ticket(ticket_id):
 
 # --- Bloque 4: registrar blueprints (al final, tras definir el CSRF) ---
 from backend.blueprints.api import bp as _api_bp
+from backend.blueprints.admin import bp as _admin_bp
 
 app.register_blueprint(_api_bp)
+app.register_blueprint(_admin_bp)
 
 
 port = int(os.environ.get('PORT', 10000))
