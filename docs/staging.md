@@ -30,15 +30,19 @@ Settings → Branches) para que el workflow `.github/workflows/keepalive.yml`
 Proyecto Supabase de staging ya creado: `wlfpyygzoqnvxnhpuvvh`.
 
 ### B1. Copiar la cadena de conexión (Postgres)
-1. Supabase → proyecto de staging → **Settings → Database**.
-2. En **Connection string**, elige la pestaña **URI** y el modo
-   **Session pooler**. Copia la cadena, con formato:
-   ```
-   postgresql://postgres.wlfpyygzoqnvxnhpuvvh:[TU_PASSWORD]@aws-0-<region>.pooler.supabase.com:5432/postgres
-   ```
-3. Reemplaza `[TU_PASSWORD]` por la contraseña de la base (si no la sabes,
-   **resetéala** en la misma pantalla). Usa el **pooler** (IPv4): Render no sale
-   por IPv6.
+En la UI nueva de Supabase ya **no** está en "Settings → Database", sino en el
+botón **"Connect"** (arriba a la derecha, junto al nombre del proyecto).
+
+1. Abre directamente el diálogo de conexión de tu proyecto de staging:
+   `https://supabase.com/dashboard/project/wlfpyygzoqnvxnhpuvvh?showConnect=true&method=session`
+2. Elige **Session pooler** y la pestaña **URI**.
+3. Copia la cadena (formato `postgresql://postgres.wlfpyygzoqnvxnhpuvvh:...@aws-...pooler.supabase.com:5432/postgres`).
+4. Reemplaza `[YOUR-PASSWORD]` por la contraseña de la base. Si no la sabes,
+   resetéala en `https://supabase.com/dashboard/project/wlfpyygzoqnvxnhpuvvh/database/settings`
+   (sección *Database password*). Codifica caracteres especiales (`@ # ? &`).
+5. Usa **Session pooler** (puerto 5432): Render es IPv4 y el pooler es IPv4;
+   la conexión directa `db.<ref>.supabase.co` es IPv6 y no sirve en Render.
+
 
 ### B2. Inicializar el esquema de staging (desde tu PC)
 En la carpeta del proyecto:
@@ -50,9 +54,9 @@ Debe imprimir `tablas en staging: NN` y `OK staging inicializado.`
 (Si te equivocas de proyecto, el script lo rechaza: protege producción.)
 
 ### B3. Copiar la llave de Storage (imágenes)
-Supabase → staging → **Settings → API → Project API keys → `service_role`**.
-Guárdala para el paso B4. También confirma la **Project URL**:
-`https://wlfpyygzoqnvxnhpuvvh.supabase.co`
+Abre `https://supabase.com/dashboard/project/wlfpyygzoqnvxnhpuvvh/settings/api-keys`
+(equivale a **Settings → API Keys**) → copia **Project URL** y la clave
+**`service_role`** (secreta). Guárdala para el paso B4.
 
 ### B4. Crear el servicio en Render
 Render → **New + → Web Service** → repo `yahyadiab666-eng/localis`.
