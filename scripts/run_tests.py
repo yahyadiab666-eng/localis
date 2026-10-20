@@ -34,6 +34,7 @@ except Exception:
 SIN_RED = [
     'test_config_seguridad.py',
     'test_estructura_blueprints.py',
+    'test_vista_previa_token.py',
     'test_metricas.py',
     'test_backup_utilidades.py',
     'test_cache.py',

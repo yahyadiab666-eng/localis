@@ -77,6 +77,53 @@ def main() -> int:
     )
     os.environ.pop('LOCALIS_CSP_REPORT_ONLY', None)
 
+    print('=== Vista previa (solo lectura) ===')
+    from backend.db import get_db_connection
+    from backend.pre_cuentas import _plan_gratis, token_vista_previa
+
+    cid = None
+    try:
+        plan = _plan_gratis()
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                'INSERT INTO comercios (usuario_id, nombre, plan_id, plan_tipo, '
+                'limite_productos, estado_pago, estado_tienda, visible) '
+                "VALUES (NULL, ?, ?, ?, ?, 'gratis', 'pre_cuenta', 0) RETURNING id",
+                ('__test_vista_previa__', plan['id'], plan['codigo'], plan['limite']),
+            )
+            cid = cursor.fetchone()[0]
+            conexion.commit()
+    except Exception:
+        traceback.print_exc()
+        cid = None
+
+    try:
+        if cid:
+            token = token_vista_previa(cid)
+            r = cliente.get(f'/vista-previa/{cid}/{token}')
+            _ok(r.status_code == 200, f'preview con token valido -> 200 ({r.status_code})')
+            _ok(
+                (r.headers.get('X-Robots-Tag') or '').startswith('noindex'),
+                'cabecera X-Robots-Tag noindex',
+            )
+            _ok(b'Vista previa' in r.data, 'muestra el aviso de vista previa')
+
+            r2 = cliente.get(f'/vista-previa/{cid}/tokeninvalido')
+            _ok(r2.status_code == 404, f'token invalido -> 404 ({r2.status_code})')
+
+            # La pre-cuenta NO debe ser accesible por la ruta publica normal.
+            r3 = cliente.get(f'/tienda/{cid}')
+            _ok(r3.status_code in (301, 302), f'pre-cuenta oculta en /tienda ({r3.status_code})')
+        else:
+            print('  aviso  no se pudo crear la pre-cuenta de prueba')
+    finally:
+        if cid:
+            with get_db_connection() as conexion:
+                cursor = conexion.cursor()
+                cursor.execute('DELETE FROM comercios WHERE id = ?', (cid,))
+                conexion.commit()
+
     print('\n=== RESULTADO ===')
     if FALLOS:
         print(f'FALLOS: {len(FALLOS)}')

@@ -100,6 +100,7 @@ from flask import (
     Response,
     flash,
     jsonify,
+    make_response,
     redirect,
     render_template,
     request,
@@ -297,6 +298,21 @@ def _filtro_url_imagen_producto(producto):
         )
         traceback.print_exc()
         return PLACEHOLDER_PRODUCTO
+
+
+@app.template_global()
+def url_vista_previa(comercio_id):
+    """URL firmada de vista previa (solo lectura) para compartir una tienda."""
+    try:
+        from backend.pre_cuentas import token_vista_previa
+
+        return url_for(
+            'vista_previa_comercio',
+            comercio_id=comercio_id,
+            token=token_vista_previa(comercio_id),
+        )
+    except Exception:
+        return ''
 
 
 @app.context_processor
@@ -1007,23 +1023,13 @@ def producto_publico(producto_id=None, slug=None):
     return redirect(destino + f'#producto-{producto_id_real}')
 
 
-@app.route('/tienda/<int:comercio_id>')
-@app.route('/tienda/<string:slug>')
-def tienda_publica(comercio_id=None, slug=None):
-    if comercio_id is None and slug:
-        comercio = obtener_comercio_por_slug(slug)
-    else:
-        comercio = obtener_comercio_por_id(comercio_id, solo_visible=True)
-    if not comercio:
-        flash('Tienda no encontrada o no disponible.', 'error')
-        return redirect(url_for('index'))
-
-    comercio_id = comercio.get('id') or comercio_id
-    palabra_clave = request.args.get('q', '').strip()
-    origen = (request.args.get('origen') or 'web').strip().lower()[:20]
+def _contexto_tienda(comercio, palabra_clave, origen, solo_publicos=True, origen_debug='tienda_publica'):
+    """Contexto compartido por la tienda publica y la vista previa (solo lectura)."""
+    comercio_id = comercio.get('id')
     productos = buscar_y_filtrar_productos(
         palabra_clave=palabra_clave,
         comercio_id=comercio_id,
+        solo_publicos=solo_publicos,
     )
     tasa_actual = obtener_tasa_dolar() or 1.0
 
@@ -1073,16 +1079,83 @@ def tienda_publica(comercio_id=None, slug=None):
         except Exception:
             producto_seleccionado = None
 
-    _debug_imagenes_antes_de_render(productos, 'tienda_publica')
-    return render_template(
-        'tienda_publica.html',
-        comercio=comercio,
-        productos=productos,
-        producto_seleccionado=producto_seleccionado,
-        tasa=tasa_actual,
-        q=palabra_clave,
-        origen=origen,
+    _debug_imagenes_antes_de_render(productos, origen_debug)
+    return {
+        'comercio': comercio,
+        'productos': productos,
+        'producto_seleccionado': producto_seleccionado,
+        'tasa': tasa_actual,
+        'q': palabra_clave,
+        'origen': origen,
+    }
+
+
+@app.route('/tienda/<int:comercio_id>')
+@app.route('/tienda/<string:slug>')
+def tienda_publica(comercio_id=None, slug=None):
+    if comercio_id is None and slug:
+        comercio = obtener_comercio_por_slug(slug)
+    else:
+        comercio = obtener_comercio_por_id(comercio_id, solo_visible=True)
+    if not comercio:
+        flash('Tienda no encontrada o no disponible.', 'error')
+        return redirect(url_for('index'))
+
+    palabra_clave = request.args.get('q', '').strip()
+    origen = (request.args.get('origen') or 'web').strip().lower()[:20]
+    contexto = _contexto_tienda(comercio, palabra_clave, origen)
+    return render_template('tienda_publica.html', **contexto)
+
+
+@app.route('/vista-previa/<int:comercio_id>/<token>')
+def vista_previa_comercio(comercio_id, token):
+    """Vista previa de solo lectura de una tienda (incluidas pre-cuentas ocultas).
+
+    Pensada para compartir con un comercio antes de transferirle la propiedad:
+    la pre-cuenta no esta publica, asi que esta es la forma de mostrarla sin
+    exponerla en el catalogo. Requiere el token firmado (backend/pre_cuentas.py).
+    """
+    from backend.pre_cuentas import token_vista_previa_valido
+
+    if not token_vista_previa_valido(comercio_id, token):
+        return (
+            render_template(
+                'error_servidor.html',
+                codigo=404,
+                titulo='Enlace no valido',
+                mensaje='El enlace de vista previa no es valido o expiro.',
+                sesion_activa=bool(session.get('usuario_id')),
+            ),
+            404,
+        )
+
+    comercio = obtener_comercio_por_id(comercio_id, solo_visible=False)
+    if not comercio:
+        return (
+            render_template(
+                'error_servidor.html',
+                codigo=404,
+                titulo='Tienda no encontrada',
+                mensaje='La tienda no existe.',
+                sesion_activa=bool(session.get('usuario_id')),
+            ),
+            404,
+        )
+
+    palabra_clave = request.args.get('q', '').strip()
+    contexto = _contexto_tienda(
+        comercio,
+        palabra_clave,
+        'previa',
+        solo_publicos=False,
+        origen_debug='vista_previa',
     )
+    contexto['preview'] = True
+    respuesta = make_response(render_template('tienda_publica.html', **contexto))
+    # No indexar ni cachear: es una vista privada para compartir, no una pagina.
+    respuesta.headers['X-Robots-Tag'] = 'noindex, nofollow'
+    respuesta.headers['Cache-Control'] = 'no-store'
+    return respuesta
 
 
 

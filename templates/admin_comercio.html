@@ -174,6 +174,24 @@
                     </form>
                 </div>
 
+                <!-- Vista previa para compartir (solo lectura) -->
+                <div style="margin-top:10px;padding:10px;border:1px dashed #c9a24a;border-radius:6px;background:#fffdf5;">
+                    <div style="font-weight:bold;font-size:0.85rem;margin-bottom:4px;">Compartir vista previa (solo ver)</div>
+                    <p class="muted" style="margin:0 0 6px;">Envía este enlace al comercio para que vea cómo queda su tienda tal como se verá al publicarse. No aparece en el catálogo ni en buscadores.</p>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                        <input type="text" readonly id="preview-url"
+                               value="{{ request.url_root.rstrip('/') }}{{ url_vista_previa(comercio.id) }}"
+                               onclick="this.select()"
+                               style="flex:1;min-width:220px;padding:5px;font-size:0.78rem;border:1px solid #ccc;border-radius:4px;">
+                        <button type="button" class="btn-accion-tabla btn-resolver"
+                                onclick="var i=document.getElementById('preview-url');i.select();try{navigator.clipboard.writeText(i.value);}catch(e){document.execCommand('copy');}this.textContent='¡Copiado!';">
+                            Copiar enlace
+                        </button>
+                        <a href="{{ url_vista_previa(comercio.id) }}" target="_blank" rel="noopener"
+                           class="btn-accion-tabla btn-activar" style="text-decoration:none;display:inline-block;">Abrir</a>
+                    </div>
+                </div>
+
                 {% if comercio.estado_tienda == 'pre_cuenta' or not comercio.propietario_id %}
                 <form action="{{ url_for('admin.admin_transferir_comercio', comercio_id=comercio.id) }}" method="POST" class="plan-form"
                       onsubmit="return confirm('¿Transferir la propiedad de «{{ comercio.nombre }}» a este correo? La tienda se activará como un comercio nuevo con plan gratis.');">

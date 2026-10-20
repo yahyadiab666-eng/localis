@@ -965,7 +965,7 @@ def _completar_imagenes_productos(productos, con_maestro=True):
     return productos
 
 
-def _base_query_productos_publicos(con_maestro=True, con_categoria=False):
+def _base_query_productos_publicos(con_maestro=True, con_categoria=False, solo_publicos=True):
     del con_maestro
     # Padre (comercios) primero, luego productos: mismo orden de bloqueo que
     # las escrituras con FK. categorias solo se une si hay filtro por nombre:
@@ -980,6 +980,9 @@ def _base_query_productos_publicos(con_maestro=True, con_categoria=False):
     # No se hereda el boost de la tienda (evita "fantasmas").
     boost_col = 'p.boost_fin AS boost_fin, ' if _boost_disponible() else 'NULL::timestamp AS boost_fin, '
     boost_select = f'{boost_col}{_expresion_destacado("p")} AS destacado_producto'
+    # ``solo_publicos=False`` (vista previa de pre-cuenta) omite el filtro de
+    # comercio publico; el filtro de producto (activo) se mantiene.
+    filtro_comercio = _filtro_comercio_publico() if solo_publicos else ''
     return f"""
         SELECT
             p.id,
@@ -998,7 +1001,7 @@ def _base_query_productos_publicos(con_maestro=True, con_categoria=False):
         JOIN productos p ON p.comercio_id = c.id
         {cat_join}
         WHERE 1=1
-    """ + _filtro_comercio_publico() + _filtro_producto_publico()
+    """ + filtro_comercio + _filtro_producto_publico()
 
 
 def _es_columna_inexistente(error):
@@ -1082,6 +1085,7 @@ def buscar_y_filtrar_productos(
     limit=None,
     orden_aleatorio=False,
     offset=0,
+    solo_publicos=True,
 ):
     ultimo_error = None
     for intento in range(_MAX_REINTENTOS_LISTADO):
@@ -1094,6 +1098,7 @@ def buscar_y_filtrar_productos(
                     limit=limit,
                     orden_aleatorio=orden_aleatorio,
                     offset=offset,
+                    solo_publicos=solo_publicos,
                 )
             )
         except Exception as e:
@@ -1147,6 +1152,7 @@ def _buscar_y_filtrar_productos_once(
     limit=None,
     orden_aleatorio=False,
     offset=0,
+    solo_publicos=True,
 ):
     tasa = obtener_tasa_dolar() or 1.0
     con_categoria = bool(categoria_nombre)
@@ -1168,7 +1174,7 @@ def _buscar_y_filtrar_productos_once(
                     FROM comercios c
                     JOIN productos p ON p.comercio_id = c.id
                     WHERE 1=1
-            """ + _filtro_comercio_publico() + _filtro_producto_publico()
+            """ + (_filtro_comercio_publico() if solo_publicos else '') + _filtro_producto_publico()
             query_ids, params_ids = _aplicar_filtros_productos(
                 query_ids, [], palabra_clave, categoria_nombre, comercio_id
             )
@@ -1191,11 +1197,11 @@ def _buscar_y_filtrar_productos_once(
                 return []
             ids = random.sample(ids, min(int(limit), len(ids)))
             placeholders = ', '.join('?' for _ in ids)
-            query = _base_query_productos_publicos(con_categoria=con_categoria)
+            query = _base_query_productos_publicos(con_categoria=con_categoria, solo_publicos=solo_publicos)
             query += f' AND p.id IN ({placeholders})'
             filas = _ejecutar_listado_productos(cursor, conexion, query, ids)
         else:
-            query = _base_query_productos_publicos(con_categoria=con_categoria)
+            query = _base_query_productos_publicos(con_categoria=con_categoria, solo_publicos=solo_publicos)
             query, parametros = _aplicar_filtros_productos(
                 query, parametros, palabra_clave, categoria_nombre, comercio_id
             )
