@@ -15,6 +15,8 @@ Config (opcional)::
 """
 
 from __future__ import annotations
+import logging
+logger = logging.getLogger('localis.image_backfill')
 
 import os
 import threading
@@ -63,7 +65,7 @@ def _comercios_con_pendientes(limite):
             )
             filas = cursor.fetchall()
     except Exception as error:
-        print(f'{_LOG} no se pudieron listar pendientes: {type(error).__name__}: {error}')
+        logger.error(f'{_LOG} no se pudieron listar pendientes: {type(error).__name__}: {error}')
         return []
 
     comercios = []
@@ -88,9 +90,9 @@ def ejecutar_ciclo():
             )
             atendidos += 1
         except Exception as error:
-            print(f'{_LOG} comercio={comercio_id} fallo: {type(error).__name__}: {error}')
+            logger.error(f'{_LOG} comercio={comercio_id} fallo: {type(error).__name__}: {error}')
     if atendidos:
-        print(f'{_LOG} ciclo completado comercios={atendidos} lote={_LOTE}')
+        logger.info(f'{_LOG} ciclo completado comercios={atendidos} lote={_LOTE}')
     return atendidos
 
 
@@ -100,14 +102,14 @@ def _bucle():
         try:
             ejecutar_ciclo()
         except Exception as error:
-            print(f'{_LOG} ciclo fallo inesperado: {type(error).__name__}: {error}')
+            logger.error(f'{_LOG} ciclo fallo inesperado: {type(error).__name__}: {error}')
 
 
 def iniciar_backfill_periodico():
     """Arranca el reintento periódico (hilo daemon). Idempotente."""
     global _iniciado
     if not _habilitado():
-        print(f'{_LOG} desactivado (LOCALIS_IMG_BACKFILL=0)')
+        logger.info(f'{_LOG} desactivado (LOCALIS_IMG_BACKFILL=0)')
         return None
     with _lock:
         if _iniciado:

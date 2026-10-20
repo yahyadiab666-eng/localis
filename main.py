@@ -1,4 +1,5 @@
 import logging
+logger = logging.getLogger('localis.app')
 import mimetypes
 import os
 import threading
@@ -22,16 +23,16 @@ def _auditar_variables_entorno():
         presente = bool((os.environ.get(clave) or '').strip())
         if presente:
             _log.info('%s=presente', clave)
-            print(f'[Localis Config] {clave}=presente', flush=True)
+            logger.info(f'[Localis Config] {clave}=presente')
         else:
             _log.error('%s ausente o vacia', clave)
-            print(f'[Localis Config] ERROR {clave} ausente o vacia', flush=True)
+            logger.error(f'[Localis Config] ERROR {clave} ausente o vacia')
     canon = (os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or '').strip()
     typo = (os.environ.get('SUPABASE_SERVICE_ROL_KEY') or '').strip()
     secret = (os.environ.get('SUPABASE_SECRET_KEY') or '').strip()
     if canon:
         _log.info('SUPABASE_SERVICE_ROLE_KEY=presente')
-        print('[Localis Config] SUPABASE_SERVICE_ROLE_KEY=presente', flush=True)
+        logger.info('[Localis Config] SUPABASE_SERVICE_ROLE_KEY=presente')
     elif typo or secret:
         _log.warning(
             'SUPABASE_SERVICE_ROLE_KEY ausente; hay alias/typo. Usa el nombre exacto.'
@@ -62,9 +63,9 @@ GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '').strip()
 GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '').strip()
 
 if not GOOGLE_CLIENT_ID:
-    print('Aviso: GOOGLE_CLIENT_ID no configurado en .env')
+    logger.info('Aviso: GOOGLE_CLIENT_ID no configurado en .env')
 else:
-    print('Google OAuth configurado correctamente.')
+    logger.info('Google OAuth configurado correctamente.')
 
 
 from backend.supabase_client import (
@@ -73,7 +74,7 @@ from backend.supabase_client import (
     supabase_storage_habilitado,
 )
 if supabase_storage_habilitado():
-    print('Supabase Storage configurado con SUPABASE_SERVICE_ROLE_KEY.')
+    logger.info('Supabase Storage configurado con SUPABASE_SERVICE_ROLE_KEY.')
 else:
     print(
         'Aviso: Storage en modo hibrido (sin SUPABASE_SERVICE_ROLE_KEY valida). '
@@ -130,7 +131,7 @@ from database import BaseDatosNoDisponible, calentar_pool_bd, init_db, normalize
 try:
     from backend.payment_ocr import validar_comprobante_pago_movil
 except Exception:
-    print('[Localis] No se pudo importar OCR de comprobantes (no bloquea el arranque):', flush=True)
+    logger.error('[Localis] No se pudo importar OCR de comprobantes (no bloquea el arranque):')
     traceback.print_exc()
 
     def validar_comprobante_pago_movil(*_args, **_kwargs):
@@ -184,7 +185,7 @@ from backend.apariencia import (
     opciones_banner,
 )
 
-print('[Localis] Creando aplicación Flask...', flush=True)
+logger.info('[Localis] Creando aplicación Flask...')
 
 mimetypes.add_type('image/webp', '.webp')
 
@@ -224,7 +225,7 @@ try:
     try:
         app.secret_key = obtener_secret_key()
     except Exception:
-        print('[Localis] LOCALIS_SECRET_KEY no disponible; el worker sigue vivo con clave de respaldo.', flush=True)
+        logger.error('[Localis] LOCALIS_SECRET_KEY no disponible; el worker sigue vivo con clave de respaldo.')
         traceback.print_exc()
         app.secret_key = (
             (os.environ.get('LOCALIS_SECRET_KEY') or '').strip()
@@ -243,7 +244,7 @@ try:
     registrar_request_logging(app)
     registrar_manejadores_errores(app)
 except Exception:
-    print('[Localis] Error al configurar Flask (el proceso no se detiene para que Gunicorn enlace el puerto):', flush=True)
+    logger.error('[Localis] Error al configurar Flask (el proceso no se detiene para que Gunicorn enlace el puerto):')
     traceback.print_exc()
     if not app.secret_key:
         app.secret_key = 'localis-arranque-degradado'
@@ -258,7 +259,7 @@ try:
 
     iniciar_backfill_periodico()
 except Exception as _error_backfill:
-    print(f'[Localis] backfill periódico no iniciado: {_error_backfill}')
+    logger.error(f'[Localis] backfill periódico no iniciado: {_error_backfill}')
 
 
 @app.template_filter('fecha_corta')
@@ -368,7 +369,7 @@ def _inyectar_tasa_bcv():
     try:
         return {'tasa_bcv': obtener_tasa_bcv()}
     except Exception as error:  # defensivo: una tasa ausente no debe tumbar la vista
-        print(f'[Localis Tasa] contexto BCV no disponible: {type(error).__name__}: {error}')
+        logger.error(f'[Localis Tasa] contexto BCV no disponible: {type(error).__name__}: {error}')
         return {
             'tasa_bcv': {
                 'ok': False,
@@ -396,7 +397,7 @@ def _diagnosticar_serper():
 
         informe = diagnosticar(imprimir=False)
         if informe.get('ok'):
-            print('[Localis Serper] Credenciales válidas (HTTP 200).', flush=True)
+            logger.info('[Localis Serper] Credenciales válidas (HTTP 200).')
         elif informe.get('categoria') == 'clave_invalida':
             print(
                 '[Localis Serper] La clave SERPER_API_KEY NO es válida. '
@@ -410,18 +411,18 @@ def _diagnosticar_serper():
                 flush=True,
             )
     except Exception as error:
-        print(f'[Localis Serper] diagnóstico omitido: {type(error).__name__}: {error}')
+        logger.error(f'[Localis Serper] diagnóstico omitido: {type(error).__name__}: {error}')
 
 
 def _inicializar_aplicacion():
     """Migraciones y diagnóstico fuera del hilo que importa el WSGI (Gunicorn ya puede bind)."""
-    print('[Localis] Inicialización en segundo plano...', flush=True)
+    logger.info('[Localis] Inicialización en segundo plano...')
     try:
         advertencias = validar_config_arranque()
         for aviso in advertencias:
-            print(f'[Localis Config] {aviso}', flush=True)
+            logger.info(f'[Localis Config] {aviso}')
         if db_url:
-            print('Base de datos: PostgreSQL (DATABASE_URL).', flush=True)
+            logger.info('Base de datos: PostgreSQL (DATABASE_URL).')
         init_db()
         # Warm-up explícito: deja el pool y la conexión verificados antes de
         # que la primera petición real pague el connect en frío del pooler.
@@ -443,9 +444,9 @@ def _inicializar_aplicacion():
         if pagos_habilitados():
             verificar_vencimientos_comercios()
         # --- RESTAURAR_PAGOS_FIN ---
-        print('[Localis] Inicialización completada.', flush=True)
+        logger.info('[Localis] Inicialización completada.')
     except Exception as error:
-        print(f'[Localis] Error al inicializar la aplicación: {error}', flush=True)
+        logger.error(f'[Localis] Error al inicializar la aplicación: {error}')
         traceback.print_exc()
         try:
             from backend.diagnostics import reportar_error_critico_async
@@ -486,7 +487,7 @@ def _mantenimiento_vencimientos_async():
             verificar_vencimientos_comercios()
         # --- RESTAURAR_PAGOS_FIN ---
     except Exception as error:
-        print(f'Aviso verificación vencimientos (async): {error}')
+        logger.error(f'Aviso verificación vencimientos (async): {error}')
     finally:
         _vencimientos_en_vuelo = False
         try:
@@ -538,7 +539,7 @@ def sincronizar_vencimientos_suscripcion():
             verificar_vencimiento_comercio(comercio_id)
             session['_venc_comercio_ts'] = ahora
     except Exception as error:
-        print(f'Aviso sincronización de vencimientos: {error}')
+        logger.error(f'Aviso sincronización de vencimientos: {error}')
 
 
 @app.after_request
@@ -772,9 +773,9 @@ def health_ready():
 
 def inicializar_base_de_datos():
     if init_db():
-        print('\nBase de datos e índices verificados/actualizados.\n')
+        logger.info('\nBase de datos e índices verificados/actualizados.\n')
     else:
-        print('\nNo se pudo completar init_db().\n')
+        logger.error('\nNo se pudo completar init_db().\n')
 
 
 # ==========================================
@@ -844,11 +845,11 @@ def index():
             # BD no disponible tras los reintentos: se renderiza sin productos
             # pero marcando la respuesta para que el Service Worker NO la
             # cachee, evitando "envenenar" la portada tras inactividad.
-            print(f'[Localis] portada degradada (BD no disponible): {error}')
+            logger.error(f'[Localis] portada degradada (BD no disponible): {error}')
             productos, hay_mas = [], False
             catalogo_degradado = True
         except Exception as error:
-            print(f'[Localis] portada fallo: {type(error).__name__}: {error}')
+            logger.error(f'[Localis] portada fallo: {type(error).__name__}: {error}')
             traceback.print_exc()
             productos, hay_mas = [], False
 
@@ -1120,13 +1121,13 @@ def tienda_qr_png(comercio_id):
     try:
         from backend.qr_codes import generar_qr_png
     except Exception as error:
-        print(f'[Localis QR] librería no disponible: {error}')
+        logger.error(f'[Localis QR] librería no disponible: {error}')
         return Response('Código QR no disponible.', status=503)
 
     try:
         png = generar_qr_png(_url_tienda_externa(comercio_id, origen='qr'))
     except Exception as error:
-        print(f'[Localis QR] generación fallida: {error}')
+        logger.error(f'[Localis QR] generación fallida: {error}')
         return Response('No se pudo generar el código QR.', status=500)
 
     return Response(

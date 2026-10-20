@@ -8,6 +8,8 @@ Imágenes de producto: subida manual (Storage/local) y pipeline profesional dife
 """
 
 from __future__ import annotations
+import logging
+logger = logging.getLogger('localis.image_lookup')
 
 import os
 import sqlite3
@@ -36,7 +38,7 @@ _descubrimiento_lock = threading.Lock()
 
 
 def _registrar_error_imagen(contexto, error):
-    print(f'{_LOG_IMAGEN} ERROR {contexto}: {type(error).__name__}: {error}')
+    logger.error(f'{_LOG_IMAGEN} ERROR {contexto}: {type(error).__name__}: {error}')
 
 
 def es_imagen_manual(valor):
@@ -205,7 +207,7 @@ def asociar_imagenes_inventario(comercio_id):
 
         return procesar_inventario(comercio_id, limite=_MAX_CSV_API)
     except Exception as error:
-        print(f'{_LOG_CSV} pipeline profesional no disponible: {type(error).__name__}: {error}')
+        logger.error(f'{_LOG_CSV} pipeline profesional no disponible: {type(error).__name__}: {error}')
         return 0
 
 
@@ -214,13 +216,13 @@ def programar_asociacion_imagenes_inventario(comercio_id):
         return None
     with _descubrimiento_lock:
         if comercio_id in _asociacion_en_vuelo:
-            print(f'{_LOG_CSV} pipeline ya en vuelo comercio={comercio_id}, omitido')
+            logger.info(f'{_LOG_CSV} pipeline ya en vuelo comercio={comercio_id}, omitido')
             return None
         _asociacion_en_vuelo.add(comercio_id)
 
     def _trabajo():
         try:
-            print(f'{_LOG_CSV} pipeline profesional inicio comercio={comercio_id}')
+            logger.info(f'{_LOG_CSV} pipeline profesional inicio comercio={comercio_id}')
             actualizados = asociar_imagenes_inventario(comercio_id)
             print(
                 f'{_LOG_CSV} pipeline profesional fin comercio={comercio_id} '
@@ -251,16 +253,16 @@ def programar_descubrimiento_producto(producto_id, categoria=None):
     la respuesta HTTP ni depende de APIs de pago.
     """
     if not producto_id:
-        print(f'{_LOG_IMAGEN} descubrimiento omitido: producto_id vacío')
+        logger.info(f'{_LOG_IMAGEN} descubrimiento omitido: producto_id vacío')
         return False
     pid = int(producto_id)
     with _descubrimiento_lock:
         if pid in _descubrimiento_en_vuelo:
-            print(f'{_LOG_IMAGEN} descubrimiento producto={pid} ya en vuelo, omitido')
+            logger.info(f'{_LOG_IMAGEN} descubrimiento producto={pid} ya en vuelo, omitido')
             return False
         _descubrimiento_en_vuelo.add(pid)
 
-    print(f'{_LOG_IMAGEN} pipeline profesional programado producto={pid} categoria={categoria!r}')
+    logger.info(f'{_LOG_IMAGEN} pipeline profesional programado producto={pid} categoria={categoria!r}')
 
     def _trabajo():
         try:

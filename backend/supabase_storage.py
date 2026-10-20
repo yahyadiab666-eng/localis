@@ -5,6 +5,8 @@ Subida de archivos a Supabase Storage (modo hibrido).
 - Sin llave o ante 403/red: comprime, guarda en static/uploads/ y no bloquea.
 - En segundo plano intenta copiar la foto local al bucket cuando hay service_role.
 """
+import logging
+logger = logging.getLogger('localis.supabase_storage')
 
 from urllib.parse import quote
 import threading
@@ -285,12 +287,12 @@ def _persistir_en_supabase(
             data, filename, content_type, carpeta=carpeta
         )
     except Exception as error:
-        print(f'{LOG_PREFIX} compresión previa omitida: {type(error).__name__}: {error}')
+        logger.error(f'{LOG_PREFIX} compresión previa omitida: {type(error).__name__}: {error}')
 
     ruta_storage = f'{carpeta.strip("/")}/{filename}'
     if not clave_es_service_role(SUPABASE_SERVICE_ROLE_KEY):
         mensaje = _mensaje_cliente_no_configurado()
-        print(f'{LOG_PREFIX} {mensaje}')
+        logger.info(f'{LOG_PREFIX} {mensaje}')
         raise SupabaseUploadError(mensaje)
 
     cliente = _resolver_cliente_storage(supabase_client)
@@ -341,7 +343,7 @@ def intentar_subir_imagen(
             lienzo_cuadrado=(carpeta == 'productos'),
         )
     except ImageProcessingError as error:
-        print(f'{LOG_PREFIX} compresion omitida: {error}')
+        logger.error(f'{LOG_PREFIX} compresion omitida: {error}')
         return None, str(error)
     except Exception as error:
         print(
@@ -368,7 +370,7 @@ def intentar_subir_imagen(
         )
         return url or url_local, None
     except SupabaseUploadError as error:
-        print(f'{LOG_PREFIX} modo hibrido, subida omitida: {error}')
+        logger.error(f'{LOG_PREFIX} modo hibrido, subida omitida: {error}')
         if url_local:
             return url_local, None
         url_local = _guardar_respaldo_local(data, filename, carpeta)
@@ -465,7 +467,7 @@ def intentar_subir_bytes(
         )
         return url, None
     except SupabaseUploadError as error:
-        print(f'{LOG_PREFIX} modo hibrido, bytes omitidos: {error}')
+        logger.error(f'{LOG_PREFIX} modo hibrido, bytes omitidos: {error}')
         return None, AVISO_HIBRIDO_USUARIO
     except Exception as error:
         print(
@@ -556,7 +558,7 @@ def asegurar_politicas_bucket_imagenes():
             cursor = conexion.cursor()
             cursor.execute(sql)
             conexion.commit()
-        print(f'{LOG_PREFIX} Politicas RLS del bucket imagenes verificadas (service_role + SELECT publico).')
+        logger.info(f'{LOG_PREFIX} Politicas RLS del bucket imagenes verificadas (service_role + SELECT publico).')
         return True
     except Exception as error:
         print(

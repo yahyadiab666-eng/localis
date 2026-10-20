@@ -1,4 +1,6 @@
 """Ciclo de vida automático de suscripciones, avisos y pagos."""
+import logging
+logger = logging.getLogger('localis.subscriptions')
 
 import re
 import sqlite3
@@ -39,7 +41,7 @@ def verificar_vencimientos_comercios():
             conexion.commit()
             return cursor.rowcount + aplicados
     except Exception as e:
-        print(f'Aviso verificación vencimientos: {e}')
+        logger.info(f'Aviso verificación vencimientos: {e}')
         return aplicados
 
 
@@ -75,7 +77,7 @@ def aplicar_planes_pendientes():
             conexion.commit()
             return cursor.rowcount
     except Exception as e:
-        print(f'Aviso aplicar planes pendientes: {e}')
+        logger.info(f'Aviso aplicar planes pendientes: {e}')
         return 0
 
 
@@ -97,7 +99,7 @@ def verificar_vencimiento_comercio(comercio_id):
             conexion.commit()
             return cursor.rowcount > 0
     except Exception as e:
-        print(f'Aviso verificación vencimiento comercio {comercio_id}: {e}')
+        logger.info(f'Aviso verificación vencimiento comercio {comercio_id}: {e}')
         return False
 
 
@@ -285,7 +287,7 @@ def marcar_bienvenida_vista(comercio_id):
             conexion.commit()
             return cursor.rowcount > 0
     except Exception as e:
-        print(f'Error al marcar bienvenida vista: {e}')
+        logger.error(f'Error al marcar bienvenida vista: {e}')
         return False
 
 

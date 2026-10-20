@@ -1,6 +1,8 @@
 """Cliente PostgREST ligero (httpx) sin SDK de Supabase — catálogo maestro."""
 
 from __future__ import annotations
+import logging
+logger = logging.getLogger('localis.postgrest_http')
 
 import json
 from urllib.parse import quote
@@ -76,7 +78,7 @@ def _manejar_fallo_red(error: Exception, contexto: str) -> None:
             'Catálogo maestro continúa vía PostgreSQL directo.'
         )
     else:
-        print(f'{LOG_PREFIX} Error en {contexto}: {type(error).__name__}: {error}')
+        logger.error(f'{LOG_PREFIX} Error en {contexto}: {type(error).__name__}: {error}')
 
 
 def consultar_imagen_maestro(codigo: str) -> str | None:

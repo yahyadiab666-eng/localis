@@ -28,6 +28,8 @@ API pública::
 """
 
 from __future__ import annotations
+import logging
+logger = logging.getLogger('localis.import_queue')
 
 import io
 import os
@@ -71,7 +73,7 @@ _procesador = None  # inyección para pruebas
 
 
 def _log(mensaje):
-    print(f'{_LOG} {mensaje}', flush=True)
+    logger.info(f'{_LOG} {mensaje}')
 
 
 def _carpeta_cola():

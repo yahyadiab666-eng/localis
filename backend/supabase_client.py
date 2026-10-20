@@ -1,6 +1,8 @@
 """Cliente Supabase Storage + helpers de URL pública."""
 
 from __future__ import annotations
+import logging
+logger = logging.getLogger('localis.supabase_client')
 
 import base64
 import json
@@ -215,10 +217,10 @@ def _imprimir_estado_supabase():
     host = _extraer_host_desde_url(SUPABASE_URL) or SUPABASE_URL
     raw_host = _extraer_host_desde_url(_limpiar_valor_env(os.getenv('SUPABASE_URL')))
     if raw_host and raw_host != host:
-        print(f'{prefijo} Host tras sanitización: {raw_host} -> {host}')
+        logger.info(f'{prefijo} Host tras sanitización: {raw_host} -> {host}')
     raw_limpia = _limpiar_valor_env(_URL_RAW).rstrip('/')
     if raw_limpia and SUPABASE_URL and raw_limpia != SUPABASE_URL:
-        print(f'{prefijo} URL sanitizada para el cliente: {SUPABASE_URL}')
+        logger.info(f'{prefijo} URL sanitizada para el cliente: {SUPABASE_URL}')
     print(
         f'{prefijo} URL={SUPABASE_URL} host={host} | '
         f'SUPABASE_KEY={_mascara_secreto(SUPABASE_KEY)} | '
@@ -249,9 +251,9 @@ def _imprimir_estado_supabase():
                 f'Nombre exacto: {ENV_SERVICE_ROLE}.'
             )
     if supabase:
-        print(f'{prefijo} Cliente API (anon/publishable) disponible para PostgREST.')
+        logger.info(f'{prefijo} Cliente API (anon/publishable) disponible para PostgREST.')
     elif SUPABASE_KEY:
-        print(f'{prefijo} Cliente API anon no se pudo crear; PostgREST HTTP deshabilitado.')
+        logger.error(f'{prefijo} Cliente API anon no se pudo crear; PostgREST HTTP deshabilitado.')
 
 
 _URL_RAW = leer_supabase_url_entorno()
@@ -383,9 +385,9 @@ def aplicar_diagnostico_conectividad(informe: dict) -> None:
     capa = informe.get('capa_fallo') or 'desconocida'
     abrir_circuito_postgrest(f'diagnóstico arranque: capa={capa}')
     for aviso in informe.get('advertencias_config') or []:
-        print(f'[Localis Supabase] URL: {aviso}')
+        logger.info(f'[Localis Supabase] URL: {aviso}')
     for error in informe.get('errores_config') or []:
-        print(f'[Localis Supabase] URL inválida: {error}')
+        logger.error(f'[Localis Supabase] URL inválida: {error}')
 
 
 def registrar_modo_catalogo_maestro() -> None:
@@ -406,7 +408,7 @@ def registrar_modo_catalogo_maestro() -> None:
             '[Localis Catálogo maestro] Backend: PostgREST HTTP (httpx, sin SDK).'
         )
     else:
-        print('[Localis Catálogo maestro] Backend: no disponible (revisa DATABASE_URL).')
+        logger.error('[Localis Catálogo maestro] Backend: no disponible (revisa DATABASE_URL).')
 
 
 if SUPABASE_URL and SUPABASE_KEY:

@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger('localis.admin')
 import os
 import re
 import sqlite3
@@ -71,7 +73,7 @@ def obtener_bandeja_tecnica(estado_filtro=None):
             cursor.execute(query, parametros)
             return [dict(fila) for fila in cursor.fetchall()]
     except Exception as e:
-        print(f'Error al obtener la bandeja técnica: {str(e)}')
+        logger.error(f'Error al obtener la bandeja técnica: {str(e)}')
         return []
 
 
@@ -385,7 +387,7 @@ def obtener_todos_comercios_admin(busqueda=None):
                 cursor.execute(query, parametros)
                 return [dict(f) for f in cursor.fetchall()]
     except Exception as e:
-        print(f'Error al listar comercios: {e}')
+        logger.error(f'Error al listar comercios: {e}')
         return []
 
 
@@ -514,7 +516,7 @@ def obtener_comercio_admin(comercio_id):
                 comercio['total_comercios_dueno'] = 0
             return comercio
     except Exception as e:
-        print(f'Error al obtener comercio admin (id={comercio_id}): {e}')
+        logger.error(f'Error al obtener comercio admin (id={comercio_id}): {e}')
         return None
 
 
@@ -570,7 +572,7 @@ def obtener_productos_admin(comercio_id, busqueda=None):
                 )
                 return [dict(f) for f in cursor.fetchall()]
     except Exception as e:
-        print(f'Error al listar productos admin (comercio={comercio_id}): {e}')
+        logger.error(f'Error al listar productos admin (comercio={comercio_id}): {e}')
         return []
 
 
@@ -773,7 +775,7 @@ def obtener_usuarios_admin(busqueda=None):
                 usuario['comercios'] = [dict(f) for f in cursor.fetchall()]
             return usuarios
     except Exception as e:
-        print(f'Error al listar usuarios admin: {e}')
+        logger.error(f'Error al listar usuarios admin: {e}')
         return []
 
 
@@ -841,7 +843,7 @@ def _cargar_categorias_admin(solo_activas=True):
                 )
             filas = [dict(f) for f in cursor.fetchall()]
     except Exception as e:
-        print(f'Error al listar categorias admin: {e}')
+        logger.error(f'Error al listar categorias admin: {e}')
         return []
     return [
         fila
@@ -986,7 +988,7 @@ def obtener_producto_admin(producto_id, comercio_id=None):
             fila = cursor.fetchone()
             return dict(fila) if fila else None
     except Exception as e:
-        print(f'Error al obtener producto admin: {e}')
+        logger.error(f'Error al obtener producto admin: {e}')
         return None
 
 
@@ -1104,6 +1106,6 @@ def actualizar_producto_admin(
             )
             conexion.commit()
     except Exception as e:
-        print(f'[Localis Admin] aviso auditoría edición producto: {e}')
+        logger.info(f'[Localis Admin] aviso auditoría edición producto: {e}')
 
     return True, 'Producto actualizado por el administrador.'

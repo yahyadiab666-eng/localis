@@ -19,6 +19,8 @@ por clave y su resultado (positivo o negativo) queda registrado.
 """
 
 from __future__ import annotations
+import logging
+logger = logging.getLogger('localis.imagenes_producto')
 
 import os
 import re
@@ -130,7 +132,7 @@ def obtener_automatica(clave):
             fila = cursor.fetchone()
             return _fila_dict(fila) if fila is not None else None
     except Exception as error:
-        print(f'{_LOG} obtener_automatica fallo clave={clave}: {type(error).__name__}')
+        logger.error(f'{_LOG} obtener_automatica fallo clave={clave}: {type(error).__name__}')
         return None
 
 
@@ -198,7 +200,7 @@ def registrar_automatica(
             conexion.commit()
         return True
     except Exception as error:
-        print(f'{_LOG} registrar_automatica fallo clave={clave}: {type(error).__name__}: {error}')
+        logger.error(f'{_LOG} registrar_automatica fallo clave={clave}: {type(error).__name__}: {error}')
         return False
 
 
@@ -300,7 +302,7 @@ def resolver_activa(producto_id):
             conexion.commit()
         return {'activa': activa, 'manual': manual, 'fuente': fuente, 'estado': estado}
     except Exception as error:
-        print(f'{_LOG} resolver_activa fallo producto={producto_id}: {type(error).__name__}')
+        logger.error(f'{_LOG} resolver_activa fallo producto={producto_id}: {type(error).__name__}')
         return None
 
 
@@ -389,9 +391,9 @@ def purgar_manual(url):
             if destino.is_file():
                 destino.unlink()
                 borrado = True
-                print(f'{_LOG} manual local borrado: {carpeta}/{filename}')
+                logger.info(f'{_LOG} manual local borrado: {carpeta}/{filename}')
     except Exception as error:
-        print(f'{_LOG} purga local omitida {carpeta}/{filename}: {type(error).__name__}')
+        logger.error(f'{_LOG} purga local omitida {carpeta}/{filename}: {type(error).__name__}')
     # Storage
     if str(url).startswith('http'):
         try:
@@ -406,9 +408,9 @@ def purgar_manual(url):
                     [f'{carpeta}/{filename}']
                 )
                 borrado = True
-                print(f'{_LOG} manual en Storage borrado: {carpeta}/{filename}')
+                logger.info(f'{_LOG} manual en Storage borrado: {carpeta}/{filename}')
         except Exception as error:
-            print(f'{_LOG} purga Storage omitida {carpeta}/{filename}: {type(error).__name__}')
+            logger.error(f'{_LOG} purga Storage omitida {carpeta}/{filename}: {type(error).__name__}')
     return borrado
 
 
@@ -439,14 +441,14 @@ def marcar_manual(producto_id, url, fuente='manual'):
             )
             conexion.commit()
     except Exception as error:
-        print(f'{_LOG} marcar_manual fallo producto={producto_id}: {type(error).__name__}')
+        logger.error(f'{_LOG} marcar_manual fallo producto={producto_id}: {type(error).__name__}')
         return False
 
     if anterior and anterior != url:
         try:
             purgar_manual(anterior)
         except Exception as error:
-            print(f'{_LOG} purga de manual anterior falló: {type(error).__name__}')
+            logger.error(f'{_LOG} purga de manual anterior falló: {type(error).__name__}')
     return resolver_activa(producto_id)
 
 
@@ -474,14 +476,14 @@ def eliminar_manual(producto_id, *, purgar=True):
             )
             conexion.commit()
     except Exception as error:
-        print(f'{_LOG} eliminar_manual fallo producto={producto_id}: {type(error).__name__}')
+        logger.error(f'{_LOG} eliminar_manual fallo producto={producto_id}: {type(error).__name__}')
         return False
 
     if anterior and purgar:
         try:
             purgar_manual(anterior)
         except Exception as error:
-            print(f'{_LOG} purga de manual descartada falló: {type(error).__name__}')
+            logger.error(f'{_LOG} purga de manual descartada falló: {type(error).__name__}')
     return resolver_activa(producto_id)
 
 
@@ -910,7 +912,7 @@ def reparar_imagenes_comercio(comercio_id, limite=40):
                     marcadas += 1
             conexion.commit()
     except Exception as error:
-        print(f'{_LOG} reparación de imágenes fallo comercio={comercio_id}: {type(error).__name__}')
+        logger.error(f'{_LOG} reparación de imágenes fallo comercio={comercio_id}: {type(error).__name__}')
 
     if reparadas or marcadas:
         print(
@@ -1118,7 +1120,7 @@ def buscar_o_cachear_automatica(
                     categoria=categoria,
                 )
             except Exception as error:
-                print(f'{_LOG} no se pudo indexar EAN en catálogo global: {type(error).__name__}')
+                logger.error(f'{_LOG} no se pudo indexar EAN en catálogo global: {type(error).__name__}')
         resultado.update(
             {
                 'url': encontrado.get('url'),

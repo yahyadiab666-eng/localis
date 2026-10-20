@@ -7,6 +7,8 @@ cambio. Los helpers de vista viven en ``backend/vistas_comercio.py``.
 """
 
 from __future__ import annotations
+import logging
+logger = logging.getLogger('localis.blueprints.comercio')
 
 import sqlite3
 import traceback
@@ -104,7 +106,7 @@ def panel_comercio():
         )
     except Exception as error:
         # Trazabilidad total: nunca ocultar el error real.
-        print(f'[Localis] panel_comercio carga fallo: {type(error).__name__}: {error}')
+        logger.error(f'[Localis] panel_comercio carga fallo: {type(error).__name__}: {error}')
         traceback.print_exc()
         comercio, productos, tasa_actual, categorias = None, [], 1.0, None
 
@@ -120,13 +122,13 @@ def panel_comercio():
     try:
         avisos = obtener_avisos_suscripcion(comercio) or {}
     except Exception as error:
-        print(f'[Localis] panel_comercio avisos fallo: {type(error).__name__}: {error}')
+        logger.error(f'[Localis] panel_comercio avisos fallo: {type(error).__name__}: {error}')
         traceback.print_exc()
         avisos = {}
     try:
         metricas = resumen_interacciones(comercio.get('id'), dias=30)
     except Exception as error:
-        print(f'[Localis] panel_comercio metricas fallo: {type(error).__name__}: {error}')
+        logger.error(f'[Localis] panel_comercio metricas fallo: {type(error).__name__}: {error}')
         traceback.print_exc()
         metricas = {'total': 0, 'detalle': [], 'productos_top': [], 'disponible': False, 'dias': 30}
     try:
@@ -139,21 +141,21 @@ def panel_comercio():
             estado_boosts_productos(comercio.get('id')) if comercio.get('id') else {}
         )
     except Exception as error:
-        print(f'[Localis] panel_comercio boosts fallo: {type(error).__name__}: {error}')
+        logger.error(f'[Localis] panel_comercio boosts fallo: {type(error).__name__}: {error}')
         boosts = {'productos': {}}
 
     # Datos de pago movil (misma fuente que el flujo de planes) para el modal.
     try:
         pago_movil = obtener_datos_pago_movil()
     except Exception as error:
-        print(f'[Localis] panel_comercio pago movil fallo: {type(error).__name__}: {error}')
+        logger.error(f'[Localis] panel_comercio pago movil fallo: {type(error).__name__}: {error}')
         pago_movil = {}
 
     # Premios y puntos (canje de destacados gratuitos).
     try:
         premios = resumen_premios(comercio.get('id')) if comercio.get('id') else {}
     except Exception as error:
-        print(f'[Localis] panel_comercio premios fallo: {type(error).__name__}: {error}')
+        logger.error(f'[Localis] panel_comercio premios fallo: {type(error).__name__}: {error}')
         premios = {'puntos': 0, 'puntos_por_destacado': PUNTOS_POR_DESTACADO}
 
     productos = productos or []
@@ -178,7 +180,7 @@ def panel_comercio():
     except Exception as error:
         # Sin pantallas artificiales: se registra el error real y se propaga al
         # manejador global (que tambien deja el traceback en consola).
-        print(f'[Localis] panel_comercio render fallo: {type(error).__name__}: {error}')
+        logger.error(f'[Localis] panel_comercio render fallo: {type(error).__name__}: {error}')
         traceback.print_exc()
         raise
 
@@ -228,7 +230,7 @@ def comercio_planes():
     except psycopg2.Error:
         raise
     except Exception as error:
-        print(f'Error al cargar planes del comercio: {error}')
+        logger.error(f'Error al cargar planes del comercio: {error}')
         flash('No se pudo cargar la página de planes.', 'error')
         return redirect(url_for('comercio.panel_comercio'))
 
@@ -318,7 +320,7 @@ def crear_comercio():
     except psycopg2.Error:
         raise
     except Exception as error:
-        print(f'Error al registrar comercio: {error}')
+        logger.error(f'Error al registrar comercio: {error}')
         flash('No se pudo registrar el comercio. Intenta de nuevo.', 'error')
         return redirect(url_for('comercio.panel_comercio'))
 
@@ -427,7 +429,7 @@ def nuevo_producto():
             if aviso_img:
                 flash(aviso_img, 'info')
         except Exception as error:
-            print(f'[Localis Imagen] hibrido alta producto: {error}')
+            logger.error(f'[Localis Imagen] hibrido alta producto: {error}')
             traceback.print_exc()
             imagen_url = imagen_url_para_persistir(imagen_url_form)
 
@@ -594,7 +596,7 @@ def eliminar_producto_ruta(producto_id):
         try:
             purgar_manual(manual)
         except Exception as error:
-            print(f'[Localis Imagen] purga manual al eliminar producto: {error}')
+            logger.error(f'[Localis Imagen] purga manual al eliminar producto: {error}')
     flash(mensaje, 'exito' if exito else 'error')
     return redirect(url_for('comercio.panel_comercio'))
 
@@ -792,7 +794,7 @@ def comercio_premios():
     try:
         premios = resumen_premios(comercio['id'])
     except Exception as error:
-        print(f'[Localis] premios fallo: {type(error).__name__}: {error}')
+        logger.error(f'[Localis] premios fallo: {type(error).__name__}: {error}')
         premios = {
             'puntos': 0,
             'referidos_total': 0,

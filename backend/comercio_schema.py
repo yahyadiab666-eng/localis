@@ -1,4 +1,6 @@
 """Mapeo de columnas de comercios (esquema oficial Supabase + alias internos)."""
+import logging
+logger = logging.getLogger('localis.comercio_schema')
 
 import re
 import threading
@@ -67,7 +69,7 @@ def _nombres_columnas_comercios(cursor=None):
                     nombres.add(fila[0])
             _cache_columnas = nombres
         except Exception as error:
-            print(f'[Localis Schema] No se pudieron leer columnas de comercios: {error}')
+            logger.error(f'[Localis Schema] No se pudieron leer columnas de comercios: {error}')
             _cache_columnas = {
                 COL_LOGO_INTERNO,
                 COL_BANNER_INTERNO,

@@ -4,6 +4,8 @@ Reutiliza la configuración SMTP existente (``config.py``). Pensado para avisar
 al dueño cuando se le transfiere/reasigna una tienda. Nunca lanza: si el correo
 falla, solo se registra en consola.
 """
+import logging
+logger = logging.getLogger('localis.correo')
 
 import os
 import smtplib
@@ -75,7 +77,7 @@ def enviar_correo_async(destinatario, asunto, cuerpo):
         )
         hilo.start()
     except Exception as error:
-        print(f'{LOG_PREFIX} no se pudo lanzar el envío: {error}', flush=True)
+        logger.error(f'{LOG_PREFIX} no se pudo lanzar el envío: {error}')
 
 
 def notificar_propietario_tienda(nombre_tienda, email, vinculado):

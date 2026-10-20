@@ -6,6 +6,8 @@ referencias ``url_for`` se actualizan en el mismo cambio.
 """
 
 from __future__ import annotations
+import logging
+logger = logging.getLogger('localis.blueprints.admin')
 
 import traceback
 
@@ -445,7 +447,7 @@ def admin_nuevo_producto(comercio_id):
             if aviso_img:
                 flash(aviso_img, 'info')
         except Exception as error:
-            print(f'[Localis Admin Imagen] alta producto: {error}')
+            logger.error(f'[Localis Admin Imagen] alta producto: {error}')
             traceback.print_exc()
             imagen_url = imagen_url_para_persistir(imagen_url_form)
 

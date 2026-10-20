@@ -40,6 +40,8 @@ hacia el pipeline (salvo al llamar a :func:`require_clave`, que sí es explícit
 """
 
 from __future__ import annotations
+import logging
+logger = logging.getLogger('localis.serper_images')
 
 import os
 import threading
@@ -561,7 +563,7 @@ def diagnosticar(*, consulta='laptop', imprimir=True):
         informe['categoria'] = 'configuracion'
         informe['mensaje'] = f'Falta {_VAR_CLAVE}.'
         if imprimir:
-            print(f'{_LOG} diagnostico={informe["categoria"]} {informe["mensaje"]}', flush=True)
+            logger.info(f'{_LOG} diagnostico={informe["categoria"]} {informe["mensaje"]}')
         return informe
 
     informe['habilitado'] = True
@@ -584,7 +586,7 @@ def diagnosticar(*, consulta='laptop', imprimir=True):
             }
         )
         if imprimir:
-            print(f'{_LOG} diagnostico=red detalle={informe["mensaje"][:160]!r}', flush=True)
+            logger.info(f'{_LOG} diagnostico=red detalle={informe["mensaje"][:160]!r}')
         return informe
 
     informe['status'] = respuesta.status_code
