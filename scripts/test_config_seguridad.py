@@ -114,15 +114,19 @@ def main():
     fallos.append(not _ok(not desprotegidas, f'rutas sin guard: {desprotegidas}'))
 
     # 8) El endpoint de sincronizacion de tasa es solo POST y requiere sesion.
+    #    (vive en el blueprint api desde el Bloque 4)
     print('=== Endpoint de tasa endurecido ===')
+    texto_api = (RAIZ / 'backend' / 'blueprints' / 'api.py').read_text(
+        encoding='utf-8', errors='ignore'
+    )
     fallos.append(
         not _ok(
-            "@app.route('/api/actualizar-tasa', methods=['POST'])" in texto_main,
+            "@bp.route('/actualizar-tasa', methods=['POST'])" in texto_api,
             'solo acepta POST',
         )
     )
     fallos.append(
-        not _ok('No autorizado.' in texto_main, 'requiere sesion (guard 401)')
+        not _ok('No autorizado.' in texto_api, 'requiere sesion (guard 401)')
     )
 
     print('\n=== RESULTADO ===')
