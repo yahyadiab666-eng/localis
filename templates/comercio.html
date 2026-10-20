@@ -40,7 +40,7 @@
                 <!-- RESTAURAR_PAGOS_INICIO -->
                 {# CTA de planes oculto en la fase gratuita. #}
                 {% if not pagos_congelados %}
-                <a href="{{ url_for('comercio_planes', abrir_pago='pro') }}"
+                <a href="{{ url_for('comercio.comercio_planes', abrir_pago='pro') }}"
                    class="btn-touch inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-stone-900 font-bold px-4 py-2 rounded-full text-xs transition shadow-sm">
                   <i data-lucide="credit-card" style="width:14px;height:14px;"></i>
                   Ver planes y actualizar
@@ -131,7 +131,7 @@
               {% if not pagos_congelados %}
               <i data-lucide="credit-card" class="text-amber-600 shrink-0" style="width:15px;height:15px;"></i>
               <span>Plan {{ plan_info.nombre }}</span>
-              <a href="{{ url_for('comercio_planes') }}"
+              <a href="{{ url_for('comercio.comercio_planes') }}"
                  class="btn-touch inline-flex items-center gap-1 text-amber-700 hover:text-amber-900 font-bold underline">
                 Gestionar plan
               </a>
@@ -231,7 +231,7 @@
           </p>
         </div>
 
-                                <form action="{{ url_for('cargar_csv') }}" method="POST" enctype="multipart/form-data"
+                                <form action="{{ url_for('comercio.cargar_csv') }}" method="POST" enctype="multipart/form-data"
               data-loading-texto="Importando inventario…"
               class="panel-comercio-csv-form flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -267,7 +267,7 @@
             · Gestiona el inventario que ven tus clientes
           </p>
         </div>
-                                <a href="{{ url_for('nuevo_producto') }}"
+                                <a href="{{ url_for('comercio.nuevo_producto') }}"
            data-loading-link data-loading-texto="Abriendo formulario…"
            class="btn-touch bg-amber-500 text-stone-900 font-bold px-5 py-2.5 rounded-full text-sm hover:bg-amber-400 transition shadow-sm flex items-center justify-center gap-2">
           <i data-lucide="plus-circle" style="width:18px;height:18px;"></i>
@@ -342,7 +342,7 @@
                           onclick="window.compartirProductoDesdeBoton(this);">
                     <i data-lucide="share-2" style="width:16px;height:16px;"></i>
                   </button>
-                  <a href="{{ url_for('editar_producto', producto_id=producto.id) }}"
+                  <a href="{{ url_for('comercio.editar_producto', producto_id=producto.id) }}"
                      class="btn-touch p-2 rounded-lg text-amber-700 bg-amber-50 hover:bg-amber-100 transition" title="Editar">
                     <i data-lucide="pencil" style="width:16px;height:16px;"></i>
                   </a>
@@ -353,7 +353,7 @@
                           title="{{ 'Renovar destacado' if (boost_info and boost_info.activo) else 'Promocionar / Destacar producto' }}">
                     <i data-lucide="sparkles" style="width:16px;height:16px;"></i>
                   </button>
-                  <form action="{{ url_for('eliminar_producto_ruta', producto_id=producto.id) }}" method="POST" class="inline-block" data-loading="true" data-loading-texto="Eliminando…">
+                  <form action="{{ url_for('comercio.eliminar_producto_ruta', producto_id=producto.id) }}" method="POST" class="inline-block" data-loading="true" data-loading-texto="Eliminando…">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" onclick="return confirm('¿Seguro que deseas eliminar este producto?')"
                             class="btn-touch p-2 rounded-lg text-rose-600 bg-rose-50 hover:bg-rose-100 transition" title="Eliminar">
@@ -407,7 +407,7 @@
         <p class="text-stone-600 text-sm mt-2">Tu plan <strong>{{ avisos.plan_actual | capitalize }}</strong> incluye 30 días de prueba gratuita.</p>
         <p class="text-amber-700 font-bold mt-1">Vence el {{ avisos.fecha_vencimiento }}</p>
       </div>
-            <form action="{{ url_for('suscripcion_marcar_bienvenida') }}" method="POST" data-loading="true" data-loading-texto="Cerrando…">
+            <form action="{{ url_for('comercio.suscripcion_marcar_bienvenida') }}" method="POST" data-loading="true" data-loading-texto="Cerrando…">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn-touch w-full py-3 rounded-full font-bold text-sm bg-amber-500 text-stone-900">¡Entendido!</button>
       </form>
@@ -427,11 +427,11 @@
         <p class="text-stone-600 text-sm mt-2">Tu plan venció el {{ avisos.fecha_vencimiento or '—' }}. Renueva para seguir visible en Localis.</p>
       </div>
       <div class="flex flex-col gap-2">
-        <a href="{{ url_for('comercio_planes', abrir_pago=(comercio.plan_tipo or 'pro')) }}"
+        <a href="{{ url_for('comercio.comercio_planes', abrir_pago=(comercio.plan_tipo or 'pro')) }}"
            class="btn-touch w-full py-3 rounded-full font-bold text-sm bg-amber-500 text-stone-900 text-center">
           Renovar mi plan / Ver planes
         </a>
-                <form id="form-rechazar-vencido" action="{{ url_for('suscripcion_rechazar_vencido') }}" method="POST" data-loading="true" data-loading-texto="Procesando…">
+                <form id="form-rechazar-vencido" action="{{ url_for('comercio.suscripcion_rechazar_vencido') }}" method="POST" data-loading="true" data-loading-texto="Procesando…">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="btn-touch w-full py-3 rounded-full font-bold text-sm border border-stone-300 text-stone-600 hover:bg-stone-50">
             Rechazar / Continuar sin pagar
@@ -618,7 +618,7 @@
             Aún no tienes puntos suficientes (mínimo {{ premios.puntos_minimos or 3 }}). Comparte el
             nombre de tu comercio para que otros lo usen como referencia al registrarse y ganes 1 punto por cada uno.
           </p>
-          <a href="{{ url_for('comercio_premios') }}"
+          <a href="{{ url_for('comercio.comercio_premios') }}"
              class="btn-touch w-full inline-flex items-center justify-center py-3 rounded-full font-bold text-sm border border-stone-300 text-stone-700 hover:bg-stone-50 transition">
             Ver Premios y Puntos
           </a>
@@ -804,7 +804,7 @@
     function canjearBoostConPuntos() {
       const form = document.getElementById('form-boost');
       if (!form) return;
-      form.action = '{{ url_for("boost_canjear_puntos") }}';
+      form.action = '{{ url_for("comercio.boost_canjear_puntos") }}';
       form.method = 'POST';
       form.submit();
     }

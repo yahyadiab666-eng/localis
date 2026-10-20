@@ -26,7 +26,7 @@
         <p class="text-stone-500 text-sm mt-1">Actualiza nombre, contacto, ubicación y logo.</p>
       </div>
 
-      <form action="{{ url_for('editar_comercio') }}" method="POST" enctype="multipart/form-data" class="space-y-5 panel-comercio-form">
+      <form action="{{ url_for('comercio.editar_comercio') }}" method="POST" enctype="multipart/form-data" class="space-y-5 panel-comercio-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
         <div class="space-y-2">

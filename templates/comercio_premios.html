@@ -77,7 +77,7 @@
       </div>
 
       {% if productos %}
-      <form action="{{ url_for('boost_canjear_puntos') }}" method="POST" data-loading="true" data-loading-texto="Canjeando…"
+      <form action="{{ url_for('comercio.boost_canjear_puntos') }}" method="POST" data-loading="true" data-loading-texto="Canjeando…"
             class="flex flex-col sm:flex-row gap-2 sm:items-center pt-2 border-t border-stone-100">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <select name="producto_id" required

@@ -95,7 +95,7 @@
           <i data-lucide="store" class="text-amber-600" style="width:20px;height:20px;"></i>
           Mis comercios
         </h2>
-        <a href="{{ url_for('panel_comercio') }}"
+        <a href="{{ url_for('comercio.panel_comercio') }}"
            class="btn-touch inline-flex items-center gap-2 bg-stone-900 text-white font-bold px-4 py-2 rounded-full text-xs hover:bg-stone-800 transition">
           <i data-lucide="layout-dashboard" style="width:14px;height:14px;"></i> Ir al panel
         </a>
@@ -126,7 +126,7 @@
         <h2 class="font-display text-xl font-bold text-stone-900">¿Tienes un comercio?</h2>
         <p class="text-sm text-stone-500 mt-1">Regístralo y empieza a mostrar tu catálogo en Localis.</p>
       </div>
-      <a href="{{ url_for('crear_comercio') }}"
+      <a href="{{ url_for('comercio.crear_comercio') }}"
          class="btn-touch inline-flex items-center justify-center gap-2 bg-amber-500 text-stone-900 font-bold px-4 py-2.5 rounded-full text-sm hover:bg-amber-400 transition shrink-0">
         <i data-lucide="plus" style="width:16px;height:16px;"></i> Registrar comercio
       </a>

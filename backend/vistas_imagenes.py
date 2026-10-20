@@ -6,6 +6,7 @@ Extraidos de ``main.py`` (Bloque 4) para reutilizarlos desde las rutas de
 
 from __future__ import annotations
 
+import os
 import traceback
 
 from backend.imagenes_producto import eliminar_manual, marcar_manual
@@ -15,7 +16,7 @@ from backend.supabase_storage import (
     programar_sincronizacion_storage,
 )
 from backend.utils import formatear_fecha
-from utils.images import enriquecer_comercio_imagenes
+from utils.images import enriquecer_comercio_imagenes, url_imagen_producto_segura
 
 
 def sincronizar_foto_local_si_aplica(producto_id, imagen_url, carpeta='productos'):
@@ -101,3 +102,35 @@ def normalizar_imagenes_comercio(comercio):
         except (TypeError, ValueError):
             comercio['visible'] = 1
     return comercio
+
+
+def debug_imagenes_antes_de_render(productos, origen):
+    """Print de control: URL persistida vs URL que vera la plantilla (sin I/O)."""
+    if os.getenv('LOCALIS_DEBUG_IMAGENES', '').strip().lower() not in (
+        '1',
+        'true',
+        'yes',
+        'on',
+    ):
+        return
+    try:
+        lista = list(productos or [])
+        print(f'[Localis Imagen] render origen={origen} productos={len(lista)}')
+        for prod in lista[:50]:
+            if hasattr(prod, 'get'):
+                nombre = prod.get('nombre')
+                codigo = prod.get('codigo_barras')
+                url_bd = prod.get('imagen_url')
+            else:
+                nombre = getattr(prod, 'nombre', None)
+                codigo = getattr(prod, 'codigo_barras', None)
+                url_bd = getattr(prod, 'imagen_url', None)
+            url = url_imagen_producto_segura(prod)
+            print(
+                f'[Localis Imagen] nombre={nombre!r} codigo={codigo!r} '
+                f'url_bd={url_bd!r} vista={url!r}'
+            )
+        if len(lista) > 50:
+            print(f'[Localis Imagen] ... {len(lista) - 50} producto(s) mas')
+    except Exception:
+        traceback.print_exc()
