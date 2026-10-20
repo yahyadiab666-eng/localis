@@ -8,7 +8,10 @@ from __future__ import annotations
 
 from backend.imagenes_producto import eliminar_manual, marcar_manual
 from backend.image_lookup import programar_descubrimiento_producto
-from backend.supabase_storage import programar_sincronizacion_storage
+from backend.supabase_storage import (
+    intentar_subir_imagen,
+    programar_sincronizacion_storage,
+)
 
 
 def sincronizar_foto_local_si_aplica(producto_id, imagen_url, carpeta='productos'):
@@ -45,3 +48,17 @@ def quitar_imagen_manual(producto_id):
         eliminar_manual(producto_id)
     except Exception as error:
         print(f'[Localis Imagen] no se pudo quitar la imagen manual: {error}')
+
+
+def procesar_imagen_subida(
+    file_storage, prefijo, carpeta='comercios', max_dimension=800
+):
+    """Intenta Storage; si falla no lanza. Retorna (url | None, aviso | None)."""
+    if not file_storage or not getattr(file_storage, 'filename', ''):
+        return None, None
+    return intentar_subir_imagen(
+        file_storage,
+        prefijo=prefijo,
+        carpeta=carpeta,
+        max_dimension=max_dimension,
+    )
