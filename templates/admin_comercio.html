@@ -137,7 +137,7 @@
                 <ul style="margin-top:6px;padding-left:18px;font-size:0.85rem;">
                     {% for otro in comercio.otros_comercios %}
                     <li style="margin-bottom:4px;">
-                        <a href="{{ url_for('admin_comercio_detalle', comercio_id=otro.id) }}" style="color:#0d6efd;">
+                        <a href="{{ url_for('admin.admin_comercio_detalle', comercio_id=otro.id) }}" style="color:#0d6efd;">
                             {{ otro.nombre }} (#{{ otro.id }})
                         </a>
                         <span class="badge badge-{{ 'visible' if otro.visible == 1 else 'oculto' }}">{{ 'Visible' if otro.visible == 1 else 'Oculto' }}</span>
@@ -306,7 +306,7 @@
                     <h2 style="font-size:1.15rem;">Catálogo del comercio ({{ productos|length }}){% if q %} · filtrado por "{{ q }}"{% endif %}</h2>
                     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
                         <span class="muted">Tasa de referencia: {{ tasa }} Bs/USD</span>
-                        <form action="{{ url_for('admin_comercio_detalle', comercio_id=comercio.id) }}" method="GET"
+                        <form action="{{ url_for('admin.admin_comercio_detalle', comercio_id=comercio.id) }}" method="GET"
                               style="display:flex;gap:6px;align-items:center;margin:0;">
                             <input type="text" name="q" value="{{ q or '' }}"
                                    placeholder="Buscar producto por nombre..."
@@ -314,7 +314,7 @@
                                    style="padding:0.5rem 0.75rem;border:1px solid #ccc;border-radius:4px;font-size:0.85rem;min-width:200px;">
                             <button type="submit" class="btn-accion-tabla btn-resolver" title="Buscar">Buscar</button>
                             {% if q %}
-                            <a href="{{ url_for('admin_comercio_detalle', comercio_id=comercio.id) }}"
+                            <a href="{{ url_for('admin.admin_comercio_detalle', comercio_id=comercio.id) }}"
                                class="muted" style="text-decoration:none;">Limpiar</a>
                             {% endif %}
                         </form>
