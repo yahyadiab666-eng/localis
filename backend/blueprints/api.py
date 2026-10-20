@@ -13,15 +13,24 @@ import traceback
 
 from flask import Blueprint, jsonify, request, session
 
+from config import MENSAJE_PAGOS_CONGELADOS, pagos_habilitados
+
 from backend.admin import confirmar_pago_suscripcion
 from backend.analytics import normalizar_tipo, registrar_interaccion
 from backend.auth import obtener_usuario_por_id
 from backend.session_comercio import es_usuario_comerciante
 from backend.stores import obtener_comercio_por_usuario, obtener_producto_publico
+from backend.subscriptions import (
+    calcular_cotizacion_cambio_plan,
+    calcular_monto_pago_plan,
+    obtener_datos_pago_movil,
+    programar_downgrade_plan,
+)
 from backend.tasa_bcv import estado_tasa_bcv, obtener_tasa_bcv
 from backend.utils import parsear_entero_form, url_whatsapp_comercio
 from backend.web_seguridad import (
     admin_requerido_api,
+    comercio_sesion_validado,
     exento_csrf,
     login_requerido_api,
 )
@@ -177,3 +186,54 @@ def api_confirmar_pago():
 
     exito, mensaje = confirmar_pago_suscripcion(comercio_id, plan_tipo, meses)
     return jsonify({'ok': exito, 'mensaje': mensaje}), 200 if exito else 400
+
+
+@bp.route('/pagos/cotizacion')
+@login_requerido_api
+def api_cotizacion_pago():
+    comercio = comercio_sesion_validado()
+    plan_tipo = (request.args.get('plan') or 'basica').lower()
+    if comercio:
+        cotizacion = calcular_cotizacion_cambio_plan(comercio, plan_tipo)
+        if not cotizacion:
+            return jsonify({'error': 'Plan no válido.'}), 400
+        datos = obtener_datos_pago_movil(plan_tipo)
+        return jsonify({'ok': True, **datos, **cotizacion}), 200
+
+    montos = calcular_monto_pago_plan(plan_tipo)
+    if not montos:
+        return jsonify({'error': 'Plan no válido.'}), 400
+    datos = obtener_datos_pago_movil(plan_tipo)
+    return jsonify({'ok': True, **datos, **montos}), 200
+
+
+@bp.route('/pagos/programar-cambio', methods=['POST'])
+@login_requerido_api
+def api_programar_cambio_plan():
+    comercio = comercio_sesion_validado()
+    if not comercio:
+        return jsonify({'error': 'Selecciona un comercio válido en tu cuenta.'}), 403
+
+    # --- RESTAURAR_PAGOS_INICIO ---
+    if not pagos_habilitados():
+        return jsonify({'error': MENSAJE_PAGOS_CONGELADOS}), 400
+    # --- RESTAURAR_PAGOS_FIN ---
+
+    plan_tipo = (
+        request.form.get('plan_tipo')
+        or (request.get_json(silent=True) or {}).get('plan_tipo')
+        or ''
+    ).lower()
+    cotizacion = calcular_cotizacion_cambio_plan(comercio, plan_tipo)
+    if not cotizacion:
+        return jsonify({'error': 'Plan no válido.'}), 400
+    if cotizacion['tipo_cambio'] != 'downgrade':
+        return jsonify(
+            {'error': 'Este cambio requiere pago. Usa el flujo de comprobante.'}
+        ), 400
+
+    exito, mensaje, datos = programar_downgrade_plan(comercio['id'], plan_tipo)
+    if not exito:
+        return jsonify({'error': mensaje}), 400
+
+    return jsonify({'ok': True, 'mensaje': mensaje, **(datos or {})}), 200

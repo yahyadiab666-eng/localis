@@ -214,6 +214,7 @@ from backend.session_comercio import (
 )
 from backend.web_seguridad import (
     admin_requerido,
+    comercio_sesion_validado as _comercio_sesion_validado,
     login_requerido,
     login_requerido_api,
     peticion_acepta_json as _peticion_acepta_json,
@@ -834,11 +835,7 @@ def _quitar_imagen_manual(producto_id):
         print(f'[Localis Imagen] no se pudo quitar la imagen manual: {error}')
 
 
-def _comercio_sesion_validado():
-    """Comercio activo validado contra PostgreSQL (HTML y API)."""
-    usuario_id = session.get('usuario_id')
-    asegurar_contexto_comercio(usuario_id)
-    return obtener_comercio_por_usuario(usuario_id)
+# _comercio_sesion_validado vive ahora en backend/web_seguridad.py
 
 
 def _requiere_comercio():
@@ -2686,50 +2683,10 @@ def api_crear_producto():
     ), 201
 
 
-@app.route('/api/pagos/cotizacion')
-@login_requerido_api
-def api_cotizacion_pago():
-    comercio = _comercio_sesion_validado()
-    plan_tipo = (request.args.get('plan') or 'basica').lower()
-    if comercio:
-        cotizacion = calcular_cotizacion_cambio_plan(comercio, plan_tipo)
-        if not cotizacion:
-            return jsonify({'error': 'Plan no válido.'}), 400
-        datos = obtener_datos_pago_movil(plan_tipo)
-        return jsonify({'ok': True, **datos, **cotizacion}), 200
-
-    montos = calcular_monto_pago_plan(plan_tipo)
-    if not montos:
-        return jsonify({'error': 'Plan no válido.'}), 400
-    datos = obtener_datos_pago_movil(plan_tipo)
-    return jsonify({'ok': True, **datos, **montos}), 200
+# api_cotizacion_pago vive ahora en backend/blueprints/api.py
 
 
-@app.route('/api/pagos/programar-cambio', methods=['POST'])
-@login_requerido_api
-def api_programar_cambio_plan():
-    comercio = _comercio_sesion_validado()
-    if not comercio:
-        return jsonify({'error': 'Selecciona un comercio válido en tu cuenta.'}), 403
-
-    # --- RESTAURAR_PAGOS_INICIO ---
-    # Los cambios de plan quedan en pausa; la lógica de abajo permanece intacta.
-    if not pagos_habilitados():
-        return jsonify({'error': MENSAJE_PAGOS_CONGELADOS}), 400
-    # --- RESTAURAR_PAGOS_FIN ---
-
-    plan_tipo = (request.form.get('plan_tipo') or (request.get_json(silent=True) or {}).get('plan_tipo') or '').lower()
-    cotizacion = calcular_cotizacion_cambio_plan(comercio, plan_tipo)
-    if not cotizacion:
-        return jsonify({'error': 'Plan no válido.'}), 400
-    if cotizacion['tipo_cambio'] != 'downgrade':
-        return jsonify({'error': 'Este cambio requiere pago. Usa el flujo de comprobante.'}), 400
-
-    exito, mensaje, datos = programar_downgrade_plan(comercio['id'], plan_tipo)
-    if not exito:
-        return jsonify({'error': mensaje}), 400
-
-    return jsonify({'ok': True, 'mensaje': mensaje, **(datos or {})}), 200
+# api_programar_cambio_plan vive ahora en backend/blueprints/api.py
 
 
 @app.route('/api/pagos/verificar', methods=['POST'])

@@ -118,3 +118,12 @@ def exento_csrf(funcion):
         return _csrf.exempt(funcion) if _csrf is not None else funcion
     except Exception:
         return funcion
+
+
+def comercio_sesion_validado():
+    """Comercio activo validado contra PostgreSQL (HTML y API)."""
+    from backend.stores import obtener_comercio_por_usuario
+
+    usuario_id = session.get('usuario_id')
+    asegurar_contexto_comercio(usuario_id)
+    return obtener_comercio_por_usuario(usuario_id)
