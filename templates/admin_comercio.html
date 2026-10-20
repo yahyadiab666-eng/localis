@@ -156,18 +156,18 @@
                        style="text-decoration:none;display:inline-block;"
                        title="Editar perfil, contacto, categoría y visibilidad">Editar tienda</a>
                     {% if comercio.visible == 1 and comercio.estado_pago != 'suspendido' %}
-                        <form action="{{ url_for('admin_suspender_comercio', comercio_id=comercio.id) }}" method="POST">
+                        <form action="{{ url_for('admin.admin_suspender_comercio', comercio_id=comercio.id) }}" method="POST">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn-accion-tabla btn-suspender" title="Suspensión temporal">Suspender</button>
                         </form>
                     {% else %}
-                        <form action="{{ url_for('admin_reactivar_comercio', comercio_id=comercio.id) }}" method="POST">
+                        <form action="{{ url_for('admin.admin_reactivar_comercio', comercio_id=comercio.id) }}" method="POST">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn-accion-tabla btn-activar" title="Reactivar cuenta">Reactivar</button>
                         </form>
                     {% endif %}
 
-                    <form action="{{ url_for('admin_eliminar_comercio', comercio_id=comercio.id) }}" method="POST"
+                    <form action="{{ url_for('admin.admin_eliminar_comercio', comercio_id=comercio.id) }}" method="POST"
                           onsubmit="return confirm('¿Eliminar definitivamente el comercio {{ comercio.nombre }}? Esta acción no se puede deshacer.');">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn-accion-tabla btn-eliminar" title="Eliminación permanente">Eliminar tienda</button>
@@ -175,7 +175,7 @@
                 </div>
 
                 {% if comercio.estado_tienda == 'pre_cuenta' or not comercio.propietario_id %}
-                <form action="{{ url_for('admin_transferir_comercio', comercio_id=comercio.id) }}" method="POST" class="plan-form"
+                <form action="{{ url_for('admin.admin_transferir_comercio', comercio_id=comercio.id) }}" method="POST" class="plan-form"
                       onsubmit="return confirm('¿Transferir la propiedad de «{{ comercio.nombre }}» a este correo? La tienda se activará como un comercio nuevo con plan gratis.');">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="email" name="owner_email" placeholder="correo del dueño" required
@@ -183,7 +183,7 @@
                     <button type="submit" class="btn-accion-tabla btn-activar">Transferir propiedad</button>
                 </form>
                 {% else %}
-                <form action="{{ url_for('admin_reasignar_comercio', comercio_id=comercio.id) }}" method="POST" class="plan-form"
+                <form action="{{ url_for('admin.admin_reasignar_comercio', comercio_id=comercio.id) }}" method="POST" class="plan-form"
                       onsubmit="return confirm('¿Reasignar el dueño de «{{ comercio.nombre }}»? Se conserva el plan actual.');">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="email" name="owner_email" placeholder="nuevo correo del dueño" required
@@ -194,7 +194,7 @@
 
                 <!-- RESTAURAR_PAGOS_INICIO -->
                 {% if not pagos_congelados %}
-                <form action="{{ url_for('admin_cambiar_plan', comercio_id=comercio.id) }}" method="POST" class="plan-form">
+                <form action="{{ url_for('admin.admin_cambiar_plan', comercio_id=comercio.id) }}" method="POST" class="plan-form">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <select name="plan_tipo">
                         <option value="gratis" {% if comercio.plan_tipo == 'gratis' %}selected{% endif %}>Gratis / Prueba</option>

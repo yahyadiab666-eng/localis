@@ -118,7 +118,7 @@
 
             <aside class="card">
                 <h2>Configuración Económica</h2>
-                <form action="{{ url_for('actualizar_tasa') }}" method="POST">
+                <form action="{{ url_for('admin.actualizar_tasa') }}" method="POST">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="form-group">
                         <label for="tasa_dolar">Tasa del Dólar (Bs.)</label>
@@ -132,7 +132,7 @@
                 <h2>Banner sección destacada (barra naranja)</h2>
                 <p style="font-size: 0.85rem; color: #666; margin-bottom: 1rem;">Esta imagen aparece en la franja promocional naranja del inicio público. Se guarda en el servidor.</p>
                 <img src="{{ banner_url }}" alt="Banner actual" class="banner-preview" onerror="this.onerror=null;this.src='{{ hero_local }}'">
-                <form action="{{ url_for('admin_banner') }}" method="POST" enctype="multipart/form-data">
+                <form action="{{ url_for('admin.admin_banner') }}" method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="form-group">
                         <label for="banner">Nueva imagen para la sección destacada</label>
@@ -149,7 +149,7 @@
                     El correo del dueño se agrega después con <strong>Transferir</strong>,
                     y la tienda arranca como un comercio nuevo (plan gratis).
                 </p>
-                <form action="{{ url_for('admin_crear_pre_cuenta') }}" method="POST">
+                <form action="{{ url_for('admin.admin_crear_pre_cuenta') }}" method="POST">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="form-group">
                         <label for="pc_nombre">Nombre del comercio *</label>
@@ -199,7 +199,7 @@
                                 <span class="badge">{{ ticket.estado }}</span>
                             </div>
                             {% if ticket.estado == 'pendiente' %}
-                                <form action="{{ url_for('admin_resolver_ticket', ticket_id=ticket.id) }}" method="POST">
+                                <form action="{{ url_for('admin.admin_resolver_ticket', ticket_id=ticket.id) }}" method="POST">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <button type="submit" class="btn-accion-tabla btn-resolver">Listo</button>
                                 </form>
@@ -302,18 +302,18 @@
                                    style="text-decoration:none;display:inline-block;"
                                    title="Ver perfil, catálogo y gestionar">Gestionar</a>
                                 {% if comercio.visible == 1 and comercio.estado_pago != 'suspendido' %}
-                                    <form action="{{ url_for('admin_suspender_comercio', comercio_id=comercio.id) }}" method="POST" style="display:inline;">
+                                    <form action="{{ url_for('admin.admin_suspender_comercio', comercio_id=comercio.id) }}" method="POST" style="display:inline;">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <button type="submit" class="btn-accion-tabla btn-suspender" title="Suspensión temporal">Suspender</button>
                                     </form>
                                 {% else %}
-                                    <form action="{{ url_for('admin_reactivar_comercio', comercio_id=comercio.id) }}" method="POST" style="display:inline;">
+                                    <form action="{{ url_for('admin.admin_reactivar_comercio', comercio_id=comercio.id) }}" method="POST" style="display:inline;">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <button type="submit" class="btn-accion-tabla btn-activar" title="Reactivar cuenta">Reactivar</button>
                                     </form>
                                 {% endif %}
 
-                                <form action="{{ url_for('admin_eliminar_comercio', comercio_id=comercio.id) }}" method="POST" style="display:inline;"
+                                <form action="{{ url_for('admin.admin_eliminar_comercio', comercio_id=comercio.id) }}" method="POST" style="display:inline;"
                                       onsubmit="return confirm('¿Eliminar definitivamente el comercio {{ comercio.nombre }}? Esta acción no se puede deshacer.');">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <button type="submit" class="btn-accion-tabla btn-eliminar" title="Eliminación permanente">Eliminar</button>
@@ -321,14 +321,14 @@
                                 </div>
 
                                 {% if comercio.estado_tienda == 'pre_cuenta' or not comercio.correo_dueno %}
-                                <form action="{{ url_for('admin_transferir_comercio', comercio_id=comercio.id) }}" method="POST" class="cuenta-form"
+                                <form action="{{ url_for('admin.admin_transferir_comercio', comercio_id=comercio.id) }}" method="POST" class="cuenta-form"
                                       onsubmit="return confirm('¿Transferir la propiedad de «{{ comercio.nombre }}» a este correo? La tienda se activará como un comercio nuevo con plan gratis.');">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <input type="email" name="owner_email" placeholder="correo del dueño" required>
                                     <button type="submit" class="btn-accion-tabla btn-activar">Transferir</button>
                                 </form>
                                 {% else %}
-                                <form action="{{ url_for('admin_reasignar_comercio', comercio_id=comercio.id) }}" method="POST" class="cuenta-form"
+                                <form action="{{ url_for('admin.admin_reasignar_comercio', comercio_id=comercio.id) }}" method="POST" class="cuenta-form"
                                       onsubmit="return confirm('¿Reasignar el dueño de «{{ comercio.nombre }}»? Se conserva el plan actual.');">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <input type="email" name="owner_email" placeholder="nuevo correo del dueño" required>
@@ -338,7 +338,7 @@
 
                                 <!-- RESTAURAR_PAGOS_INICIO -->
                                 {% if not pagos_congelados %}
-                                <form action="{{ url_for('admin_cambiar_plan', comercio_id=comercio.id) }}" method="POST" class="plan-form">
+                                <form action="{{ url_for('admin.admin_cambiar_plan', comercio_id=comercio.id) }}" method="POST" class="plan-form">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <select name="plan_tipo">
                                         <option value="gratis" {% if comercio.plan_tipo == 'gratis' %}selected{% endif %}>Gratis / Prueba</option>
