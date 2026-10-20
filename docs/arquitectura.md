@@ -18,10 +18,27 @@ Navegador / TWA ──HTTPS──> Flask (main.py, 1 worker gunicorn)
                                    + servicios externos (Serper, BCV, ...)
 ```
 
-- **Server-rendered**: no hay SPA ni bundler. Las rutas y la lógica de negocio
-  se registran en `main.py` (app global; no hay factory `create_app`).
-- **Monolito** con separación por carpetas: `backend/` (negocio), `services/`
-  (imágenes), `utils/` (helpers).
+- **Server-rendered**: no hay SPA ni bundler. La app global vive en `main.py`
+  (no hay factory `create_app`).
+- **Monolito modular**: `main.py` conserva la app, filtros y rutas públicas
+  (portada, tienda, salud, sitemap); el resto está repartido en **blueprints**
+  por dominio (`backend/blueprints/`) y en módulos de negocio (`backend/`),
+  imágenes (`services/`) y helpers (`utils/`).
+
+### Blueprints (`backend/blueprints/`)
+
+| Blueprint | Prefijo | Responsabilidad |
+|---|---|---|
+| `api` | `/api` | endpoints JSON |
+| `admin` | `/admin` | panel de administración |
+| `comercio` | `/comercio` | panel del comerciante, catálogo, CSV, premios |
+| `auth` | (raíz) | login Google, callback OAuth, perfil, logout |
+
+Los endpoints pasan a llamarse `blueprint.endpoint` (p. ej.
+`comercio.panel_comercio`). Los helpers de vista compartidos viven en
+`backend/web_seguridad.py`, `backend/vistas_imagenes.py`,
+`backend/vistas_comercio.py`, `backend/oauth_google.py`, `backend/rate_limit.py`
+y `backend/observabilidad.py`.
 
 ## Flujo de una petición
 
@@ -31,7 +48,8 @@ Navegador / TWA ──HTTPS──> Flask (main.py, 1 worker gunicorn)
 3. Respuestas pasan por `@app.after_request`: caché de estáticos y **cabeceras
    de seguridad** (`main.py`).
 4. Código defensivo: el camino de request captura excepciones y devuelve un
-   fallback; logs con prefijo `[Localis ...]`.
+   fallback; **logging estructurado** (`logging`, `localis.<módulo>`), con
+   request-id y salida JSON opt-in (`LOCALIS_LOG_JSON=1`).
 
 ## Base de datos
 
@@ -90,6 +108,8 @@ nombres de categoría.
 
 ## Deuda técnica conocida
 
-Ver `docs/auditoria-tecnica.md`. Resumen: `main.py` monolítico, sin migraciones
-versionadas, 1 worker, `print` en lugar de `logging`, y pipeline de imágenes
-pesado acoplado al proceso web.
+Ver `docs/auditoria-tecnica.md`. Resumen: **1 worker** obligatorio (cola de
+importación en memoria → hace falta un broker compartido para escalar) y
+pipeline de imágenes pesado acoplado al proceso web. **Resuelto en el Bloque 4**:
+blueprints por dominio, migraciones versionadas (`schema_migrations`),
+observabilidad con request-id y `logging` estructurado.
