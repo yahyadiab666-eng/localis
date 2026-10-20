@@ -87,13 +87,25 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
 ### B5. Autorizar el login de Google en staging (¡importante!)
-Si usas el mismo cliente de Google, en **Google Cloud Console →
-APIs & Services → Credentials → tu OAuth 2.0 Client ID → Authorized redirect
-URIs** añade:
+La app entra solo por **Google OAuth**. Para poder iniciar sesión en staging hay
+que registrar las URLs de callback en **Google Cloud Console → APIs & Services →
+Credentials → tu OAuth 2.0 Client ID → Authorized redirect URIs**:
+
 ```
-https://localis-staging.onrender.com/login/google/callback
+http://127.0.0.1:10000/login/google/callback          # staging LOCAL
+https://localis-staging.onrender.com/login/google/callback   # staging en Render
 ```
-Sin esto, el login dará `redirect_uri_mismatch` en staging.
+
+Y en el entorno de staging deben estar `GOOGLE_CLIENT_ID` y
+`GOOGLE_CLIENT_SECRET` (los mismos de producción o uno de pruebas).
+
+Sin esto, el login da `redirect_uri_mismatch`.
+
+Nota: la **validación automática** (runner + `e2e_smoke.py`) **no** necesita
+login real: inyecta la sesión. El login de Google solo hace falta para usar el
+staging a mano. Con la BD de staging vacía, el primer login crea el usuario (y
+si su correo está en `LOCALIS_ADMIN_EMAILS`, queda como admin).
+
 
 ### B6. Verificar y avisar
 Cuando el deploy termine:
