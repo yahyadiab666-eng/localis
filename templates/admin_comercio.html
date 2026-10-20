@@ -77,8 +77,8 @@
     <header>
         <h1>Localis | Gestión de comercio</h1>
         <div class="nav-links">
-            <a href="{{ url_for('panel_admin') }}">&larr; Volver al panel</a>
-            <a href="{{ url_for('admin_usuarios') }}">Usuarios</a>
+            <a href="{{ url_for('admin.panel_admin') }}">&larr; Volver al panel</a>
+            <a href="{{ url_for('admin.admin_usuarios') }}">Usuarios</a>
             {% if comercio.id %}
             <a href="{{ url_for('admin_editar_comercio', comercio_id=comercio.id) }}">Editar tienda</a>
             <a href="{{ url_for('admin_nuevo_producto', comercio_id=comercio.id) }}">Añadir producto</a>

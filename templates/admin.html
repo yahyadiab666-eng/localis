@@ -92,7 +92,7 @@
     <header class="admin-header-mobile">
         <h1>Localis | Panel Admin</h1>
         <div class="nav-links admin-nav-mobile">
-            <a href="{{ url_for('admin_usuarios') }}">Usuarios</a>
+            <a href="{{ url_for('admin.admin_usuarios') }}">Usuarios</a>
             <a href="https://wa.me/584125970507" target="_blank" class="wa-link">WhatsApp Soporte</a>
             <a href="{{ url_for('index') }}">Ver Sitio Público</a>
             <form method="POST" action="{{ url_for('logout') }}" style="display:inline;"
@@ -222,11 +222,11 @@
                 </p>
                 {% endif %}
                 <!-- RESTAURAR_PAGOS_FIN -->
-                <form action="{{ url_for('panel_admin') }}" method="GET" class="busqueda-admin">
+                <form action="{{ url_for('admin.panel_admin') }}" method="GET" class="busqueda-admin">
                     <input type="text" name="q" value="{{ q or '' }}" placeholder="Buscar por nombre, correo del dueño, RIF/Cédula o teléfono...">
                     <button type="submit">Buscar</button>
                     {% if q %}
-                        <a href="{{ url_for('panel_admin') }}" style="align-self:center;font-size:0.85rem;color:#666;">Limpiar</a>
+                        <a href="{{ url_for('admin.panel_admin') }}" style="align-self:center;font-size:0.85rem;color:#666;">Limpiar</a>
                     {% endif %}
                 </form>
             </div>
