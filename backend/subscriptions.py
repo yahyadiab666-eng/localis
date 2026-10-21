@@ -923,6 +923,7 @@ def activar_suscripcion_por_comprobante(
     comprobante_url=None,
     monto_ocr_bs=None,
     comprobante_hash=None,
+    metodo='pago_movil_ocr',
 ):
     """
     Valida referencia OCR, registra pago aprobado y renueva suscripción automáticamente.
@@ -934,9 +935,17 @@ def activar_suscripcion_por_comprobante(
     if plan_tipo not in PLANES or plan_tipo == 'gratis':
         return False, 'Plan no válido para pago.', None
 
+    es_binance = str(metodo or '').startswith('binance')
     referencia = (referencia or '').strip()
-    if not re.match(r'^\d{6}$', referencia):
-        return False, 'No se detectó una referencia válida de 6 dígitos.', None
+    patron_ref = r'^\d{6,24}$' if es_binance else r'^\d{6}$'
+    if not re.match(patron_ref, referencia):
+        return (
+            False,
+            'No se detectó un ID de orden válido de Binance.'
+            if es_binance
+            else 'No se detectó una referencia válida de 6 dígitos.',
+            None,
+        )
 
     if _referencia_ya_usada(referencia):
         return False, 'Esta referencia ya fue registrada en el sistema.', None
@@ -1009,9 +1018,9 @@ def activar_suscripcion_por_comprobante(
                     int(comercio_id),
                     plan_id,
                     monto_bs,
-                    'pago_movil_ocr',
+                    metodo,
                     referencia,
-                    'Banco Caribe',
+                    'Binance Pay' if es_binance else 'Banco Caribe',
                     'aprobado',
                     comprobante_url,
                     comprobante_hash,
@@ -1064,7 +1073,7 @@ def activar_suscripcion_por_comprobante(
 def obtener_datos_pago_movil(plan_tipo=None):
     """Lee configuración de pago móvil y montos calculados para un plan."""
     from backend.stores import obtener_configs, obtener_tasa_dolar
-    from config import PAGO_MOVIL_DEFAULT
+    from config import BINANCE_DEFAULT, PAGO_MOVIL_DEFAULT
 
     tasa = float(obtener_tasa_dolar() or 1.0)
     configs = obtener_configs({
@@ -1077,6 +1086,8 @@ def obtener_datos_pago_movil(plan_tipo=None):
         'cedula_rif': configs['pago_movil_cedula'],
         'telefono': configs['pago_movil_telefono'],
         'tasa': tasa,
+        'binance_id': BINANCE_DEFAULT['pay_id'],
+        'binance_moneda': BINANCE_DEFAULT['moneda'],
     }
     if plan_tipo:
         montos = calcular_monto_pago_plan(plan_tipo, tasa=tasa)

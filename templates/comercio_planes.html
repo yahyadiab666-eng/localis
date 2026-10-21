@@ -199,17 +199,35 @@
 
       <ul id="modal-plan-beneficios" class="space-y-2 text-sm text-stone-700 bg-stone-50 rounded-xl p-4"></ul>
 
-      <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm space-y-1">
+      <div class="flex gap-2">
+        <label class="flex-1 flex items-center justify-center gap-2 bg-white border border-stone-200 rounded-xl px-3 py-2 text-sm cursor-pointer font-semibold text-stone-700">
+          <input type="radio" name="metodo" value="pago_movil" form="form-pago-movil" checked> Pago Móvil
+        </label>
+        <label class="flex-1 flex items-center justify-center gap-2 bg-white border border-stone-200 rounded-xl px-3 py-2 text-sm cursor-pointer font-semibold text-stone-700">
+          <input type="radio" name="metodo" value="binance" form="form-pago-movil"> Binance Pay
+        </label>
+      </div>
+
+      <div id="info-pago-movil" class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm space-y-1">
         <p class="font-bold text-amber-900">Datos para Pago Móvil</p>
         <p><span class="text-stone-500">Banco:</span> {{ pago_movil.banco }}</p>
         <p><span class="text-stone-500">Cédula/RIF:</span> {{ pago_movil.cedula_rif }}</p>
         <p><span class="text-stone-500">Teléfono:</span> {{ pago_movil.telefono }}</p>
-        <p class="pt-2 border-t border-amber-200 mt-2">
-          <span class="text-stone-500">Tasa BCV:</span>
-          <strong>{{ tasa }} Bs/USD</strong>
+        <p class="pt-2 border-t border-amber-200 mt-2"><span class="text-stone-500">Tasa BCV:</span> <strong>{{ tasa }} Bs/USD</strong></p>
+      </div>
+
+      <div id="info-binance" class="hidden bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm space-y-1">
+        <p class="font-bold text-amber-900">Datos para Binance Pay</p>
+        <p><span class="text-stone-500">Binance Pay ID:</span> <strong>{{ pago_movil.binance_id }}</strong></p>
+        <p><span class="text-stone-500">Moneda:</span> {{ pago_movil.binance_moneda }}</p>
+        <p class="text-xs text-stone-600 pt-2 border-t border-amber-200 mt-2">
+          En tu app de Binance: <strong>Pay → Enviar → ID</strong>, pega este ID y envía el monto exacto en USDT.
         </p>
-        <p id="modal-plan-monto-bs" class="font-bold text-amber-900 text-base"></p>
-        <p id="modal-plan-mensaje" class="text-xs text-stone-600 mt-2"></p>
+      </div>
+
+      <div class="bg-white border border-stone-200 rounded-xl p-4 text-sm space-y-1">
+        <p id="modal-plan-monto-bs" class="font-bold text-stone-900 text-base"></p>
+        <p id="modal-plan-mensaje" class="text-xs text-stone-600 mt-1"></p>
       </div>
 
       <div id="contenedor-form-pago">
@@ -221,7 +239,7 @@
             <label for="comprobante" class="block text-xs font-bold uppercase text-stone-600 mb-1">Captura del comprobante</label>
             <input type="file" id="comprobante" name="comprobante" accept="image/png, image/jpeg, image/webp"
                    class="w-full text-xs text-stone-600 file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-amber-500 file:text-stone-900 hover:file:bg-amber-400 bg-white rounded-xl border border-stone-200 cursor-pointer">
-            <p class="text-[11px] text-stone-500 mt-1">
+            <p id="ayuda-comprobante" class="text-[11px] text-stone-500 mt-1">
               Sube la captura del pago móvil. Validamos con OCR la referencia, el monto en Bs
               y que el destino sea {{ pago_movil.banco }} (RIF {{ pago_movil.cedula_rif }}).
             </p>
@@ -311,6 +329,7 @@
         if (inputComprobante) inputComprobante.setAttribute('required', 'required');
         if (btnTexto) btnTexto.textContent = 'Verificar comprobante y activar plan';
       }
+      if (typeof aplicarMetodo === 'function') aplicarMetodo();
     }
 
     function actualizarMontoPlan(codigo) {
@@ -366,6 +385,31 @@
       abrirModalPlan(planAbrir);
     }
 
+    function aplicarMetodo() {
+      const sel = document.querySelector('input[name="metodo"]:checked');
+      const metodo = sel ? sel.value : 'pago_movil';
+      const esBinance = metodo === 'binance';
+      document.getElementById('info-pago-movil')?.classList.toggle('hidden', esBinance);
+      document.getElementById('info-binance')?.classList.toggle('hidden', !esBinance);
+      const ayuda = document.getElementById('ayuda-comprobante');
+      if (ayuda) {
+        ayuda.textContent = esBinance
+          ? 'Sube la captura del pago por Binance (USDT). Validamos el monto y el ID de la orden.'
+          : 'Sube la captura del pago móvil. Validamos la referencia, el monto en Bs y el destino.';
+      }
+      const cot = window.cotizacionPlanActual;
+      const montoEl = document.getElementById('modal-plan-monto-bs');
+      if (montoEl && cot && cot.requiere_pago !== false && cot.tipo_cambio !== 'downgrade') {
+        const usd = Number(cot.monto_usd || 0);
+        const bs = Number(cot.monto_bs || 0);
+        montoEl.textContent = esBinance
+          ? 'Monto a pagar: ' + usd.toFixed(2) + ' USDT (Binance Pay)'
+          : 'Monto a pagar: ' + bs.toFixed(2) + ' Bs (' + usd.toFixed(2) + ' USD)';
+      }
+    }
+    document.querySelectorAll('input[name="metodo"]').forEach(function (r) {
+      r.addEventListener('change', aplicarMetodo);
+    });
     lucide.createIcons();
   </script>
   <script src="{{ url_for('static', filename='js/flash.js') }}?v={{ asset_v }}"></script>
