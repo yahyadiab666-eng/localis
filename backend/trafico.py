@@ -208,7 +208,9 @@ def _bucle():
     while True:
         time.sleep(max(10, _INTERVALO))
         try:
-            volcar()
+            volcadas = volcar()
+            if volcadas:
+                logger.info(f'{_LOG} volcadas {volcadas} clave(s)')
         except Exception as error:
             logger.error(f'{_LOG} ciclo de volcado falló: {type(error).__name__}: {error}')
 
@@ -231,6 +233,22 @@ def iniciar_flush_periodico():
     except Exception as error:
         logger.error(f'{_LOG} no se pudo iniciar el volcado: {error}')
         return None
+
+
+def estado():
+    """Diagnóstico del acumulador en memoria (para /health). Nunca lanza."""
+    try:
+        with _lock:
+            return {
+                'habilitado': habilitado(),
+                'dia': _dia_actual.isoformat() if _dia_actual else None,
+                'pendientes_claves': len(_pendientes),
+                'unicos_dia': len(_unicos),
+                'ultimo_volcado': _ultimo_volcado,
+                'intervalo_seg': _INTERVALO,
+            }
+    except Exception as error:
+        return {'error': f'{type(error).__name__}: {error}'}
 
 
 # ==========================================================

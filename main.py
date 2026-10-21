@@ -800,6 +800,12 @@ def health_live():
 def health_ready():
     """Readiness: 200 solo si la base de datos responde."""
     estado = obtener_estado_sistema()
+    try:
+        from backend import trafico
+
+        estado['trafico'] = trafico.estado()
+    except Exception:
+        pass
     return jsonify(estado), (200 if estado.get('ok') else 503)
 
 
