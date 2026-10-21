@@ -28,7 +28,10 @@ from backend.analytics import (
 from backend.auth import obtener_usuario_por_id
 from backend.boosts import activar_boost_producto, precio_boost
 from backend.image_lookup import persistir_imagen_producto_hibrida
-from backend.payment_ocr import validar_comprobante_pago_movil
+from backend.payment_ocr import (
+    validar_comprobante_binance,
+    validar_comprobante_pago_movil,
+)
 from backend.payments import calcular_hash_comprobante
 from backend.plans import MENSAJE_LIMITE_PRODUCTOS, es_limite_ilimitado
 from backend.session_comercio import es_usuario_comerciante
@@ -569,7 +572,12 @@ def api_verificar_pago():
     if not montos:
         return jsonify({'error': 'Plan no válido para pago.'}), 400
 
-    ocr = validar_comprobante_pago_movil(data_bytes, montos['monto_bs'])
+    metodo = (request.form.get('metodo') or 'pago_movil').strip().lower()
+    es_binance = metodo == 'binance'
+    if es_binance:
+        ocr = validar_comprobante_binance(data_bytes, montos.get('monto_usd'))
+    else:
+        ocr = validar_comprobante_pago_movil(data_bytes, montos['monto_bs'])
     if not ocr.get('ok'):
         return jsonify(
             {
@@ -607,6 +615,7 @@ def api_verificar_pago():
         comprobante_url=comprobante_url,
         monto_ocr_bs=ocr.get('monto_bs'),
         comprobante_hash=hash_comprobante,
+        metodo=('binance' if es_binance else 'pago_movil_ocr'),
     )
 
     if not exito:

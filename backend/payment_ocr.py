@@ -309,3 +309,129 @@ def validar_comprobante_pago_movil(
         'ms': transcurrido_ms,
         'texto_ocr': texto_raw[:500],
     }
+
+
+# ==========================================================================
+# Binance Pay (2.ª forma de pago)
+# ==========================================================================
+
+ORDER_ID_RE = re.compile(r'\b(\d{12,24})\b')
+MONTO_USDT_RE = re.compile(r'([\d.,]+)\s*usdt', re.IGNORECASE)
+
+
+def _extraer_order_id(texto):
+    """ID de la orden de Binance (token de 12-24 dígitos), o None."""
+    coincidencias = ORDER_ID_RE.findall(texto or '')
+    return max(coincidencias, key=len) if coincidencias else None
+
+
+def evaluar_texto_binance(
+    texto_raw,
+    monto_usd,
+    ahora=None,
+    exigir_fecha=None,
+    max_dias=None,
+):
+    """Evalúa el texto OCR de una captura de Binance Pay. Nunca lanza.
+
+    La captura de Binance trae **pocos datos** (monto en USDT, fecha e ID de la
+    orden; NO muestra el destinatario), así que el OCR pide: un pago en USDT, el
+    **monto ≈ valor del plan en USD**, la **fecha reciente** y un **ID de orden**
+    como referencia. El admin verifica ese ID en su Binance antes de aprobar.
+    """
+    errores = []
+    texto_norm = _normalizar_texto(texto_raw)
+
+    if 'usdt' not in texto_norm and 'binance' not in texto_norm:
+        errores.append('El comprobante debe ser un pago por Binance (USDT).')
+
+    referencia = _extraer_order_id(texto_raw)
+    if not referencia:
+        errores.append('No se detectó el ID de la orden de Binance.')
+
+    candidatos = _extraer_montos_candidatos(texto_raw)
+    for bruto in MONTO_USDT_RE.findall(texto_raw or ''):
+        monto = _parse_monto_ve(bruto)
+        if monto is not None and monto > 0:
+            candidatos.insert(0, monto)
+    monto_detectado = _elegir_monto(candidatos, float(monto_usd or 0))
+    if monto_usd and float(monto_usd) > 0:
+        if monto_detectado is None:
+            errores.append('No se pudo leer el monto en USDT de la captura.')
+        elif not _montos_coinciden(monto_detectado, float(monto_usd)):
+            errores.append(
+                f'El monto de la captura ({monto_detectado:.2f} USDT) no coincide '
+                f'con el esperado ({float(monto_usd):.2f} USDT).'
+            )
+
+    exigir_fecha = (
+        EXIGIR_FECHA_COMPROBANTE if exigir_fecha is None else bool(exigir_fecha)
+    )
+    max_dias = MAX_DIAS_COMPROBANTE if max_dias is None else max(0, int(max_dias))
+    hoy = ahora or datetime.now().date()
+    fecha_comprobante, delta_dias = _elegir_fecha(_extraer_fechas(texto_raw), hoy)
+    if exigir_fecha:
+        if fecha_comprobante is None:
+            errores.append('No se detectó la fecha de la captura (DD/MM/AAAA).')
+        elif not (-1 <= delta_dias <= max_dias):
+            errores.append(
+                f'La fecha del comprobante '
+                f'({fecha_comprobante.strftime("%d/%m/%Y")}) está fuera del rango '
+                f'permitido (máximo {max_dias} día(s) de antigüedad).'
+            )
+
+    ok = not errores and bool(referencia)
+    return {
+        'ok': ok,
+        'referencia': referencia,
+        'monto_usd': monto_detectado,
+        'fecha_comprobante': (
+            fecha_comprobante.strftime('%Y-%m-%d') if fecha_comprobante else None
+        ),
+        'errores': errores,
+        'texto_ocr': (texto_raw or '')[:500],
+    }
+
+
+def validar_comprobante_binance(
+    data_bytes,
+    monto_usd,
+    ahora=None,
+    exigir_fecha=None,
+    max_dias=None,
+):
+    """OCR de una captura de Binance Pay. Mismo contrato que la de pago móvil."""
+    inicio = time.perf_counter()
+    base = {
+        'ok': False,
+        'referencia': None,
+        'monto_usd': None,
+        'fecha_comprobante': None,
+        'errores': ['Comprobante vacío o ilegible.'],
+        'ms': 0.0,
+        'texto_ocr': '',
+    }
+    if not data_bytes:
+        return base
+
+    buffer = np.frombuffer(data_bytes, dtype=np.uint8)
+    imagen = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
+    if imagen is None:
+        base['errores'] = ['No se pudo leer la imagen de la captura.']
+        base['ms'] = (time.perf_counter() - inicio) * 1000
+        return base
+
+    texto_completo = _ocr_texto(imagen)
+    roi = recortar_roi_central(imagen, ratio=0.45)
+    texto_roi = _ocr_texto(roi)
+    texto_raw = f'{texto_completo} {texto_roi}'.strip()
+
+    resultado = evaluar_texto_binance(
+        texto_raw,
+        monto_usd,
+        ahora=ahora,
+        exigir_fecha=exigir_fecha,
+        max_dias=max_dias,
+    )
+    resultado['ms'] = (time.perf_counter() - inicio) * 1000
+    return resultado

@@ -14,6 +14,13 @@ PAGO_MOVIL_DEFAULT = {
     "telefono": "04127957989",
 }
 
+# Binance Pay (2.ª forma de pago, opcional). El comercio paga el monto del plan
+# en USDT a este Pay ID. Verificación por captura (OCR) + aprobación del admin.
+BINANCE_DEFAULT = {
+    "pay_id": os.environ.get("LOCALIS_BINANCE_ID", "1054151954"),
+    "moneda": "USDT",
+}
+
 # Tamaño máximo por petición multipart (imágenes, comprobantes, CSV/Excel).
 MAX_UPLOAD_BYTES = int(os.environ.get('MAX_UPLOAD_BYTES', str(8 * 1024 * 1024)))
 
