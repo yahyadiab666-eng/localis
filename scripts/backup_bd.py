@@ -6,6 +6,12 @@ Uso:
     python scripts/backup_bd.py --list          # lista respaldos existentes
     python scripts/backup_bd.py --dry-run       # muestra el comando sin ejecutar
 
+Por defecto respalda SOLO el esquema ``public`` (los datos de la app). En
+Supabase, un dump de TODA la base incluye schemas gestionados (auth, storage,
+realtime, vault, graphql) que NO son restaurables sin superusuario; el drill de
+restore falla con "permission denied". Supabase protege esos schemas con sus
+propios backups/PITR. Usa ``--schema=""`` solo si sabes lo que haces.
+
 Usa la ``DATABASE_URL`` del entorno (.env o panel). La contrasena NO se pasa en
 la linea de comandos: se inyecta por ``PGPASSWORD``.
 
@@ -62,8 +68,8 @@ def podar(directorio, keep):
     return eliminados
 
 
-def _construir_comando(pg_dump, datos, archivo):
-    return [
+def _construir_comando(pg_dump, datos, archivo, esquema='public'):
+    comando = [
         pg_dump,
         '--format=custom',
         '--no-owner',
@@ -72,8 +78,16 @@ def _construir_comando(pg_dump, datos, archivo):
         '--port', str(datos['port']),
         '--username', datos['user'],
         '--dbname', datos['dbname'],
-        '--file', str(archivo),
     ]
+    # Por defecto SOLO el esquema de la app (public). Un dump de TODA la base en
+    # Supabase incluye schemas gestionados (auth, storage, realtime, vault,
+    # graphql) que NO se pueden restaurar sin superusuario: el drill de restore
+    # fallaba con "permission denied". Supabase ya protege esos schemas con sus
+    # propios backups/PITR.
+    if esquema:
+        comando += ['--schema', str(esquema)]
+    comando += ['--file', str(archivo)]
+    return comando
 
 
 def _listar(destino):
@@ -92,6 +106,11 @@ def main(argv=None):
     )
     parser.add_argument('--out', default=str(RAIZ / 'backups'))
     parser.add_argument('--keep', type=int, default=7, help='respaldos a conservar')
+    parser.add_argument(
+        '--schema',
+        default='public',
+        help="esquema a respaldar (por defecto 'public'; vacio = todos los esquemas)",
+    )
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--list', action='store_true')
     args = parser.parse_args(argv)
@@ -113,7 +132,7 @@ def main(argv=None):
     destino.mkdir(parents=True, exist_ok=True)
     sello = datetime.now().strftime('%Y%m%d_%H%M%S')
     archivo = destino / f'localis_{sello}.dump'
-    comando = _construir_comando(pg_dump or 'pg_dump', datos, archivo)
+    comando = _construir_comando(pg_dump or 'pg_dump', datos, archivo, args.schema)
 
     if args.dry_run:
         print('DRY-RUN: se ejecutaria:')
@@ -135,7 +154,7 @@ def main(argv=None):
     if datos['password']:
         entorno['PGPASSWORD'] = datos['password']
 
-    print(f'Respaldando {datos["host"]}/{datos["dbname"]} -> {archivo} ...')
+    print(f'Respaldando {datos["host"]}/{datos["dbname"]} (esquema={args.schema or "todos"}) -> {archivo} ...')
     try:
         subprocess.run(comando, env=entorno, check=True)
     except Exception as error:

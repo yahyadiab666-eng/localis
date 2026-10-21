@@ -37,6 +37,12 @@ python scripts/backup_bd.py --list
   (nunca en la línea de comandos).
 - Formato `custom` comprimido (restaurable con `pg_restore`).
 - Requiere `pg_dump` en el PATH (cliente de PostgreSQL).
+- **Respalda solo el esquema `public`** (los datos de la app) por defecto.
+  Un dump de TODA la base en Supabase incluye schemas gestionados (`auth`,
+  `storage`, `realtime`, `vault`, `graphql`) que **no se pueden restaurar** sin
+  superusuario: `pg_restore` daba 15 errores de `permission denied` y el drill
+  resultaba en un **falso negativo**. Supabase protege esos schemas con sus
+  propios backups/PITR. Usa `--schema=""` solo si sabes lo que haces.
 
 **Programación (Windows):** Programador de tareas → diario 03:00 →
 `python C:\ruta\scripts\backup_bd.py --out D:\respaldos_localis --keep 14`.
@@ -60,6 +66,12 @@ python scripts/restore_bd.py backups/localis_YYYYMMDD_HHMMSS.dump \
 `restore_bd.py` es destructivo (`pg_restore --clean`), por eso:
 - exige `--yes`;
 - **rechaza el host de producción** salvo `--force-prod`.
+
+> **Drill verificado (producción → base dedicada)**: se respalda producción y se
+> restaura en una base **dedicada** del proyecto de staging (`localis_drill`),
+> sin tocar la base principal de staging. Resultado: **10/10 tablas con conteos
+> idénticos** (usuarios, comercios, productos, interacciones…). Es el
+> procedimiento recomendado: realista y no destruye nada en staging.
 
 ## Verificación tras restaurar
 1. `GET /health/ready` → `ok: true`.
