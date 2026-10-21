@@ -87,6 +87,13 @@ def registrar_request_logging(app):
             asegurar_reporte_diario_activo()
         except Exception:
             pass
+        # Envía (una sola vez) el informe de marketing a los administradores.
+        try:
+            from backend.informe_marketing import asegurar_informe_marketing
+
+            asegurar_informe_marketing()
+        except Exception:
+            pass
 
     @app.after_request
     def _registrar_acceso(response):
