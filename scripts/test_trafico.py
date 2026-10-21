@@ -89,6 +89,20 @@ def main() -> int:
     finally:
         trafico._hoy = real_hoy
 
+    print('\n=== Volcado oportunista: respeta el intervalo ===')
+    _reset()
+    trafico._ultimo_intento_volcado = 0.0
+    trafico._pendientes[('2026-01-01', 'peticiones')] = 1
+    llamadas = []
+    original_volcar = trafico.volcar
+    trafico.volcar = lambda: (llamadas.append(1), 1)[1]
+    try:
+        trafico.volcar_oportunista()  # intervalo vencido -> dispara
+        trafico.volcar_oportunista()  # dentro del intervalo -> no dispara
+    finally:
+        trafico.volcar = original_volcar
+    _ok(len(llamadas) == 1, f'dispara 1 de 2 llamadas -> {len(llamadas)}')
+
     print('\n=== Degradacion (sin tocar la BD) ===')
     _reset()
     from backend.reporte_trafico import construir_reporte, enviar_reporte_admin

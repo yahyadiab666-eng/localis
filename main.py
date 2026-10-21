@@ -266,13 +266,9 @@ try:
 except Exception as _error_backfill:
     logger.error(f'[Localis] backfill periódico no iniciado: {_error_backfill}')
 
-# Volcado periódico de métricas de tráfico a la BD (sobreviven al reinicio).
-try:
-    from backend.trafico import iniciar_flush_periodico
-
-    iniciar_flush_periodico()
-except Exception as _error_trafico:
-    logger.error(f'[Localis] volcado de tráfico no iniciado: {_error_trafico}')
+# Métricas de tráfico: se acumulan en memoria (backend/trafico.py) y se vuelcan
+# a la BD desde el propio ciclo del request (after_request), sin depender de un
+# hilo de fondo (en producción la creación de hilos puede fallar).
 
 
 @app.template_filter('fecha_corta')
@@ -804,8 +800,6 @@ def health_ready():
         from backend import trafico
 
         estado['trafico'] = trafico.estado()
-        if request.args.get('diag') == '1':
-            estado['trafico_stack'] = trafico.stack_hilo()
     except Exception:
         pass
     return jsonify(estado), (200 if estado.get('ok') else 503)

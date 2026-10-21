@@ -2,9 +2,13 @@
 
 A diferencia de ``backend.metricas`` (Prometheus, en memoria y se pierde al
 reiniciar), aquí los conteos **sobreviven al reinicio**: se acumulan en memoria
-durante el día y se vuelcan a la tabla ``metricas_diarias`` con un ``UPSERT``
-cada pocos segundos. Con 1 worker (``WEB_CONCURRENCY=1``) el acumulador en
-memoria es consistente.
+durante el día y se vuelcan a la tabla ``metricas_diarias`` con un ``UPSERT``.
+Con 1 worker (``WEB_CONCURRENCY=1``) el acumulador en memoria es consistente.
+
+El volcado lo dispara **el propio request** (``after_request`` →
+``volcar_oportunista``) como máximo cada ``LOCALIS_TRAFICO_FLUSH_SEC`` segundos.
+No se usa un hilo de fondo a propósito: en producción la creación de hilos puede
+fallar (límite del contenedor) y el volcado quedaría muerto sin avisar.
 
 Qué se cuenta (cada clave es una fila por fecha):
 
@@ -18,8 +22,9 @@ Qué se cuenta (cada clave es una fila por fecha):
 
 Reglas de robustez (igual que el resto del proyecto):
   - Nunca lanza: la analítica jamás debe tumbar una petición.
-  - El volcado a la BD ocurre fuera del lock, para no añadir latencia al
-    ``after_request``; si falla, los deltas se reintegran y no se pierden.
+  - El volcado a la BD usa una conexión propia y acotada (``statement_timeout``),
+    de modo que un pooler que no responde no lo bloquea para siempre; si falla,
+    los deltas se reintegran y no se pierden.
   - Se apaga con ``LOCALIS_TRAFICO=0``.
 
 Los días se calculan en UTC (el servidor corre en UTC). El reporte lo indica.
@@ -76,8 +81,7 @@ _pendientes = {}  # (fecha_iso, clave) -> delta pendiente de volcar
 _unicos = set()   # huellas únicas del día en curso
 _dia_actual = None
 _ultimo_volcado = 0.0
-_iniciado = False
-_inicio_lock = threading.Lock()
+_ultimo_intento_volcado = 0.0
 _volcado_intentos = 0
 _ultimo_error_volcado = ''
 
@@ -234,35 +238,28 @@ def _escribir(filas):
         return False
 
 
-def _bucle():
-    while True:
-        time.sleep(max(10, _INTERVALO))
-        try:
-            volcadas = volcar()
-            if volcadas:
-                logger.info(f'{_LOG} volcadas {volcadas} clave(s)')
-        except Exception as error:
-            logger.error(f'{_LOG} ciclo de volcado falló: {type(error).__name__}: {error}')
+def volcar_oportunista():
+    """Volcado disparado desde el request (SIN depender de hilos).
 
-
-def iniciar_flush_periodico():
-    """Arranca el volcado periódico (hilo daemon). Idempotente. Nunca lanza."""
-    global _iniciado
+    En producción la creación de un hilo de fondo puede fallar (límite de hilos
+    del contenedor): por eso el volcado NO debe depender de un hilo. Se invoca
+    desde ``after_request`` y ejecuta ``volcar()`` a lo sumo una vez cada
+    ``_INTERVALO`` segundos. Nunca lanza.
+    """
+    global _ultimo_intento_volcado
     try:
         if not habilitado():
-            logger.info(f'{_LOG} desactivado (LOCALIS_TRAFICO=0)')
-            return None
-        with _inicio_lock:
-            if _iniciado:
-                return None
-            _iniciado = True
-            hilo = threading.Thread(target=_bucle, name='localis-trafico', daemon=True)
-            hilo.start()
-            logger.info(f'{_LOG} volcado periódico activo (cada {_INTERVALO}s)')
-            return hilo
-    except Exception as error:
-        logger.error(f'{_LOG} no se pudo iniciar el volcado: {error}')
-        return None
+            return
+        ahora = time.time()
+        with _lock:
+            if not _pendientes:
+                return
+            if ahora - _ultimo_intento_volcado < _INTERVALO:
+                return
+            _ultimo_intento_volcado = ahora
+        volcar()
+    except Exception:
+        pass
 
 
 def estado():
@@ -271,34 +268,18 @@ def estado():
         with _lock:
             return {
                 'habilitado': habilitado(),
-                'iniciado': _iniciado,
+                'hilos_activos': threading.active_count(),
                 'dia': _dia_actual.isoformat() if _dia_actual else None,
                 'pendientes_claves': len(_pendientes),
                 'unicos_dia': len(_unicos),
                 'volcado_intentos': _volcado_intentos,
                 'ultimo_volcado': _ultimo_volcado,
+                'ultimo_intento_volcado': _ultimo_intento_volcado,
                 'ultimo_error_volcado': _ultimo_error_volcado,
                 'intervalo_seg': _INTERVALO,
             }
     except Exception as error:
         return {'error': f'{type(error).__name__}: {error}'}
-
-
-def stack_hilo(nombre='localis-trafico'):
-    """Stack actual del hilo de volcado (diagnóstico temporal). Nunca lanza."""
-    import sys
-    import traceback
-
-    try:
-        marcos = sys._current_frames()
-        for hilo in threading.enumerate():
-            if hilo.name == nombre:
-                marco = marcos.get(hilo.ident)
-                if marco is not None:
-                    return ''.join(traceback.format_stack(marco))
-        return f'(hilo {nombre!r} no encontrado)'
-    except Exception as error:
-        return f'(error: {error})'
 
 
 # ==========================================================
