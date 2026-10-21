@@ -801,12 +801,15 @@ def health_ready():
         pass
     try:
         from backend.correo import correo_configurado
+        from config import SMTP_PASSWORD, SMTP_USER
         import backend.reporte_trafico as _rt
 
         estado['reporte_diario'] = {
             'habilitado': _rt._reporte_diario_habilitado(),
             'hora_utc': _rt._hora_objetivo_utc(),
             'correo_configurado': correo_configurado(),
+            'smtp_user_presente': bool(SMTP_USER),
+            'smtp_password_presente': bool(SMTP_PASSWORD),
             'iniciado': _rt._iniciado,
             'admins': len(_rt.ADMIN_EMAILS),
         }
