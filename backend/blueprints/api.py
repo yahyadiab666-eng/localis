@@ -394,11 +394,12 @@ def api_crear_producto():
 @limite('10 per minute')
 @login_requerido_api
 def api_verificar_boost():
-    """Valida el pago móvil y activa el destacado de un producto.
+    """Valida el pago (móvil o Binance Pay) y activa el destacado de un producto.
 
     Réplica EXACTA del flujo de mensualidades (``/api/pagos/verificar``):
-    comprobante + OCR antifraude (banco nacional, RIF/cédula y teléfono destino,
-    monto exacto y fecha reciente) + anti-reutilización de referencia/comprobante.
+    comprobante + OCR antifraude + anti-reutilización de referencia/comprobante.
+    Con ``metodo_boost=binance`` se valida la captura de Binance Pay y, si las
+    llaves están configuradas, se confirma la orden contra la API de Binance.
     """
     comercio = comercio_sesion_validado()
     if not comercio:
@@ -419,6 +420,13 @@ def api_verificar_boost():
     precio_usd = precio_boost(dias)
     if not precio_usd:
         return jsonify({'error': 'Duración no válida. Elige 3, 5 o 7 días.'}), 400
+
+    metodo_pago = (
+        'binance'
+        if (request.form.get('metodo_boost') or '').strip().lower() == 'binance'
+        else 'pago_movil'
+    )
+    es_binance = metodo_pago == 'binance'
 
     # a) Propiedad inequívoca: el producto debe ser del comercio de la sesión.
     if not producto_pertenece_a_comercio(producto_id, comercio['id']):
@@ -448,9 +456,13 @@ def api_verificar_boost():
         tasa = 1.0
     monto_bs = round(float(precio_usd) * tasa, 2)
 
-    # b) OCR estricto: banco nacional, RIF/cédula y teléfono destino,
-    #    monto exacto y fecha reciente.
-    ocr = validar_comprobante_pago_movil(data_bytes, monto_bs)
+    # b) OCR estricto. Pago móvil: banco nacional, RIF/cédula y teléfono
+    #    destino, monto exacto y fecha reciente. Binance: monto en USDT, fecha
+    #    reciente e ID de orden.
+    if es_binance:
+        ocr = validar_comprobante_binance(data_bytes, float(precio_usd))
+    else:
+        ocr = validar_comprobante_pago_movil(data_bytes, monto_bs)
     if not ocr.get('ok'):
         return (
             jsonify(
@@ -463,6 +475,28 @@ def api_verificar_boost():
         )
 
     referencia = ocr['referencia']
+
+    # b.2) Verificación REAL contra Binance (si la API está configurada). La
+    #      captura sola no prueba que el dinero llegó. True=confirmado;
+    #      False=no está; None=no se pudo verificar (no bloquea: queda el OCR).
+    if es_binance:
+        from backend.binance_api import verificar_orden_binance
+
+        confirmado = verificar_orden_binance(referencia, ocr.get('monto_usd'))
+        if confirmado is False:
+            return (
+                jsonify(
+                    {
+                        'error': (
+                            'No encontramos ese pago en Binance. Verifica que el ID '
+                            'de la orden sea correcto.'
+                        ),
+                        'ocr_ms': round(ocr.get('ms', 0), 1),
+                    }
+                ),
+                400,
+            )
+
     comprobante_url = None
     aviso_pago = None
     try:
@@ -486,6 +520,7 @@ def api_verificar_boost():
         logger.error(f'[Localis Boost] no se pudo subir el comprobante: {error}')
 
     # c) Activación atómica: auditoría + referencia única + boost del producto.
+    #    Se conserva el valor histórico 'pago_movil_ocr' en la tabla boosts.
     exito, mensaje = activar_boost_producto(
         comercio['id'],
         producto_id,
@@ -493,6 +528,7 @@ def api_verificar_boost():
         referencia,
         comprobante_url=comprobante_url,
         comprobante_hash=hash_comprobante,
+        metodo=('binance' if es_binance else 'pago_movil_ocr'),
     )
     if not exito:
         return jsonify({'error': mensaje, 'ocr_ms': round(ocr.get('ms', 0), 1)}), 400
@@ -505,6 +541,7 @@ def api_verificar_boost():
                 'producto_id': producto_id,
                 'dias': dias,
                 'referencia': referencia,
+                'metodo': metodo_pago,
                 'monto_usd': float(precio_usd),
                 'monto_bs': monto_bs,
                 'tasa': tasa,
