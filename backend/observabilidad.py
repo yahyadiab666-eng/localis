@@ -94,6 +94,13 @@ def registrar_request_logging(app):
             asegurar_informe_marketing()
         except Exception:
             pass
+        # Arranca (post-fork) el recordatorio de vencimiento de suscripciones.
+        try:
+            from backend.recordatorios import asegurar_recordatorios_activos
+
+            asegurar_recordatorios_activos()
+        except Exception:
+            pass
 
     @app.after_request
     def _registrar_acceso(response):
