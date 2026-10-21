@@ -804,6 +804,8 @@ def health_ready():
         from backend import trafico
 
         estado['trafico'] = trafico.estado()
+        if request.args.get('diag') == '1':
+            estado['trafico_stack'] = trafico.stack_hilo()
     except Exception:
         pass
     return jsonify(estado), (200 if estado.get('ok') else 503)

@@ -284,6 +284,23 @@ def estado():
         return {'error': f'{type(error).__name__}: {error}'}
 
 
+def stack_hilo(nombre='localis-trafico'):
+    """Stack actual del hilo de volcado (diagnóstico temporal). Nunca lanza."""
+    import sys
+    import traceback
+
+    try:
+        marcos = sys._current_frames()
+        for hilo in threading.enumerate():
+            if hilo.name == nombre:
+                marco = marcos.get(hilo.ident)
+                if marco is not None:
+                    return ''.join(traceback.format_stack(marco))
+        return f'(hilo {nombre!r} no encontrado)'
+    except Exception as error:
+        return f'(error: {error})'
+
+
 # ==========================================================
 # Lectura para el reporte
 # ==========================================================
