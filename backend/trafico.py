@@ -78,6 +78,8 @@ _dia_actual = None
 _ultimo_volcado = 0.0
 _iniciado = False
 _inicio_lock = threading.Lock()
+_volcado_intentos = 0
+_ultimo_error_volcado = ''
 
 
 def habilitado():
@@ -157,9 +159,10 @@ def volcar():
     Devuelve el número de claves volcadas. Si la BD falla, los deltas se
     reintegran para reintentarlos en el siguiente ciclo.
     """
+    global _ultimo_volcado, _volcado_intentos
     if not habilitado():
         return 0
-    global _ultimo_volcado
+    _volcado_intentos += 1
     with _lock:
         if not _pendientes:
             return 0
@@ -177,6 +180,7 @@ def volcar():
 
 def _escribir(filas):
     """Escribe los deltas con UPSERT. Devuelve True si la transacción se guardó."""
+    global _ultimo_error_volcado
     try:
         from backend.db import get_db_connection
 
@@ -198,6 +202,7 @@ def _escribir(filas):
             conexion.commit()
         return True
     except Exception as error:
+        _ultimo_error_volcado = f'{type(error).__name__}: {error}'
         logger.error(
             f'{_LOG} no se pudo volcar ({type(error).__name__}: {error})'
         )
@@ -241,10 +246,13 @@ def estado():
         with _lock:
             return {
                 'habilitado': habilitado(),
+                'iniciado': _iniciado,
                 'dia': _dia_actual.isoformat() if _dia_actual else None,
                 'pendientes_claves': len(_pendientes),
                 'unicos_dia': len(_unicos),
+                'volcado_intentos': _volcado_intentos,
                 'ultimo_volcado': _ultimo_volcado,
+                'ultimo_error_volcado': _ultimo_error_volcado,
                 'intervalo_seg': _INTERVALO,
             }
     except Exception as error:
