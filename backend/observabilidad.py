@@ -80,6 +80,13 @@ def registrar_request_logging(app):
             asegurar_backfill_activo()
         except Exception:
             pass
+        # Arranca (post-fork) el planificador del reporte diario de tráfico.
+        try:
+            from backend.reporte_trafico import asegurar_reporte_diario_activo
+
+            asegurar_reporte_diario_activo()
+        except Exception:
+            pass
 
     @app.after_request
     def _registrar_acceso(response):

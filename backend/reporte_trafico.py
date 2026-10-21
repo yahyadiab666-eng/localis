@@ -13,6 +13,9 @@ Nunca lanza hacia el llamador HTTP: si algo falla, devuelve ``(False, detalle)``
 from __future__ import annotations
 
 import logging
+import os
+import threading
+import time
 from datetime import datetime, timezone
 
 from config import ADMIN_EMAILS
@@ -23,6 +26,15 @@ logger = logging.getLogger('localis.reporte_trafico')
 
 _LOG = '[Localis Reporte Trafico]'
 _CLAVE_MARCA = 'reporte_trafico_ultimo_envio'
+
+# Planificador diario dentro de la app (sin cron externo). El hilo se arranca de
+# forma perezosa desde el request (post-fork): un hilo creado al importar el
+# módulo no sobrevive al fork de gunicorn en producción.
+_INTERVALO_REVISION = int(os.environ.get('LOCALIS_REPORTE_REVISION_SEG', '600') or 600)
+_envio_lock = threading.Lock()
+_iniciado = False
+_ultimo_intento_arranque = 0.0
+_inicio_lock = threading.Lock()
 
 # Orden y etiquetas de las claves mostradas en el reporte.
 _ETIQUETAS = (
@@ -162,40 +174,134 @@ def _guardar_marca(valor):
 def enviar_reporte_admin(dias=1, forzar=False, destinatarios=None):
     """Genera y envía el reporte. Devuelve ``(ok, detalle, texto)``.
 
-    Si ya se envió hoy y ``forzar`` es False, no reenvía (idempotencia).
+    Si ya se envió hoy y ``forzar`` es False, no reenvía (idempotencia). El envío
+    se serializa con un lock para que el planificador interno y el endpoint de
+    cron nunca disparen dos correos a la vez.
     """
     reporte = construir_reporte(dias=dias)
     texto = reporte['texto']
 
-    if not forzar:
-        hoy = _ahora_utc().date().isoformat()
-        if _leer_marca() == hoy:
-            return False, 'ya enviado hoy (sin reenvío)', texto
+    with _envio_lock:
+        if not forzar:
+            hoy = _ahora_utc().date().isoformat()
+            if _leer_marca() == hoy:
+                return False, 'ya enviado hoy (sin reenvío)', texto
 
-    if not correo_configurado():
-        return False, 'SMTP no configurado (SMTP_USER/SMTP_PASSWORD)', texto
+        if not correo_configurado():
+            return False, 'SMTP no configurado (SMTP_USER/SMTP_PASSWORD)', texto
 
-    destinatarios = destinatarios or list(ADMIN_EMAILS)
-    if not destinatarios:
-        return False, 'sin administradores configurados (LOCALIS_ADMIN_EMAILS)', texto
+        destinatarios = destinatarios or list(ADMIN_EMAILS)
+        if not destinatarios:
+            return False, 'sin administradores configurados (LOCALIS_ADMIN_EMAILS)', texto
 
-    asunto = f'[Localis] Reporte de tráfico {_ahora_utc().date().isoformat()}'
-    enviados = 0
-    fallos = []
-    for destino in destinatarios:
+        asunto = f'[Localis] Reporte de tráfico {_ahora_utc().date().isoformat()}'
+        enviados = 0
+        fallos = []
+        for destino in destinatarios:
+            try:
+                ok, detalle = enviar_correo(destino, asunto, texto)
+            except Exception as error:
+                ok, detalle = False, str(error)
+            if ok:
+                enviados += 1
+            else:
+                fallos.append(f'{destino}: {detalle}')
+
+        if enviados:
+            _guardar_marca(_ahora_utc().date().isoformat())
+
+        detalle = f'enviados={enviados} fallos={len(fallos)}'
+        if fallos:
+            detalle += ' | ' + '; '.join(fallos)
+        return (enviados > 0), detalle, texto
+
+
+# ==========================================================
+# Planificador diario dentro de la app (sin cron externo)
+# ==========================================================
+
+def _reporte_diario_habilitado():
+    valor = (os.environ.get('LOCALIS_REPORTE_DIARIO') or '1').strip().lower()
+    return valor not in ('0', 'false', 'no', 'off')
+
+
+def _hora_objetivo_utc():
+    try:
+        return max(0, min(23, int(os.environ.get('LOCALIS_REPORTE_HORA_UTC', '13') or 13)))
+    except (TypeError, ValueError):
+        return 13
+
+
+def quizas_enviar_reporte_diario():
+    """Envía el reporte si ya pasó la hora diaria y no se envió hoy. Nunca lanza.
+
+    Reintenta solo: si la app estaba dormida a la hora objetivo, envía en el
+    primer ciclo posterior a despertar (idempotente por día).
+    """
+    if not _reporte_diario_habilitado():
+        return
+    try:
+        ahora = _ahora_utc()
+        if ahora.hour < _hora_objetivo_utc():
+            return
+        if _leer_marca() == ahora.date().isoformat():
+            return
+        enviar_reporte_admin(forzar=False)
+    except Exception as error:
+        logger.error(f'{_LOG} envío diario falló: {type(error).__name__}: {error}')
+
+
+def _bucle_reporte():
+    while True:
+        time.sleep(max(60, _INTERVALO_REVISION))
         try:
-            ok, detalle = enviar_correo(destino, asunto, texto)
+            quizas_enviar_reporte_diario()
         except Exception as error:
-            ok, detalle = False, str(error)
-        if ok:
-            enviados += 1
-        else:
-            fallos.append(f'{destino}: {detalle}')
+            logger.error(f'{_LOG} ciclo del planificador falló: {type(error).__name__}: {error}')
 
-    if enviados:
-        _guardar_marca(_ahora_utc().date().isoformat())
 
-    detalle = f'enviados={enviados} fallos={len(fallos)}'
-    if fallos:
-        detalle += ' | ' + '; '.join(fallos)
-    return (enviados > 0), detalle, texto
+def iniciar_reporte_diario():
+    """Arranca el planificador del reporte (hilo daemon). Idempotente. Nunca lanza.
+
+    NO llamar al importar el módulo (el hilo no sobreviviría al fork de gunicorn).
+    """
+    global _iniciado
+    if not _reporte_diario_habilitado():
+        logger.info(f'{_LOG} desactivado (LOCALIS_REPORTE_DIARIO=0)')
+        return None
+    if not correo_configurado():
+        logger.info(f'{_LOG} sin SMTP configurado: reporte diario no programado')
+        return None
+    with _inicio_lock:
+        if _iniciado:
+            return None
+        try:
+            hilo = threading.Thread(
+                target=_bucle_reporte, name='localis-reporte', daemon=True
+            )
+            hilo.start()
+        except Exception as error:
+            logger.error(
+                f'{_LOG} no se pudo iniciar el planificador: {type(error).__name__}: {error}'
+            )
+            return None
+        _iniciado = True
+        logger.info(
+            f'{_LOG} planificador diario activo (objetivo {_hora_objetivo_utc()}:00 UTC)'
+        )
+        return hilo
+
+
+def asegurar_reporte_diario_activo():
+    """Arranca el planificador desde el request (post-fork). Throttle 30 s. Nunca lanza."""
+    global _ultimo_intento_arranque
+    try:
+        if _iniciado or not _reporte_diario_habilitado():
+            return
+        ahora = time.time()
+        if ahora - _ultimo_intento_arranque < 30:
+            return
+        _ultimo_intento_arranque = ahora
+        iniciar_reporte_diario()
+    except Exception:
+        pass
