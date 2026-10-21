@@ -227,7 +227,7 @@ def _reporte_diario_habilitado():
 
 def _hora_objetivo_utc():
     try:
-        return max(0, min(23, int(os.environ.get('LOCALIS_REPORTE_HORA_UTC', '0') or 0)))
+        return max(0, min(23, int(os.environ.get('LOCALIS_REPORTE_HORA_UTC', '13') or 13)))
     except (TypeError, ValueError):
         return 13
 
