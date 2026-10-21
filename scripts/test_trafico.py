@@ -77,6 +77,16 @@ def main() -> int:
     _ok(c.get('pwa_aperturas') == 1, f"aperturas_pwa=1 -> {c.get('pwa_aperturas')}")
     _ok(c.get('pwa_instalaciones') == 2, f"instalaciones_pwa=2 -> {c.get('pwa_instalaciones')}")
 
+    print('\n=== Canal (utm_source) ===')
+    _reset()
+    trafico.registrar_peticion('/', 200, user_agent='Mozilla', remote_addr='7.7.7.7', query='utm_source=Instagram&x=1')
+    trafico.registrar_peticion('/', 200, user_agent='Mozilla', remote_addr='7.7.7.7', query='utm_source=instagram')
+    trafico.registrar_peticion('/', 200, user_agent='Mozilla', remote_addr='7.7.7.7', query='sin_utm=1')
+    c = _claves()
+    _ok(c.get('canal_instagram') == 2, f"canal_instagram=2 (normaliza mayúsculas) -> {c.get('canal_instagram')}")
+    canales = [k for k in c if k.startswith('canal_')]
+    _ok(canales == ['canal_instagram'], f'un solo canal, sin inventar -> {canales}')
+
     print('\n=== Cambio de dia: la misma huella vuelve a contar ===')
     real_hoy = trafico._hoy
     base = _dt.date(2026, 1, 1)
