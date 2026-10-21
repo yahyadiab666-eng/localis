@@ -13,7 +13,8 @@ fallar (límite del contenedor) y el volcado quedaría muerto sin avisar.
 Qué se cuenta (cada clave es una fila por fecha):
 
   - ``peticiones``       → todas las peticiones HTTP.
-  - ``peticiones_app``   → tráfico "real" (excluye estáticos, salud, métricas).
+  - ``peticiones_app``   → tráfico de la app (excluye estáticos, salud, métricas).
+  - ``peticiones_bots``  → de las anteriores, las de bots/crawlers (heurística UA).
   - ``visitas_unicas``   → huellas (IP+UA) únicas del día, sin bots. Aproximado:
                             el conjunto vive en memoria y se reinicia con el
                             worker y al cambiar de día.
@@ -134,7 +135,9 @@ def registrar_peticion(ruta, status=None, user_agent='', remote_addr='', query='
             _sumar(fecha, 'peticiones', 1)
             if not ruta.startswith(_RAIZ_EXCLUIDA):
                 _sumar(fecha, 'peticiones_app', 1)
-                if not _es_bot(user_agent):
+                if _es_bot(user_agent):
+                    _sumar(fecha, 'peticiones_bots', 1)
+                else:
                     huella = _huella(remote_addr, user_agent)
                     if huella not in _unicos and len(_unicos) < _MAX_UNICOS:
                         _unicos.add(huella)

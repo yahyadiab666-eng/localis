@@ -9,7 +9,8 @@ depender de analítica externa ni de pagos.
 | Dato | Clave en BD | Cómo se obtiene |
 |---|---|---|
 | Peticiones totales | `peticiones` | Toda petición HTTP |
-| Tráfico de la app | `peticiones_app` | Sin estáticos, `/health`, `/metrics` |
+| Tráfico de la app (humanos) | `peticiones_app` − `peticiones_bots` | Sin estáticos/`/health`/`/metrics`, sin bots |
+| Peticiones de bots/crawlers | `peticiones_bots` | Subconjunto anterior detectado por User-Agent |
 | Visitantes únicos (aprox.) | `visitas_unicas` | Huella IP+navegador por día, sin bots |
 | Instalaciones de PWA | `pwa_instalaciones` | Evento `appinstalled` (beacon del cliente) |
 | Aperturas desde la PWA | `pwa_aperturas` | Peticiones con `?source=pwa` |
