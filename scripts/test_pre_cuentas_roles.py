@@ -133,6 +133,21 @@ def main() -> int:
         _ok(fila.get('owner_email') in (None, ''), 'sin correo (owner_email NULL)')
         _ok(fila.get('usuario_id') in (None, ''), 'sin dueño (usuario_id NULL)')
         _ok((fila.get('codigo_publico') or '').startswith('COM-'), f"código={fila.get('codigo_publico')!r}")
+
+        print('\n=== Auditoría aislada: admin inexistente no aborta la operación ===')
+        # Un admin_id que no existe viola la FK de logs_auditoria. Antes, Postgres
+        # abortaba TODA la transacción y la pre-cuenta no se creaba (aunque se
+        # devolvía "éxito"). Con el SAVEPOINT en _auditar, debe persistir.
+        admin_inexistente = 2_000_000_000
+        exito_ai, msg_ai, cid_ai = pre_cuentas.crear_pre_cuenta_admin(
+            admin_inexistente, {'nombre': f'Tienda {token} audit'}
+        )
+        _ok(exito_ai and cid_ai, f'crea la pre-cuenta pese a auditoría inválida: {msg_ai}')
+        if cid_ai:
+            creados['comercios'].append(cid_ai)
+            fila_ai = _leer_comercio(cid_ai)
+            _ok(fila_ai is not None, 'la pre-cuenta persistió (transacción no abortada)')
+
         # Se fuerza visible=1 para probar que el filtro la oculta igualmente.
         with get_db_connection() as c:
             cur = c.cursor()

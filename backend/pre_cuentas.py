@@ -56,6 +56,16 @@ def _valor_fila(fila, clave, indice=0):
 
 
 def _auditar(cursor, admin_id, accion, detalles):
+    """Registra en ``logs_auditoria`` dentro de un SAVEPOINT.
+
+    La auditoría es auxiliar: si falla (p. ej. una FK), se revierte SOLO el
+    savepoint y la transacción principal continúa. Sin esto, un fallo de la
+    auditoría abortaba toda la operación (Postgres revoca el COMMIT posterior).
+    """
+    try:
+        cursor.execute('SAVEPOINT sp_auditar')
+    except Exception:
+        pass
     try:
         cursor.execute(
             """
@@ -66,6 +76,15 @@ def _auditar(cursor, admin_id, accion, detalles):
         )
     except Exception as error:
         logger.error(f'{LOG_PREFIX} aviso auditoría: {error}')
+        try:
+            cursor.execute('ROLLBACK TO SAVEPOINT sp_auditar')
+        except Exception:
+            pass
+        return
+    try:
+        cursor.execute('RELEASE SAVEPOINT sp_auditar')
+    except Exception:
+        pass
 
 
 def _plan_gratis():
@@ -94,6 +113,10 @@ def _ascender_a_comerciante(cursor, usuario_id):
     if not usuario_id:
         return
     try:
+        cursor.execute('SAVEPOINT sp_ascender')
+    except Exception:
+        pass
+    try:
         cursor.execute(
             "UPDATE usuarios SET rol = 'comerciante' "
             "WHERE id = ? AND LOWER(TRIM(COALESCE(rol, ''))) <> 'admin'",
@@ -101,12 +124,25 @@ def _ascender_a_comerciante(cursor, usuario_id):
         )
     except Exception as error:
         logger.error(f'{LOG_PREFIX} rol usuario {usuario_id}: {error}')
+        try:
+            cursor.execute('ROLLBACK TO SAVEPOINT sp_ascender')
+        except Exception:
+            pass
+        return
+    try:
+        cursor.execute('RELEASE SAVEPOINT sp_ascender')
+    except Exception:
+        pass
 
 
 def _usuario_tiene_tienda(cursor, usuario_id, excluir_comercio_id=None):
     """True si el usuario ya posee alguna tienda (regla: 1 tienda por usuario)."""
     if not usuario_id:
         return False
+    try:
+        cursor.execute('SAVEPOINT sp_tiene_tienda')
+    except Exception:
+        pass
     try:
         if excluir_comercio_id:
             cursor.execute(
@@ -118,10 +154,19 @@ def _usuario_tiene_tienda(cursor, usuario_id, excluir_comercio_id=None):
                 'SELECT 1 FROM comercios WHERE usuario_id = ? LIMIT 1',
                 (int(usuario_id),),
             )
-        return cursor.fetchone() is not None
+        tiene = cursor.fetchone() is not None
     except Exception as error:
         logger.error(f'{LOG_PREFIX} no se pudo verificar tiendas de {usuario_id}: {error}')
+        try:
+            cursor.execute('ROLLBACK TO SAVEPOINT sp_tiene_tienda')
+        except Exception:
+            pass
         return False
+    try:
+        cursor.execute('RELEASE SAVEPOINT sp_tiene_tienda')
+    except Exception:
+        pass
+    return tiene
 
 
 def _recalcular_rol_usuario(cursor, usuario_id):
@@ -133,6 +178,10 @@ def _recalcular_rol_usuario(cursor, usuario_id):
     if not usuario_id:
         return
     try:
+        cursor.execute('SAVEPOINT sp_recalcular_rol')
+    except Exception:
+        pass
+    try:
         tiene = _usuario_tiene_tienda(cursor, usuario_id)
         nuevo = 'comerciante' if tiene else 'user'
         cursor.execute(
@@ -142,6 +191,15 @@ def _recalcular_rol_usuario(cursor, usuario_id):
         )
     except Exception as error:
         logger.error(f'{LOG_PREFIX} recálculo rol {usuario_id}: {error}')
+        try:
+            cursor.execute('ROLLBACK TO SAVEPOINT sp_recalcular_rol')
+        except Exception:
+            pass
+        return
+    try:
+        cursor.execute('RELEASE SAVEPOINT sp_recalcular_rol')
+    except Exception:
+        pass
 
 
 def _asegurar_slug(comercio_id, nombre=None):
@@ -220,11 +278,24 @@ def crear_pre_cuenta_admin(admin_id, datos):
                 return False, 'No se pudo crear la pre-cuenta.', None
 
             try:
+                cursor.execute('SAVEPOINT sp_codigo_comercio')
+            except Exception:
+                pass
+            try:
                 from backend.codigos_publicos import asignar_codigo_comercio
 
                 asignar_codigo_comercio(cursor, comercio_id)
             except Exception as error:
                 logger.error(f'{LOG_PREFIX} código comercio {comercio_id}: {error}')
+                try:
+                    cursor.execute('ROLLBACK TO SAVEPOINT sp_codigo_comercio')
+                except Exception:
+                    pass
+            else:
+                try:
+                    cursor.execute('RELEASE SAVEPOINT sp_codigo_comercio')
+                except Exception:
+                    pass
 
             _auditar(
                 cursor,
