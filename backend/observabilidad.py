@@ -90,6 +90,10 @@ def registrar_request_logging(app):
                     else ''
                 ),
             )
+            # Volcado oportunista: persiste los contadores a lo sumo cada
+            # LOCALIS_TRAFICO_FLUSH_SEC segundos, desde el propio request
+            # (sin depender de un hilo de fondo).
+            trafico.volcar_oportunista()
             if not request.path.startswith('/static/'):
                 log.info(
                     '%s %s -> %s %.1fms rid=%s',

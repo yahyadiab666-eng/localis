@@ -32,10 +32,18 @@ depender de analítica externa ni de pagos.
 1. Cada petición se cuenta en memoria (`backend/trafico.py`) desde el hook
    `after_request` (`backend/observabilidad.py`). No hay una escritura a la BD
    por petición.
-2. Un hilo daemon vuelca los acumulados a la tabla **`metricas_diarias`**
-   (`UPSERT` atómico) cada `LOCALIS_TRAFICO_FLUSH_SEC` segundos (por defecto 45).
-   Si el volcado falla, los deltas se reintentan y no se pierden.
+2. El **propio request** vuelca los acumulados a la tabla **`metricas_diarias`**
+   (`UPSERT` atómico) a lo sumo cada `LOCALIS_TRAFICO_FLUSH_SEC` segundos (45
+   por defecto). **No hay hilo de fondo** a propósito: en producción la creación
+   de hilos puede fallar (límite del contenedor) y el volcado quedaría muerto en
+   silencio — justo lo que pasó y motivó este diseño. Si el volcado falla, los
+   deltas se reintentan y no se pierden (conexión propia y acotada con
+   `statement_timeout`, para que un pooler que no responde no lo cuelgue).
 3. El reporte lee `metricas_diarias` y lo envía por correo.
+
+> Como el volcado lo dispara el tráfico, si la app queda inactiva, los contadores
+> del último tramo quedan en memoria hasta la siguiente petición. Si el proceso
+> muere antes, se pierde a lo sumo ese tramo (≈45 s).
 
 Con `WEB_CONCURRENCY=1` el acumulador en memoria es consistente. **No subas los
 workers** sin mover la agregación a un almacén compartido.
