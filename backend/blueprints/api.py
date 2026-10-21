@@ -48,6 +48,7 @@ from backend.subscriptions import (
     comprobante_ya_usado,
     contar_productos_comercio,
     obtener_datos_pago_movil,
+    obtener_destino_pago_movil,
     obtener_limite_productos_comercio,
     programar_downgrade_plan,
     puede_agregar_producto,
@@ -74,6 +75,22 @@ from backend.web_seguridad import (
 from utils.images import PLACEHOLDER_PRODUCTO, url_imagen_producto_segura
 
 bp = Blueprint('api', __name__, url_prefix='/api')
+
+
+def _destino_pago_movil():
+    """Banco/RIF/teléfono con los que la UI cobra y el OCR debe validar.
+
+    Nunca lanza: si la configuración falla, el OCR usa sus valores por defecto.
+    """
+    try:
+        datos = obtener_destino_pago_movil() or {}
+    except Exception:
+        datos = {}
+    return {
+        'banco': datos.get('banco'),
+        'cedula_rif': datos.get('cedula_rif'),
+        'telefono': datos.get('telefono'),
+    }
 
 
 @bp.route('/tasa-bcv')
@@ -462,13 +479,21 @@ def api_verificar_boost():
     if es_binance:
         ocr = validar_comprobante_binance(data_bytes, float(precio_usd))
     else:
-        ocr = validar_comprobante_pago_movil(data_bytes, monto_bs)
+        destino = _destino_pago_movil()
+        ocr = validar_comprobante_pago_movil(
+            data_bytes,
+            monto_bs,
+            banco=destino.get('banco'),
+            rif=destino.get('cedula_rif'),
+            telefono=destino.get('telefono'),
+        )
     if not ocr.get('ok'):
         return (
             jsonify(
                 {
                     'error': ' '.join(ocr.get('errores') or ['Comprobante no válido.']),
                     'ocr_ms': round(ocr.get('ms', 0), 1),
+                    'estado_monto': ocr.get('estado_monto'),
                 }
             ),
             400,
@@ -482,14 +507,15 @@ def api_verificar_boost():
     if es_binance:
         from backend.binance_api import verificar_orden_binance
 
-        confirmado = verificar_orden_binance(referencia, ocr.get('monto_usd'))
+        confirmado = verificar_orden_binance(referencia, float(precio_usd))
         if confirmado is False:
             return (
                 jsonify(
                     {
                         'error': (
-                            'No encontramos ese pago en Binance. Verifica que el ID '
-                            'de la orden sea correcto.'
+                            'No encontramos ese pago en USDT en Binance. Verifica '
+                            'que el ID de la orden sea correcto y que el monto sea '
+                            'el exacto.'
                         ),
                         'ocr_ms': round(ocr.get('ms', 0), 1),
                     }
@@ -614,7 +640,14 @@ def api_verificar_pago():
     if es_binance:
         ocr = validar_comprobante_binance(data_bytes, montos.get('monto_usd'))
     else:
-        ocr = validar_comprobante_pago_movil(data_bytes, montos['monto_bs'])
+        destino = _destino_pago_movil()
+        ocr = validar_comprobante_pago_movil(
+            data_bytes,
+            montos['monto_bs'],
+            banco=destino.get('banco'),
+            rif=destino.get('cedula_rif'),
+            telefono=destino.get('telefono'),
+        )
     if not ocr.get('ok'):
         return jsonify(
             {
@@ -631,14 +664,15 @@ def api_verificar_pago():
     if es_binance:
         from backend.binance_api import verificar_orden_binance
 
-        confirmado = verificar_orden_binance(referencia, ocr.get('monto_usd'))
+        confirmado = verificar_orden_binance(referencia, montos.get('monto_usd'))
         if confirmado is False:
             return (
                 jsonify(
                     {
                         'error': (
-                            'No encontramos ese pago en Binance. Verifica que el ID '
-                            'de la orden sea correcto.'
+                            'No encontramos ese pago en USDT en Binance. Verifica '
+                            'que el ID de la orden sea correcto y que el monto sea '
+                            'el exacto.'
                         ),
                         'ocr_ms': round(ocr.get('ms', 0), 1),
                     }

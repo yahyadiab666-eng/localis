@@ -6,9 +6,11 @@ orden), en vez de fiarse de una captura (que se puede falsificar).
 Requiere ``LOCALIS_BINANCE_API_KEY`` y ``LOCALIS_BINANCE_API_SECRET`` (permiso
 **solo lectura**, sin retiros). Nunca lanza:
 
-  - ``True``  → la orden existe (y el monto cuadra).
-  - ``False`` → la API respondió y la orden NO está.
-  - ``None``  → no está configurada o la API falló (no bloquea: el OCR sigue).
+  - ``True``  → la orden existe (en USDT y con el monto exacto).
+  - ``False`` → la API respondió y la orden NO está (o no es USDT / el monto
+    no cuadra: incompleto o excedido).
+  - ``None``  → no está configurada, la API falló o la orden no informa monto
+    (no bloquea: el OCR sigue y el admin revisa).
 
 Ojo: el endpoint de historial de Binance Pay puede requerir que la cuenta tenga
 Pay habilitado; si la API no lo permite, se degrada a ``None`` y el respaldo es
@@ -46,6 +48,13 @@ _VENTANA_DIAS = 3
 _TAMANO_PAGINA = 100
 _SLICE_MS = 12 * 60 * 60 * 1000  # 12 h: ventana de barrido si hay truncamiento
 _MAX_SLICES = 12
+
+# La verificación solo acepta pagos en USDT y exige el importe exacto (con
+# centavos de margen). Nunca se acepta un dólar menos: en destacados de $2-4
+# eso equivalía a regalar hasta el 50 % del servicio.
+MONEDA_ESPERADA = 'USDT'
+_TOLERANCIA_USD_ABS = 0.02
+_TOLERANCIA_USD_REL = 0.01
 
 
 def _dias_ventana():
@@ -107,6 +116,15 @@ def _monto_tx(tx):
                 return abs(float(tx.get(clave)))
         except (TypeError, ValueError):
             continue
+    return None
+
+
+def _moneda_tx(tx):
+    """Moneda del movimiento (`currency`/`coin`/`asset`), en mayúsculas."""
+    for clave in ('currency', 'coin', 'asset'):
+        valor = tx.get(clave)
+        if valor:
+            return str(valor).strip().upper()
     return None
 
 
@@ -192,18 +210,43 @@ def verificar_orden_binance(order_id, monto_usd=None):
             return None
 
         monto = _monto_tx(tx)
-        if (
-            objetivo_monto
-            and monto
-            and abs(monto - objetivo_monto) > max(1.0, objetivo_monto * 0.05)
-        ):
+        moneda = _moneda_tx(tx)
+        if moneda and moneda != MONEDA_ESPERADA:
             logger.warning(
-                f'{_LOG} orden {order_id} existe pero el monto {monto} no '
-                f'cuadra con {objetivo_monto}.'
+                f'{_LOG} orden {order_id} existe pero en {moneda}, '
+                f'no en {MONEDA_ESPERADA}.'
             )
             return False
 
-        logger.info(f'{_LOG} orden {order_id} confirmada en Binance.')
+        if objetivo_monto:
+            if monto is None:
+                logger.warning(
+                    f'{_LOG} orden {order_id} sin monto en la respuesta; '
+                    f'no se puede validar el importe (revisión manual).'
+                )
+                return None
+            tolerancia = max(_TOLERANCIA_USD_ABS, objetivo_monto * _TOLERANCIA_USD_REL)
+            diferencia = round(monto - objetivo_monto, 2)
+            if diferencia < -tolerancia:
+                logger.warning(
+                    f'{_LOG} orden {order_id} incompleta: {monto:.2f} '
+                    f'de {objetivo_monto:.2f} {MONEDA_ESPERADA} '
+                    f'(faltan {abs(diferencia):.2f}).'
+                )
+                return False
+            if diferencia > tolerancia:
+                logger.warning(
+                    f'{_LOG} orden {order_id} excedida: {monto:.2f} '
+                    f'de {objetivo_monto:.2f} {MONEDA_ESPERADA} '
+                    f'(sobran {diferencia:.2f}).'
+                )
+                return False
+
+        logger.info(
+            f'{_LOG} orden {order_id} confirmada en Binance '
+            f'({monto if monto is not None else "monto no informado"} '
+            f'{MONEDA_ESPERADA}).'
+        )
         return True
     except Exception as error:
         logger.error(

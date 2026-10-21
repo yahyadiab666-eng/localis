@@ -2194,6 +2194,10 @@ def _crear_indices(cursor):
         'CREATE INDEX IF NOT EXISTS idx_tiendas_estado ON comercios(estado_pago, plan_id)',
         'CREATE INDEX IF NOT EXISTS idx_pagos_tienda ON pagos(tienda_id)',
         'CREATE INDEX IF NOT EXISTS idx_pagos_referencia ON pagos(referencia)',
+        # Anti doble-gasto: una referencia solo puede pagar UNA vez (carrera).
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_pagos_referencia_unica "
+        "ON pagos(referencia) WHERE referencia IS NOT NULL "
+        "AND estado IN ('pendiente', 'aprobado')",
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_pagos_comprobante_hash ON pagos(comprobante_hash) WHERE comprobante_hash IS NOT NULL',
         'CREATE INDEX IF NOT EXISTS idx_pagos_estado ON pagos(estado)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_estado_plan ON comercios(estado_pago, plan_tipo)',
@@ -2214,6 +2218,10 @@ def _crear_indices(cursor):
         'CREATE INDEX IF NOT EXISTS idx_soporte_estado ON soporte_y_reportes(estado)',
         'CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_comercio ON solicitudes_pago(comercio_id)',
         'CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_referencia ON solicitudes_pago(referencia)',
+        # Anti doble-gasto: misma garantía para solicitudes/pagos de destacados.
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_solicitudes_pago_referencia_unica "
+        "ON solicitudes_pago(referencia) WHERE referencia IS NOT NULL "
+        "AND estado IN ('pendiente', 'aprobado')",
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_solicitudes_pago_comprobante_hash ON solicitudes_pago(comprobante_hash) WHERE comprobante_hash IS NOT NULL',
         'CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_estado ON solicitudes_pago(estado)',
         'CREATE INDEX IF NOT EXISTS idx_interacciones_comercio_fecha ON interacciones_comercio(comercio_id, fecha DESC)',
