@@ -70,6 +70,16 @@ def registrar_request_logging(app):
             g.request_inicio = time.perf_counter()
         except Exception:
             pass
+        # Arranca el backfill de imágenes en el primer request (post-fork): un
+        # hilo creado al importar el módulo no sobrevive al fork de gunicorn en
+        # producción (mismo motivo por el que el volcado de tráfico se movió al
+        # request). Idempotente y muy barato (early-return si ya está activo).
+        try:
+            from backend.image_backfill import asegurar_backfill_activo
+
+            asegurar_backfill_activo()
+        except Exception:
+            pass
 
     @app.after_request
     def _registrar_acceso(response):

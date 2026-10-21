@@ -38,6 +38,7 @@ _PRESUPUESTO = max(10, _env_int('LOCALIS_IMG_BACKFILL_PRESUPUESTO', 50))
 _INTERVALO = max(30, _env_int('LOCALIS_IMG_BACKFILL_INTERVALO', 90))
 
 _iniciado = False
+_ultimo_intento_arranque = 0.0
 _lock = threading.Lock()
 
 
@@ -106,7 +107,13 @@ def _bucle():
 
 
 def iniciar_backfill_periodico():
-    """Arranca el reintento periódico (hilo daemon). Idempotente."""
+    """Arranca el reintento periódico (hilo daemon). Idempotente. Nunca lanza.
+
+    OJO: NO se debe llamar al importar el módulo. Un hilo creado antes del fork
+    de gunicorn NO sobrevive al fork en producción (por eso el reintento estaba
+    muerto, igual que el volcado de tráfico). Se arranca de forma perezosa desde
+    el primer request, vía ``asegurar_backfill_activo``.
+    """
     global _iniciado
     if not _habilitado():
         logger.info(f'{_LOG} desactivado (LOCALIS_IMG_BACKFILL=0)')
@@ -114,11 +121,41 @@ def iniciar_backfill_periodico():
     with _lock:
         if _iniciado:
             return None
+        try:
+            hilo = threading.Thread(
+                target=_bucle, name='localis-img-backfill', daemon=True
+            )
+            hilo.start()
+        except Exception as error:
+            # No marcar como iniciado: se reintenta en el próximo request.
+            logger.error(
+                f'{_LOG} no se pudo iniciar el hilo: {type(error).__name__}: {error}'
+            )
+            return None
         _iniciado = True
-        hilo = threading.Thread(target=_bucle, name='localis-img-backfill', daemon=True)
-        hilo.start()
-        print(
+        logger.info(
             f'{_LOG} activo: cada {_INTERVALO}s, {_LOTE} producto(s) x '
             f'{_COMERCIOS} comercio(s), presupuesto {_PRESUPUESTO}s'
         )
         return hilo
+
+
+def asegurar_backfill_activo():
+    """Arranca el backfill la 1.ª vez que se atiende un request (post-fork).
+
+    Un hilo creado al importar el módulo nace ANTES del fork de gunicorn y no
+    sobrevive en producción (por eso el reintento estaba muerto). Arrancarlo
+    desde el request garantiza que viva en el worker. Se intenta a lo sumo cada
+    30 s. Nunca lanza.
+    """
+    global _ultimo_intento_arranque
+    try:
+        if _iniciado or not _habilitado():
+            return
+        ahora = time.time()
+        if ahora - _ultimo_intento_arranque < 30:
+            return
+        _ultimo_intento_arranque = ahora
+        iniciar_backfill_periodico()
+    except Exception:
+        pass

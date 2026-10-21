@@ -258,13 +258,10 @@ except Exception:
 # los workers. Los hilos se crean de forma perezosa en la primera importación.
 configurar_cola(app)
 
-# Reintento periódico de imágenes pendientes/rechazadas (sin falsos positivos).
-try:
-    from backend.image_backfill import iniciar_backfill_periodico
-
-    iniciar_backfill_periodico()
-except Exception as _error_backfill:
-    logger.error(f'[Localis] backfill periódico no iniciado: {_error_backfill}')
+# El reintento periódico de imágenes NO se arranca aquí: un hilo creado al
+# importar el módulo nace antes del fork de gunicorn y no sobrevive en
+# producción. Se arranca de forma perezosa desde el primer request
+# (backend/observabilidad.py -> image_backfill.asegurar_backfill_activo).
 
 # Métricas de tráfico: se acumulan en memoria (backend/trafico.py) y se vuelcan
 # a la BD desde el propio ciclo del request (after_request), sin depender de un
