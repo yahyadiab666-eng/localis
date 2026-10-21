@@ -40,6 +40,7 @@ SIN_RED = [
     'test_reporte_trafico.py',
     'test_seo_jsonld.py',
     'test_binance_ocr.py',
+    'test_binance_api.py',
     'test_backfill_lazy.py',
     'test_backup_utilidades.py',
     'test_cache.py',

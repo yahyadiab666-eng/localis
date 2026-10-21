@@ -587,6 +587,28 @@ def api_verificar_pago():
         ), 400
 
     referencia = ocr['referencia']
+
+    # Verificación REAL contra Binance (si la API está configurada): la captura
+    # sola NO prueba que el dinero llegó. True=confirmado; False=no está; None=no
+    # se pudo verificar (no bloquea; el OCR sigue siendo el filtro).
+    if es_binance:
+        from backend.binance_api import verificar_orden_binance
+
+        confirmado = verificar_orden_binance(referencia, ocr.get('monto_usd'))
+        if confirmado is False:
+            return (
+                jsonify(
+                    {
+                        'error': (
+                            'No encontramos ese pago en Binance. Verifica que el ID '
+                            'de la orden sea correcto.'
+                        ),
+                        'ocr_ms': round(ocr.get('ms', 0), 1),
+                    }
+                ),
+                400,
+            )
+
     aviso_pago = None
     comprobante_url = None
 
