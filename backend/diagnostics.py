@@ -2,6 +2,7 @@
 import logging
 logger = logging.getLogger('localis.diagnostics')
 
+import os
 import smtplib
 import threading
 import traceback
@@ -73,6 +74,30 @@ def _diagnostico_supabase_red(*, forzar: bool = False):
         return _cache_diagnostico_supabase
 
 
+def _estado_pagos():
+    """Estado NO secreto de la verificación automática de pagos.
+
+    ``binance_api_configurado`` es True solo si existen
+    ``LOCALIS_BINANCE_API_KEY`` y ``LOCALIS_BINANCE_API_SECRET`` en el proceso.
+    Si es False, el flujo sigue funcionando pero solo con OCR + revisión manual:
+    nadie confirma contra Binance que la orden exista.
+    """
+    try:
+        from backend import binance_api
+
+        return {
+            'binance_api_configurado': binance_api.configurado(),
+            'binance_pay_id_configurado': bool(
+                (os.environ.get('LOCALIS_BINANCE_ID') or '').strip()
+            ),
+        }
+    except Exception as error:  # nunca romper el health check
+        return {
+            'binance_api_configurado': False,
+            'error': f'{type(error).__name__}: {error}',
+        }
+
+
 def obtener_estado_sistema(*, probar_supabase: bool = False):
     """Estado consolidado para health checks y arranque."""
     diag_bd = diagnosticar_postgresql()
@@ -91,6 +116,7 @@ def obtener_estado_sistema(*, probar_supabase: bool = False):
         'database_url_configurada': bool(DATABASE_URL),
         'supabase': diag_supabase,
         'supabase_conectado': ok_supabase,
+        'pagos': _estado_pagos(),
     }
 
 
@@ -127,6 +153,18 @@ def ejecutar_diagnostico_inicio():
                 '[Localis Diagnóstico] En Render, SUPABASE_URL debe ser exactamente '
                 f"{supabase['url_recomendada']}"
             )
+
+    pagos = estado.get('pagos') or {}
+    if pagos.get('binance_api_configurado'):
+        print(
+            '[Localis Diagnóstico] Binance API: llaves cargadas '
+            '(verificación real de pagos ACTIVA).'
+        )
+    else:
+        print(
+            '[Localis Diagnóstico] Binance API: SIN llaves '
+            '(los pagos solo se validan por OCR + revisión manual).'
+        )
     return estado
 
 
