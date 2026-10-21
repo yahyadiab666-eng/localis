@@ -124,7 +124,11 @@ def _auditar_importacion_instantanea():
     _ok('Imagen pendiente' in _leer('templates/comercio.html'), 'badge de imagen pendiente en el panel')
     backfill = _leer('backend/image_backfill.py')
     _ok('def ejecutar_ciclo' in backfill, 'reintento periódico de pendientes')
-    _ok('iniciar_backfill_periodico' in _leer('main.py'), 'el reintento arranca con la app')
+    _ok('def asegurar_backfill_activo' in backfill, 'arranque perezoso del reintento')
+    _ok(
+        'asegurar_backfill_activo' in _leer('backend/observabilidad.py'),
+        'el reintento arranca desde el request (sobrevive al fork de gunicorn)',
+    )
 
     cobertura = _leer('backend/cobertura_visual.py')
     _ok('def auditar_comercio' in cobertura, 'auditoría (solo lectura) de assets por comercio')
