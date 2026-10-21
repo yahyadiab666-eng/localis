@@ -799,6 +799,19 @@ def health_ready():
         estado['trafico'] = trafico.estado()
     except Exception:
         pass
+    try:
+        from backend.correo import correo_configurado
+        import backend.reporte_trafico as _rt
+
+        estado['reporte_diario'] = {
+            'habilitado': _rt._reporte_diario_habilitado(),
+            'hora_utc': _rt._hora_objetivo_utc(),
+            'correo_configurado': correo_configurado(),
+            'iniciado': _rt._iniciado,
+            'admins': len(_rt.ADMIN_EMAILS),
+        }
+    except Exception:
+        pass
     return jsonify(estado), (200 if estado.get('ok') else 503)
 
 

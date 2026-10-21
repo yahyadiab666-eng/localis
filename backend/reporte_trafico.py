@@ -269,9 +269,6 @@ def iniciar_reporte_diario():
     if not _reporte_diario_habilitado():
         logger.info(f'{_LOG} desactivado (LOCALIS_REPORTE_DIARIO=0)')
         return None
-    if not correo_configurado():
-        logger.info(f'{_LOG} sin SMTP configurado: reporte diario no programado')
-        return None
     with _inicio_lock:
         if _iniciado:
             return None
