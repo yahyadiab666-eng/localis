@@ -12,9 +12,26 @@ import numpy as np
 from config import PAGO_MOVIL_DEFAULT
 
 _ocr_engine = None
-REFERENCIA_RE = re.compile(r'\b(\d{6})\b')
+# Referencia etiquetada ("Referencia: 123456", "Ref123456", "Nro 123456").
+REFERENCIA_ETIQUETADA_RE = re.compile(
+    r'(?:referencia|refer|ref\.?|nro\.?|n[uú]mero|operaci[oó]n|comprobante)'
+    r'[^\d]{0,15}(\d{6})(?!\d)',
+    re.IGNORECASE,
+)
+# Token de 6 dígitos aislado: no forma parte de un número, fecha ni monto.
+REFERENCIA_TOKEN_RE = re.compile(r'(?<![\d/.,-])(\d{6})(?![\d/.,-])')
 MONTO_RE = re.compile(
-    r'(\d{1,3}(?:[.\s]\d{3})*[.,]\d{2}|\d+[.,]\d{2})'
+    r'(\d{1,3}(?:,\d{3})+\.\d{2}'       # 1,234.56 (formato US)
+    r'|\d{1,3}(?:[.\s]\d{3})*[.,]\d{2}'  # 1.234,56 / 1234,56
+    r'|\d+[.,]\d{2})'                    # 500.00
+)
+# Monto con etiqueta y sin decimales ("Monto 500 Bs", "Total: 2.000").
+MONTO_ETIQUETADO_RE = re.compile(
+    r'(?:monto|total|importe|pagado|bs\.?|bol[ií]vares)\s*[:.]?\s*'
+    r'(\d{1,3}(?:,\d{3})+\.\d{1,2}'
+    r'|\d{1,3}(?:[.\s]\d{3})*(?:[.,]\d{1,2})?'
+    r'|\d+(?:[.,]\d{1,2})?)',
+    re.IGNORECASE,
 )
 # Fechas típicas de comprobantes bancarios: DD/MM/YYYY, YYYY-MM-DD y DD/MM/YY.
 FECHAS_RE = (
@@ -22,6 +39,21 @@ FECHAS_RE = (
     re.compile(r'\b(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})\b'),
     re.compile(r'\b(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2})\b'),
 )
+# Fechas con nombre de mes: "21 oct 2026", "21 de octubre de 2026",
+# "Oct 21, 2026" (capturas de Binance en inglés).
+FECHA_MES_DIA_RE = re.compile(
+    r'\b(\d{1,2})\s*(?:de\s+)?([a-záéíóú]{3,10})\.?\s*(?:de\s+)?(\d{4})\b',
+    re.IGNORECASE,
+)
+FECHA_MES_EN_RE = re.compile(
+    r'\b([a-z]{3,10})\.?\s+(\d{1,2}),?\s+(\d{4})\b',
+    re.IGNORECASE,
+)
+MESES = {
+    'ene': 1, 'feb': 2, 'mar': 3, 'abr': 4, 'may': 5, 'jun': 6,
+    'jul': 7, 'ago': 8, 'sep': 9, 'set': 9, 'oct': 10, 'nov': 11, 'dic': 12,
+    'jan': 1, 'apr': 4, 'aug': 8, 'dec': 12,
+}
 
 
 def _env_bool(nombre, default=True):
@@ -103,12 +135,17 @@ def _parse_monto_ve(valor):
 
 
 def _extraer_referencia(texto):
-    solo_digitos = re.sub(r'\D', '', texto or '')
-    coincidencias = REFERENCIA_RE.findall(solo_digitos)
-    if coincidencias:
-        return coincidencias[0]
-    coincidencias = REFERENCIA_RE.findall(texto or '')
-    return coincidencias[0] if coincidencias else None
+    """Referencia de 6 dígitos, priorizando la que va junto a una etiqueta.
+
+    Evita confundir montos ("500000,00"), fechas y teléfonos con la referencia.
+    """
+    if not texto:
+        return None
+    for match in REFERENCIA_ETIQUETADA_RE.finditer(texto):
+        return match.group(1)
+    for match in REFERENCIA_TOKEN_RE.finditer(texto):
+        return match.group(1)
+    return None
 
 
 def _extraer_montos_candidatos(texto):
@@ -117,7 +154,19 @@ def _extraer_montos_candidatos(texto):
         monto = _parse_monto_ve(match)
         if monto is not None and monto > 0:
             candidatos.append(monto)
-    return candidatos
+    # Respaldo: montos sin decimales junto a una etiqueta ("Monto 500 Bs").
+    for match in MONTO_ETIQUETADO_RE.findall(texto or ''):
+        monto = _parse_monto_ve(match)
+        if monto is not None and monto > 0:
+            candidatos.append(monto)
+    # Deduplica sin perder el orden (el OCR puede repetir el mismo monto).
+    vistos = set()
+    unicos = []
+    for monto in candidatos:
+        if monto not in vistos:
+            vistos.add(monto)
+            unicos.append(monto)
+    return unicos
 
 
 def _elegir_monto(candidatos, monto_esperado):
@@ -133,8 +182,13 @@ def _parse_fecha(anio, mes, dia):
         return None
 
 
+def _mes_numero(nombre):
+    limpio = _normalizar_texto(nombre).replace('.', '').strip()
+    return MESES.get(limpio[:3])
+
+
 def _extraer_fechas(texto):
-    """Extrae fechas válidas del texto OCR (DD/MM/YYYY, YYYY-MM-DD, DD/MM/YY)."""
+    """Extrae fechas válidas del texto OCR (numéricas o con nombre de mes)."""
     fechas = []
     for patron in FECHAS_RE:
         for a, b, c in patron.findall(texto or ''):
@@ -147,6 +201,21 @@ def _extraer_fechas(texto):
                 fecha = _parse_fecha(anio, b, a)
             if fecha:
                 fechas.append(fecha)
+
+    # "21 oct 2026", "21 de octubre de 2026" y "Oct 21, 2026".
+    for dia, mes, anio in FECHA_MES_DIA_RE.findall(texto or ''):
+        numero = _mes_numero(mes)
+        if numero:
+            fecha = _parse_fecha(anio, numero, dia)
+            if fecha:
+                fechas.append(fecha)
+    for mes, dia, anio in FECHA_MES_EN_RE.findall(texto or ''):
+        numero = _mes_numero(mes)
+        if numero:
+            fecha = _parse_fecha(anio, numero, dia)
+            if fecha:
+                fechas.append(fecha)
+
     vistas = set()
     unicas = []
     for fecha in fechas:
@@ -164,25 +233,90 @@ def _elegir_fecha(fechas, hoy):
     return mejor, (hoy - mejor).days
 
 
-def _contiene_banco(texto_norm):
-    return 'caribe' in texto_norm
+def _normalizar_digitos(valor):
+    return re.sub(r'\D', '', str(valor or ''))
 
 
-def _contiene_rif(texto):
-    digitos = re.sub(r'\D', '', texto or '')
-    return RIF_OFICIAL in digitos
-
-
-def _contiene_telefono(texto):
-    digitos = re.sub(r'\D', '', texto or '')
-    return TELEFONO_OFICIAL in digitos or TELEFONO_OFICIAL.lstrip('0') in digitos
-
-
-def _montos_coinciden(monto_detectado, monto_esperado, tolerancia_rel=0.02):
-    if monto_detectado is None or monto_esperado is None:
+def _contiene_banco(texto_norm, banco=None):
+    nombre = _normalizar_texto(banco or BANCO_OFICIAL)
+    if not nombre:
         return False
-    tolerancia = max(1.0, float(monto_esperado) * tolerancia_rel)
-    return abs(float(monto_detectado) - float(monto_esperado)) <= tolerancia
+    if nombre in texto_norm:
+        return True
+    # "Banco Caribe" -> basta con "caribe" (el OCR puede omitir "Banco").
+    palabras = [p for p in nombre.split() if len(p) > 3 and p != 'banco']
+    return any(p in texto_norm for p in palabras)
+
+
+def _contiene_rif(texto, rif=None):
+    esperado = _normalizar_digitos(rif or RIF_OFICIAL)
+    return bool(esperado) and esperado in _normalizar_digitos(texto)
+
+
+def _contiene_telefono(texto, telefono=None):
+    esperado = _normalizar_digitos(telefono or TELEFONO_OFICIAL)
+    if not esperado:
+        return False
+    digitos = _normalizar_digitos(texto)
+    variantes = {
+        esperado,
+        esperado.lstrip('0'),
+        esperado if esperado.startswith('0') else '0' + esperado,
+    }
+    return any(variante and variante in digitos for variante in variantes)
+
+
+MONTO_OK = 'ok'
+MONTO_INCOMPLETO = 'incompleto'
+MONTO_EXCEDIDO = 'excedido'
+MONTO_NO_DETECTADO = 'no_detectado'
+
+# Tolerancia (absoluta, relativa) por moneda. En USD (cripto) el importe es
+# exacto: se permiten centavos por redondeo, nunca un dólar. En bolívares se
+# tolera el redondeo de la tasa (2 %).
+TOLERANCIA_MONTO = {
+    'USD': (0.02, 0.01),
+    'BS': (1.0, 0.02),
+}
+
+
+def tolerancia_monto(monto_esperado, moneda='BS'):
+    """Diferencia máxima aceptada para un monto esperado en esa moneda."""
+    absoluta, relativa = TOLERANCIA_MONTO.get(moneda, TOLERANCIA_MONTO['BS'])
+    return max(absoluta, abs(float(monto_esperado or 0)) * relativa)
+
+
+def clasificar_monto(monto_detectado, monto_esperado, moneda='BS'):
+    """Clasifica el monto: ``ok``, ``incompleto``, ``excedido`` o ``no_detectado``.
+
+    Retorna ``(estado, diferencia)``; la diferencia es detectado - esperado.
+    """
+    if monto_detectado is None or monto_esperado is None:
+        return MONTO_NO_DETECTADO, None
+    if float(monto_esperado) <= 0:
+        return MONTO_NO_DETECTADO, None
+    diferencia = round(float(monto_detectado) - float(monto_esperado), 2)
+    if abs(diferencia) <= tolerancia_monto(monto_esperado, moneda):
+        return MONTO_OK, diferencia
+    if diferencia < 0:
+        return MONTO_INCOMPLETO, diferencia
+    return MONTO_EXCEDIDO, diferencia
+
+
+def _mensaje_monto(estado, detectado, esperado, diferencia, unidad):
+    """Mensaje accionable y específico para subpago o sobrepago."""
+    if estado == MONTO_INCOMPLETO:
+        return (
+            f'El monto del comprobante ({detectado:.2f} {unidad}) es menor al '
+            f'esperado ({esperado:.2f} {unidad}); faltan '
+            f'{abs(diferencia):.2f} {unidad}. Completa el pago o contacta a '
+            'soporte técnico para recibir ayuda.'
+        )
+    return (
+        f'El monto del comprobante ({detectado:.2f} {unidad}) supera al esperado '
+        f'({esperado:.2f} {unidad}) por {diferencia:.2f} {unidad}. Verifica la '
+        'cantidad o contacta a soporte técnico para recibir ayuda.'
+    )
 
 
 def extraer_referencia_desde_bytes(data_bytes):
@@ -197,6 +331,9 @@ def validar_comprobante_pago_movil(
     ahora=None,
     exigir_fecha=None,
     max_dias=None,
+    banco=None,
+    rif=None,
+    telefono=None,
 ):
     """
     OCR estricto del comprobante.
@@ -207,9 +344,11 @@ def validar_comprobante_pago_movil(
     defecto toma ``LOCALIS_COMPROBANTE_EXIGIR_FECHA`` (1).
     ``max_dias``: antigüedad máxima permitida en días. Por defecto
     ``LOCALIS_COMPROBANTE_MAX_DIAS`` (1: hoy o ayer).
+    ``banco``/``rif``/``telefono``: datos destino reales (configuración); si no
+    se pasan, se usan los valores por defecto del sistema.
 
     Retorna dict con: ok, referencia, monto_bs, fecha_comprobante, errores,
-    ms, texto_ocr.
+    ms, texto_ocr, estado_monto y diferencia_monto.
     """
     inicio = time.perf_counter()
     errores = []
@@ -223,6 +362,8 @@ def validar_comprobante_pago_movil(
             'errores': ['Comprobante vacío o ilegible.'],
             'ms': 0.0,
             'texto_ocr': '',
+            'estado_monto': None,
+            'diferencia_monto': None,
         }
 
     buffer = np.frombuffer(data_bytes, dtype=np.uint8)
@@ -236,6 +377,8 @@ def validar_comprobante_pago_movil(
             'errores': ['No se pudo leer la imagen del comprobante.'],
             'ms': (time.perf_counter() - inicio) * 1000,
             'texto_ocr': '',
+            'estado_monto': None,
+            'diferencia_monto': None,
         }
 
     texto_completo = _ocr_texto(imagen)
@@ -248,29 +391,43 @@ def validar_comprobante_pago_movil(
     if not referencia:
         errores.append('No se detectó una referencia válida de 6 dígitos.')
 
-    if not _contiene_banco(texto_norm):
-        errores.append(f'El comprobante debe corresponder a {BANCO_OFICIAL}.')
-
-    if not _contiene_rif(texto_raw):
-        errores.append(f'El comprobante debe incluir el RIF/Cédula {PAGO_MOVIL_DEFAULT["cedula_rif"]}.')
-
-    if not _contiene_telefono(texto_raw):
+    if not _contiene_banco(texto_norm, banco):
         errores.append(
-            f'El comprobante debe incluir el teléfono {PAGO_MOVIL_DEFAULT["telefono"]}.'
+            f'El comprobante debe corresponder a {banco or BANCO_OFICIAL}.'
+        )
+
+    if not _contiene_rif(texto_raw, rif):
+        errores.append(
+            'El comprobante debe incluir el RIF/Cédula '
+            f'{rif or PAGO_MOVIL_DEFAULT["cedula_rif"]}.'
+        )
+
+    if not _contiene_telefono(texto_raw, telefono):
+        errores.append(
+            'El comprobante debe incluir el teléfono '
+            f'{telefono or PAGO_MOVIL_DEFAULT["telefono"]}.'
         )
 
     candidatos = _extraer_montos_candidatos(texto_raw)
     monto_detectado = _elegir_monto(candidatos, float(monto_esperado_bs or 0))
 
+    estado_monto = None
+    diferencia_monto = None
     if monto_esperado_bs and monto_esperado_bs > 0:
-        if monto_detectado is None:
+        estado_monto, diferencia_monto = clasificar_monto(
+            monto_detectado, monto_esperado_bs, 'BS'
+        )
+        if estado_monto == MONTO_NO_DETECTADO:
             errores.append('No se pudo leer el monto en bolívares del comprobante.')
-        elif not _montos_coinciden(monto_detectado, monto_esperado_bs):
+        elif estado_monto != MONTO_OK:
             errores.append(
-                f'El monto del comprobante ({monto_detectado:.2f} Bs) no coincide '
-                f'con el esperado ({float(monto_esperado_bs):.2f} Bs). '
-                'Por favor, verifica la cantidad o contacta a soporte técnico '
-                'para recibir ayuda.'
+                _mensaje_monto(
+                    estado_monto,
+                    monto_detectado,
+                    float(monto_esperado_bs),
+                    diferencia_monto,
+                    'Bs',
+                )
             )
 
     # Antifraude: la fecha del comprobante debe ser reciente (hoy/ayer por defecto).
@@ -308,6 +465,8 @@ def validar_comprobante_pago_movil(
         'errores': errores,
         'ms': transcurrido_ms,
         'texto_ocr': texto_raw[:500],
+        'estado_monto': estado_monto,
+        'diferencia_monto': diferencia_monto,
     }
 
 
@@ -355,13 +514,23 @@ def evaluar_texto_binance(
         if monto is not None and monto > 0:
             candidatos.insert(0, monto)
     monto_detectado = _elegir_monto(candidatos, float(monto_usd or 0))
+    estado_monto = None
+    diferencia_monto = None
     if monto_usd and float(monto_usd) > 0:
-        if monto_detectado is None:
+        estado_monto, diferencia_monto = clasificar_monto(
+            monto_detectado, float(monto_usd), 'USD'
+        )
+        if estado_monto == MONTO_NO_DETECTADO:
             errores.append('No se pudo leer el monto en USDT de la captura.')
-        elif not _montos_coinciden(monto_detectado, float(monto_usd)):
+        elif estado_monto != MONTO_OK:
             errores.append(
-                f'El monto de la captura ({monto_detectado:.2f} USDT) no coincide '
-                f'con el esperado ({float(monto_usd):.2f} USDT).'
+                _mensaje_monto(
+                    estado_monto,
+                    monto_detectado,
+                    float(monto_usd),
+                    diferencia_monto,
+                    'USDT',
+                )
             )
 
     exigir_fecha = (
@@ -390,6 +559,8 @@ def evaluar_texto_binance(
         ),
         'errores': errores,
         'texto_ocr': (texto_raw or '')[:500],
+        'estado_monto': estado_monto,
+        'diferencia_monto': diferencia_monto,
     }
 
 
@@ -410,6 +581,8 @@ def validar_comprobante_binance(
         'errores': ['Comprobante vacío o ilegible.'],
         'ms': 0.0,
         'texto_ocr': '',
+        'estado_monto': None,
+        'diferencia_monto': None,
     }
     if not data_bytes:
         return base

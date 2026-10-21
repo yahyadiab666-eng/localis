@@ -104,4 +104,10 @@ def activar_suscripcion_con_pago(
                 conexion.rollback()
                 raise
     except Exception as error:
+        if getattr(error, 'pgcode', None) == '23505':
+            return (
+                False,
+                'Esta referencia o comprobante ya fue registrado en el sistema.',
+                None,
+            )
         return False, f'Error al confirmar pago: {error}', None

@@ -1067,24 +1067,62 @@ def activar_suscripcion_por_comprobante(
             },
         )
     except Exception as error:
+        if getattr(error, 'pgcode', None) == '23505':
+            return (
+                False,
+                'Esta referencia o comprobante ya fue registrado en el sistema.',
+                None,
+            )
         return False, f'Error al activar suscripción: {error}', None
+
+
+def obtener_destino_pago_movil():
+    """Banco, RIF/cédula y teléfono destino desde configuración.
+
+    La UI muestra estos datos y el OCR debe validar EXACTAMENTE los mismos. Si
+    la configuración no está disponible, cae a los valores por defecto.
+    """
+    from backend.stores import obtener_configs
+    from config import PAGO_MOVIL_DEFAULT
+
+    try:
+        configs = obtener_configs(
+            {
+                'pago_movil_banco': PAGO_MOVIL_DEFAULT['banco'],
+                'pago_movil_cedula': PAGO_MOVIL_DEFAULT['cedula_rif'],
+                'pago_movil_telefono': PAGO_MOVIL_DEFAULT['telefono'],
+            }
+        )
+        return {
+            'banco': configs.get('pago_movil_banco') or PAGO_MOVIL_DEFAULT['banco'],
+            'cedula_rif': configs.get('pago_movil_cedula')
+            or PAGO_MOVIL_DEFAULT['cedula_rif'],
+            'telefono': configs.get('pago_movil_telefono')
+            or PAGO_MOVIL_DEFAULT['telefono'],
+        }
+    except Exception as error:
+        logger.warning(
+            f'[Localis Pagos] configuración de pago móvil no disponible: '
+            f'{type(error).__name__}: {error}'
+        )
+        return {
+            'banco': PAGO_MOVIL_DEFAULT['banco'],
+            'cedula_rif': PAGO_MOVIL_DEFAULT['cedula_rif'],
+            'telefono': PAGO_MOVIL_DEFAULT['telefono'],
+        }
 
 
 def obtener_datos_pago_movil(plan_tipo=None):
     """Lee configuración de pago móvil y montos calculados para un plan."""
-    from backend.stores import obtener_configs, obtener_tasa_dolar
-    from config import BINANCE_DEFAULT, PAGO_MOVIL_DEFAULT
+    from backend.stores import obtener_tasa_dolar
+    from config import BINANCE_DEFAULT
 
     tasa = float(obtener_tasa_dolar() or 1.0)
-    configs = obtener_configs({
-        'pago_movil_banco': PAGO_MOVIL_DEFAULT['banco'],
-        'pago_movil_cedula': PAGO_MOVIL_DEFAULT['cedula_rif'],
-        'pago_movil_telefono': PAGO_MOVIL_DEFAULT['telefono'],
-    })
+    destino = obtener_destino_pago_movil()
     datos = {
-        'banco': configs['pago_movil_banco'],
-        'cedula_rif': configs['pago_movil_cedula'],
-        'telefono': configs['pago_movil_telefono'],
+        'banco': destino['banco'],
+        'cedula_rif': destino['cedula_rif'],
+        'telefono': destino['telefono'],
         'tasa': tasa,
         'binance_id': BINANCE_DEFAULT['pay_id'],
         'binance_moneda': BINANCE_DEFAULT['moneda'],
