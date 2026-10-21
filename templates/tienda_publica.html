@@ -27,6 +27,9 @@
   <meta name="twitter:title" content="{{ seo_titulo }}">
   <meta name="twitter:description" content="{{ seo_desc }}">
   <meta name="twitter:image" content="{{ og_img_abs }}">
+  {% if seo_json_ld and not preview %}
+  <script type="application/ld+json">{{ seo_json_ld | safe }}</script>
+  {% endif %}
   <!-- PWA -->
   <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
   <meta name="theme-color" content="#F59E0B">

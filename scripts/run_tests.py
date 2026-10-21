@@ -38,6 +38,7 @@ SIN_RED = [
     'test_metricas.py',
     'test_trafico.py',
     'test_reporte_trafico.py',
+    'test_seo_jsonld.py',
     'test_backfill_lazy.py',
     'test_backup_utilidades.py',
     'test_cache.py',

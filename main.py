@@ -1009,6 +1009,8 @@ def index():
         categorias = []
 
     _debug_imagenes_antes_de_render(productos, 'index')
+    from backend.seo import json_ld_website
+
     respuesta = render_template(
         'cliente.html',
         productos=productos,
@@ -1022,6 +1024,7 @@ def index():
         whatsapp_url=WHATSAPP_SOPORTE_URL,
         pagina=pagina,
         hay_mas=hay_mas,
+        seo_json_ld=json_ld_website(request.url_root),
     )
     if catalogo_degradado:
         # Señal para el Service Worker: no cachear esta respuesta degradada.
@@ -1161,6 +1164,8 @@ def _contexto_tienda(comercio, palabra_clave, origen, solo_publicos=True, origen
             producto_seleccionado = None
 
     _debug_imagenes_antes_de_render(productos, origen_debug)
+    from backend.seo import json_ld_store
+
     return {
         'comercio': comercio,
         'productos': productos,
@@ -1168,6 +1173,7 @@ def _contexto_tienda(comercio, palabra_clave, origen, solo_publicos=True, origen
         'tasa': tasa_actual,
         'q': palabra_clave,
         'origen': origen,
+        'seo_json_ld': json_ld_store(comercio, request.url_root, producto_seleccionado),
     }
 
 
