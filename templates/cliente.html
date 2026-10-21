@@ -37,6 +37,9 @@
   <meta name="twitter:title" content="{{ seo_titulo }}">
   <meta name="twitter:description" content="{{ seo_descripcion }}">
   <meta name="twitter:image" content="{{ og_imagen_abs }}">
+  {% if seo_json_ld %}
+  <script type="application/ld+json">{{ seo_json_ld | safe }}</script>
+  {% endif %}
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700;900&display=swap" rel="stylesheet">

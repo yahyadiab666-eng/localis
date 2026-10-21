@@ -108,6 +108,19 @@ def _es_bot(user_agent):
     return any(token in ua for token in _BOT_TOKENS)
 
 
+def _utm_source(query):
+    """Extrae ``utm_source`` saneado de la query (o None). Nunca lanza."""
+    try:
+        for parte in (query or '').split('&'):
+            if parte.startswith('utm_source='):
+                valor = parte[len('utm_source='):].strip().lower()
+                valor = ''.join(c for c in valor if c.isalnum() or c in '-_')[:24]
+                return valor or None
+    except Exception:
+        pass
+    return None
+
+
 def _sumar(fecha, clave, delta):
     """Suma un delta pendiente (debe llamarse con ``_lock`` tomado)."""
     llave = (fecha, clave)
@@ -144,6 +157,9 @@ def registrar_peticion(ruta, status=None, user_agent='', remote_addr='', query='
                         _sumar(fecha, 'visitas_unicas', 1)
                 if 'source=pwa' in (query or ''):
                     _sumar(fecha, 'pwa_aperturas', 1)
+                utm = _utm_source(query)
+                if utm:
+                    _sumar(fecha, f'canal_{utm}', 1)
     except Exception:
         # La analítica nunca rompe una petición.
         pass

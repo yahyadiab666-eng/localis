@@ -107,6 +107,17 @@ def construir_reporte(dias=1):
         lineas.append(f'  {etiqueta}: {_fmt(_valor_clave(totales, clave))}')
     lineas.append('')
 
+    canales = {
+        clave[len('canal_'):]: int(valor or 0)
+        for clave, valor in totales.items()
+        if clave.startswith('canal_') and int(valor or 0) > 0
+    }
+    if canales:
+        lineas.append(f'--- Tráfico por canal (utm_source, {dias} día(s)) ---')
+        for nombre, valor in sorted(canales.items(), key=lambda kv: -kv[1]):
+            lineas.append(f'  {nombre}: {_fmt(valor)}')
+        lineas.append('')
+
     historicos = datos.get('totales_historicos', {})
     if historicos:
         lineas.append('--- Totales históricos (desde el inicio) ---')

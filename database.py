@@ -224,6 +224,8 @@ COLUMNAS_ESQUEMA = {
         ('owner_email', 'TEXT'),
         # Identificador visible (COM-0001) independiente de la PK.
         ('codigo_publico', 'TEXT'),
+        # Fecha del último recordatorio de vencimiento enviado por correo.
+        ('recordatorio_vencimiento_en', 'TIMESTAMP'),
     ],
     'sucursales': [
         ('comercio_id', 'INTEGER'),
