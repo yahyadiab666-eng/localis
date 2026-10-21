@@ -84,6 +84,7 @@ _ultimo_volcado = 0.0
 _ultimo_intento_volcado = 0.0
 _volcado_intentos = 0
 _ultimo_error_volcado = ''
+_probe_hilos = None
 
 
 def habilitado():
@@ -262,13 +263,31 @@ def volcar_oportunista():
         pass
 
 
+def _probar_creacion_hilos():
+    """Comprueba UNA vez si el proceso puede crear hilos. Devuelve True/str."""
+    global _probe_hilos
+    if _probe_hilos is not None:
+        return _probe_hilos
+    try:
+        hilo = threading.Thread(target=lambda: None, name='localis-probe')
+        hilo.start()
+        hilo.join(2)
+        _probe_hilos = True
+    except Exception as error:
+        _probe_hilos = f'{type(error).__name__}: {error}'
+    return _probe_hilos
+
+
 def estado():
     """Diagnóstico del acumulador en memoria (para /health). Nunca lanza."""
+    puede_hilos = _probar_creacion_hilos()
     try:
         with _lock:
             return {
                 'habilitado': habilitado(),
                 'hilos_activos': threading.active_count(),
+                'hilos_nombres': [h.name for h in threading.enumerate()],
+                'puede_crear_hilos': puede_hilos,
                 'dia': _dia_actual.isoformat() if _dia_actual else None,
                 'pendientes_claves': len(_pendientes),
                 'unicos_dia': len(_unicos),
