@@ -435,6 +435,26 @@ def _diagnosticar_serper():
         logger.error(f'[Localis Serper] diagnóstico omitido: {type(error).__name__}: {error}')
 
 
+def _calentar_ocr():
+    """Precarga el modelo OCR para que el primer pago no pague ese coste.
+
+    Corre en el hilo de inicialización (no bloquea el bind). Se desactiva con
+    ``LOCALIS_OCR_WARMUP=0``.
+    """
+    activo = str(os.getenv('LOCALIS_OCR_WARMUP', '1')).strip().lower()
+    if activo in ('0', 'false', 'no', 'off'):
+        return
+    try:
+        inicio = time.perf_counter()
+        from backend.payment_ocr import calentar_motor_ocr
+
+        if calentar_motor_ocr():
+            ms = (time.perf_counter() - inicio) * 1000
+            print(f'[Localis OCR] motor precargado en {ms:.0f} ms', flush=True)
+    except Exception as error:
+        logger.error(f'[Localis OCR] warm-up omitido: {type(error).__name__}: {error}')
+
+
 def _inicializar_aplicacion():
     """Migraciones y diagnóstico fuera del hilo que importa el WSGI (Gunicorn ya puede bind)."""
     logger.info('[Localis] Inicialización en segundo plano...')
@@ -460,6 +480,7 @@ def _inicializar_aplicacion():
             traceback.print_exc()
         ejecutar_diagnostico_inicio()
         _diagnosticar_serper()
+        _calentar_ocr()
         # --- RESTAURAR_PAGOS_INICIO ---
         # En la fase gratuita no se expiran tiendas por suscripción al arrancar.
         if pagos_habilitados():

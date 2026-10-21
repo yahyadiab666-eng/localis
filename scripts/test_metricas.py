@@ -45,6 +45,27 @@ def main() -> int:
     _ok('quantile="0.95"' in texto, 'expone p95')
     _ok('localis_uptime_seconds' in texto, 'expone uptime')
 
+    print('=== Metricas: OCR de comprobantes ===')
+    metricas.registrar_ocr('binance', 'ok', 250.0, 'ok')
+    metricas.registrar_ocr('binance', 'rechazado', 300.0, 'incompleto')
+    metricas.registrar_ocr('pago_movil', 'rechazado', 420.0, 'excedido')
+    s_ocr = metricas.snapshot()['ocr']
+    _ok(s_ocr['total'] >= 3, f"ocr total={s_ocr['total']}")
+    _ok(s_ocr['por_metodo']['binance']['ok'] >= 1, 'cuenta ok de binance')
+    _ok(
+        s_ocr['estado_monto']['binance']['incompleto'] >= 1,
+        'cuenta monto incompleto',
+    )
+    _ok(
+        s_ocr['estado_monto']['pago_movil']['excedido'] >= 1,
+        'cuenta monto excedido',
+    )
+    _ok(s_ocr['latencia_ms']['p95'] >= 200.0, 'percentiles de OCR')
+    texto_ocr = metricas.render_prometheus()
+    _ok('localis_ocr_total{' in texto_ocr, 'Prometheus expone OCR')
+    _ok('localis_ocr_monto_total{' in texto_ocr, 'Prometheus expone estado de monto')
+    _ok('localis_ocr_duration_ms' in texto_ocr, 'Prometheus expone latencia OCR')
+
     print('=== Metricas: gating por entorno ===')
     os.environ.pop('LOCALIS_METRICS', None)
     _ok(not metricas.habilitado(), 'deshabilitado por defecto')

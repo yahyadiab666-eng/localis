@@ -74,6 +74,10 @@ def _env_int(nombre, default):
 EXIGIR_FECHA_COMPROBANTE = _env_bool('LOCALIS_COMPROBANTE_EXIGIR_FECHA', True)
 MAX_DIAS_COMPROBANTE = max(0, _env_int('LOCALIS_COMPROBANTE_MAX_DIAS', 1))
 
+# Límite de resolución antes de OCR: acota tiempo y memoria sin perder texto,
+# porque las capturas reales rondan 1080-2400 px de lado mayor.
+MAX_OCR_DIM = max(600, _env_int('LOCALIS_OCR_MAX_DIM', 2200))
+
 
 BANCO_OFICIAL = PAGO_MOVIL_DEFAULT['banco']
 RIF_OFICIAL = re.sub(r'\D', '', PAGO_MOVIL_DEFAULT['cedula_rif'])
@@ -97,6 +101,45 @@ def recortar_roi_central(imagen_bgr, ratio=0.4):
     y1 = (alto - alto_recorte) // 2
     x1 = (ancho - ancho_recorte) // 2
     return imagen_bgr[y1 : y1 + alto_recorte, x1 : x1 + ancho_recorte]
+
+
+def _redimensionar_para_ocr(imagen_bgr, max_dim=None):
+    """Limita el lado mayor de la imagen para acotar el coste del OCR."""
+    limite = max(600, int(max_dim or MAX_OCR_DIM))
+    alto, ancho = imagen_bgr.shape[:2]
+    mayor = max(alto, ancho)
+    if mayor <= limite:
+        return imagen_bgr
+    escala = limite / float(mayor)
+    return cv2.resize(
+        imagen_bgr,
+        (max(1, int(ancho * escala)), max(1, int(alto * escala))),
+        interpolation=cv2.INTER_AREA,
+    )
+
+
+def calentar_motor_ocr():
+    """Carga el modelo OCR en memoria (warm-up de arranque). Nunca lanza."""
+    try:
+        _obtener_motor_ocr()
+        return True
+    except Exception as error:
+        print(
+            f'[Localis OCR] no se pudo precargar el motor: '
+            f'{type(error).__name__}: {error}',
+            flush=True,
+        )
+        return False
+
+
+def _registrar_metricas_ocr(metodo, resultado, duracion_ms, estado_monto=None):
+    """Observabilidad best-effort: nunca debe romper una validación."""
+    try:
+        from backend import metricas
+
+        metricas.registrar_ocr(metodo, resultado, duracion_ms, estado_monto)
+    except Exception:
+        pass
 
 
 def _normalizar_texto(texto):
@@ -369,25 +412,33 @@ def validar_comprobante_pago_movil(
     buffer = np.frombuffer(data_bytes, dtype=np.uint8)
     imagen = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
     if imagen is None:
+        ms = (time.perf_counter() - inicio) * 1000
+        _registrar_metricas_ocr('pago_movil', 'invalido', ms)
         return {
             'ok': False,
             'referencia': None,
             'monto_bs': None,
             'fecha_comprobante': None,
             'errores': ['No se pudo leer la imagen del comprobante.'],
-            'ms': (time.perf_counter() - inicio) * 1000,
+            'ms': ms,
             'texto_ocr': '',
             'estado_monto': None,
             'diferencia_monto': None,
         }
 
+    imagen = _redimensionar_para_ocr(imagen)
     texto_completo = _ocr_texto(imagen)
-    roi = recortar_roi_central(imagen, ratio=0.45)
-    texto_roi = _ocr_texto(roi)
-    texto_raw = f'{texto_completo} {texto_roi}'.strip()
+    texto_raw = texto_completo
+    # Segunda pasada SOLO si la referencia no apareció: el recorte central la
+    # rescata en capturas donde el texto es muy pequeño. Evita duplicar el OCR
+    # (la mayor parte del tiempo) sin degradar la detección.
+    if not _extraer_referencia(texto_completo):
+        roi = recortar_roi_central(imagen, ratio=0.45)
+        texto_roi = _ocr_texto(roi)
+        texto_raw = f'{texto_completo} {texto_roi}'.strip()
     texto_norm = _normalizar_texto(texto_raw)
 
-    referencia = _extraer_referencia(texto_roi) or _extraer_referencia(texto_raw)
+    referencia = _extraer_referencia(texto_raw)
     if not referencia:
         errores.append('No se detectó una referencia válida de 6 dígitos.')
 
@@ -456,6 +507,12 @@ def validar_comprobante_pago_movil(
 
     transcurrido_ms = (time.perf_counter() - inicio) * 1000
     ok = not errores and bool(referencia)
+    _registrar_metricas_ocr(
+        'pago_movil',
+        'ok' if ok else 'rechazado',
+        transcurrido_ms,
+        estado_monto,
+    )
 
     return {
         'ok': ok,
@@ -592,12 +649,18 @@ def validar_comprobante_binance(
     if imagen is None:
         base['errores'] = ['No se pudo leer la imagen de la captura.']
         base['ms'] = (time.perf_counter() - inicio) * 1000
+        _registrar_metricas_ocr('binance', 'invalido', base['ms'])
         return base
 
+    imagen = _redimensionar_para_ocr(imagen)
     texto_completo = _ocr_texto(imagen)
-    roi = recortar_roi_central(imagen, ratio=0.45)
-    texto_roi = _ocr_texto(roi)
-    texto_raw = f'{texto_completo} {texto_roi}'.strip()
+    texto_raw = texto_completo
+    # Igual que en pago móvil: la segunda pasada solo hace falta si el ID de la
+    # orden no se leyó en la imagen completa.
+    if not _extraer_order_id(texto_completo):
+        roi = recortar_roi_central(imagen, ratio=0.45)
+        texto_roi = _ocr_texto(roi)
+        texto_raw = f'{texto_completo} {texto_roi}'.strip()
 
     resultado = evaluar_texto_binance(
         texto_raw,
@@ -607,4 +670,10 @@ def validar_comprobante_binance(
         max_dias=max_dias,
     )
     resultado['ms'] = (time.perf_counter() - inicio) * 1000
+    _registrar_metricas_ocr(
+        'binance',
+        'ok' if resultado.get('ok') else 'rechazado',
+        resultado['ms'],
+        resultado.get('estado_monto'),
+    )
     return resultado

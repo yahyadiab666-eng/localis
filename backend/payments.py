@@ -1,9 +1,12 @@
 """Confirmación atómica de pagos y activación de suscripciones."""
 
 import hashlib
+import logging
 import sqlite3
 
 from backend.db import get_db_connection
+
+logger = logging.getLogger('localis.payments')
 
 
 def calcular_hash_comprobante(data_bytes, algoritmo='sha256'):
@@ -105,6 +108,10 @@ def activar_suscripcion_con_pago(
                 raise
     except Exception as error:
         if getattr(error, 'pgcode', None) == '23505':
+            logger.warning(
+                '[Localis Pagos] referencia/comprobante duplicado: '
+                f'{type(error).__name__}'
+            )
             return (
                 False,
                 'Esta referencia o comprobante ya fue registrado en el sistema.',

@@ -372,6 +372,9 @@ COLUMNAS_ESQUEMA = {
         # Antifraude: trazabilidad del comprobante y bloqueo por imagen repetida.
         ('comprobante_url', 'TEXT'),
         ('comprobante_hash', 'TEXT'),
+        # Resultado de la verificación (API Binance u OCR) para auditoría.
+        ('verificacion', 'TEXT'),
+        ('verificacion_detalle', 'TEXT'),
     ],
     'interacciones_comercio': [
         ('comercio_id', 'INTEGER'),
@@ -1723,7 +1726,9 @@ def _crear_tabla_solicitudes_pago(cursor):
             estado TEXT DEFAULT 'pendiente',
             fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             comprobante_url TEXT,
-            comprobante_hash TEXT
+            comprobante_hash TEXT,
+            verificacion TEXT,
+            verificacion_detalle TEXT
         )
         """
     )
