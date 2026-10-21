@@ -27,6 +27,7 @@ from backend.payment_ocr import (  # noqa: E402
     _extraer_montos_candidatos,
     _extraer_referencia,
     _parse_monto_ve,
+    _redimensionar_para_ocr,
     clasificar_monto,
     tolerancia_monto,
 )
@@ -99,6 +100,21 @@ def main() -> int:
     _ok(_contiene_telefono('telefono 04141234567', '04141234567'), 'teléfono configurado')
     _ok(not _contiene_telefono('telefono 04141234567', '04149999999'),
         'teléfono distinto no pasa')
+
+    print('\n=== Rendimiento: reescalado antes de OCR ===')
+    try:
+        import numpy as np
+
+        grande = np.zeros((4000, 3000, 3), dtype=np.uint8)
+        pequena = _redimensionar_para_ocr(grande, max_dim=2200)
+        _ok(max(pequena.shape[:2]) == 2200, f'lado mayor={max(pequena.shape[:2])}')
+        _ok(pequena.shape[1] == 1650, f'ancho proporcional={pequena.shape[1]}')
+
+        chica = np.zeros((600, 800, 3), dtype=np.uint8)
+        igual = _redimensionar_para_ocr(chica, max_dim=2200)
+        _ok(igual.shape == chica.shape, 'imagen pequeña no se toca')
+    except ImportError:
+        print('  (numpy no disponible: se omite)')
 
     print('\n=== RESULTADO ===')
     if FALLOS:

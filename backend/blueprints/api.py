@@ -504,6 +504,7 @@ def api_verificar_boost():
     # b.2) Verificación REAL contra Binance (si la API está configurada). La
     #      captura sola no prueba que el dinero llegó. True=confirmado;
     #      False=no está; None=no se pudo verificar (no bloquea: queda el OCR).
+    confirmado = None
     if es_binance:
         from backend.binance_api import verificar_orden_binance
 
@@ -558,6 +559,21 @@ def api_verificar_boost():
     )
     if not exito:
         return jsonify({'error': mensaje, 'ocr_ms': round(ocr.get('ms', 0), 1)}), 400
+
+    # Auditoría: deja constancia de cómo se verificó el pago (API Binance u OCR).
+    try:
+        from backend.verificacion_pagos import guardar_verificacion
+
+        guardar_verificacion(
+            comercio['id'],
+            referencia,
+            'binance' if es_binance else 'pago_movil_ocr',
+            confirmado=confirmado,
+            estado_monto=ocr.get('estado_monto'),
+            monto=float(precio_usd) if es_binance else ocr.get('monto_bs'),
+        )
+    except Exception as error:
+        logger.warning(f'[Localis Boost] auditoría de verificación omitida: {error}')
 
     return (
         jsonify(
@@ -661,6 +677,7 @@ def api_verificar_pago():
     # Verificación REAL contra Binance (si la API está configurada): la captura
     # sola NO prueba que el dinero llegó. True=confirmado; False=no está; None=no
     # se pudo verificar (no bloquea; el OCR sigue siendo el filtro).
+    confirmado = None
     if es_binance:
         from backend.binance_api import verificar_orden_binance
 
@@ -713,6 +730,21 @@ def api_verificar_pago():
 
     if not exito:
         return jsonify({'error': mensaje, 'ocr_ms': round(ocr.get('ms', 0), 1)}), 400
+
+    # Auditoría: deja constancia de cómo se verificó el pago (API Binance u OCR).
+    try:
+        from backend.verificacion_pagos import guardar_verificacion
+
+        guardar_verificacion(
+            comercio['id'],
+            referencia,
+            'binance' if es_binance else 'pago_movil_ocr',
+            confirmado=confirmado,
+            estado_monto=ocr.get('estado_monto'),
+            monto=montos.get('monto_usd') if es_binance else ocr.get('monto_bs'),
+        )
+    except Exception as error:
+        logger.warning(f'[Localis Pagos] auditoría de verificación omitida: {error}')
 
     respuesta = {
         'ok': True,
