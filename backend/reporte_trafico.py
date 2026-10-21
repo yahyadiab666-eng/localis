@@ -227,7 +227,7 @@ def _reporte_diario_habilitado():
 
 def _hora_objetivo_utc():
     try:
-        return max(0, min(23, int(os.environ.get('LOCALIS_REPORTE_HORA_UTC', '13') or 13)))
+        return max(0, min(23, int(os.environ.get('LOCALIS_REPORTE_HORA_UTC', '0') or 0)))
     except (TypeError, ValueError):
         return 13
 
@@ -253,11 +253,13 @@ def quizas_enviar_reporte_diario():
 
 def _bucle_reporte():
     while True:
-        time.sleep(max(60, _INTERVALO_REVISION))
+        # Revisa ya al arrancar (catch-up tras un deploy/despertar) y luego cada
+        # intervalo. Idempotente: solo envía una vez al día.
         try:
             quizas_enviar_reporte_diario()
         except Exception as error:
             logger.error(f'{_LOG} ciclo del planificador falló: {type(error).__name__}: {error}')
+        time.sleep(max(60, _INTERVALO_REVISION))
 
 
 def iniciar_reporte_diario():
