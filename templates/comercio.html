@@ -508,7 +508,7 @@
   </div>
   {% endif %}
 
-  <!-- Modal: Promocionar / Destacar producto (pago móvil) -->
+  <!-- Modal: Promocionar / Destacar producto (pago móvil, Binance Pay o puntos) -->
   <div id="modal-boost" class="modal-push" onclick="if(event.target===this)cerrarModalBoost()">
     <div class="panel p-5 sm:p-6 space-y-4">
       <div class="flex items-start justify-between gap-3">
@@ -525,19 +525,26 @@
         <input type="hidden" name="producto_id" id="boost-producto-id" value="">
 
         <!-- Método de pago del destacado -->
-        <div class="grid grid-cols-2 gap-2 text-xs font-bold">
+        <div class="grid grid-cols-3 gap-2 text-xs font-bold">
           <label class="cursor-pointer">
             <input type="radio" name="metodo_boost" value="pago_movil" class="peer sr-only" checked
                    onchange="cambiarMetodoBoost()">
-            <span class="block text-center rounded-xl border border-stone-200 px-3 py-2.5 transition peer-checked:border-amber-500 peer-checked:ring-2 peer-checked:ring-amber-500/30">
+            <span class="block text-center rounded-xl border border-stone-200 px-2 py-2.5 transition peer-checked:border-amber-500 peer-checked:ring-2 peer-checked:ring-amber-500/30">
               Pago móvil
+            </span>
+          </label>
+          <label class="cursor-pointer">
+            <input type="radio" name="metodo_boost" value="binance" class="peer sr-only"
+                   onchange="cambiarMetodoBoost()">
+            <span class="block text-center rounded-xl border border-stone-200 px-2 py-2.5 transition peer-checked:border-amber-500 peer-checked:ring-2 peer-checked:ring-amber-500/30">
+              Binance Pay
             </span>
           </label>
           <label class="cursor-pointer">
             <input type="radio" name="metodo_boost" value="puntos" class="peer sr-only"
                    onchange="cambiarMetodoBoost()">
-            <span class="block text-center rounded-xl border border-stone-200 px-3 py-2.5 transition peer-checked:border-violet-500 peer-checked:ring-2 peer-checked:ring-violet-500/30">
-              Canjear puntos
+            <span class="block text-center rounded-xl border border-stone-200 px-2 py-2.5 transition peer-checked:border-violet-500 peer-checked:ring-2 peer-checked:ring-violet-500/30">
+              Puntos
             </span>
           </label>
         </div>
@@ -559,7 +566,7 @@
             </div>
           </div>
 
-          <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm space-y-1">
+          <div id="boost-info-pago-movil" class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm space-y-1">
             <p class="font-bold text-amber-900">Datos para Pago Móvil</p>
             <p><span class="text-stone-500">Banco:</span> {{ pago_movil.banco or '—' }}</p>
             <p><span class="text-stone-500">Cédula/RIF:</span> {{ pago_movil.cedula_rif or '—' }}</p>
@@ -568,12 +575,22 @@
             <p id="boost-monto-bs" class="pt-2 border-t border-amber-200 mt-2 font-bold text-amber-900"></p>
           </div>
 
+          <div id="boost-info-binance" class="hidden bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm space-y-1">
+            <p class="font-bold text-amber-900">Datos para Binance Pay</p>
+            <p><span class="text-stone-500">Binance Pay ID:</span> <strong>{{ pago_movil.binance_id or '—' }}</strong></p>
+            <p><span class="text-stone-500">Moneda:</span> {{ pago_movil.binance_moneda or 'USDT' }}</p>
+            <p class="text-xs text-stone-600 pt-2 border-t border-amber-200 mt-2">
+              En tu app de Binance: <strong>Pay → Enviar → ID</strong>, pega este ID y envía el monto exacto en USDT.
+            </p>
+            <p id="boost-monto-usdt" class="pt-2 border-t border-amber-200 mt-2 font-bold text-amber-900"></p>
+          </div>
+
           <div>
             <label for="boost-comprobante" class="block text-xs font-bold uppercase text-stone-600 mb-1">Captura del comprobante</label>
             <input type="file" id="boost-comprobante" name="comprobante"
                    accept="image/png, image/jpeg, image/webp" required
                    class="w-full text-xs text-stone-600 file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-amber-500 file:text-stone-900 hover:file:bg-amber-400 bg-white rounded-xl border border-stone-200 cursor-pointer">
-            <p class="text-[11px] text-stone-500 mt-1">
+            <p id="boost-ayuda-comprobante" class="text-[11px] text-stone-500 mt-1">
               Sube la captura de tu pago móvil. Validamos con OCR el banco
               <strong>{{ pago_movil.banco or '—' }}</strong>, el RIF/cédula
               <strong>{{ pago_movil.cedula_rif or '—' }}</strong>, el teléfono
@@ -752,14 +769,21 @@
 
     function actualizarMontoBoost() {
       const form = document.getElementById('form-boost');
-      const monto = document.getElementById('boost-monto-bs');
-      if (!form || !monto) return;
+      if (!form) return;
       const sel = form.querySelector('input[name="dias"]:checked');
       if (!sel) return;
       const precio = parseFloat(sel.getAttribute('data-precio') || '0');
-      monto.textContent =
-        'Monto a pagar: ' + (precio * TASA_BOOST).toFixed(2) +
-        ' Bs ($' + precio.toFixed(2) + ' USD)';
+      const montoBs = document.getElementById('boost-monto-bs');
+      if (montoBs) {
+        montoBs.textContent =
+          'Monto a pagar: ' + (precio * TASA_BOOST).toFixed(2) +
+          ' Bs ($' + precio.toFixed(2) + ' USD)';
+      }
+      const montoUsdt = document.getElementById('boost-monto-usdt');
+      if (montoUsdt) {
+        montoUsdt.textContent =
+          'Monto a pagar: ' + precio.toFixed(2) + ' USDT (Binance Pay)';
+      }
     }
 
     function abrirModalBoost(productoId, nombre) {
@@ -790,15 +814,27 @@
       const pago = document.getElementById('boost-pago-bloque');
       const puntos = document.getElementById('boost-puntos-bloque');
       const comp = document.getElementById('boost-comprobante');
+      const infoPago = document.getElementById('boost-info-pago-movil');
+      const infoBinance = document.getElementById('boost-info-binance');
+      const ayuda = document.getElementById('boost-ayuda-comprobante');
       if (metodo === 'puntos') {
         if (pago) pago.classList.add('hidden');
         if (puntos) puntos.classList.remove('hidden');
         if (comp) comp.removeAttribute('required');
-      } else {
-        if (pago) pago.classList.remove('hidden');
-        if (puntos) puntos.classList.add('hidden');
-        if (comp) comp.setAttribute('required', 'required');
+        return;
       }
+      const esBinance = metodo === 'binance';
+      if (pago) pago.classList.remove('hidden');
+      if (puntos) puntos.classList.add('hidden');
+      if (comp) comp.setAttribute('required', 'required');
+      if (infoPago) infoPago.classList.toggle('hidden', esBinance);
+      if (infoBinance) infoBinance.classList.toggle('hidden', !esBinance);
+      if (ayuda) {
+        ayuda.textContent = esBinance
+          ? 'Sube la captura del pago por Binance (USDT). Validamos el monto en USDT y el ID de la orden.'
+          : 'Sube la captura de tu pago móvil. Validamos con OCR el banco, el RIF/cédula, el teléfono, la referencia, el monto y la fecha.';
+      }
+      actualizarMontoBoost();
     }
 
     function canjearBoostConPuntos() {

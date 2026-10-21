@@ -1,4 +1,4 @@
-"""Módulo de "Destacados / Boosts" de PRODUCTO (integrado al pago móvil).
+"""Módulo de "Destacados / Boosts" de PRODUCTO (pago móvil y Binance Pay).
 
 Reutiliza EXACTAMENTE el sistema de pagos existente en ``Localis``:
 
@@ -7,8 +7,8 @@ Reutiliza EXACTAMENTE el sistema de pagos existente en ``Localis``:
   - Datos de pago móvil: ``obtener_datos_pago_movil`` (banco, cédula, teléfono,
     tasa) desde ``configuracion_sistema``.
   - Registro del pago: tabla ``solicitudes_pago`` (la misma que usa el pago móvil).
-  - Formato de referencia: exactamente 6 dígitos (idéntico a
-    ``registrar_pago_movil_plan``).
+  - Formato de referencia: 6 dígitos para pago móvil; 6-24 dígitos para el ID de
+    orden de Binance Pay (idéntico a ``activar_suscripcion_por_comprobante``).
 
 Precios fijos por duración (USD):
   - 3 días -> $2.00
@@ -43,8 +43,6 @@ DIAS_BOOST_VALIDOS = tuple(sorted(PRECIOS_BOOST_USD))
 DURACION_BOOST_DIAS = 7
 PRECIO_BOOST_USD = PRECIOS_BOOST_USD[DURACION_BOOST_DIAS]
 
-_REFERENCIA_RE = re.compile(r'^\d{6}$')
-
 
 # ==========================================
 # Utilidades de validación / sanitización
@@ -67,6 +65,17 @@ def _a_int(valor, campo='id'):
 def sanitizar_referencia(referencia):
     """Deja solo los dígitos de la referencia (sin espacios ni caracteres raros)."""
     return re.sub(r'\D', '', str(referencia or ''))
+
+
+def referencia_valida(referencia, metodo='pago_movil_ocr'):
+    """True si la referencia cumple el formato del método de pago.
+
+    Pago móvil: exactamente 6 dígitos. Binance Pay: 6-24 dígitos (ID de orden),
+    igual que ``activar_suscripcion_por_comprobante``.
+    """
+    ref = sanitizar_referencia(referencia)
+    patron = r'^\d{6,24}$' if str(metodo or '').startswith('binance') else r'^\d{6}$'
+    return bool(re.match(patron, ref))
 
 
 def _ahora_utc():
@@ -173,11 +182,14 @@ def activar_boost_producto(
     referencia,
     comprobante_url=None,
     comprobante_hash=None,
+    metodo='pago_movil_ocr',
 ):
-    """Activa el destaque de un producto tras validar el pago móvil.
+    """Activa el destaque de un producto tras validar el pago.
 
     ``referencia``/``comprobante_*`` provienen del OCR del comprobante (igual
-    que el flujo de mensualidades). Retorna ``(exito, mensaje)``. Ante cualquier
+    que el flujo de mensualidades). ``metodo`` es ``pago_movil_ocr`` (por
+    defecto) o ``binance``; cada uno usa su propio formato de referencia y su
+    propio registro de auditoría. Retorna ``(exito, mensaje)``. Ante cualquier
     fallo no deja estado inconsistente ni realiza cargos.
     """
     # 1) Sanitización y control de tipos.
@@ -191,12 +203,19 @@ def activar_boost_producto(
     if dias not in PRECIOS_BOOST_USD:
         return False, 'Duración no válida. Elige 3, 5 o 7 días.'
 
+    es_binance = str(metodo or '').startswith('binance')
+    metodo = 'binance' if es_binance else 'pago_movil_ocr'
     referencia = sanitizar_referencia(referencia)
-    if not _REFERENCIA_RE.match(referencia):
+    if not referencia_valida(referencia, metodo):
         _registrar_intento_rechazado(
             comercio_id, producto_id, referencia, 'referencia_invalida'
         )
-        return False, 'La referencia de pago móvil debe tener exactamente 6 dígitos.'
+        return (
+            False,
+            'No se detectó un ID de orden válido de Binance.'
+            if es_binance
+            else 'La referencia de pago móvil debe tener exactamente 6 dígitos.',
+        )
 
     # 2) Anti fraude: la referencia no puede haberse usado nunca.
     #    Se audita en el sistema de pagos (pagos/solicitudes_pago = mensualidades)
@@ -258,9 +277,18 @@ def activar_boost_producto(
                 INSERT INTO boosts
                     (comercio_id, tipo, objetivo_id, precio_usd, dias_duracion,
                      referencia_pago, metodo, estado, fecha_inicio, fecha_fin)
-                VALUES (?, 'producto', ?, ?, ?, ?, 'pago_movil_ocr', 'activo', ?, ?)
+                VALUES (?, 'producto', ?, ?, ?, ?, ?, 'activo', ?, ?)
                 """,
-                (comercio_id, producto_id, precio_usd, dias, referencia, inicio, fin),
+                (
+                    comercio_id,
+                    producto_id,
+                    precio_usd,
+                    dias,
+                    referencia,
+                    metodo,
+                    inicio,
+                    fin,
+                ),
             )
 
             # 3d) Activación en el producto (propiedad re-verificada en el WHERE).
