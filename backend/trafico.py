@@ -179,27 +179,52 @@ def volcar():
 
 
 def _escribir(filas):
-    """Escribe los deltas con UPSERT. Devuelve True si la transacción se guardó."""
+    """Escribe los deltas con UPSERT en una conexión PROPIA y acotada.
+
+    Abre una conexión dedicada (NO la del pool compartido) con
+    ``statement_timeout`` y ``lock_timeout``: si el pooler de Supabase acepta la
+    conexión y luego no responde, la consulta se aborta sola en 10 s en vez de
+    dejar el volcado bloqueado para siempre (causa observada en producción).
+
+    Se usan marcadores ``%s`` (PostgreSQL nativo) porque aquí NO pasa por el
+    adaptador ``?`` -> ``%s``. Devuelve True si la transacción se guardó.
+    """
     global _ultimo_error_volcado
     try:
-        from backend.db import get_db_connection
+        import psycopg2
 
-        with get_db_connection() as conexion:
-            cursor = conexion.cursor()
-            for (fecha, clave), valor in filas:
-                if valor <= 0:
-                    continue
-                cursor.execute(
-                    """
-                    INSERT INTO metricas_diarias (fecha, clave, valor)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT (fecha, clave) DO UPDATE
-                        SET valor = metricas_diarias.valor + EXCLUDED.valor,
-                            actualizado = CURRENT_TIMESTAMP
-                    """,
-                    (fecha, clave, int(valor)),
-                )
-            conexion.commit()
+        from database import DATABASE_URL
+
+        if not DATABASE_URL:
+            _ultimo_error_volcado = 'DATABASE_URL no configurada'
+            return False
+
+        conexion = psycopg2.connect(
+            DATABASE_URL,
+            connect_timeout=10,
+            options='-c statement_timeout=10000 -c lock_timeout=5000',
+        )
+        try:
+            with conexion:
+                cursor = conexion.cursor()
+                for (fecha, clave), valor in filas:
+                    if valor <= 0:
+                        continue
+                    cursor.execute(
+                        """
+                        INSERT INTO metricas_diarias (fecha, clave, valor)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (fecha, clave) DO UPDATE
+                            SET valor = metricas_diarias.valor + EXCLUDED.valor,
+                                actualizado = CURRENT_TIMESTAMP
+                        """,
+                        (fecha, clave, int(valor)),
+                    )
+        finally:
+            try:
+                conexion.close()
+            except Exception:
+                pass
         return True
     except Exception as error:
         _ultimo_error_volcado = f'{type(error).__name__}: {error}'
