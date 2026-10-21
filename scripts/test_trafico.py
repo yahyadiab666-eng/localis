@@ -64,6 +64,8 @@ def main() -> int:
     trafico.registrar_peticion('/', 200, user_agent='Googlebot/2.1', remote_addr='4.4.4.4')
     c = _claves()
     _ok(c.get('visitas_unicas') == 2, f"unicos=2 (2 humanos, 1 bot) -> {c.get('visitas_unicas')}")
+    _ok(c.get('peticiones_app') == 4, f"app=4 (3 humanos + 1 bot) -> {c.get('peticiones_app')}")
+    _ok(c.get('peticiones_bots') == 1, f"bots=1 -> {c.get('peticiones_bots')}")
 
     print('\n=== PWA: instalaciones y aperturas ===')
     _reset()

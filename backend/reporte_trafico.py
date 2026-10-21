@@ -39,11 +39,27 @@ _inicio_lock = threading.Lock()
 # Orden y etiquetas de las claves mostradas en el reporte.
 _ETIQUETAS = (
     ('peticiones', 'Peticiones totales (incl. salud y estáticos)'),
-    ('peticiones_app', 'Tráfico de la app (sin estáticos)'),
+    ('peticiones_app_humanas', 'Tráfico de la app (humanos, sin bots)'),
+    ('peticiones_bots', 'Peticiones de bots/crawlers'),
     ('visitas_unicas', 'Visitantes únicos (aprox.)'),
     ('pwa_instalaciones', 'Instalaciones de PWA'),
     ('pwa_aperturas', 'Aperturas desde la PWA'),
 )
+
+
+def _valor_clave(claves, clave):
+    """Valor de una métrica del reporte, resolviendo las derivadas.
+
+    ``peticiones_app_humanas`` = peticiones de app − peticiones de bots, para que
+    "tráfico de la app" signifique realmente personas.
+    """
+    if clave == 'peticiones_app_humanas':
+        return max(
+            0,
+            int(claves.get('peticiones_app', 0) or 0)
+            - int(claves.get('peticiones_bots', 0) or 0),
+        )
+    return int(claves.get(clave, 0) or 0)
 
 
 def _fmt(valor):
@@ -80,7 +96,7 @@ def construir_reporte(dias=1):
     lineas.append(f'--- Hoy ({hoy}) ---')
     if hoy_claves:
         for clave, etiqueta in _ETIQUETAS:
-            lineas.append(f'  {etiqueta}: {_fmt(hoy_claves.get(clave, 0))}')
+            lineas.append(f'  {etiqueta}: {_fmt(_valor_clave(hoy_claves, clave))}')
     else:
         lineas.append('  (sin tráfico registrado hoy todavía)')
     lineas.append('')
@@ -88,14 +104,14 @@ def construir_reporte(dias=1):
     lineas.append(f'--- Totales del período ({dias} día(s)) ---')
     totales = datos.get('totales_periodo', {})
     for clave, etiqueta in _ETIQUETAS:
-        lineas.append(f'  {etiqueta}: {_fmt(totales.get(clave, 0))}')
+        lineas.append(f'  {etiqueta}: {_fmt(_valor_clave(totales, clave))}')
     lineas.append('')
 
     historicos = datos.get('totales_historicos', {})
     if historicos:
         lineas.append('--- Totales históricos (desde el inicio) ---')
         for clave, etiqueta in _ETIQUETAS:
-            lineas.append(f'  {etiqueta}: {_fmt(historicos.get(clave, 0))}')
+            lineas.append(f'  {etiqueta}: {_fmt(_valor_clave(historicos, clave))}')
         lineas.append('')
 
     por_dia = datos.get('por_dia', [])
@@ -106,7 +122,8 @@ def construir_reporte(dias=1):
             lineas.append(
                 f'  {dia.get("fecha")}  '
                 f'pet={_fmt(c.get("peticiones", 0))}  '
-                f'app={_fmt(c.get("peticiones_app", 0))}  '
+                f'humanos={_fmt(_valor_clave(c, "peticiones_app_humanas"))}  '
+                f'bots={_fmt(c.get("peticiones_bots", 0))}  '
                 f'únicos={_fmt(c.get("visitas_unicas", 0))}  '
                 f'inst_pwa={_fmt(c.get("pwa_instalaciones", 0))}  '
                 f'apert_pwa={_fmt(c.get("pwa_aperturas", 0))}'
@@ -114,6 +131,8 @@ def construir_reporte(dias=1):
         lineas.append('')
 
     lineas.append('Notas:')
+    lineas.append('- "Tráfico de la app (humanos)" excluye bots/crawlers detectados')
+    lineas.append('  por User-Agent; los no detectados aún cuentan como humanos.')
     lineas.append('- "Visitantes únicos" es aproximado (huella IP+navegador; se')
     lineas.append('  reinicia con el worker y al cambiar de día, en UTC).')
     lineas.append('- Instalaciones de PWA: evento appinstalled. En iPhone (iOS)')
