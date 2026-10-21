@@ -1,5 +1,6 @@
 import logging
 logger = logging.getLogger('localis.app')
+import hmac
 import mimetypes
 import os
 import threading
@@ -155,6 +156,7 @@ from backend.session_comercio import (
     destino_panel_usuario,
 )
 from backend.web_seguridad import (
+    exento_csrf,
     peticion_acepta_json as _peticion_acepta_json,
     registrar_csrf,
 )
@@ -263,6 +265,14 @@ try:
     iniciar_backfill_periodico()
 except Exception as _error_backfill:
     logger.error(f'[Localis] backfill periódico no iniciado: {_error_backfill}')
+
+# Volcado periódico de métricas de tráfico a la BD (sobreviven al reinicio).
+try:
+    from backend.trafico import iniciar_flush_periodico
+
+    iniciar_flush_periodico()
+except Exception as _error_trafico:
+    logger.error(f'[Localis] volcado de tráfico no iniciado: {_error_trafico}')
 
 
 @app.template_filter('fecha_corta')
@@ -804,6 +814,62 @@ def metrics_prometheus():
         metricas.render_prometheus(),
         mimetype='text/plain; version=0.0.4; charset=utf-8',
     )
+
+
+@app.route('/tareas/reporte-trafico', methods=['GET', 'POST'])
+@exento_csrf
+def tarea_reporte_trafico():
+    """Dispara el reporte diario de tráfico (pensado para un cron externo).
+
+    Protegido por un token compartido (``LOCALIS_CRON_TOKEN``). Si no está
+    configurado, la ruta responde 404 (no existe). Nunca lanza.
+    """
+    token = (os.environ.get('LOCALIS_CRON_TOKEN') or '').strip()
+    if not token:
+        return jsonify({'ok': False, 'error': 'no configurado'}), 404
+    recibido = (
+        request.headers.get('X-Cron-Token')
+        or request.args.get('token')
+        or ''
+    ).strip()
+    try:
+        autorizado = hmac.compare_digest(token, recibido)
+    except Exception:
+        autorizado = False
+    if not autorizado:
+        return jsonify({'ok': False, 'error': 'no autorizado'}), 401
+
+    from backend import trafico
+    from backend.reporte_trafico import enviar_reporte_admin
+
+    # Persistir lo pendiente para que el reporte incluya lo de hoy.
+    try:
+        trafico.volcar()
+    except Exception as error:
+        logger.error(f'[Localis] volcado previo al reporte falló: {error}')
+
+    forzar = (request.args.get('forzar') or '').strip().lower() in (
+        '1', 'true', 'yes', 'si', 'sí'
+    )
+    try:
+        dias = max(1, int(request.args.get('dias', '1') or 1))
+    except (TypeError, ValueError):
+        dias = 1
+
+    try:
+        ok, detalle, _ = enviar_reporte_admin(dias=dias, forzar=forzar)
+    except Exception as error:
+        logger.error(f'[Localis] reporte de tráfico falló: {error}')
+        return jsonify({'ok': False, 'estado': 'error', 'detalle': str(error)}), 500
+
+    if ok:
+        estado = 'enviado'
+    elif 'ya enviado' in detalle:
+        estado = 'omitido'
+    else:
+        estado = 'error'
+    codigo = 200 if estado != 'error' else 502
+    return jsonify({'ok': estado != 'error', 'estado': estado, 'detalle': detalle}), codigo
 
 
 # /api/tasa-bcv y /api/actualizar-tasa viven ahora en backend/blueprints/api.py
