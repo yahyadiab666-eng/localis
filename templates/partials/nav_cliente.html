@@ -144,4 +144,21 @@
       navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
     });
   }
+
+  // Beacon de instalación: avisa al servidor cuando la PWA se instala
+  // (evento appinstalled) para poder contarlo en el reporte de tráfico.
+  // Se registra UNA sola vez por página (evita dobles conteos).
+  if (!window.__localisPwaBeacon) {
+    window.__localisPwaBeacon = true;
+    window.addEventListener('appinstalled', function () {
+      try {
+        fetch('/api/pwa/instalada', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+          keepalive: true
+        }).catch(function () {});
+      } catch (e) {}
+    });
+  }
 </script>

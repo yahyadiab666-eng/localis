@@ -1,0 +1,51 @@
+name: Reporte diario de tráfico
+
+# Envía el reporte de tráfico y PWA a los administradores una vez al día,
+# llamando al endpoint protegido del backend. El endpoint corre dentro de la
+# app (tiene acceso a la BD); este workflow solo lo dispara.
+#
+# Requisitos (configurar una sola vez en GitHub -> Settings -> Secrets and variables):
+#   - Secret   LOCALIS_CRON_TOKEN  = el mismo valor que en Render.
+#   - Variable LOCALIS_BASE_URL    = opcional (por defecto https://localis.onrender.com).
+
+on:
+  schedule:
+    # 13:00 UTC = 09:00 en Venezuela (UTC-4).
+    - cron: '0 13 * * *'
+  workflow_dispatch:
+    inputs:
+      forzar:
+        description: 'Reenviar aunque ya se haya enviado hoy'
+        type: boolean
+        default: false
+
+# Evita solapamientos si una ejecución se alarga.
+concurrency:
+  group: reporte-diario-trafico
+  cancel-in-progress: false
+
+jobs:
+  enviar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Disparar el reporte
+        env:
+          CRON_TOKEN: ${{ secrets.LOCALIS_CRON_TOKEN }}
+          BASE_URL: ${{ vars.LOCALIS_BASE_URL || 'https://localis.onrender.com' }}
+          FORZAR: ${{ github.event.inputs.forzar || 'false' }}
+        run: |
+          if [ -z "$CRON_TOKEN" ]; then
+            echo "::error::Falta el secreto LOCALIS_CRON_TOKEN"
+            exit 1
+          fi
+          URL="${BASE_URL%/}/tareas/reporte-trafico"
+          if [ "$FORZAR" = "true" ]; then URL="$URL?forzar=1"; fi
+          echo "POST $URL"
+          codigo=$(curl -sS --max-time 120 -o respuesta.json -w '%{http_code}' \
+            -X POST -H "X-Cron-Token: $CRON_TOKEN" "$URL") || true
+          echo "HTTP $codigo"
+          cat respuesta.json 2>/dev/null || true
+          if [ "$codigo" != "200" ]; then
+            echo "::error::El reporte no se envió (HTTP $codigo)"
+            exit 1
+          fi

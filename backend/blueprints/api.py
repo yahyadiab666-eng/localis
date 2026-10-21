@@ -205,6 +205,19 @@ def api_registrar_interaccion(comercio_id):
     return ('', 204)
 
 
+@bp.route('/pwa/instalada', methods=['POST'])
+@exento_csrf
+def api_pwa_instalada():
+    """Beacon público: la PWA se instaló (evento ``appinstalled``).
+
+    Respuesta 204 sin cuerpo: nunca bloquea ni rompe la navegación del cliente.
+    """
+    from backend import trafico
+
+    trafico.registrar_evento('pwa_instalaciones')
+    return ('', 204)
+
+
 @bp.route('/suscripcion/confirmar-pago', methods=['POST'])
 @limite('10 per minute')
 @admin_requerido_api

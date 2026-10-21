@@ -18,7 +18,7 @@ import uuid
 
 from flask import g, request
 
-from backend import metricas
+from backend import metricas, trafico
 
 
 class JsonFormatter(logging.Formatter):
@@ -79,6 +79,17 @@ def registrar_request_logging(app):
             rid = getattr(g, 'request_id', '-')
             response.headers.setdefault('X-Request-ID', rid)
             metricas.registrar(response.status_code, duracion)
+            trafico.registrar_peticion(
+                request.path,
+                response.status_code,
+                user_agent=request.headers.get('User-Agent') or '',
+                remote_addr=request.remote_addr or '',
+                query=(
+                    request.query_string.decode('latin-1', 'ignore')
+                    if request.query_string
+                    else ''
+                ),
+            )
             if not request.path.startswith('/static/'):
                 log.info(
                     '%s %s -> %s %.1fms rid=%s',

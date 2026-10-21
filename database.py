@@ -146,6 +146,7 @@ TABLAS_PERMITIDAS = frozenset({
     'product_image_overrides',
     'image_pipeline_log',
     'interacciones_comercio',
+    'metricas_diarias',
     'imagenes_automaticas',
     'boosts',
     'referidos',
@@ -1795,6 +1796,26 @@ def _crear_tabla_canjes_puntos(cursor):
     )
 
 
+def _crear_tabla_metricas_diarias(cursor):
+    """Contadores agregados de tráfico por día (una fila por fecha+clave).
+
+    Alimentada por ``backend/trafico.py`` (UPSERT de deltas). Sobrevive al
+    reinicio del worker, a diferencia de las métricas Prometheus en memoria.
+    La PK (fecha, clave) hace el UPSERT atómico y evita duplicados.
+    """
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS metricas_diarias (
+            fecha DATE NOT NULL,
+            clave TEXT NOT NULL,
+            valor BIGINT NOT NULL DEFAULT 0,
+            actualizado TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (fecha, clave)
+        )
+        """
+    )
+
+
 def _crear_tabla_contadores_publicos(cursor):
     """Contadores monotónicos para códigos públicos sin huecos (USR-, COM-, PROD-).
 
@@ -1831,6 +1852,7 @@ def _crear_tablas(cursor):
         ('pagos', _crear_tabla_pagos),
         ('solicitudes_pago', _crear_tabla_solicitudes_pago),
         ('interacciones_comercio', _crear_tabla_interacciones_comercio),
+        ('metricas_diarias', _crear_tabla_metricas_diarias),
         ('imagenes_automaticas', _crear_tabla_imagenes_automaticas),
         ('boosts', _crear_tabla_boosts),
         ('referidos', _crear_tabla_referidos),

@@ -36,6 +36,7 @@ SIN_RED = [
     'test_estructura_blueprints.py',
     'test_vista_previa_token.py',
     'test_metricas.py',
+    'test_trafico.py',
     'test_backup_utilidades.py',
     'test_cache.py',
     'test_clasificador_categorias.py',
@@ -43,6 +44,7 @@ SIN_RED = [
 ]
 INTEGRACION = [
     'test_migraciones.py',
+    'test_trafico_bd.py',
     'test_pre_cuentas_roles.py',
     'test_auth_panel.py',
     'test_rutas_smoke.py',

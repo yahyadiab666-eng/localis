@@ -112,4 +112,6 @@ Ver `docs/auditoria-tecnica.md`. Resumen: **1 worker** obligatorio (cola de
 importación en memoria → hace falta un broker compartido para escalar) y
 pipeline de imágenes pesado acoplado al proceso web. **Resuelto en el Bloque 4**:
 blueprints por dominio, migraciones versionadas (`schema_migrations`),
-observabilidad con request-id y `logging` estructurado.
+observabilidad con request-id y `logging` estructurado. Tráfico persistido por
+día (`metricas_diarias`) y reporte diario por correo a los administradores: ver
+`docs/reporte-trafico.md`.
