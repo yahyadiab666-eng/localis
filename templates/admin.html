@@ -28,6 +28,8 @@
         }
         @media (max-width: 992px) { .container { grid-template-columns: 1fr; } }
         .col-izquierda { display: flex; flex-direction: column; gap: 2rem; }
+        /* La bandeja de revisión es lo operativo: va primero en la columna. */
+        #bandeja-revision { order: -1; }
         .card {
             background: white; padding: 1.5rem; border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.05); border: 1px solid #e1e4e8;
@@ -78,6 +80,23 @@
             padding: 1rem; border-bottom: 1px solid #e1e4e8;
             display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem;
         }
+        .ticket-item.ticket-revision { border-left: 4px solid #dc3545; background: #fffafa; }
+        .ticket-item.ticket-revision.es-aviso { border-left-color: #fd7e14; background: #fffaf3; }
+        .ticket-meta { font-size: 0.78rem; color: #6c757d; margin-top: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+        .badge-revision { background: #f8d7da; color: #721c24; }
+        .badge-aviso { background: #ffe8cc; color: #8a5a00; }
+        .badge-soporte { background: #e1effe; color: #084298; }
+        .bandeja-filtros { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 0.75rem; font-size: 0.8rem; }
+        .bandeja-filtros a {
+            padding: 3px 8px; border-radius: 999px; text-decoration: none;
+            border: 1px solid #d7dbe0; color: #495057; background: #fff;
+        }
+        .bandeja-filtros a.activo { background: #212529; color: #fff; border-color: #212529; }
+        .contador-revision {
+            display: inline-block; background: #dc3545; color: #fff; border-radius: 999px;
+            padding: 1px 8px; font-size: 0.75rem; font-weight: bold; margin-left: 6px;
+        }
+        .enlace-comprobante { font-size: 0.78rem; color: #0d6efd; text-decoration: underline; }
         .plan-form { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
         .plan-form select { padding: 4px; font-size: 0.8rem; }
         .cuenta-form { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
@@ -188,14 +207,55 @@
                 </form>
             </aside>
 
-            <aside class="card">
-                <h2>Bandeja de Soporte</h2>
-                <div style="max-height: 400px; overflow-y: auto;">
+            <aside class="card" id="bandeja-revision">
+                <h2>
+                    Bandeja de revisión
+                    {% if revisiones_pendientes %}
+                    <span class="contador-revision">{{ revisiones_pendientes }} pago(s) por revisar</span>
+                    {% endif %}
+                </h2>
+                <p style="font-size:0.85rem;color:#666;margin-bottom:0.75rem;">
+                    Aquí llegan los <strong>pagos con Binance Pay que la API no pudo confirmar</strong>
+                    (rechazados o aceptados sin verificar). Ábrelos para ver la transacción y el
+                    comprobante. Marca <strong>Listo</strong> cuando lo hayas revisado.
+                </p>
+
+                <div class="bandeja-filtros">
+                    <a href="{{ url_for('admin.panel_admin', tipo_ticket=tipo_ticket or None) }}"
+                       class="{{ 'activo' if not estado_ticket else '' }}">Todas</a>
+                    <a href="{{ url_for('admin.panel_admin', estado_ticket='pendiente', tipo_ticket=tipo_ticket or None) }}"
+                       class="{{ 'activo' if estado_ticket == 'pendiente' else '' }}">Por revisar</a>
+                    <a href="{{ url_for('admin.panel_admin', estado_ticket='resuelto', tipo_ticket=tipo_ticket or None) }}"
+                       class="{{ 'activo' if estado_ticket == 'resuelto' else '' }}">Revisadas</a>
+                </div>
+
+                <div style="max-height: 420px; overflow-y: auto;">
                     {% for ticket in tickets %}
-                        <div class="ticket-item">
-                            <div>
-                                <h4 style="font-size:0.95rem;">[{{ ticket.tipo | upper }}] {{ ticket.correo }}</h4>
-                                <p style="font-size:0.9rem;color:#666;">{{ ticket.mensaje }}</p>
+                        {% set es_revision = ticket.tipo == 'revision_pago' %}
+                        {% set es_aviso = es_revision and 'SIN VERIFICAR' in (ticket.mensaje or '') %}
+                        <div class="ticket-item {{ 'ticket-revision' if es_revision else '' }} {{ 'es-aviso' if es_aviso else '' }}">
+                            <div style="flex:1;min-width:0;">
+                                <h4 style="font-size:0.95rem;">
+                                    {% if es_revision %}
+                                    <span class="badge {{ 'badge-aviso' if es_aviso else 'badge-revision' }}">
+                                        {{ 'SIN VERIFICAR' if es_aviso else 'PAGO RECHAZADO' }}
+                                    </span>
+                                    {% else %}
+                                    <span class="badge badge-soporte">{{ ticket.tipo | upper }}</span>
+                                    {% endif %}
+                                    {{ ticket.correo }}
+                                </h4>
+                                <p style="font-size:0.88rem;color:#444;margin-top:4px;">{{ ticket.mensaje }}</p>
+                                {% if es_revision %}
+                                <p class="ticket-meta">
+                                    {% if ticket.referencia_pago %}ID de orden: {{ ticket.referencia_pago }} · {% endif %}
+                                    {{ ticket.fecha }}
+                                </p>
+                                {% if ticket.comprobante_url %}
+                                <a class="enlace-comprobante" href="{{ ticket.comprobante_url }}"
+                                   target="_blank" rel="noopener">Ver comprobante subido</a>
+                                {% endif %}
+                                {% endif %}
                                 <span class="badge">{{ ticket.estado }}</span>
                             </div>
                             {% if ticket.estado == 'pendiente' %}
@@ -206,7 +266,9 @@
                             {% endif %}
                         </div>
                     {% else %}
-                        <p style="text-align:center;color:#777;padding:1rem;">No hay alertas pendientes.</p>
+                        <p style="text-align:center;color:#777;padding:1rem;">
+                            No hay nada por revisar. Los pagos confirmados no generan alertas.
+                        </p>
                     {% endfor %}
                 </div>
             </aside>

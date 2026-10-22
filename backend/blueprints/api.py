@@ -93,6 +93,55 @@ def _destino_pago_movil():
     }
 
 
+def _registrar_revision_pago(
+    comercio,
+    referencia,
+    es_binance,
+    confirmado,
+    monto_usd,
+    ocr=None,
+    comprobante_url=None,
+):
+    """Manda a la bandeja administrativa un pago Binance no confirmado.
+
+    Solo actúa con Binance y cuando la API no confirmó la orden: ``False``
+    (no encontrada o monto que no cuadra) o ``None`` (no verificable). Los pagos
+    confirmados y los de pago móvil no generan ticket. Nunca lanza.
+    """
+    if not es_binance or confirmado is True:
+        return
+    try:
+        from backend.verificacion_pagos import (
+            describir_revision_pago,
+            registrar_revision_pago,
+        )
+
+        motivo, mensaje = describir_revision_pago(
+            'binance',
+            confirmado,
+            referencia=referencia,
+            monto=monto_usd,
+            moneda='USDT',
+            fecha_comprobante=(ocr or {}).get('fecha_comprobante'),
+            nombre_comercio=(comercio or {}).get('nombre'),
+            comercio_id=(comercio or {}).get('id'),
+        )
+        if not mensaje:
+            return
+        registrar_revision_pago(
+            (comercio or {}).get('id'),
+            referencia,
+            motivo,
+            mensaje,
+            correo=session.get('correo') or (comercio or {}).get('owner_email'),
+            usuario_id=session.get('usuario_id'),
+            comprobante_url=comprobante_url,
+            monto=monto_usd,
+        )
+    except Exception as error:
+        logger.warning(f'[Localis Pagos] no se registró la revisión: {error}')
+
+
 @bp.route('/tasa-bcv')
 def api_tasa_bcv_actual():
     """Tasa vigente en caché (sin forzar red) + metadatos de la caché."""
@@ -510,6 +559,9 @@ def api_verificar_boost():
 
         confirmado = verificar_orden_binance(referencia, float(precio_usd))
         if confirmado is False:
+            _registrar_revision_pago(
+                comercio, referencia, es_binance, confirmado, float(precio_usd), ocr=ocr
+            )
             return (
                 jsonify(
                     {
@@ -574,6 +626,17 @@ def api_verificar_boost():
         )
     except Exception as error:
         logger.warning(f'[Localis Boost] auditoría de verificación omitida: {error}')
+
+    # Un pago no confirmado (API caída, sin monto) queda en la bandeja del admin.
+    _registrar_revision_pago(
+        comercio,
+        referencia,
+        es_binance,
+        confirmado,
+        float(precio_usd),
+        ocr=ocr,
+        comprobante_url=comprobante_url,
+    )
 
     return (
         jsonify(
@@ -683,6 +746,14 @@ def api_verificar_pago():
 
         confirmado = verificar_orden_binance(referencia, montos.get('monto_usd'))
         if confirmado is False:
+            _registrar_revision_pago(
+                comercio,
+                referencia,
+                es_binance,
+                confirmado,
+                montos.get('monto_usd'),
+                ocr=ocr,
+            )
             return (
                 jsonify(
                     {
@@ -745,6 +816,17 @@ def api_verificar_pago():
         )
     except Exception as error:
         logger.warning(f'[Localis Pagos] auditoría de verificación omitida: {error}')
+
+    # Un pago no confirmado (API caída, sin monto) queda en la bandeja del admin.
+    _registrar_revision_pago(
+        comercio,
+        referencia,
+        es_binance,
+        confirmado,
+        montos.get('monto_usd'),
+        ocr=ocr,
+        comprobante_url=comprobante_url,
+    )
 
     respuesta = {
         'ok': True,

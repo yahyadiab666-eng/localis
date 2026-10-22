@@ -15,12 +15,15 @@ if str(RAIZ) not in sys.path:
     sys.path.insert(0, str(RAIZ))
 
 from backend.verificacion_pagos import (  # noqa: E402
+    TIPO_REVISION_PAGO,
     VERIF_BINANCE_CONFIRMADO,
     VERIF_BINANCE_NO_ENCONTRADO,
     VERIF_BINANCE_NO_VERIFICADO,
     VERIF_PAGO_MOVIL_OCR,
+    describir_revision_pago,
     describir_verificacion,
     guardar_verificacion,
+    motivo_revision,
 )
 
 FALLOS = []
@@ -62,6 +65,35 @@ def main() -> int:
 
     print('\n=== guardar_verificacion nunca lanza ===')
     _ok(guardar_verificacion(1, '', 'binance', True) is False, 'referencia vacía -> False')
+
+    print('\n=== Motivo de revisión ===')
+    _ok(motivo_revision(True) is None, 'confirmado -> sin revisión')
+    _ok(motivo_revision(False) == 'no_encontrado', 'no encontrado')
+    _ok(motivo_revision(None) == 'no_verificado', 'no verificado')
+
+    print('\n=== Bandeja: mensaje de pago RECHAZADO ===')
+    motivo, mensaje = describir_revision_pago(
+        'binance', False, referencia='459426196324909056', monto=2.0,
+        moneda='USDT', fecha_comprobante='2026-10-21',
+        nombre_comercio='Tienda Demo', comercio_id=7,
+    )
+    _ok(motivo == 'no_encontrado', f'motivo={motivo}')
+    _ok('RECHAZADO' in mensaje, 'marca rechazo')
+    _ok('459426196324909056' in mensaje, 'incluye ID de orden')
+    _ok('2.0 USDT' in mensaje, 'incluye monto')
+    _ok('Tienda Demo (ID 7)' in mensaje, 'incluye comercio')
+    _ok('2026-10-21' in mensaje, 'incluye fecha del comprobante')
+
+    print('\n=== Bandeja: mensaje de pago SIN VERIFICAR ===')
+    motivo, mensaje = describir_revision_pago('binance', None, referencia='123456789012')
+    _ok(motivo == 'no_verificado', f'motivo={motivo}')
+    _ok('SIN VERIFICAR' in mensaje, 'marca no verificado')
+    _ok('Monto esperado' not in mensaje, 'sin monto no lo inventa')
+
+    print('\n=== Bandeja: no genera alerta si está confirmado ===')
+    _ok(describir_revision_pago('binance', True, referencia='x') == (None, ''),
+        'confirmado -> sin mensaje')
+    _ok(TIPO_REVISION_PAGO == 'revision_pago', 'tipo interno estable')
 
     print('\n=== RESULTADO ===')
     if FALLOS:

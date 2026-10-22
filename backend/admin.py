@@ -57,24 +57,49 @@ def crear_ticket_soporte_o_reporte(
         return False, f'Error al procesar el reporte: {str(e)}'
 
 
-def obtener_bandeja_tecnica(estado_filtro=None):
+def obtener_bandeja_tecnica(estado_filtro=None, tipo_filtro=None):
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
 
-            query = 'SELECT * FROM soporte_y_reportes'
+            condiciones = []
             parametros = []
 
             if estado_filtro in ['pendiente', 'resuelto']:
-                query += ' WHERE estado = ?'
+                condiciones.append('estado = ?')
                 parametros.append(estado_filtro)
+            if tipo_filtro:
+                condiciones.append('tipo = ?')
+                parametros.append(tipo_filtro)
 
-            query += ' ORDER BY fecha DESC'
+            query = 'SELECT * FROM soporte_y_reportes'
+            if condiciones:
+                query += ' WHERE ' + ' AND '.join(condiciones)
+            # Lo pendiente primero y, dentro de cada estado, lo más reciente.
+            query += " ORDER BY (estado = 'resuelto') ASC, fecha DESC"
             cursor.execute(query, parametros)
             return [dict(fila) for fila in cursor.fetchall()]
     except Exception as e:
         logger.error(f'Error al obtener la bandeja técnica: {str(e)}')
         return []
+
+
+def contar_revisiones_pago_pendientes():
+    """Cuántos pagos sin verificar esperan revisión del admin. Nunca lanza."""
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT COUNT(*) FROM soporte_y_reportes
+                WHERE tipo = 'revision_pago' AND estado = 'pendiente'
+                """
+            )
+            fila = cursor.fetchone()
+            return int(fila[0]) if fila and fila[0] is not None else 0
+    except Exception as e:
+        logger.error(f'Error al contar revisiones de pago: {str(e)}')
+        return 0
 
 
 def resolver_ticket_soporte(ticket_id):
