@@ -98,6 +98,29 @@ def _estado_pagos():
         }
 
 
+def _estado_proceso():
+    """Datos NO secretos del proceso: sirven para detectar mala configuración.
+
+    El sistema está diseñado para **1 solo worker** (colas, cachés y rate limit
+    viven en memoria del proceso). Si ``WEB_CONCURRENCY`` llegara a 2, el polling
+    de importaciones fallaría de forma intermitente. Y si Render inyecta
+    ``--preload`` en ``GUNICORN_CMD_ARGS``, el arranque cambia por completo
+    (las migraciones correrían en el maestro, no en el worker).
+    """
+    args = os.environ.get('GUNICORN_CMD_ARGS') or ''
+    # Solo banderas: nunca valores (podrían contener credenciales).
+    banderas = [parte for parte in args.split() if parte.startswith('--')]
+    concurrencia = (os.environ.get('WEB_CONCURRENCY') or '').strip()
+    return {
+        'pid': os.getpid(),
+        'web_concurrency': concurrencia or None,
+        # El sistema asume 1 worker; con 2 la cola de importación se rompe.
+        'configurado_para_un_worker': concurrencia in ('', '1'),
+        'gunicorn_flags': banderas,
+        'gunicorn_preload': any(b == '--preload' for b in banderas),
+    }
+
+
 def obtener_estado_sistema(*, probar_supabase: bool = False):
     """Estado consolidado para health checks y arranque."""
     diag_bd = diagnosticar_postgresql()
@@ -117,6 +140,7 @@ def obtener_estado_sistema(*, probar_supabase: bool = False):
         'supabase': diag_supabase,
         'supabase_conectado': ok_supabase,
         'pagos': _estado_pagos(),
+        'proceso': _estado_proceso(),
     }
 
 
@@ -164,6 +188,21 @@ def ejecutar_diagnostico_inicio():
         print(
             '[Localis Diagnóstico] Binance API: SIN llaves '
             '(los pagos solo se validan por OCR + revisión manual).'
+        )
+
+    proceso = estado.get('proceso') or {}
+    if not proceso.get('configurado_para_un_worker', True):
+        print(
+            '[Localis Diagnóstico] ATENCIÓN: WEB_CONCURRENCY='
+            f"{proceso.get('web_concurrency')}. El sistema está diseñado para 1 "
+            'worker; con más de uno la cola de importación y el rate limit se '
+            'rompen. Fija WEB_CONCURRENCY=1.'
+        )
+    if proceso.get('gunicorn_preload'):
+        print(
+            '[Localis Diagnóstico] ATENCIÓN: GUNICORN_CMD_ARGS incluye --preload '
+            'pero gunicorn.conf.py pide lo contrario (preload_app=False). '
+            'Revisa GUNICORN_CMD_ARGS en el panel.'
         )
     return estado
 
