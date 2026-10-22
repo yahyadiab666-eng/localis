@@ -109,11 +109,14 @@
               <i data-lucide="phone" class="text-amber-600 shrink-0" style="width:15px;height:15px;"></i>
               <span>{{ comercio.telefono or 'Número no disponible' }}</span>
             </div>
-            <div class="flex items-center justify-center sm:justify-start gap-1.5">
+            <div class="flex flex-wrap items-center justify-center sm:justify-start gap-1.5">
               <i data-lucide="map-pin" class="text-amber-600 shrink-0" style="width:15px;height:15px;"></i>
               <span class="text-center sm:text-left">
-                {% if comercio.direccion %}
-                  {{ comercio.direccion }}{% if comercio.ciudad %}, {{ comercio.ciudad }}{% endif %}{% if comercio.zona %} ({{ comercio.zona }}){% endif %}
+                {% set sedes = comercio.sucursales or [] %}
+                {% if sedes %}
+                  {% for sede in sedes %}{{ sede.nombre or sede.direccion }}{% if not loop.last %} · {% endif %}{% endfor %}
+                {% elif comercio.direccion %}
+                  {{ comercio.direccion }}{% if comercio.ciudad %}, {{ comercio.ciudad }}{% endif %}
                 {% else %}
                   Dirección no configurada
                 {% endif %}

@@ -261,12 +261,27 @@
                     </span>
                 </div>
                 <div class="dato"><span>Documento / RIF</span><span>{{ comercio.documento_identidad or '—' }}</span></div>
-                <div class="dato"><span>Dirección</span><span>{{ comercio.direccion or '—' }}{% if comercio.ciudad %}, {{ comercio.ciudad }}{% endif %}{% if comercio.zona %} ({{ comercio.zona }}){% endif %}</span></div>
-                <div class="dato"><span>Google Maps</span>
-                    <span>
-                        {% if comercio.maps_link %}
-                            <a href="{{ comercio.maps_link }}" target="_blank" rel="noopener" style="color:#0d6efd;">Abrir ubicación</a>
-                        {% else %}—{% endif %}
+                <div class="dato"><span>Ubicaciones</span>
+                    <span style="display:flex;flex-direction:column;gap:0.35rem;">
+                        {% set sedes = comercio.sucursales or [] %}
+                        {% if sedes %}
+                            {% for sede in sedes %}
+                                <span>
+                                    <strong>{{ sede.nombre or ('Principal' if loop.first else 'Sede ' ~ loop.index) }}</strong>
+                                    {% if sede.maps_link %}
+                                        &nbsp;<a href="{{ sede.maps_link }}" target="_blank" rel="noopener" style="color:#0d6efd;">Abrir en Google Maps</a>
+                                    {% endif %}
+                                    {% if sede.direccion %}<br><span class="muted" style="font-size:0.8rem;">{{ sede.direccion }}</span>{% endif %}
+                                </span>
+                            {% endfor %}
+                        {% elif comercio.direccion %}
+                            <span>{{ comercio.direccion }}{% if comercio.ciudad %}, {{ comercio.ciudad }}{% endif %}{% if comercio.zona %} ({{ comercio.zona }}){% endif %}</span>
+                            {% if comercio.maps_link %}
+                                <a href="{{ comercio.maps_link }}" target="_blank" rel="noopener" style="color:#0d6efd;">Abrir en Google Maps</a>
+                            {% endif %}
+                        {% else %}
+                            —
+                        {% endif %}
                     </span>
                 </div>
                 <!-- RESTAURAR_PAGOS_INICIO -->

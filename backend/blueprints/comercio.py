@@ -57,6 +57,10 @@ from backend.subscriptions import (
     puede_agregar_producto,
     rechazar_renovacion_vencida,
 )
+from backend.ubicaciones import (
+    normalizar_ubicaciones,
+    ubicaciones_desde_form,
+)
 from backend.utils import (
     imagen_url_para_persistir,
     normalizar_codigo_barras,
@@ -271,13 +275,24 @@ def crear_comercio():
         nombre = request.form.get('nombre', '').strip()
         descripcion = request.form.get('descripcion', '').strip()
         telefono = request.form.get('telefono', '').strip()
-        direccion = request.form.get('direccion', '').strip()
-        ciudad = request.form.get('ciudad', '').strip()
-        zona = request.form.get('zona', '').strip()
-        maps_url = request.form.get('maps_url', '').strip()
         documento_identidad = request.form.get('documento_identidad', '').strip()
         banner_color = normalizar_color_banner(request.form.get('banner_color'))
         referido_por = request.form.get('referido_por', '').strip()
+
+        # Ubicaciones: lista de sedes (nombre + enlace de Google Maps). Ya no se
+        # capturan dirección/ciudad/zona a mano; se derivan del enlace de Maps.
+        ubicaciones = ubicaciones_desde_form(request.form)
+        ok_ubicaciones, lista_ubicaciones = normalizar_ubicaciones(ubicaciones)
+        if not ok_ubicaciones:
+            flash(lista_ubicaciones, 'error')
+            return redirect(url_for('comercio.crear_comercio'))
+        if not lista_ubicaciones:
+            flash(
+                'Agrega al menos una ubicación con su nombre y enlace de Google Maps.',
+                'error',
+            )
+            return redirect(url_for('comercio.crear_comercio'))
+
         categoria_raw = request.form.get('categoria_id')
         if not categoria_raw or not str(categoria_raw).strip().isdigit():
             flash('Debes seleccionar una categoría válida.', 'error')
@@ -298,15 +313,13 @@ def crear_comercio():
             nombre,
             descripcion,
             telefono,
-            direccion,
+            '',
             categoria_id,
             logo_url=logo_url,
-            ciudad=ciudad or None,
-            zona=zona or None,
-            maps_url=maps_url or None,
             documento_identidad=documento_identidad or None,
             banner_color=banner_color,
             referido_por=referido_por or None,
+            ubicaciones=lista_ubicaciones,
         )
 
         if exito:
@@ -335,13 +348,22 @@ def editar_comercio():
     if request.method == 'POST':
         nombre = request.form.get('nombre', '').strip()
         telefono = request.form.get('telefono', '').strip()
-        direccion = request.form.get('direccion', '').strip()
         descripcion = request.form.get('descripcion', '').strip()
-        ciudad = request.form.get('ciudad', '').strip()
-        zona = request.form.get('zona', '').strip()
-        maps_url = request.form.get('maps_url', '').strip()
         banner_color = normalizar_color_banner(request.form.get('banner_color'))
         logo_archivo = request.files.get('logo')
+
+        # Ubicaciones (repeater): nombre + enlace de Google Maps por sede.
+        ubicaciones = ubicaciones_desde_form(request.form)
+        ok_ubicaciones, lista_ubicaciones = normalizar_ubicaciones(ubicaciones)
+        if not ok_ubicaciones:
+            flash(lista_ubicaciones, 'error')
+            return redirect(url_for('comercio.editar_comercio'))
+        if not lista_ubicaciones:
+            flash(
+                'Agrega al menos una ubicación con su nombre y enlace de Google Maps.',
+                'error',
+            )
+            return redirect(url_for('comercio.editar_comercio'))
 
         logo_url = None
         if logo_archivo and logo_archivo.filename:
@@ -359,13 +381,11 @@ def editar_comercio():
             comercio['id'],
             nombre,
             telefono,
-            direccion,
+            '',
             descripcion=descripcion,
-            ciudad=ciudad,
-            zona=zona,
-            maps_url=maps_url,
             logo_url=logo_url,
             banner_color=banner_color,
+            ubicaciones=lista_ubicaciones,
         )
         flash(mensaje, 'exito' if exito else 'error')
         return redirect(url_for('comercio.panel_comercio'))

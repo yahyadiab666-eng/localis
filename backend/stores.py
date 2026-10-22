@@ -29,6 +29,12 @@ from backend.utils import (
     normalizar_codigo_barras,
     validar_ubicacion_comercio,
 )
+from backend.ubicaciones import (
+    adjuntar_ubicaciones,
+    datos_ubicacion_principal,
+    guardar_ubicaciones,
+    normalizar_ubicaciones,
+)
 from backend.inventory_import import (
     LOG_PREFIX as CSV_LOG,
     analizar_inventario,
@@ -430,6 +436,7 @@ def registrar_comercio_completo(
     documento_identidad=None,
     banner_color=None,
     referido_por=None,
+    ubicaciones=None,
 ):
     plan_gratis = obtener_plan_por_codigo(PLAN_GRATIS_CODIGO)
     plan_id = plan_gratis.get('id')
@@ -441,17 +448,32 @@ def registrar_comercio_completo(
             'Contacta soporte o reinicia la aplicación para aplicar migraciones.'
         )
 
-    ok_ubicacion, datos_ubicacion = validar_ubicacion_comercio(
-        direccion, ciudad=ciudad, zona=zona, maps_url=maps_url
-    )
-    if not ok_ubicacion:
-        return False, datos_ubicacion
+    lista_ubicaciones = []
+    if ubicaciones is not None:
+        # Flujo nuevo: solo sedes (nombre + enlace de Google Maps). El sistema
+        # deriva de la principal la dirección y el enlace históricos.
+        ok_ubicaciones, resultado_ubicaciones = normalizar_ubicaciones(ubicaciones)
+        if not ok_ubicaciones:
+            return False, resultado_ubicaciones
+        lista_ubicaciones = resultado_ubicaciones
+        principal = datos_ubicacion_principal(lista_ubicaciones)
+        direccion = principal['direccion']
+        ciudad = principal['ciudad']
+        zona = principal['zona']
+        maps_url = principal['maps_url']
+        ubicacion_maps_url = principal['ubicacion_maps_url']
+    else:
+        ok_ubicacion, datos_ubicacion = validar_ubicacion_comercio(
+            direccion, ciudad=ciudad, zona=zona, maps_url=maps_url
+        )
+        if not ok_ubicacion:
+            return False, datos_ubicacion
 
-    direccion = datos_ubicacion['direccion']
-    ciudad = datos_ubicacion['ciudad']
-    zona = datos_ubicacion['zona']
-    maps_url = datos_ubicacion['maps_url']
-    ubicacion_maps_url = datos_ubicacion['ubicacion_maps_url']
+        direccion = datos_ubicacion['direccion']
+        ciudad = datos_ubicacion['ciudad']
+        zona = datos_ubicacion['zona']
+        maps_url = datos_ubicacion['maps_url']
+        ubicacion_maps_url = datos_ubicacion['ubicacion_maps_url']
 
     try:
         from backend.apariencia import normalizar_color_banner
@@ -545,6 +567,10 @@ def registrar_comercio_completo(
                         tuple(extra),
                     )
 
+            # Sedes del comercio (repeater): nombre propio + enlace de Google Maps.
+            if nuevo_id and lista_ubicaciones:
+                guardar_ubicaciones(cursor, nuevo_id, lista_ubicaciones)
+
             # Referidos B2B: otorga 1 punto al comercio referente. Se aísla con
             # savepoint para que un fallo aquí NUNCA rompa el registro.
             if nuevo_id and referido_por:
@@ -605,18 +631,32 @@ def actualizar_datos_comercio(
     logo_url=None,
     banner_url=None,
     banner_color=None,
+    ubicaciones=None,
 ):
-    ok_ubicacion, datos_ubicacion = validar_ubicacion_comercio(
-        direccion, ciudad=ciudad, zona=zona, maps_url=maps_url
-    )
-    if not ok_ubicacion:
-        return False, datos_ubicacion
+    lista_ubicaciones = []
+    if ubicaciones is not None:
+        ok_ubicaciones, resultado_ubicaciones = normalizar_ubicaciones(ubicaciones)
+        if not ok_ubicaciones:
+            return False, resultado_ubicaciones
+        lista_ubicaciones = resultado_ubicaciones
+        principal = datos_ubicacion_principal(lista_ubicaciones)
+        direccion = principal['direccion']
+        ciudad = principal['ciudad']
+        zona = principal['zona']
+        maps_url = principal['maps_url']
+        ubicacion_maps_url = principal['ubicacion_maps_url']
+    else:
+        ok_ubicacion, datos_ubicacion = validar_ubicacion_comercio(
+            direccion, ciudad=ciudad, zona=zona, maps_url=maps_url
+        )
+        if not ok_ubicacion:
+            return False, datos_ubicacion
 
-    direccion = datos_ubicacion['direccion']
-    ciudad = datos_ubicacion['ciudad']
-    zona = datos_ubicacion['zona']
-    maps_url = datos_ubicacion['maps_url']
-    ubicacion_maps_url = datos_ubicacion['ubicacion_maps_url']
+        direccion = datos_ubicacion['direccion']
+        ciudad = datos_ubicacion['ciudad']
+        zona = datos_ubicacion['zona']
+        maps_url = datos_ubicacion['maps_url']
+        ubicacion_maps_url = datos_ubicacion['ubicacion_maps_url']
 
     try:
         with get_db_connection() as conexion:
@@ -672,6 +712,10 @@ def actualizar_datos_comercio(
                 tuple(valores),
             )
 
+            # Sedes: se reemplazan por la lista recibida (repeater del formulario).
+            if ubicaciones is not None:
+                guardar_ubicaciones(cursor, comercio_id, lista_ubicaciones)
+
             filas_afectadas = cursor.rowcount
             conexion.commit()
 
@@ -696,7 +740,9 @@ def obtener_comercio_por_id(comercio_id, solo_visible=True):
 
             cursor.execute(query, (comercio_id,))
             fila = cursor.fetchone()
-            return normalizar_fila_comercio(dict(fila)) if fila else None
+            if not fila:
+                return None
+            return adjuntar_ubicaciones(normalizar_fila_comercio(dict(fila)))
     except Exception as e:
         logger.error(f'Error al obtener comercio: {e}')
         return None
@@ -721,7 +767,9 @@ def obtener_comercio_por_slug(slug, solo_visible=True):
             query += ' LIMIT 1'
             cursor.execute(query, (valor,))
             fila = cursor.fetchone()
-            return normalizar_fila_comercio(dict(fila)) if fila else None
+            if not fila:
+                return None
+            return adjuntar_ubicaciones(normalizar_fila_comercio(dict(fila)))
     except Exception as e:
         logger.error(f'Error al obtener comercio por slug: {e}')
         return None
@@ -843,7 +891,9 @@ def obtener_comercio_por_usuario(usuario_id, comercio_id=None):
                     (usuario_id,),
                 )
             fila = cursor.fetchone()
-            return normalizar_fila_comercio(dict(fila)) if fila else None
+            if not fila:
+                return None
+            return adjuntar_ubicaciones(normalizar_fila_comercio(dict(fila)))
     except psycopg2.Error:
         raise
     except Exception as error:

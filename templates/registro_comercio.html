@@ -143,42 +143,39 @@
             </div>
           </div>
 
-          <!-- Dirección -->
-          <div>
-            <label for="direccion" class="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-1.5">Dirección o Referencia</label>
-            <div class="relative">
-              <input type="text" id="direccion" name="direccion" placeholder="Ej: Av. Santiago Mariño, Porlamar" required class="w-full pl-10 pr-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm text-stone-900 focus:outline-none focus:border-amber-500 focus:bg-white transition">
-              <i data-lucide="map-pin" class="absolute left-3 top-3 text-stone-400" style="width:18px;height:18px;"></i>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label for="ciudad" class="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-1.5">Ciudad</label>
-              <input type="text" id="ciudad" name="ciudad" placeholder="Ej: Porlamar"
-                     class="w-full px-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:outline-none focus:border-amber-500">
-            </div>
-            <div>
-              <label for="zona" class="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-1.5">Zona</label>
-              <input type="text" id="zona" name="zona" placeholder="Ej: Centro"
-                     class="w-full px-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:outline-none focus:border-amber-500">
-            </div>
-          </div>
-
-          <div>
-            <label for="maps_url" class="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-1.5">Enlace de Google Maps</label>
-            <input type="url" id="maps_url" name="maps_url" placeholder="https://maps.google.com/..."
-                   class="w-full px-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:outline-none focus:border-amber-500">
-            <a href="https://maps.google.com" target="_blank" rel="noopener"
-               class="inline-flex items-center gap-1 mt-2 text-xs font-semibold text-amber-700 hover:text-amber-800">
-              <i data-lucide="external-link" style="width:14px;height:14px;"></i>
-              Abrir Google Maps para obtener ubicación
-            </a>
-            <button type="button" id="btn-ubicacion-actual"
-                    class="inline-flex items-center gap-1 mt-2 ml-3 text-xs font-semibold text-emerald-700 hover:text-emerald-800">
-              📍 Usar mi ubicación actual
+          <!-- Ubicaciones -->
+          <div class="space-y-2">
+            <label class="block text-xs font-bold uppercase tracking-wider text-stone-700">Ubicaciones</label>
+            <p class="text-[11px] text-stone-400">Agrega tus sedes. Solo necesitas un <strong>nombre</strong> y el <strong>enlace de Google Maps</strong>. La primera es la ubicación principal.</p>
+            <div id="ubicaciones-lista" class="space-y-3"></div>
+            <button type="button" id="btn-agregar-ubicacion"
+                    class="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 hover:text-amber-800">
+              <i data-lucide="plus" style="width:14px;height:14px;"></i> Agregar ubicación
             </button>
           </div>
+
+          <template id="plantilla-ubicacion">
+            <div class="ubicacion-fila rounded-xl border border-stone-200 bg-stone-50 p-3 space-y-2">
+              <div class="flex items-center gap-2">
+                <input type="text" name="ubicacion_nombre" placeholder="Nombre de la sede (ej: Sede Centro)"
+                       class="flex-1 px-3 py-2 bg-white border border-stone-200 rounded-lg text-sm focus:outline-none focus:border-amber-500">
+                <button type="button" class="btn-quitar-ubicacion text-stone-400 hover:text-red-600" title="Quitar ubicación" aria-label="Quitar ubicación">
+                  <i data-lucide="x" style="width:18px;height:18px;"></i>
+                </button>
+              </div>
+              <input type="url" name="ubicacion_maps" placeholder="Enlace de Google Maps"
+                     class="w-full px-3 py-2 bg-white border border-stone-200 rounded-lg text-sm focus:outline-none focus:border-amber-500">
+              <div class="flex flex-wrap gap-3">
+                <a href="https://maps.google.com" target="_blank" rel="noopener"
+                   class="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 hover:text-amber-800">
+                  <i data-lucide="external-link" style="width:13px;height:13px;"></i> Abrir Google Maps
+                </a>
+                <button type="button" class="btn-ubicacion-actual inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 hover:text-emerald-800">
+                  <i data-lucide="crosshair" style="width:13px;height:13px;"></i> Usar mi ubicación actual
+                </button>
+              </div>
+            </div>
+          </template>
 
           <!-- Descripción -->
           <div>
@@ -221,21 +218,12 @@
   <!-- Inicializar Iconos de Lucide -->
   <script>
     lucide.createIcons();
-
-    document.getElementById('btn-ubicacion-actual')?.addEventListener('click', () => {
-      if (!navigator.geolocation) {
-        alert('Tu navegador no soporta geolocalización.');
-        return;
-      }
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const { latitude, longitude } = pos.coords;
-          document.getElementById('maps_url').value =
-            `https://www.google.com/maps?q=${latitude},${longitude}`;
-        },
-        () => alert('No se pudo obtener tu ubicación. Verifica los permisos del navegador.')
-      );
-    });
+  </script>
+  <script src="{{ url_for('static', filename='js/ubicaciones_repeater.js') }}?v={{ asset_v }}"></script>
+  <script>
+    if (window.LocalisUbicaciones && window.LocalisUbicaciones.contar() === 0) {
+      window.LocalisUbicaciones.agregar('', '');
+    }
   </script>
   <script src="{{ url_for('static', filename='js/flash.js') }}?v={{ asset_v }}"></script>
 </body>

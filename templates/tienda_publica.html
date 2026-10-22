@@ -151,7 +151,20 @@
             </button>
           {% endif %}
 
-          {% if comercio.maps_link %}
+          {% set sedes = comercio.sucursales or [] %}
+          {% if sedes|length > 1 %}
+            <div class="flex flex-wrap gap-2 justify-center sm:justify-start">
+              {% for sede in sedes %}
+                {% if sede.maps_link %}
+                  <a href="{{ sede.maps_link }}" target="_blank" rel="noopener"
+                     data-interaccion="clic_maps" data-interaccion-comercio="{{ comercio.id }}"
+                     class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500 text-stone-900 font-bold hover:bg-amber-400 transition btn-touch">
+                    <i data-lucide="map-pin" style="width:16px;height:16px;"></i> {{ sede.nombre or 'Cómo llegar' }}
+                  </a>
+                {% endif %}
+              {% endfor %}
+            </div>
+          {% elif comercio.maps_link %}
             <a href="{{ comercio.maps_link }}" target="_blank" rel="noopener"
                data-interaccion="clic_maps" data-interaccion-comercio="{{ comercio.id }}"
                class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500 text-stone-900 font-bold hover:bg-amber-400 transition btn-touch">
