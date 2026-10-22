@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import os
 import sys
+import time
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parents[1]
@@ -45,7 +46,7 @@ def _probar_busqueda():
     llamadas = []
     guion = {'fn': lambda n: {'data': []}}
 
-    def _falso_get(path, params):
+    def _falso_get(path, params, timeout=None):
         llamadas.append((path, dict(params)))
         return guion['fn'](len(llamadas))
 
@@ -122,13 +123,63 @@ def _probar_busqueda():
 
         print('\n=== Error de red -> None ===')
 
-        def _falla(path, params):
+        def _falla(path, params, timeout=None):
             raise TimeoutError('sin red')
 
         b._get_firmado = _falla
         _ok(b.verificar_orden_binance(ORDEN, 20) is None, 'excepción -> None')
     finally:
         b._get_firmado = original
+        os.environ.pop('LOCALIS_BINANCE_API_KEY', None)
+        os.environ.pop('LOCALIS_BINANCE_API_SECRET', None)
+
+
+def _probar_presupuesto():
+    """La verificación no puede exceder el presupuesto aunque la API se cuelgue."""
+    original = b._get_firmado
+    os.environ['LOCALIS_BINANCE_API_KEY'] = 'clave-prueba'
+    os.environ['LOCALIS_BINANCE_API_SECRET'] = 'secreto-prueba'
+    os.environ['LOCALIS_BINANCE_PRESUPUESTO_SEG'] = '2'
+    llamadas = []
+
+    def _colgado(path, params, timeout=None):
+        llamadas.append(timeout)
+        # Simula una API que no responde: duerme hasta el timeout recibido.
+        time.sleep(min(float(timeout or 1), 1.5))
+        raise TimeoutError('la API no responde')
+
+    def _lleno_lento(path, params, timeout=None):
+        llamadas.append(timeout)
+        time.sleep(min(float(timeout or 1), 0.9))
+        return {'data': [{'orderId': f'X{i}', 'amount': '1.00'} for i in range(100)]}
+
+    b._get_firmado = _colgado
+    try:
+        print('\n=== API colgada: respeta el presupuesto ===')
+        llamadas.clear()
+        inicio = time.monotonic()
+        resultado = b.verificar_orden_binance(ORDEN, 20)
+        transcurrido = time.monotonic() - inicio
+        _ok(resultado is None, 'devuelve None (revisión manual), no bloquea')
+        _ok(transcurrido < 6.0, f'no excede el timeout de Gunicorn ({transcurrido:.1f}s)')
+        _ok(all(t is not None for t in llamadas), 'cada petición lleva timeout acotado')
+        _ok(
+            all(float(t) <= b._TIMEOUT_MAX_PETICION for t in llamadas),
+            f'timeout por petición acotado ({llamadas[:1]})',
+        )
+
+        print('\n=== Páginas siempre llenas: corta al agotar el presupuesto ===')
+        b._get_firmado = _lleno_lento
+        llamadas.clear()
+        inicio = time.monotonic()
+        resultado = b.verificar_orden_binance(ORDEN, 20)
+        transcurrido = time.monotonic() - inicio
+        _ok(resultado is None, 'inconcluyente -> None')
+        _ok(transcurrido < 6.0, f'corta por presupuesto ({transcurrido:.1f}s)')
+        _ok(len(llamadas) <= 1 + b._MAX_SLICES, f'peticiones acotadas ({len(llamadas)})')
+    finally:
+        b._get_firmado = original
+        os.environ.pop('LOCALIS_BINANCE_PRESUPUESTO_SEG', None)
         os.environ.pop('LOCALIS_BINANCE_API_KEY', None)
         os.environ.pop('LOCALIS_BINANCE_API_SECRET', None)
 
@@ -159,6 +210,7 @@ def main() -> int:
     _ok(b._moneda_tx({'otro': 1}) is None, 'sin moneda -> None')
 
     _probar_busqueda()
+    _probar_presupuesto()
 
     print('\n=== RESULTADO ===')
     if FALLOS:
