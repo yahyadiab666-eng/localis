@@ -244,7 +244,9 @@ def crear_pre_cuenta_admin(admin_id, datos):
     lista_ubicaciones = []
     principal = None
     if datos.get('ubicaciones') is not None:
-        ok_ubic, resultado_ubic = normalizar_ubicaciones(datos.get('ubicaciones'))
+        ok_ubic, resultado_ubic = normalizar_ubicaciones(
+            datos.get('ubicaciones'), geocodificar=True
+        )
         if not ok_ubic:
             return False, resultado_ubic, None
         lista_ubicaciones = resultado_ubic

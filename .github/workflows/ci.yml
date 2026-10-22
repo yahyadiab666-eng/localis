@@ -44,6 +44,9 @@ jobs:
           --health-retries 5
     env:
       DATABASE_URL: "postgresql://localis:localis@localhost:5432/localis"
+      # Las pruebas no deben depender de red de terceros: la geocodificación de
+      # ubicaciones (Nominatim) se prueba en su propio test unitario, no aquí.
+      LOCALIS_GEOCODIFICACION: "0"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
