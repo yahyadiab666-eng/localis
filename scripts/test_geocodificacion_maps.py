@@ -53,6 +53,23 @@ RESPUESTA_NOMINATIM = {
 }
 
 
+# Respuesta REAL de Nominatim para 10.6543,-71.6214 (Maracaibo): no trae ``city``;
+# la ciudad real está en ``county`` ("Municipio Maracaibo").
+RESPUESTA_MARACAIBO = {
+    'display_name': (
+        'Barrio El Paraíso, Parroquia Chiquinquirá, Municipio Maracaibo, '
+        'Estado Zulia, 4000, Venezuela'
+    ),
+    'address': {
+        'city_district': 'Barrio El Paraíso',
+        'municipality': 'Parroquia Chiquinquirá',
+        'county': 'Municipio Maracaibo',
+        'state': 'Estado Zulia',
+        'country': 'Venezuela',
+    },
+}
+
+
 def _ok(cond, mensaje):
     print(('  OK  ' if cond else '  FALLO  ') + mensaje)
     if not cond:
@@ -95,6 +112,15 @@ def _probar_parser_nominatim():
     _ok(
         vacio['ciudad'] is None and vacio['zona'] is None,
         'sin address -> ciudad/zona None',
+    )
+
+    print('\n=== Ciudad en "county" (caso Maracaibo: OSM no trae "city") ===')
+    datos = geo_ubicacion.datos_desde_respuesta_nominatim(RESPUESTA_MARACAIBO)
+    _ok(datos['ciudad'] == 'Maracaibo', f"ciudad {datos['ciudad']!r}")
+    _ok(datos['zona'] == 'Barrio El Paraíso', f"zona {datos['zona']!r}")
+    _ok(
+        'Maracaibo' in (datos['direccion'] or ''),
+        f"la dirección contiene Maracaibo ({datos['direccion']!r})",
     )
 
     print('\n=== Zona cae al estado si no hay barrio ===')
