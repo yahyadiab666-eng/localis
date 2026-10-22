@@ -103,6 +103,41 @@ def guardar_verificacion(
         return False
 
 
+def concepto_plan(plan_tipo):
+    """Concepto para una mensualidad: ``plan:pro``."""
+    return f'plan:{str(plan_tipo or "").strip().lower()}'
+
+
+def concepto_boost(dias, producto_id):
+    """Concepto para un destacado: ``boost:7:prod:123``."""
+    return f'boost:{int(dias)}:prod:{int(producto_id)}'
+
+
+def parsear_concepto(concepto):
+    """Interpreta el concepto guardado en la alerta.
+
+    Devuelve ``{'tipo': 'plan', 'plan_tipo': ...}`` o
+    ``{'tipo': 'boost', 'dias': n, 'producto_id': n}``, o ``None`` si el formato
+    no es reconocible. Función pura: no toca la BD.
+    """
+    texto = str(concepto or '').strip().lower()
+    if not texto:
+        return None
+    partes = texto.split(':')
+    if partes[0] == 'plan' and len(partes) == 2 and partes[1]:
+        return {'tipo': 'plan', 'plan_tipo': partes[1]}
+    if partes[0] == 'boost' and len(partes) == 4 and partes[2] == 'prod':
+        try:
+            return {
+                'tipo': 'boost',
+                'dias': int(partes[1]),
+                'producto_id': int(partes[3]),
+            }
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 def motivo_revision(confirmado):
     """Motivo de revisión para un pago Binance no confirmado.
 
@@ -168,6 +203,7 @@ def registrar_revision_pago(
     usuario_id=None,
     comprobante_url=None,
     monto=None,
+    concepto=None,
 ):
     """Crea el ticket de revisión en la bandeja administrativa. Nunca lanza.
 
@@ -214,8 +250,8 @@ def registrar_revision_pago(
                 """
                 INSERT INTO soporte_y_reportes
                     (usuario_id, tipo, correo, mensaje, referencia_id, estado,
-                     comprobante_url, referencia_pago)
-                VALUES (?, ?, ?, ?, ?, 'pendiente', ?, ?)
+                     comprobante_url, referencia_pago, concepto)
+                VALUES (?, ?, ?, ?, ?, 'pendiente', ?, ?, ?)
                 """,
                 (
                     usuario_id,
@@ -225,6 +261,7 @@ def registrar_revision_pago(
                     int(comercio_id),
                     comprobante_url,
                     referencia,
+                    concepto,
                 ),
             )
             conexion.commit()

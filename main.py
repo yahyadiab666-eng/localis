@@ -841,11 +841,27 @@ def health_ready():
 
 @app.route('/metrics')
 def metrics_prometheus():
-    """Metricas Prometheus (contadores y latencia). Solo si LOCALIS_METRICS=1."""
+    """Metricas Prometheus (contadores, latencia y OCR). Solo si LOCALIS_METRICS=1.
+
+    Si ``LOCALIS_METRICS_TOKEN`` esta definido, exige ``?token=...`` o la
+    cabecera ``X-Metrics-Token``: asi se puede publicar sin dejar el endpoint
+    abierto. Sin token configurado se mantiene el comportamiento previo.
+    """
     from backend import metricas
 
     if not metricas.habilitado():
         return jsonify({'ok': False, 'error': 'metricas deshabilitadas'}), 404
+
+    token_esperado = (os.environ.get('LOCALIS_METRICS_TOKEN') or '').strip()
+    if token_esperado:
+        recibido = (
+            request.args.get('token')
+            or request.headers.get('X-Metrics-Token')
+            or ''
+        ).strip()
+        if not hmac.compare_digest(recibido, token_esperado):
+            return jsonify({'ok': False, 'error': 'no autorizado'}), 401
+
     return Response(
         metricas.render_prometheus(),
         mimetype='text/plain; version=0.0.4; charset=utf-8',

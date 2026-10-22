@@ -29,6 +29,7 @@ from backend.admin import (
     actualizar_producto_admin,
     actualizar_tasa_dolar,
     alternar_destacado_producto,
+    aplicar_accion_revision,
     cambiar_plan_comercio,
     cambiar_visibilidad_comercio,
     crear_producto_admin,
@@ -37,6 +38,7 @@ from backend.admin import (
     eliminar_producto_admin,
     obtener_bandeja_tecnica,
     contar_revisiones_pago_pendientes,
+    salud_pagos,
     obtener_banner_principal,
     obtener_categorias_admin,
     obtener_comercio_admin,
@@ -104,6 +106,7 @@ def panel_admin():
         comercios=comercios,
         tickets=tickets,
         revisiones_pendientes=contar_revisiones_pago_pendientes(),
+        salud=salud_pagos(),
         estado_ticket=estado_filtro or '',
         tipo_ticket=tipo_filtro or '',
         banner_url=banner_url,
@@ -289,6 +292,22 @@ def admin_cambiar_plan(comercio_id):
 @admin_requerido
 def admin_resolver_ticket(ticket_id):
     exito, mensaje = resolver_ticket_soporte(ticket_id)
+    flash(mensaje, 'exito' if exito else 'error')
+    return redirect(url_for('admin.panel_admin'))
+
+
+@bp.route('/revision/<int:ticket_id>', methods=['POST'])
+@admin_requerido
+def admin_revision_accion(ticket_id):
+    """Aplica una acción a una alerta de revisión de pago.
+
+    ``accion``: ``confirmar`` (activa el plan/destacado pagado), ``suspender``
+    (oculta la tienda) o ``resolver`` (solo cerrar la alerta).
+    """
+    accion = request.form.get('accion') or request.args.get('accion') or 'resolver'
+    exito, mensaje = aplicar_accion_revision(
+        ticket_id, accion, session.get('usuario_id')
+    )
     flash(mensaje, 'exito' if exito else 'error')
     return redirect(url_for('admin.panel_admin'))
 
