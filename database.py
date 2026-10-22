@@ -2226,6 +2226,9 @@ def _crear_indices(cursor):
         'CREATE INDEX IF NOT EXISTS idx_comercios_estado_plan ON comercios(estado_pago, plan_tipo)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_plan_id ON comercios(plan_id)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_ciudad ON comercios(ciudad)',
+        # Sedes por comercio: acelera la búsqueda por ubicación (EXISTS sobre
+        # sucursales) y la carga de ubicaciones de cada tienda.
+        'CREATE INDEX IF NOT EXISTS idx_sucursales_comercio_id ON sucursales(comercio_id)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_usuario_id ON comercios(usuario_id)',
         'CREATE INDEX IF NOT EXISTS idx_intentos_correo ON intentos_login(correo_intentado)',
         'CREATE INDEX IF NOT EXISTS idx_productos_nombre ON productos(nombre)',

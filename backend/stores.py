@@ -385,6 +385,18 @@ def invalidar_cache_configuracion():
     invalidate('config:')
 
 
+# Búsqueda por ubicación. La ubicación ya no vive solo en las columnas
+# históricas del comercio (``ciudad``/``zona``/``direccion``): desde las sedes
+# con nombre está en ``sucursales``. Se busca en AMBAS para no perder ni los
+# comercios antiguos (que llenaron las columnas) ni los nuevos (que usan sedes).
+# Ojo: contiene 3 marcadores ``?`` (nombre, dirección y enlace de la sede).
+_EXISTS_UBICACION_SQL = (
+    'EXISTS (SELECT 1 FROM sucursales s WHERE s.comercio_id = c.id AND ('
+    's.nombre ILIKE ? OR s.direccion ILIKE ? OR s.maps_url ILIKE ?))'
+)
+_EXISTS_UBICACION_PARAMS = 3
+
+
 def _construir_filtro_palabras(palabra_clave):
     """Genera condiciones LIKE por cada palabra del término de búsqueda."""
     if not palabra_clave:
@@ -403,10 +415,12 @@ def _construir_filtro_palabras(palabra_clave):
     for palabra in palabras:
         like = f'%{palabra}%'
         sub = ' OR '.join(f'{campo} ILIKE ?' for campo in campos)
+        sub += f' OR {_EXISTS_UBICACION_SQL}'
         codigo_palabra = normalizar_codigo_barras(palabra) or palabra
         sub += f' OR {EXPR_CODIGO_BARRAS} ILIKE ?'
         condiciones.append(f'({sub})')
         parametros.extend([like] * len(campos))
+        parametros.extend([like] * _EXISTS_UBICACION_PARAMS)
         parametros.append(f'%{codigo_palabra}%')
 
     filtro = ' AND '.join(condiciones)
@@ -917,9 +931,13 @@ def buscar_y_filtrar_comercios(
             parametros = []
 
             if palabra_clave:
-                query += ' AND (c.nombre ILIKE ? OR c.descripcion ILIKE ? OR c.ciudad ILIKE ? OR c.zona ILIKE ?)'
+                query += (
+                    ' AND (c.nombre ILIKE ? OR c.descripcion ILIKE ?'
+                    ' OR c.ciudad ILIKE ? OR c.zona ILIKE ?'
+                    f' OR {_EXISTS_UBICACION_SQL})'
+                )
                 like = f'%{palabra_clave}%'
-                parametros.extend([like, like, like, like])
+                parametros.extend([like] * (4 + _EXISTS_UBICACION_PARAMS))
 
             if categoria_id:
                 query += ' AND c.categoria_id = ?'
