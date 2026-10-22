@@ -92,7 +92,11 @@ CREATE TABLE IF NOT EXISTS sucursales (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     comercio_id INTEGER,
     direccion TEXT NOT NULL,
-    coordinates_maps TEXT, 
+    coordinates_maps TEXT,
+    nombre TEXT,              -- nombre específico de la sede ("Centro", "Depósito")
+    maps_url TEXT,            -- enlace de Google Maps de la sede
+    orden INTEGER DEFAULT 0,  -- orden de presentación (0 = principal)
+    es_principal INTEGER DEFAULT 0,
     FOREIGN KEY (comercio_id) REFERENCES comercios(id) ON DELETE CASCADE
 );
 

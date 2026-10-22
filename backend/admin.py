@@ -8,6 +8,12 @@ from backend.comercio_schema import sql_set_imagenes
 from backend.db import get_db_connection
 from backend.plans import PLANES, limite_para_plan, obtener_plan_por_codigo
 from backend.runtime_cache import get_or_load
+from backend.ubicaciones import (
+    cargar_ubicaciones,
+    guardar_ubicaciones,
+    normalizar_ubicaciones,
+    datos_ubicacion_principal,
+)
 from backend.utils import parsear_visible_form, url_banner_principal
 
 TIPOS_REPORTES_PERMITIDOS = {'soporte', 'reportar_tienda', 'reportar_articulo'}
@@ -687,6 +693,9 @@ def obtener_comercio_admin(comercio_id):
             else:
                 comercio['otros_comercios'] = []
                 comercio['total_comercios_dueno'] = 0
+
+            comercio['sucursales'] = cargar_ubicaciones(cursor, comercio_id)
+            comercio['ubicaciones'] = comercio['sucursales']
             return comercio
     except Exception as e:
         logger.error(f'Error al obtener comercio admin (id={comercio_id}): {e}')
@@ -1080,11 +1089,6 @@ def actualizar_comercio_admin(
                 ('descripcion', datos.get('descripcion')),
                 ('telefono', datos.get('telefono')),
                 ('documento_identidad', datos.get('documento_identidad')),
-                ('direccion', datos.get('direccion')),
-                ('ciudad', datos.get('ciudad')),
-                ('zona', datos.get('zona')),
-                ('maps_url', datos.get('maps_url')),
-                ('ubicacion_maps_url', datos.get('maps_url')),
             )
             for columna, valor in columnas_simples:
                 if valor is None:
@@ -1092,6 +1096,31 @@ def actualizar_comercio_admin(
                 valor_limpio = str(valor).strip()
                 campos.append(f'{columna} = ?')
                 valores.append(valor_limpio or None)
+
+            # Ubicación: con el repeater se sobrescribe completa (la primera sede
+            # es la principal); sin él se conserva el comportamiento legado.
+            lista_ubicaciones = None
+            if datos.get('ubicaciones') is not None:
+                ok_ubic, resultado_ubic = normalizar_ubicaciones(datos.get('ubicaciones'))
+                if not ok_ubic:
+                    return False, resultado_ubic
+                lista_ubicaciones = resultado_ubic
+                principal = datos_ubicacion_principal(lista_ubicaciones)
+                for columna in ('direccion', 'ciudad', 'zona', 'maps_url', 'ubicacion_maps_url'):
+                    campos.append(f'{columna} = ?')
+                    valores.append(principal[columna])
+            else:
+                for columna, valor in (
+                    ('direccion', datos.get('direccion')),
+                    ('ciudad', datos.get('ciudad')),
+                    ('zona', datos.get('zona')),
+                    ('maps_url', datos.get('maps_url')),
+                    ('ubicacion_maps_url', datos.get('maps_url')),
+                ):
+                    if valor is None:
+                        continue
+                    campos.append(f'{columna} = ?')
+                    valores.append(str(valor).strip() or None)
 
             if categoria_id:
                 campos.append('categoria_id = ?')
@@ -1131,6 +1160,10 @@ def actualizar_comercio_admin(
             if cursor.rowcount == 0:
                 conexion.rollback()
                 return False, 'Comercio no encontrado.'
+
+            # Sedes: se reemplazan por la lista del repeater si vino.
+            if lista_ubicaciones is not None:
+                guardar_ubicaciones(cursor, comercio_id, lista_ubicaciones)
 
             _registrar_auditoria_admin(
                 cursor,

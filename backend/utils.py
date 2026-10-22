@@ -3,7 +3,7 @@
 import re
 import unicodedata
 from datetime import date, datetime
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 
 def formatear_fecha(valor):
@@ -445,6 +445,109 @@ def url_whatsapp_comercio(telefono, texto=None):
         return None
     msg = texto or 'Hola, vi tu tienda en Localis'
     return f'https://wa.me/{numero}?text={quote(msg)}'
+
+
+_MAPS_COORD_AT_RE = re.compile(r'@(-?\d{1,2}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)')
+_MAPS_COORD_BANG_RE = re.compile(r'!3d(-?\d{1,2}(?:\.\d+)?)!4d(-?\d{1,3}(?:\.\d+)?)')
+_MAPS_COORD_SUELTA_RE = re.compile(r'^\s*(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$')
+
+
+def _coordenadas_desde_texto(texto):
+    """Interpreta un texto ``lat,lng`` como coordenadas válidas o ``None``."""
+    coincidencia = _MAPS_COORD_SUELTA_RE.match(str(texto or ''))
+    if not coincidencia:
+        return None
+    try:
+        lat = float(coincidencia.group(1))
+        lng = float(coincidencia.group(2))
+    except (TypeError, ValueError):
+        return None
+    if -90 <= lat <= 90 and -180 <= lng <= 180:
+        return (lat, lng)
+    return None
+
+
+def derivar_datos_maps(url):
+    """Deriva nombre, dirección y coordenadas de un enlace de Google Maps.
+
+    Interpreta los formatos que copia la propia app de Maps **sin hacer
+    peticiones de red** (el camino de request debe ser rápido y defensivo):
+    ``@lat,lng``, ``!3d…!4d…``, ``?q=lat,lng`` y ``/maps/place/<texto>``.
+
+    Retorna un dict con ``maps_url``, ``nombre``, ``direccion``, ``latitud``,
+    ``longitud``, ``coordinates_maps`` y ``valido``. Nunca lanza: lo que no se
+    pueda deducir queda en ``None``.
+    """
+    resultado = {
+        'maps_url': None,
+        'nombre': None,
+        'direccion': None,
+        'latitud': None,
+        'longitud': None,
+        'coordinates_maps': None,
+        'valido': False,
+    }
+    try:
+        texto = str(url or '').strip()
+        if not texto:
+            return resultado
+        resultado['maps_url'] = texto
+
+        # 1) Coordenadas embebidas en la ruta (@lat,lng o !3d..!4d..).
+        coords = None
+        coincidencia = _MAPS_COORD_AT_RE.search(texto)
+        if coincidencia:
+            coords = (float(coincidencia.group(1)), float(coincidencia.group(2)))
+        if not coords:
+            coincidencia = _MAPS_COORD_BANG_RE.search(texto)
+            if coincidencia:
+                coords = (float(coincidencia.group(1)), float(coincidencia.group(2)))
+
+        # 2) Parámetros de consulta habituales de Maps.
+        parsed = urlparse(texto if '://' in texto else 'https://' + texto)
+        parametros = parse_qs(parsed.query)
+        nombre_texto = None
+        for clave in ('q', 'query', 'll', 'daddr', 'destination', 'center'):
+            valor = (parametros.get(clave) or [None])[0]
+            if not valor:
+                continue
+            valor = unquote(str(valor).replace('+', ' ')).strip()
+            posible = _coordenadas_desde_texto(valor)
+            if posible and not coords:
+                coords = posible
+            elif not posible and not nombre_texto:
+                nombre_texto = valor
+
+        # 3) Nombre del lugar en la ruta (/maps/place/<texto>/).
+        if not nombre_texto:
+            coincidencia = re.search(r'/maps/place/([^/@?]+)', texto)
+            if coincidencia:
+                nombre_texto = unquote(
+                    coincidencia.group(1).replace('+', ' ')
+                ).strip()
+
+        if coords and _coordenadas_desde_texto(f'{coords[0]},{coords[1]}'):
+            lat, lng = coords
+            resultado['latitud'] = lat
+            resultado['longitud'] = lng
+            resultado['coordinates_maps'] = f'{lat},{lng}'
+        else:
+            coords = None
+
+        if nombre_texto:
+            nombre_texto = re.sub(r'\s+', ' ', nombre_texto).strip(' ,')
+            if nombre_texto and not _coordenadas_desde_texto(nombre_texto):
+                resultado['nombre'] = nombre_texto
+                resultado['direccion'] = nombre_texto
+
+        host = (parsed.netloc or '').lower()
+        es_maps = 'google.' in host or 'goo.gl' in host
+        resultado['valido'] = bool(
+            resultado['coordinates_maps'] or resultado['nombre'] or es_maps
+        )
+        return resultado
+    except Exception:
+        return resultado
 
 
 def url_maps_comercio(comercio):

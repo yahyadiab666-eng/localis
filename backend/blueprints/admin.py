@@ -65,6 +65,7 @@ from backend.pre_cuentas import (
     transferir_propiedad_comercio,
 )
 from backend.stores import asegurar_slug_producto, obtener_config, obtener_tasa_dolar
+from backend.ubicaciones import ubicaciones_desde_form
 from backend.utils import (
     imagen_url_para_persistir,
     normalizar_codigo_barras,
@@ -215,10 +216,9 @@ def admin_crear_pre_cuenta():
         'nombre': request.form.get('nombre', ''),
         'descripcion': request.form.get('descripcion', ''),
         'telefono': request.form.get('telefono', ''),
-        'direccion': request.form.get('direccion', ''),
-        'ciudad': request.form.get('ciudad', ''),
-        'zona': request.form.get('zona', ''),
         'categoria_id': categoria_id,
+        # Sedes con nombre + enlace de Google Maps (repeater del formulario).
+        'ubicaciones': ubicaciones_desde_form(request.form),
     }
     exito, mensaje, comercio_id = crear_pre_cuenta_admin(admin_id, datos)
     if peticion_acepta_json():
@@ -410,13 +410,11 @@ def admin_editar_comercio(comercio_id):
                 'descripcion': request.form.get('descripcion', '').strip(),
                 'telefono': request.form.get('telefono', '').strip(),
                 'documento_identidad': request.form.get('documento_identidad', '').strip(),
-                'direccion': request.form.get('direccion', '').strip(),
-                'ciudad': request.form.get('ciudad', '').strip(),
-                'zona': request.form.get('zona', '').strip(),
-                'maps_url': request.form.get('maps_url', '').strip(),
                 'categoria_id': categoria_id,
                 'visible': request.form.get('visible'),
                 'banner_color': request.form.get('banner_color'),
+                # Sedes con nombre + enlace de Google Maps (repeater).
+                'ubicaciones': ubicaciones_desde_form(request.form),
             },
             logo_url=logo_url,
             banner_url=banner_url,

@@ -126,25 +126,25 @@
                 </div>
 
                 <div class="campo">
-                    <label for="direccion">Dirección</label>
-                    <input type="text" id="direccion" name="direccion" value="{{ comercio.direccion or '' }}">
+                    <label>Ubicaciones</label>
+                    <p class="muted" style="margin-top:-0.25rem;">Nombre + enlace de Google Maps. La primera es la principal.</p>
+                    <div id="ubicaciones-lista"></div>
+                    <button type="button" id="btn-agregar-ubicacion" class="btn btn-secundario" style="margin-top:0.6rem;padding:0.5rem 1rem;">+ Agregar ubicación</button>
                 </div>
 
-                <div class="grid">
-                    <div class="campo">
-                        <label for="ciudad">Ciudad</label>
-                        <input type="text" id="ciudad" name="ciudad" value="{{ comercio.ciudad or '' }}">
+                <template id="plantilla-ubicacion">
+                    <div class="ubicacion-fila" style="border:1px solid #e1e4e8;border-radius:8px;padding:0.75rem;margin-bottom:0.6rem;background:#fafafa;">
+                        <div style="display:flex;gap:0.5rem;align-items:center;">
+                            <input type="text" name="ubicacion_nombre" placeholder="Nombre de la sede (ej: Sede Centro)" style="flex:1;padding:0.65rem;border:1px solid #ccc;border-radius:6px;font-size:0.92rem;">
+                            <button type="button" class="btn-quitar-ubicacion" title="Quitar ubicación" aria-label="Quitar ubicación" style="background:none;border:none;cursor:pointer;font-size:1.3rem;line-height:1;color:#9ca3af;">&times;</button>
+                        </div>
+                        <input type="url" name="ubicacion_maps" placeholder="Enlace de Google Maps" style="width:100%;margin-top:0.5rem;padding:0.65rem;border:1px solid #ccc;border-radius:6px;font-size:0.92rem;">
+                        <div style="display:flex;flex-wrap:wrap;gap:0.75rem;margin-top:0.5rem;">
+                            <a href="https://maps.google.com" target="_blank" rel="noopener" style="font-size:0.78rem;font-weight:600;color:#b45309;">Abrir Google Maps</a>
+                            <button type="button" class="btn-ubicacion-actual" style="background:none;border:none;cursor:pointer;font-size:0.78rem;font-weight:600;color:#047857;">Usar mi ubicación actual</button>
+                        </div>
                     </div>
-                    <div class="campo">
-                        <label for="zona">Zona</label>
-                        <input type="text" id="zona" name="zona" value="{{ comercio.zona or '' }}">
-                    </div>
-                </div>
-
-                <div class="campo">
-                    <label for="maps_url">Enlace de Google Maps</label>
-                    <input type="url" id="maps_url" name="maps_url" value="{{ comercio.maps_url or comercio.ubicacion_maps_url or '' }}" placeholder="https://maps.google.com/...">
-                </div>
+                </template>
 
                 <div class="grid">
                     <div class="campo">
@@ -200,6 +200,24 @@
                     b.classList.toggle('activo', b === boton);
                 });
             });
+        })();
+    </script>
+    <script src="{{ url_for('static', filename='js/ubicaciones_repeater.js') }}?v={{ asset_v }}"></script>
+    <script>
+        (function () {
+            var existentes = [
+                {% for sede in comercio.sucursales or [] %}
+                {nombre: {{ (sede.nombre or '')|tojson }}, maps: {{ (sede.maps_url or '')|tojson }}}{{ ',' if not loop.last }}
+                {% endfor %}
+            ];
+            if (!window.LocalisUbicaciones) return;
+            if (existentes.length === 0) {
+                window.LocalisUbicaciones.agregar('', '');
+            } else {
+                existentes.forEach(function (s) {
+                    window.LocalisUbicaciones.agregar(s.nombre, s.maps);
+                });
+            }
         })();
     </script>
     <script src="{{ url_for('static', filename='js/flash.js') }}"></script>

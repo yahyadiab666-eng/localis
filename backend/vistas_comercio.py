@@ -28,6 +28,7 @@ from backend.subscriptions import (
     comercio_puede_gestionar_inventario,
 )
 from backend.utils import url_maps_comercio
+from backend.ubicaciones import adjuntar_ubicaciones
 from backend.vistas_imagenes import (
     normalizar_imagenes_comercio,
     procesar_imagen_subida,
@@ -153,6 +154,7 @@ def cargar_datos_comercio_usuario(usuario_id):
         productos_db = []
 
     comercio = normalizar_imagenes_comercio(comercio_raw)
+    comercio = adjuntar_ubicaciones(comercio)
     try:
         comercio['maps_link'] = url_maps_comercio(comercio)
     except Exception:

@@ -36,6 +36,11 @@ import re
 
 from backend.db import get_db_connection
 from backend.plans import PLAN_GRATIS_CODIGO, obtener_plan_por_codigo
+from backend.ubicaciones import (
+    datos_ubicacion_principal,
+    guardar_ubicaciones,
+    normalizar_ubicaciones,
+)
 
 LOG_PREFIX = '[Localis PreCuentas]'
 
@@ -215,9 +220,10 @@ def _asegurar_slug(comercio_id, nombre=None):
 def crear_pre_cuenta_admin(admin_id, datos):
     """Crea un comercio en estado ``pre_cuenta`` (**sin correo ni dueño**).
 
-    ``datos`` admite: nombre (obligatorio), descripcion, telefono, direccion,
-    ciudad, zona, categoria_id. El correo del dueño se agrega después, al
-    transferir la propiedad.
+    ``datos`` admite: nombre (obligatorio), descripcion, telefono, categoria_id
+    y ``ubicaciones`` (lista de sedes con nombre y enlace de Google Maps). Se
+    aceptan también ``direccion`` / ``ciudad`` / ``zona`` por compatibilidad. El
+    correo del dueño se agrega después, al transferir la propiedad.
 
     Retorna ``(exito, mensaje, comercio_id)``. Nunca lanza.
     """
@@ -232,6 +238,20 @@ def crear_pre_cuenta_admin(admin_id, datos):
         return False, 'El plan gratuito no está configurado en el sistema.', None
 
     categoria_id = datos.get('categoria_id')
+
+    # Sedes con nombre (repeater). Si vienen, mandan sobre la dirección manual:
+    # la principal alimenta las columnas históricas del comercio.
+    lista_ubicaciones = []
+    principal = None
+    if datos.get('ubicaciones') is not None:
+        ok_ubic, resultado_ubic = normalizar_ubicaciones(datos.get('ubicaciones'))
+        if not ok_ubic:
+            return False, resultado_ubic, None
+        lista_ubicaciones = resultado_ubic
+        principal = datos_ubicacion_principal(lista_ubicaciones)
+    direccion = principal['direccion'] if principal else datos.get('direccion')
+    ciudad = principal['ciudad'] if principal else datos.get('ciudad')
+    zona = principal['zona'] if principal else datos.get('zona')
 
     try:
         with get_db_connection() as conexion:
@@ -263,9 +283,9 @@ def crear_pre_cuenta_admin(admin_id, datos):
                     nombre,
                     datos.get('descripcion'),
                     datos.get('telefono'),
-                    datos.get('direccion'),
-                    datos.get('ciudad'),
-                    datos.get('zona'),
+                    direccion,
+                    ciudad,
+                    zona,
                     categoria_id,
                     plan_id,
                     plan['codigo'],
@@ -276,6 +296,9 @@ def crear_pre_cuenta_admin(admin_id, datos):
             if not comercio_id:
                 conexion.rollback()
                 return False, 'No se pudo crear la pre-cuenta.', None
+
+            if lista_ubicaciones:
+                guardar_ubicaciones(cursor, comercio_id, lista_ubicaciones)
 
             try:
                 cursor.execute('SAVEPOINT sp_codigo_comercio')

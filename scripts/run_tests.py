@@ -43,6 +43,7 @@ SIN_RED = [
     'test_binance_api.py',
     'test_pago_movil_ocr.py',
     'test_ocr_robustez.py',
+    'test_ubicaciones_maps.py',
     'test_boost_referencias.py',
     'test_verificacion_pagos.py',
     'test_compresion.py',
@@ -55,6 +56,7 @@ SIN_RED = [
 ]
 INTEGRACION = [
     'test_migraciones.py',
+    'test_ubicaciones_integracion.py',
     'test_trafico_bd.py',
     'test_recordatorios.py',
     'test_pre_cuentas_roles.py',

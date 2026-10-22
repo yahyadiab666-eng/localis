@@ -231,6 +231,12 @@ COLUMNAS_ESQUEMA = {
         ('comercio_id', 'INTEGER'),
         ('direccion', 'TEXT'),
         ('coordinates_maps', 'TEXT'),
+        # Ubicaciones con nombre: el comerciante declara una sede (nombre + enlace
+        # de Google Maps) y el sistema deriva de ahí dirección y coordenadas.
+        ('nombre', 'TEXT'),
+        ('maps_url', 'TEXT'),
+        ('orden', 'INTEGER DEFAULT 0'),
+        ('es_principal', 'INTEGER DEFAULT 0'),
     ],
     'productos': [
         ('comercio_id', 'INTEGER'),
@@ -1537,7 +1543,11 @@ def _crear_tabla_sucursales(cursor):
             id SERIAL PRIMARY KEY,
             comercio_id INTEGER REFERENCES comercios(id) ON DELETE CASCADE,
             direccion TEXT NOT NULL,
-            coordinates_maps TEXT
+            coordinates_maps TEXT,
+            nombre TEXT,
+            maps_url TEXT,
+            orden INTEGER DEFAULT 0,
+            es_principal INTEGER DEFAULT 0
         )
         """
     )
@@ -2338,9 +2348,31 @@ def _tomar_lock_migracion(cursor):
 # posteriores se anaden aqui como migraciones numeradas y se registran en
 # ``schema_migrations``: asi hay historial auditable, idempotencia y rollback
 # por version, sin depender de ``schema.sql`` (que es solo referencia).
+def _migracion_0002_sucursales_ubicaciones(cursor):
+    """Añade a ``sucursales`` las columnas de sedes con nombre y enlace de Maps.
+
+    Idempotente (``ADD COLUMN IF NOT EXISTS``): si init_db ya las agregó por
+    ``COLUMNAS_ESQUEMA``, esta migración no hace nada.
+    """
+    for columna, tipo in (
+        ('nombre', 'TEXT'),
+        ('maps_url', 'TEXT'),
+        ('orden', 'INTEGER DEFAULT 0'),
+        ('es_principal', 'INTEGER DEFAULT 0'),
+    ):
+        cursor.execute(
+            f'ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS {columna} {tipo}'
+        )
+
+
 MIGRACIONES = [
     # (version, descripcion, funcion(cursor))
     ('0001', 'base inicial (el esquema lo crea init_db)', lambda cursor: None),
+    (
+        '0002',
+        'sucursales: sedes con nombre propio y enlace de Google Maps',
+        lambda cursor: _migracion_0002_sucursales_ubicaciones(cursor),
+    ),
 ]
 
 
