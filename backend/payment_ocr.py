@@ -74,9 +74,12 @@ def _env_int(nombre, default):
 EXIGIR_FECHA_COMPROBANTE = _env_bool('LOCALIS_COMPROBANTE_EXIGIR_FECHA', True)
 MAX_DIAS_COMPROBANTE = max(0, _env_int('LOCALIS_COMPROBANTE_MAX_DIAS', 1))
 
-# Límite de resolución antes de OCR: acota tiempo y memoria sin perder texto,
-# porque las capturas reales rondan 1080-2400 px de lado mayor.
-MAX_OCR_DIM = max(600, _env_int('LOCALIS_OCR_MAX_DIM', 2200))
+# Límite de resolución antes de OCR: acota tiempo y memoria sin perder texto.
+# Medido con el motor real y capturas de 900x1600 a 1440x3120:
+#   2200 px -> hasta 5.671 ms   1800 px -> hasta 3.495 ms (-38 %)
+#   1400 px -> empieza a fallar (no detecta en 2 de 4 capturas)
+# Por eso 1800 es el punto óptimo: mismo acierto, bastante menos tiempo.
+MAX_OCR_DIM = max(600, _env_int('LOCALIS_OCR_MAX_DIM', 1800))
 
 
 BANCO_OFICIAL = PAGO_MOVIL_DEFAULT['banco']
