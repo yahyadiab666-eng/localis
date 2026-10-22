@@ -535,6 +535,39 @@ img.localis-img-producto-thumb--vacio:not([src]) {
   font-weight: 700;
 }
 
+/* Importador CSV — advertencia de precio de venta (más urgente que la de fotos) */
+.aviso-csv-precios {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  margin-top: 0.6rem;
+  padding: 0.85rem 1rem;
+  border-radius: 0.85rem;
+  background: #fef2f2;
+  border: 1px solid #f3b4b4;
+  color: #44403c;
+}
+
+.aviso-csv-precios-icono {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: #b91c1c;
+}
+
+.aviso-csv-precios p {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: #57534e;
+}
+
+.aviso-csv-precios strong {
+  color: #991b1b;
+  font-weight: 700;
+}
+
 /* Guía de ayuda / Cómo funciona Localis */
 .guia-ayuda-numero {
   display: inline-flex;
