@@ -572,7 +572,6 @@ def validar_comprobante_pago_movil(
     ms, texto_ocr, estado_monto y diferencia_monto.
     """
     inicio = time.perf_counter()
-    errores = []
 
     if not data_bytes:
         return {
