@@ -109,8 +109,10 @@
   </nav>
 
   <section class="max-w-6xl mx-auto px-6 py-8">
-    <div class="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden">
-      <div class="tienda-banner-box h-32 md:h-40 overflow-hidden" role="img" aria-label="{% if comercio.tiene_banner %}Banner de la tienda{% else %}Banner predeterminado{% endif %}">
+    {# Sin overflow-hidden en la tarjeta: recortaba el desplegable de sedes.
+       El banner se recorta solo con rounded-t-2xl + overflow-hidden. #}
+    <div class="bg-white rounded-2xl shadow-sm border border-stone-200">
+      <div class="tienda-banner-box h-32 md:h-40 rounded-t-2xl overflow-hidden" role="img" aria-label="{% if comercio.tiene_banner %}Banner de la tienda{% else %}Banner predeterminado{% endif %}">
         {% if comercio.banner_completo %}
           <img src="{{ comercio.banner_completo }}" alt="" class="w-full h-full object-cover" loading="lazy" decoding="async" onerror="this.onerror=null;this.style.display='none'">
         {% else %}
@@ -171,7 +173,7 @@
                 <span class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-stone-900/15 text-[11px] font-bold">{{ sedes_mapa|length }}</span>
                 <i data-lucide="chevron-down" class="sedes-chevron" style="width:15px;height:15px;"></i>
               </summary>
-              <div class="sedes-panel absolute left-0 top-full mt-2 z-30 w-64 rounded-2xl border border-stone-200 bg-white p-2 shadow-xl">
+              <div class="sedes-panel absolute left-0 top-full mt-2 z-40 w-64 max-w-[calc(100vw-3rem)] rounded-2xl border border-stone-200 bg-white p-2 shadow-xl">
                 <p class="px-3 pt-1 pb-2 text-[11px] font-bold uppercase tracking-wider text-stone-400">Sedes</p>
                 {% for sede in sedes_mapa %}
                   <a href="{{ sede.maps_link }}" target="_blank" rel="noopener"
