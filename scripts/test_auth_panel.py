@@ -103,14 +103,17 @@ def main() -> int:
 
         import psycopg2
 
-        import main as _main
+        # El panel vive en el blueprint de comercio, que importa estas funciones
+        # en su propio espacio de nombres (antes estaban en ``main``). Se parchea
+        # ahí para que el fallo simulado llegue realmente al código del panel.
+        from backend.blueprints import comercio as _panel_mod
 
         for nombre, objetivo in (
             ('metricas', 'resumen_interacciones'),
             ('avisos', 'obtener_avisos_suscripcion'),
             ('config', 'obtener_config'),
         ):
-            with patch.object(_main, objetivo, side_effect=psycopg2.OperationalError('x')):
+            with patch.object(_panel_mod, objetivo, side_effect=psycopg2.OperationalError('x')):
                 r = cliente.get('/comercio')
                 _ok(
                     r.status_code == 200 and not r.headers.get('Location'),
