@@ -5,6 +5,10 @@ Binance confirmó la orden, si no la encontró, si no se pudo verificar o si sol
 pasó el filtro OCR del pago móvil. Permite que el admin vea el detalle sin
 depender de los logs del worker.
 
+Además redacta el mensaje de la **bandeja de revisión** del panel admin
+(``soporte_y_reportes`` con ``tipo = 'revision_pago'``), que es donde aterrizan
+los pagos que no quedaron confirmados automáticamente.
+
 Todo es best-effort: nunca lanza ni bloquea el flujo de pago.
 """
 
@@ -21,6 +25,11 @@ VERIF_BINANCE_CONFIRMADO = 'binance_confirmado'
 VERIF_BINANCE_NO_ENCONTRADO = 'binance_no_encontrado'
 VERIF_BINANCE_NO_VERIFICADO = 'binance_no_verificado'
 VERIF_PAGO_MOVIL_OCR = 'pago_movil_ocr'
+
+# Tipo de ticket interno de la bandeja administrativa.
+TIPO_REVISION_PAGO = 'revision_pago'
+# Tope de revisiones pendientes por comercio: evita inundar la bandeja.
+MAX_REVISIONES_PENDIENTES = 20
 
 
 def describir_verificacion(metodo, confirmado=None, estado_monto=None, monto=None):
@@ -89,6 +98,145 @@ def guardar_verificacion(
     except Exception as error:
         logger.warning(
             '[Localis Verificación] no se pudo guardar la auditoría '
+            f'(ref={referencia}): {type(error).__name__}: {error}'
+        )
+        return False
+
+
+def motivo_revision(confirmado):
+    """Motivo de revisión para un pago Binance no confirmado.
+
+    ``'no_encontrado'`` si la API respondió que la orden no está (o el monto no
+    cuadra); ``'no_verificado'`` si no se pudo comprobar (API caída, sin monto,
+    volumen anómalo). ``None`` cuando la orden sí quedó confirmada.
+    """
+    if confirmado is True:
+        return None
+    return 'no_encontrado' if confirmado is False else 'no_verificado'
+
+
+def describir_revision_pago(
+    metodo,
+    confirmado,
+    referencia=None,
+    monto=None,
+    moneda='USDT',
+    fecha_comprobante=None,
+    nombre_comercio=None,
+    comercio_id=None,
+):
+    """Redacta el mensaje de la bandeja para un pago no confirmado.
+
+    Devuelve ``(motivo, mensaje)`` o ``(None, '')`` si no requiere revisión.
+    Función pura: se prueba sin BD ni red.
+    """
+    motivo = motivo_revision(confirmado)
+    if motivo is None:
+        return None, ''
+
+    partes = []
+    if motivo == 'no_encontrado':
+        partes.append(
+            'RECHAZADO: la captura pasó el OCR, pero Binance NO confirma que la '
+            'orden exista (posible ID equivocado o comprobante falsificado).'
+        )
+    else:
+        partes.append(
+            'ACEPTADO SIN VERIFICAR: el pago se activó con el OCR, pero la API '
+            'de Binance no pudo confirmar la orden. Revisa manualmente.'
+        )
+
+    if nombre_comercio:
+        etiqueta = f'{nombre_comercio} (ID {comercio_id})' if comercio_id else nombre_comercio
+        partes.append(f'Comercio: {etiqueta}')
+    if referencia:
+        partes.append(f'ID de orden: {referencia}')
+    if monto is not None:
+        partes.append(f'Monto esperado: {monto} {moneda}')
+    if fecha_comprobante:
+        partes.append(f'Fecha del comprobante: {fecha_comprobante}')
+    partes.append(f'Metodo: {metodo or "binance"}')
+    return motivo, ' — '.join(partes)
+
+
+def registrar_revision_pago(
+    comercio_id,
+    referencia,
+    motivo,
+    mensaje,
+    correo=None,
+    usuario_id=None,
+    comprobante_url=None,
+    monto=None,
+):
+    """Crea el ticket de revisión en la bandeja administrativa. Nunca lanza.
+
+    Evita duplicados (misma referencia pendiente) y limita el número de
+    revisiones pendientes por comercio para no inundar la bandeja si alguien
+    reintenta o introduce referencias inventadas.
+    """
+    try:
+        referencia = (str(referencia) if referencia is not None else '').strip()
+        if not referencia or not mensaje:
+            return False
+
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+
+            cursor.execute(
+                """
+                SELECT 1 FROM soporte_y_reportes
+                WHERE tipo = ? AND referencia_pago = ? AND estado = 'pendiente'
+                LIMIT 1
+                """,
+                (TIPO_REVISION_PAGO, referencia),
+            )
+            if cursor.fetchone():
+                return False
+
+            cursor.execute(
+                """
+                SELECT COUNT(*) FROM soporte_y_reportes
+                WHERE tipo = ? AND referencia_id = ? AND estado = 'pendiente'
+                """,
+                (TIPO_REVISION_PAGO, int(comercio_id)),
+            )
+            fila = cursor.fetchone()
+            pendientes = fila[0] if fila else 0
+            if pendientes is not None and int(pendientes) >= MAX_REVISIONES_PENDIENTES:
+                logger.warning(
+                    f'[Localis Verificación] bandeja llena para el comercio '
+                    f'{comercio_id} ({pendientes} pendientes); no se crea revisión.'
+                )
+                return False
+
+            cursor.execute(
+                """
+                INSERT INTO soporte_y_reportes
+                    (usuario_id, tipo, correo, mensaje, referencia_id, estado,
+                     comprobante_url, referencia_pago)
+                VALUES (?, ?, ?, ?, ?, 'pendiente', ?, ?)
+                """,
+                (
+                    usuario_id,
+                    TIPO_REVISION_PAGO,
+                    correo or 'sistema@localis.app',
+                    mensaje,
+                    int(comercio_id),
+                    comprobante_url,
+                    referencia,
+                ),
+            )
+            conexion.commit()
+
+        logger.info(
+            f'[Localis Verificación] revisión registrada ({motivo}) '
+            f'ref={referencia} comercio={comercio_id}'
+        )
+        return True
+    except Exception as error:
+        logger.warning(
+            '[Localis Verificación] no se pudo registrar la revisión '
             f'(ref={referencia}): {type(error).__name__}: {error}'
         )
         return False

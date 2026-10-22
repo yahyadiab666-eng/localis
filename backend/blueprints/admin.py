@@ -36,6 +36,7 @@ from backend.admin import (
     eliminar_comercio_definitivo,
     eliminar_producto_admin,
     obtener_bandeja_tecnica,
+    contar_revisiones_pago_pendientes,
     obtener_banner_principal,
     obtener_categorias_admin,
     obtener_comercio_admin,
@@ -87,8 +88,11 @@ bp = Blueprint('admin', __name__, url_prefix='/admin')
 @admin_requerido
 def panel_admin():
     estado_filtro = request.args.get('estado_ticket', None)
+    tipo_filtro = request.args.get('tipo_ticket', None)
     busqueda = request.args.get('q', '').strip()
-    tickets = obtener_bandeja_tecnica(estado_filtro=estado_filtro)
+    tickets = obtener_bandeja_tecnica(
+        estado_filtro=estado_filtro, tipo_filtro=tipo_filtro
+    )
     tasa_actual = obtener_tasa_dolar()
     comercios = obtener_todos_comercios_admin(busqueda=busqueda or None)
     banner_url = url_hero_inicio(obtener_banner_principal()) or DEFAULT_BANNER_URL
@@ -99,6 +103,9 @@ def panel_admin():
         tasa=tasa_actual,
         comercios=comercios,
         tickets=tickets,
+        revisiones_pendientes=contar_revisiones_pago_pendientes(),
+        estado_ticket=estado_filtro or '',
+        tipo_ticket=tipo_filtro or '',
         banner_url=banner_url,
         whatsapp=whatsapp,
         whatsapp_url=WHATSAPP_SOPORTE_URL,

@@ -330,6 +330,9 @@ COLUMNAS_ESQUEMA = {
         ('referencia_id', 'INTEGER'),
         ('fecha', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
         ('estado', "TEXT DEFAULT 'pendiente'"),
+        # Revisión de pagos: imagen del comprobante y referencia/ID de orden.
+        ('comprobante_url', 'TEXT'),
+        ('referencia_pago', 'TEXT'),
     ],
     'configuracion_sistema': [
         ('clave', 'TEXT'),
@@ -1647,7 +1650,9 @@ def _crear_tabla_soporte_y_reportes(cursor):
             mensaje TEXT NOT NULL,
             referencia_id INTEGER,
             fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            estado TEXT DEFAULT 'pendiente'
+            estado TEXT DEFAULT 'pendiente',
+            comprobante_url TEXT,
+            referencia_pago TEXT
         )
         """
     )
@@ -2221,6 +2226,11 @@ def _crear_indices(cursor):
         'CREATE INDEX IF NOT EXISTS idx_comercios_categoria ON comercios(categoria_id)',
         'CREATE INDEX IF NOT EXISTS idx_comercios_visible ON comercios(visible)',
         'CREATE INDEX IF NOT EXISTS idx_soporte_estado ON soporte_y_reportes(estado)',
+        # Bandeja de revisión de pagos: filtrar por tipo+estado sin recorrer todo.
+        'CREATE INDEX IF NOT EXISTS idx_soporte_tipo_estado ON soporte_y_reportes(tipo, estado)',
+        # Anti-duplicado: una revisión pendiente por referencia de pago.
+        "CREATE INDEX IF NOT EXISTS idx_soporte_revision_pago "
+        "ON soporte_y_reportes(referencia_pago) WHERE tipo = 'revision_pago'",
         'CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_comercio ON solicitudes_pago(comercio_id)',
         'CREATE INDEX IF NOT EXISTS idx_solicitudes_pago_referencia ON solicitudes_pago(referencia)',
         # Anti doble-gasto: misma garantía para solicitudes/pagos de destacados.
