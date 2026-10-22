@@ -387,14 +387,16 @@ def invalidar_cache_configuracion():
 
 # Búsqueda por ubicación. La ubicación ya no vive solo en las columnas
 # históricas del comercio (``ciudad``/``zona``/``direccion``): desde las sedes
-# con nombre está en ``sucursales``. Se busca en AMBAS para no perder ni los
-# comercios antiguos (que llenaron las columnas) ni los nuevos (que usan sedes).
-# Ojo: contiene 3 marcadores ``?`` (nombre, dirección y enlace de la sede).
+# con nombre está en ``sucursales`` (con ciudad/zona derivadas del enlace de
+# Maps). Se busca en AMBAS para no perder ni los comercios antiguos (que
+# llenaron las columnas) ni los nuevos (que usan sedes).
+# Ojo: contiene 5 marcadores ``?`` (nombre, dirección, enlace, ciudad y zona).
 _EXISTS_UBICACION_SQL = (
     'EXISTS (SELECT 1 FROM sucursales s WHERE s.comercio_id = c.id AND ('
-    's.nombre ILIKE ? OR s.direccion ILIKE ? OR s.maps_url ILIKE ?))'
+    's.nombre ILIKE ? OR s.direccion ILIKE ? OR s.maps_url ILIKE ?'
+    ' OR s.ciudad ILIKE ? OR s.zona ILIKE ?))'
 )
-_EXISTS_UBICACION_PARAMS = 3
+_EXISTS_UBICACION_PARAMS = 5
 
 
 def _construir_filtro_palabras(palabra_clave):
@@ -466,7 +468,9 @@ def registrar_comercio_completo(
     if ubicaciones is not None:
         # Flujo nuevo: solo sedes (nombre + enlace de Google Maps). El sistema
         # deriva de la principal la dirección y el enlace históricos.
-        ok_ubicaciones, resultado_ubicaciones = normalizar_ubicaciones(ubicaciones)
+        ok_ubicaciones, resultado_ubicaciones = normalizar_ubicaciones(
+            ubicaciones, geocodificar=True
+        )
         if not ok_ubicaciones:
             return False, resultado_ubicaciones
         lista_ubicaciones = resultado_ubicaciones
@@ -649,7 +653,9 @@ def actualizar_datos_comercio(
 ):
     lista_ubicaciones = []
     if ubicaciones is not None:
-        ok_ubicaciones, resultado_ubicaciones = normalizar_ubicaciones(ubicaciones)
+        ok_ubicaciones, resultado_ubicaciones = normalizar_ubicaciones(
+            ubicaciones, geocodificar=True
+        )
         if not ok_ubicaciones:
             return False, resultado_ubicaciones
         lista_ubicaciones = resultado_ubicaciones

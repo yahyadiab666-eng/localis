@@ -44,6 +44,7 @@ SIN_RED = [
     'test_pago_movil_ocr.py',
     'test_ocr_robustez.py',
     'test_ubicaciones_maps.py',
+    'test_geocodificacion_maps.py',
     'test_boost_referencias.py',
     'test_verificacion_pagos.py',
     'test_compresion.py',

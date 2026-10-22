@@ -97,6 +97,8 @@ CREATE TABLE IF NOT EXISTS sucursales (
     maps_url TEXT,            -- enlace de Google Maps de la sede
     orden INTEGER DEFAULT 0,  -- orden de presentación (0 = principal)
     es_principal INTEGER DEFAULT 0,
+    ciudad TEXT,              -- derivada del enlace de Maps (geocodificación)
+    zona TEXT,                -- derivada del enlace de Maps (geocodificación)
     FOREIGN KEY (comercio_id) REFERENCES comercios(id) ON DELETE CASCADE
 );
 

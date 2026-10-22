@@ -79,6 +79,10 @@ def main():
     )
     from backend.admin import actualizar_comercio_admin
 
+    # Determinista y sin red: la geocodificación real se prueba aparte
+    # (test_geocodificacion_maps.py). Aquí se inyectan ciudad/zona a mano.
+    os.environ['LOCALIS_GEOCODIFICACION'] = '0'
+
     errores = []
 
     def _ok(cond, msg):
@@ -241,6 +245,51 @@ def main():
         _ok(
             any((p.get('nombre') or '').endswith('producto sede') for p in encontrados),
             f'encuentra el producto por el nombre de la sede ({len(encontrados)} resultados)',
+        )
+
+        print('\n=== Ciudad/zona de la sede: se persisten y son buscables ===')
+        token_ciudad_sede = 'localisqaciudadsede'
+        token_zona_sede = 'localisqazonasede'
+        # Se inyectan como los rellenaría el geocodificador desde el enlace.
+        actualizar_datos_comercio(
+            comercio['id'],
+            NOMBRE,
+            '04141112223',
+            '',
+            ubicaciones=[{
+                'nombre': 'Sede ciudad',
+                'maps_url': MAPS_SEDE_CENTRO,
+                'ciudad': token_ciudad_sede,
+                'zona': token_zona_sede,
+            }],
+        )
+        comercio = obtener_comercio_por_id(comercio['id'], solo_visible=False)
+        sede_principal = (comercio.get('sucursales') or [{}])[0]
+        _ok(
+            sede_principal.get('ciudad') == token_ciudad_sede,
+            'la ciudad de la sede se persiste',
+        )
+        _ok(
+            sede_principal.get('zona') == token_zona_sede,
+            'la zona de la sede se persiste',
+        )
+        _ok(
+            comercio.get('ciudad') == token_ciudad_sede,
+            'la ciudad del comercio se deriva de la sede principal',
+        )
+        res_ciudad = buscar_y_filtrar_productos(
+            palabra_clave=token_ciudad_sede, limit=None, orden_aleatorio=False
+        )
+        _ok(
+            any((p.get('nombre') or '').endswith('producto sede') for p in res_ciudad),
+            f'encuentra por ciudad de la sede ({len(res_ciudad)} resultados)',
+        )
+        res_zona = buscar_y_filtrar_productos(
+            palabra_clave=token_zona_sede, limit=None, orden_aleatorio=False
+        )
+        _ok(
+            any((p.get('nombre') or '').endswith('producto sede') for p in res_zona),
+            f'encuentra por zona de la sede ({len(res_zona)} resultados)',
         )
 
         print('\n=== Búsqueda por ubicación: comercio ANTIGUO (ciudad manual) ===')

@@ -237,6 +237,9 @@ COLUMNAS_ESQUEMA = {
         ('maps_url', 'TEXT'),
         ('orden', 'INTEGER DEFAULT 0'),
         ('es_principal', 'INTEGER DEFAULT 0'),
+        # Ciudad/zona derivadas automáticamente del enlace de Maps (geocodificación).
+        ('ciudad', 'TEXT'),
+        ('zona', 'TEXT'),
     ],
     'productos': [
         ('comercio_id', 'INTEGER'),
@@ -1547,7 +1550,9 @@ def _crear_tabla_sucursales(cursor):
             nombre TEXT,
             maps_url TEXT,
             orden INTEGER DEFAULT 0,
-            es_principal INTEGER DEFAULT 0
+            es_principal INTEGER DEFAULT 0,
+            ciudad TEXT,
+            zona TEXT
         )
         """
     )
@@ -2368,6 +2373,18 @@ def _migracion_0002_sucursales_ubicaciones(cursor):
         )
 
 
+def _migracion_0003_sucursales_ciudad_zona(cursor):
+    """Añade ``ciudad``/``zona`` a ``sucursales`` (derivadas del enlace de Maps).
+
+    Idempotente. Permite que la búsqueda por ubicación funcione con los
+    comercios nuevos, rellenando ciudad/zona automáticamente.
+    """
+    for columna, tipo in (('ciudad', 'TEXT'), ('zona', 'TEXT')):
+        cursor.execute(
+            f'ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS {columna} {tipo}'
+        )
+
+
 MIGRACIONES = [
     # (version, descripcion, funcion(cursor))
     ('0001', 'base inicial (el esquema lo crea init_db)', lambda cursor: None),
@@ -2375,6 +2392,11 @@ MIGRACIONES = [
         '0002',
         'sucursales: sedes con nombre propio y enlace de Google Maps',
         lambda cursor: _migracion_0002_sucursales_ubicaciones(cursor),
+    ),
+    (
+        '0003',
+        'sucursales: ciudad y zona derivadas del enlace de Google Maps',
+        lambda cursor: _migracion_0003_sucursales_ciudad_zona(cursor),
     ),
 ]
 

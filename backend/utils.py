@@ -450,6 +450,12 @@ def url_whatsapp_comercio(telefono, texto=None):
 _MAPS_COORD_AT_RE = re.compile(r'@(-?\d{1,2}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)')
 _MAPS_COORD_BANG_RE = re.compile(r'!3d(-?\d{1,2}(?:\.\d+)?)!4d(-?\d{1,3}(?:\.\d+)?)')
 _MAPS_COORD_SUELTA_RE = re.compile(r'^\s*(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$')
+# Par "lat,lng" suelto dentro de la URL. Google resuelve los enlaces cortos a
+# rutas como ``/maps/search/11.080405,+-63.969985`` (con ``+`` de separador), que
+# no traen ``@`` ni ``!3d``. Se tolera el ``+`` y separadores alternativos.
+_MAPS_COORD_SUELTA_EN_URL_RE = re.compile(
+    r'(?<![\d.])(-?\d{1,2}\.\d+)\s*[,;](?:%20|\+|\s)*(-?\d{1,3}\.\d+)(?![\d.])'
+)
 
 
 def _coordenadas_desde_texto(texto):
@@ -464,6 +470,17 @@ def _coordenadas_desde_texto(texto):
         return None
     if -90 <= lat <= 90 and -180 <= lng <= 180:
         return (lat, lng)
+    return None
+
+
+def _primeras_coordenadas(texto):
+    """Busca el primer par ``lat,lng`` válido dentro de un texto largo."""
+    for coincidencia in _MAPS_COORD_SUELTA_EN_URL_RE.finditer(str(texto or '')):
+        valido = _coordenadas_desde_texto(
+            f'{coincidencia.group(1)},{coincidencia.group(2)}'
+        )
+        if valido:
+            return valido
     return None
 
 
@@ -517,6 +534,11 @@ def derivar_datos_maps(url):
                 coords = posible
             elif not posible and not nombre_texto:
                 nombre_texto = valor
+
+        # 2b) Coordenadas sueltas en la ruta: enlaces cortos resueltos quedan como
+        #     ``/maps/search/11.080405,+-63.969985`` (sin ``@`` ni ``!3d``).
+        if not coords:
+            coords = _primeras_coordenadas(texto)
 
         # 3) Nombre del lugar en la ruta (/maps/place/<texto>/).
         if not nombre_texto:

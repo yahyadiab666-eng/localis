@@ -1101,7 +1101,9 @@ def actualizar_comercio_admin(
             # es la principal); sin él se conserva el comportamiento legado.
             lista_ubicaciones = None
             if datos.get('ubicaciones') is not None:
-                ok_ubic, resultado_ubic = normalizar_ubicaciones(datos.get('ubicaciones'))
+                ok_ubic, resultado_ubic = normalizar_ubicaciones(
+                    datos.get('ubicaciones'), geocodificar=True
+                )
                 if not ok_ubic:
                     return False, resultado_ubic
                 lista_ubicaciones = resultado_ubic

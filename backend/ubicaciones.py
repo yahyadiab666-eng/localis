@@ -14,6 +14,7 @@ Reglas:
 
 import logging
 
+from backend.geo_ubicacion import enriquecer_ubicaciones_geo
 from backend.utils import derivar_datos_maps, url_maps_comercio
 
 logger = logging.getLogger('localis.ubicaciones')
@@ -34,11 +35,15 @@ def _valor(fila, clave, indice=0):
         return None
 
 
-def normalizar_ubicaciones(ubicaciones):
+def normalizar_ubicaciones(ubicaciones, geocodificar=False):
     """Valida y normaliza la lista de sedes recibida desde un formulario.
 
     Acepta una lista de dicts con ``nombre`` y ``maps_url``. Ignora las filas
     totalmente vacías (permite plantillas con campos opcionales).
+
+    Con ``geocodificar=True`` se completa ``ciudad``/``zona``/``direccion``
+    resolviendo el enlace de Google Maps (red). Por defecto es ``False`` para
+    que esta función siga siendo **pura** y se pueda probar sin red.
 
     Retorna ``(True, lista)`` o ``(False, mensaje)``. Nunca lanza.
     """
@@ -64,8 +69,10 @@ def normalizar_ubicaciones(ubicaciones):
 
         lista.append({
             'nombre': nombre,
-            'maps_url': datos.get('maps_url') or maps_url,
+            'maps_url': maps_url,
             'direccion': datos.get('direccion') or nombre,
+            'ciudad': entrada.get('ciudad') or None,
+            'zona': entrada.get('zona') or None,
             'coordinates_maps': datos.get('coordinates_maps'),
             'orden': len(lista),
             'es_principal': 1 if not lista else 0,
@@ -73,6 +80,10 @@ def normalizar_ubicaciones(ubicaciones):
 
     if len(lista) > MAX_UBICACIONES:
         return False, f'Solo se permiten hasta {MAX_UBICACIONES} ubicaciones.'
+
+    if geocodificar and lista:
+        # Rellena ciudad/zona/dirección desde el enlace de Maps (red, defensivo).
+        lista = enriquecer_ubicaciones_geo(lista)
 
     return True, lista
 
@@ -113,8 +124,11 @@ def datos_ubicacion_principal(ubicaciones):
     maps_url = principal.get('maps_url') or None
     return {
         'direccion': principal.get('direccion') or principal.get('nombre') or None,
-        'ciudad': None,
-        'zona': None,
+        # Ciudad/zona se rellenan automáticamente desde el enlace de Maps, para
+        # que la búsqueda por ubicación funcione como antes en los comercios
+        # nuevos (que ya no escriben ciudad/zona a mano).
+        'ciudad': principal.get('ciudad') or None,
+        'zona': principal.get('zona') or None,
         'maps_url': maps_url,
         'ubicacion_maps_url': maps_url,
     }
@@ -133,9 +147,9 @@ def guardar_ubicaciones(cursor, comercio_id, ubicaciones):
             """
             INSERT INTO sucursales (
                 comercio_id, direccion, coordinates_maps,
-                nombre, maps_url, orden, es_principal
+                nombre, maps_url, orden, es_principal, ciudad, zona
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 int(comercio_id),
@@ -145,6 +159,8 @@ def guardar_ubicaciones(cursor, comercio_id, ubicaciones):
                 sede.get('maps_url'),
                 int(sede.get('orden') or 0),
                 int(sede.get('es_principal') or 0),
+                sede.get('ciudad'),
+                sede.get('zona'),
             ),
         )
 
@@ -164,7 +180,7 @@ def cargar_ubicaciones(cursor, comercio_id):
         cursor.execute(
             """
             SELECT id, comercio_id, nombre, direccion, maps_url,
-                   coordinates_maps, orden, es_principal
+                   coordinates_maps, orden, es_principal, ciudad, zona
             FROM sucursales
             WHERE comercio_id = ?
             ORDER BY es_principal DESC, orden ASC, id ASC
@@ -183,6 +199,8 @@ def cargar_ubicaciones(cursor, comercio_id):
                 'coordinates_maps': _valor(fila, 'coordinates_maps', 5),
                 'orden': _valor(fila, 'orden', 6),
                 'es_principal': _valor(fila, 'es_principal', 7),
+                'ciudad': _valor(fila, 'ciudad', 8),
+                'zona': _valor(fila, 'zona', 9),
             }
             sedes.append(sede)
         return sedes

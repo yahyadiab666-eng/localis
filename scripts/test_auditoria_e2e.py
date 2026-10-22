@@ -35,6 +35,9 @@ def _cargar_entorno():
     # El sandbox de QA debe ser visible para las pruebas públicas de este script;
     # en producción el prefijo ``__`` queda aislado por defecto.
     os.environ['LOCALIS_PERMITIR_SANDBOX_PUBLICO'] = '1'
+    # Sin red de terceros en pruebas: la geocodificación de ubicaciones tiene su
+    # propio test (test_geocodificacion_maps.py). Aquí se mantiene determinista.
+    os.environ['LOCALIS_GEOCODIFICACION'] = '0'
 
 
 def _ok(condicion, mensaje, errores):
