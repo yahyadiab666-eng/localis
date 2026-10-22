@@ -42,6 +42,7 @@ SIN_RED = [
     'test_binance_ocr.py',
     'test_binance_api.py',
     'test_pago_movil_ocr.py',
+    'test_ocr_robustez.py',
     'test_boost_referencias.py',
     'test_verificacion_pagos.py',
     'test_compresion.py',
