@@ -105,6 +105,10 @@ def main() -> int:
     try:
         import numpy as np
 
+        from backend import payment_ocr as _po
+
+        _ok(_po.MAX_OCR_DIM == 1800, f'cota por defecto medida = 1800 (dio {_po.MAX_OCR_DIM})')
+
         grande = np.zeros((4000, 3000, 3), dtype=np.uint8)
         pequena = _redimensionar_para_ocr(grande, max_dim=2200)
         _ok(max(pequena.shape[:2]) == 2200, f'lado mayor={max(pequena.shape[:2])}')
