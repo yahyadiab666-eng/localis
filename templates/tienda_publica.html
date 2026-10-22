@@ -71,6 +71,13 @@
       height: 100% !important;
       object-fit: contain !important;
     }
+    /* Desplegable de sedes: queda alineado en la fila de acciones y despliega
+       un panel flotante (no empuja el resto de botones). */
+    details.sedes-menu > summary { list-style: none; cursor: pointer; }
+    details.sedes-menu > summary::-webkit-details-marker { display: none; }
+    .sedes-chevron { transition: transform .18s ease; }
+    details.sedes-menu[open] .sedes-chevron { transform: rotate(180deg); }
+    .sedes-panel { max-height: min(60vh, 22rem); overflow-y: auto; }
   </style>
 </head>
 <body class="min-h-screen" style="background: rgb(254, 251, 246);"
@@ -125,60 +132,77 @@
           </div>
         </div>
 
-        <div class="mt-6 flex flex-wrap gap-3 text-sm">
+        {# Acciones: contacto, ubicación(es) y compartir, todas en la misma fila
+           y con la misma altura (btn-touch = 44px) para que queden alineadas. #}
+        <div class="acciones-tienda mt-6 flex flex-wrap items-center gap-2 sm:gap-2.5 text-sm">
           {% if comercio.telefono_disponible and comercio.whatsapp_url %}
             <a href="{{ comercio.whatsapp_url }}" target="_blank" rel="noopener"
                data-interaccion="clic_whatsapp" data-interaccion-comercio="{{ comercio.id }}"
-               class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500 text-white font-semibold hover:bg-emerald-400 transition">
+               class="btn-touch inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500 text-white font-semibold hover:bg-emerald-400 transition">
               <i data-lucide="message-circle" style="width:16px;height:16px;"></i> WhatsApp
             </a>
+            {# Un solo control: muestra el número y lo copia al pulsar. #}
             <button type="button" data-interaccion="clic_copiar" data-interaccion-comercio="{{ comercio.id }}"
-                    onclick="copiarTelefono('{{ comercio.telefono }}')"
-                    class="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-stone-300 text-stone-700 font-semibold hover:bg-stone-50 transition">
-              <i data-lucide="copy" style="width:16px;height:16px;"></i> Copiar número
+                    onclick="copiarTelefono('{{ comercio.telefono }}')" title="Copiar número"
+                    class="btn-touch inline-flex items-center gap-2 px-4 py-2 rounded-full border border-stone-300 text-stone-700 font-semibold hover:bg-stone-50 transition">
+              <i data-lucide="phone" style="width:16px;height:16px;"></i>
+              <span>{{ comercio.telefono }}</span>
+              <i data-lucide="copy" class="text-stone-400" style="width:14px;height:14px;"></i>
             </button>
-            <span class="flex items-center gap-1.5 text-stone-600 self-center">
-              <i data-lucide="phone" style="width:16px;height:16px;"></i> {{ comercio.telefono }}
-            </span>
           {% else %}
-            <span class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-stone-100 text-stone-500 font-semibold"
+            <span class="btn-touch inline-flex items-center gap-2 px-4 py-2 rounded-full bg-stone-100 text-stone-500 font-semibold"
                   title="Este comercio no tiene un número de teléfono asignado">
               <i data-lucide="phone-off" style="width:16px;height:16px;"></i> Número no disponible
             </span>
             <button type="button" onclick="abrirModalSinTelefono()"
-                    class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/60 text-white font-semibold hover:bg-emerald-500 transition">
+                    class="btn-touch inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/60 text-white font-semibold hover:bg-emerald-500 transition">
               <i data-lucide="message-circle" style="width:16px;height:16px;"></i> WhatsApp
             </button>
           {% endif %}
 
           {% set sedes = comercio.sucursales or [] %}
-          {% if sedes|length > 1 %}
-            <div class="flex flex-wrap gap-2 justify-center sm:justify-start">
-              {% for sede in sedes %}
-                {% if sede.maps_link %}
+          {% set sedes_mapa = sedes | selectattr('maps_link') | list %}
+          {% if sedes_mapa|length > 1 %}
+            {# Varias sedes: un desplegable para no romper la fila ni llenarla de botones. #}
+            <details class="sedes-menu relative">
+              <summary class="btn-touch inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500 text-stone-900 font-bold hover:bg-amber-400 transition">
+                <i data-lucide="map-pin" style="width:16px;height:16px;"></i>
+                <span>Cómo llegar</span>
+                <span class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-stone-900/15 text-[11px] font-bold">{{ sedes_mapa|length }}</span>
+                <i data-lucide="chevron-down" class="sedes-chevron" style="width:15px;height:15px;"></i>
+              </summary>
+              <div class="sedes-panel absolute left-0 top-full mt-2 z-30 w-64 rounded-2xl border border-stone-200 bg-white p-2 shadow-xl">
+                <p class="px-3 pt-1 pb-2 text-[11px] font-bold uppercase tracking-wider text-stone-400">Sedes</p>
+                {% for sede in sedes_mapa %}
                   <a href="{{ sede.maps_link }}" target="_blank" rel="noopener"
                      data-interaccion="clic_maps" data-interaccion-comercio="{{ comercio.id }}"
-                     class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500 text-stone-900 font-bold hover:bg-amber-400 transition btn-touch">
-                    <i data-lucide="map-pin" style="width:16px;height:16px;"></i> {{ sede.nombre or 'Cómo llegar' }}
+                     class="flex items-start gap-2 rounded-xl px-3 py-2 hover:bg-amber-50 transition">
+                    <i data-lucide="map-pin" class="mt-0.5 text-amber-600 shrink-0" style="width:15px;height:15px;"></i>
+                    <span class="min-w-0">
+                      <span class="block font-semibold text-stone-800 truncate">{{ sede.nombre or 'Sede' }}</span>
+                      {% if sede.ciudad or sede.zona %}
+                        <span class="block text-[11px] text-stone-500 truncate">{{ sede.ciudad or '' }}{% if sede.ciudad and sede.zona %} · {% endif %}{{ sede.zona or '' }}</span>
+                      {% endif %}
+                    </span>
                   </a>
-                {% endif %}
-              {% endfor %}
-            </div>
+                {% endfor %}
+              </div>
+            </details>
           {% elif comercio.maps_link %}
             <a href="{{ comercio.maps_link }}" target="_blank" rel="noopener"
                data-interaccion="clic_maps" data-interaccion-comercio="{{ comercio.id }}"
-               class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500 text-stone-900 font-bold hover:bg-amber-400 transition btn-touch">
-              <i data-lucide="map-pin" style="width:16px;height:16px;"></i> Cómo llegar / Ver en Google Maps
+               class="btn-touch inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500 text-stone-900 font-bold hover:bg-amber-400 transition">
+              <i data-lucide="map-pin" style="width:16px;height:16px;"></i> Cómo llegar
             </a>
           {% elif comercio.direccion or comercio.ciudad %}
-            <span class="flex items-center gap-1.5 text-stone-600 self-center">
+            <span class="btn-touch inline-flex items-center gap-2 px-4 py-2 rounded-full bg-stone-100 text-stone-600">
               <i data-lucide="map-pin" style="width:16px;height:16px;"></i>
-              {{ comercio.direccion }}{% if comercio.ciudad %}, {{ comercio.ciudad }}{% endif %}{% if comercio.zona %} ({{ comercio.zona }}){% endif %}
+              <span>{{ comercio.direccion }}{% if comercio.ciudad %}, {{ comercio.ciudad }}{% endif %}</span>
             </span>
           {% endif %}
 
           <button type="button" onclick="abrirModalCompartir()"
-                  class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-stone-900 text-white font-semibold hover:bg-stone-800 transition btn-touch">
+                  class="btn-touch inline-flex items-center gap-2 px-4 py-2 rounded-full bg-stone-900 text-white font-semibold hover:bg-stone-800 transition">
             <i data-lucide="share-2" style="width:16px;height:16px;"></i> Compartir tienda
           </button>
         </div>
@@ -486,6 +510,26 @@
       card.scrollIntoView({ behavior: 'smooth', block: 'center' });
       card.classList.add('ring-2', 'ring-amber-500');
       setTimeout(function () { card.classList.remove('ring-2', 'ring-amber-500'); }, 3200);
+    })();
+
+    // Desplegable de sedes: se cierra al elegir una sede o al tocar fuera.
+    (function () {
+      document.addEventListener('click', function (evento) {
+        var abiertos = document.querySelectorAll('details.sedes-menu[open]');
+        Array.prototype.forEach.call(abiertos, function (menu) {
+          if (!menu.contains(evento.target)) menu.removeAttribute('open');
+        });
+      });
+      Array.prototype.forEach.call(
+        document.querySelectorAll('details.sedes-menu'),
+        function (menu) {
+          menu.addEventListener('click', function (evento) {
+            if (evento.target.closest && evento.target.closest('a')) {
+              menu.removeAttribute('open');
+            }
+          });
+        }
+      );
     })();
   </script>
   <script src="{{ url_for('static', filename='js/header-smart-hide.js') }}?v={{ asset_v }}"></script>

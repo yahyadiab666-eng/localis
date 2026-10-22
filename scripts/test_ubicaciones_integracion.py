@@ -292,6 +292,81 @@ def main():
             f'encuentra por zona de la sede ({len(res_zona)} resultados)',
         )
 
+        print('\n=== VARIAS sedes: cada una conserva SU ciudad/zona ===')
+        token_a = 'localisqasedea'
+        token_b = 'localisqasedeb'
+        actualizar_datos_comercio(
+            comercio['id'],
+            NOMBRE,
+            '04141112223',
+            '',
+            ubicaciones=[
+                {
+                    'nombre': 'Sede A',
+                    'maps_url': MAPS_SEDE_CENTRO,
+                    'ciudad': token_a,
+                    'zona': f'{token_a}zona',
+                },
+                {
+                    'nombre': 'Sede B',
+                    'maps_url': MAPS_SEDE_NORTE,
+                    'ciudad': token_b,
+                    'zona': f'{token_b}zona',
+                },
+            ],
+        )
+        comercio = obtener_comercio_por_id(comercio['id'], solo_visible=False)
+        sedes = comercio.get('sucursales') or []
+        _ok(len(sedes) == 2, f'dos sedes guardadas ({len(sedes)})')
+        _ok(
+            [s.get('ciudad') for s in sedes] == [token_a, token_b],
+            f'cada sede conserva SU ciudad ({[s.get("ciudad") for s in sedes]})',
+        )
+        _ok(
+            [s.get('zona') for s in sedes] == [f'{token_a}zona', f'{token_b}zona'],
+            'cada sede conserva SU zona',
+        )
+        _ok(
+            comercio.get('ciudad') == token_a,
+            'el comercio hereda la ciudad de la sede PRINCIPAL (la primera)',
+        )
+        # La sede NO principal también hace encontrable al comercio.
+        for token, etiqueta in ((token_a, 'principal'), (token_b, 'no principal')):
+            res = buscar_y_filtrar_productos(
+                palabra_clave=token, limit=None, orden_aleatorio=False
+            )
+            _ok(
+                any((p.get('nombre') or '').endswith('producto sede') for p in res),
+                f'encuentra por la ciudad de la sede {etiqueta} ({len(res)} resultados)',
+            )
+
+        print('\n=== Enlace SOLO con texto (sin coordenadas) ===')
+        # Sin coordenadas no se puede geocodificar, pero el texto del enlace queda
+        # en la dirección de la sede y la búsqueda también consulta ese campo.
+        actualizar_datos_comercio(
+            comercio['id'],
+            NOMBRE,
+            '04141112223',
+            '',
+            ubicaciones=[{
+                'nombre': 'Sede texto',
+                'maps_url': 'https://maps.google.com/?q=localisqatextolink,+Nueva+Esparta',
+            }],
+        )
+        comercio = obtener_comercio_por_id(comercio['id'], solo_visible=False)
+        sede_texto = (comercio.get('sucursales') or [{}])[0]
+        _ok(
+            'localisqatextolink' in (sede_texto.get('direccion') or ''),
+            f"la dirección toma el texto del enlace ({sede_texto.get('direccion')!r})",
+        )
+        res_texto = buscar_y_filtrar_productos(
+            palabra_clave='localisqatextolink', limit=None, orden_aleatorio=False
+        )
+        _ok(
+            any((p.get('nombre') or '').endswith('producto sede') for p in res_texto),
+            f'se encuentra por el texto del enlace ({len(res_texto)} resultados)',
+        )
+
         print('\n=== Búsqueda por ubicación: comercio ANTIGUO (ciudad manual) ===')
         exito_leg, msg_leg = registrar_comercio_completo(
             usuario_id,

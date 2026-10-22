@@ -67,13 +67,19 @@ def _timeout():
 
 
 def _presupuesto_seg():
+    """Presupuesto total para geocodificar todas las sedes de un comercio.
+
+    Nominatim exige ~1 req/s, así que hay que dar margen: con el máximo de 10
+    sedes hacen falta ~15-20 s. Un valor corto dejaría las últimas sedes sin
+    ciudad/zona. El envío del formulario puede tardar eso una sola vez.
+    """
     try:
         return max(
             0.0,
-            float(os.getenv('LOCALIS_GEOCODIFICACION_PRESUPUESTO_SEG', '8')),
+            float(os.getenv('LOCALIS_GEOCODIFICACION_PRESUPUESTO_SEG', '25')),
         )
     except (TypeError, ValueError):
-        return 8.0
+        return 25.0
 
 
 # ---------------------------------------------------------------------------
@@ -137,8 +143,13 @@ def datos_desde_respuesta_nominatim(payload):
     if not isinstance(mapa, dict):
         mapa = {}
 
+    # Orden pensado para Venezuela: OSM a veces no trae ``city`` y la ciudad real
+    # está en ``county`` ("Municipio Maracaibo" -> "Maracaibo"). Se prefiere
+    # ``county`` antes que ``municipality`` (que suele ser la parroquia).
     ciudad = _limpiar(
-        _primer_valor(mapa, ('city', 'town', 'village', 'hamlet', 'municipality'))
+        _primer_valor(
+            mapa, ('city', 'town', 'village', 'hamlet', 'county', 'municipality')
+        )
     )
     estado = _limpiar(_primer_valor(mapa, ('state',)))
     zona = _limpiar(
