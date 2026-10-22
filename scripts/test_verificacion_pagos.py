@@ -20,10 +20,13 @@ from backend.verificacion_pagos import (  # noqa: E402
     VERIF_BINANCE_NO_ENCONTRADO,
     VERIF_BINANCE_NO_VERIFICADO,
     VERIF_PAGO_MOVIL_OCR,
+    concepto_boost,
+    concepto_plan,
     describir_revision_pago,
     describir_verificacion,
     guardar_verificacion,
     motivo_revision,
+    parsear_concepto,
 )
 
 FALLOS = []
@@ -94,6 +97,19 @@ def main() -> int:
     _ok(describir_revision_pago('binance', True, referencia='x') == (None, ''),
         'confirmado -> sin mensaje')
     _ok(TIPO_REVISION_PAGO == 'revision_pago', 'tipo interno estable')
+
+    print('\n=== Concepto: plan y destacado ===')
+    _ok(concepto_plan('Pro') == 'plan:pro', 'concepto de plan normalizado')
+    _ok(concepto_boost(7, 123) == 'boost:7:prod:123', 'concepto de destacado')
+
+    print('\n=== Concepto: parseo para las acciones ===')
+    _ok(parsear_concepto('plan:pro') == {'tipo': 'plan', 'plan_tipo': 'pro'},
+        'parsea plan')
+    _ok(parsear_concepto('boost:7:prod:123')
+        == {'tipo': 'boost', 'dias': 7, 'producto_id': 123}, 'parsea destacado')
+    for malo in (None, '', 'plan', 'plan:', 'boost:7', 'boost:x:prod:1',
+                 'boost:7:prod:y', 'otra:cosa', 'plan:pro:extra'):
+        _ok(parsear_concepto(malo) is None, f'rechaza {malo!r}')
 
     print('\n=== RESULTADO ===')
     if FALLOS:

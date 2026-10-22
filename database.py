@@ -333,6 +333,8 @@ COLUMNAS_ESQUEMA = {
         # Revisión de pagos: imagen del comprobante y referencia/ID de orden.
         ('comprobante_url', 'TEXT'),
         ('referencia_pago', 'TEXT'),
+        # Qué se estaba pagando (plan:pro / boost:7:prod:123) para poder actuar.
+        ('concepto', 'TEXT'),
     ],
     'configuracion_sistema': [
         ('clave', 'TEXT'),
@@ -1652,7 +1654,8 @@ def _crear_tabla_soporte_y_reportes(cursor):
             fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             estado TEXT DEFAULT 'pendiente',
             comprobante_url TEXT,
-            referencia_pago TEXT
+            referencia_pago TEXT,
+            concepto TEXT
         )
         """
     )

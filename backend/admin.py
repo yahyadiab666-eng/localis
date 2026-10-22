@@ -102,6 +102,154 @@ def contar_revisiones_pago_pendientes():
         return 0
 
 
+def obtener_ticket(ticket_id):
+    """Un ticket de la bandeja por id, o ``None``. Nunca lanza."""
+    try:
+        with get_db_connection(row_factory=sqlite3.Row) as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                'SELECT * FROM soporte_y_reportes WHERE id = ?', (int(ticket_id),)
+            )
+            fila = cursor.fetchone()
+            return dict(fila) if fila else None
+    except Exception as e:
+        logger.error(f'Error al obtener el ticket {ticket_id}: {str(e)}')
+        return None
+
+
+def _auditar_accion_admin(admin_id, accion, detalles):
+    """Registra la acción en ``logs_auditoria``. Aislado: nunca lanza."""
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                INSERT INTO logs_auditoria (usuario_id, accion, detalles)
+                VALUES (?, ?, ?)
+                """,
+                (admin_id, accion, detalles),
+            )
+            conexion.commit()
+    except Exception as e:
+        logger.error(f'No se pudo auditar la acción del admin: {str(e)}')
+
+
+def aplicar_accion_revision(ticket_id, accion, admin_id):
+    """Ejecuta una acción sobre una alerta de revisión de pago.
+
+    Acciones: ``resolver`` (solo cierra), ``confirmar`` (activa el plan o el
+    destacado que el comerciante intentó pagar) y ``suspender`` (oculta la
+    tienda). Retorna ``(exito, mensaje)``. Nunca lanza.
+    """
+    from backend.verificacion_pagos import parsear_concepto
+
+    accion = str(accion or '').strip().lower()
+    if accion not in ('resolver', 'confirmar', 'suspender'):
+        return False, 'Acción no válida.'
+
+    ticket = obtener_ticket(ticket_id)
+    if not ticket:
+        return False, 'La alerta no existe.'
+    if ticket.get('tipo') != 'revision_pago':
+        return False, 'Esa alerta no es de revisión de pagos.'
+
+    comercio_id = ticket.get('referencia_id')
+    if not comercio_id:
+        return False, 'La alerta no tiene comercio asociado.'
+    comercio_id = int(comercio_id)
+    concepto = parsear_concepto(ticket.get('concepto'))
+
+    if accion == 'resolver':
+        exito, mensaje = resolver_ticket_soporte(ticket_id)
+        _auditar_accion_admin(
+            admin_id,
+            'Revisión de pago resuelta',
+            f'ticket={ticket_id} comercio={comercio_id} ref={ticket.get("referencia_pago")}',
+        )
+        return exito, mensaje
+
+    if accion == 'suspender':
+        exito, mensaje = suspender_comercio_temporal(admin_id, comercio_id)
+        if exito:
+            resolver_ticket_soporte(ticket_id)
+            _auditar_accion_admin(
+                admin_id,
+                'Comercio suspendido tras revisión de pago',
+                f'ticket={ticket_id} comercio={comercio_id}',
+            )
+        return exito, mensaje
+
+    # accion == 'confirmar'
+    if not concepto:
+        return (
+            False,
+            'No se sabe qué se estaba pagando; confirma el plan a mano en la '
+            'ficha del comercio.',
+        )
+
+    if concepto['tipo'] == 'plan':
+        exito, mensaje = confirmar_pago_suscripcion(
+            comercio_id, concepto['plan_tipo'], 1
+        )
+    else:
+        exito, mensaje, _ = destacar_producto_por_dias(
+            admin_id, concepto['producto_id'], concepto['dias']
+        )
+
+    if exito:
+        resolver_ticket_soporte(ticket_id)
+        _auditar_accion_admin(
+            admin_id,
+            'Pago confirmado manualmente tras revisión',
+            f'ticket={ticket_id} comercio={comercio_id} concepto={ticket.get("concepto")}',
+        )
+    return exito, mensaje
+
+
+def salud_pagos(dias=30):
+    """Resumen de salud de la verificación de pagos (para el panel admin).
+
+    Lee ``solicitudes_pago.verificacion`` de los últimos ``dias``. Nunca lanza:
+    devuelve ceros si algo falla.
+    """
+    resultado = {
+        'pendientes_revision': contar_revisiones_pago_pendientes(),
+        'confirmados': 0,
+        'no_encontrados': 0,
+        'no_verificados': 0,
+        'otras': 0,
+        'total': 0,
+    }
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT verificacion, COUNT(*)
+                FROM solicitudes_pago
+                WHERE fecha_registro >= CURRENT_TIMESTAMP - (? || ' days')::interval
+                GROUP BY verificacion
+                """,
+                (int(dias),),
+            )
+            for fila in cursor.fetchall() or []:
+                codigo = fila[0]
+                total = int(fila[1] or 0)
+                resultado['total'] += total
+                if codigo == 'binance_confirmado':
+                    resultado['confirmados'] += total
+                elif codigo == 'binance_no_encontrado':
+                    resultado['no_encontrados'] += total
+                elif codigo == 'binance_no_verificado':
+                    resultado['no_verificados'] += total
+                else:
+                    resultado['otras'] += total
+    except Exception as e:
+        logger.error(f'Error al calcular la salud de pagos: {str(e)}')
+    resultado['dias'] = int(dias)
+    return resultado
+
+
 def resolver_ticket_soporte(ticket_id):
     try:
         with get_db_connection() as conexion:

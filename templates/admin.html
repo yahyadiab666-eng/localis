@@ -75,6 +75,12 @@
         .btn-activar { background: #28a745; color: white; }
         .btn-eliminar { background: #6c757d; color: white; }
         .btn-resolver { background: #007bff; color: white; }
+        .btn-ver { background: #eef2f7; color: #084298; }
+        .salud-pagos { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+        .salud-pagos .metrica { background: #f8f9fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: 8px; text-align: center; }
+        .salud-pagos .metrica strong { display: block; font-size: 1.3rem; }
+        .salud-pagos .metrica span { font-size: 0.72rem; color: #6c757d; }
+        .salud-pagos .metrica.alerta strong { color: #dc3545; }
         .acciones-comercio { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
         .ticket-item {
             padding: 1rem; border-bottom: 1px solid #e1e4e8;
@@ -258,18 +264,76 @@
                                 {% endif %}
                                 <span class="badge">{{ ticket.estado }}</span>
                             </div>
-                            {% if ticket.estado == 'pendiente' %}
-                                <form action="{{ url_for('admin.admin_resolver_ticket', ticket_id=ticket.id) }}" method="POST">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    <button type="submit" class="btn-accion-tabla btn-resolver">Listo</button>
-                                </form>
-                            {% endif %}
+                            <div style="display:flex;flex-direction:column;gap:4px;align-items:stretch;">
+                                {% if es_revision and ticket.referencia_id %}
+                                <a class="btn-accion-tabla btn-ver" style="text-align:center;text-decoration:none;"
+                                   href="{{ url_for('admin.admin_comercio_detalle', comercio_id=ticket.referencia_id) }}">
+                                    Ver comercio
+                                </a>
+                                {% endif %}
+                                {% if ticket.estado == 'pendiente' %}
+                                    {% if es_revision %}
+                                        {% if ticket.concepto %}
+                                        <form action="{{ url_for('admin.admin_revision_accion', ticket_id=ticket.id) }}" method="POST"
+                                              onsubmit="return confirm('¿Confirmar el pago y activar lo que se estaba pagando?');">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                            <input type="hidden" name="accion" value="confirmar">
+                                            <button type="submit" class="btn-accion-tabla btn-activar">Confirmar pago</button>
+                                        </form>
+                                        {% endif %}
+                                        {% if ticket.referencia_id %}
+                                        <form action="{{ url_for('admin.admin_revision_accion', ticket_id=ticket.id) }}" method="POST"
+                                              onsubmit="return confirm('¿Suspender esta tienda?');">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                            <input type="hidden" name="accion" value="suspender">
+                                            <button type="submit" class="btn-accion-tabla btn-suspender">Suspender</button>
+                                        </form>
+                                        {% endif %}
+                                    {% endif %}
+                                    <form action="{{ url_for('admin.admin_revision_accion', ticket_id=ticket.id) }}" method="POST">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="accion" value="resolver">
+                                        <button type="submit" class="btn-accion-tabla btn-resolver">Listo</button>
+                                    </form>
+                                {% endif %}
+                            </div>
                         </div>
                     {% else %}
                         <p style="text-align:center;color:#777;padding:1rem;">
                             No hay nada por revisar. Los pagos confirmados no generan alertas.
                         </p>
                     {% endfor %}
+                </div>
+            </aside>
+
+            <aside class="card" id="salud-pagos">
+                <h2>Salud de pagos (últimos {{ salud.dias or 30 }} días)</h2>
+                <p style="font-size:0.85rem;color:#666;margin-bottom:0.75rem;">
+                    Cómo se están resolviendo los pagos. Si <strong>Sin verificar</strong> o
+                    <strong>No encontrados</strong> suben, algo pasa con Binance o con los
+                    comprobantes: revisa la bandeja de arriba.
+                </p>
+                <div class="salud-pagos">
+                    <div class="metrica">
+                        <strong>{{ salud.total or 0 }}</strong>
+                        <span>Pagos registrados</span>
+                    </div>
+                    <div class="metrica">
+                        <strong>{{ salud.confirmados or 0 }}</strong>
+                        <span>Confirmados por Binance</span>
+                    </div>
+                    <div class="metrica {{ 'alerta' if salud.no_verificados }}">
+                        <strong>{{ salud.no_verificados or 0 }}</strong>
+                        <span>Sin verificar (API)</span>
+                    </div>
+                    <div class="metrica {{ 'alerta' if salud.no_encontrados }}">
+                        <strong>{{ salud.no_encontrados or 0 }}</strong>
+                        <span>No encontrados</span>
+                    </div>
+                    <div class="metrica {{ 'alerta' if salud.pendientes_revision }}">
+                        <strong>{{ salud.pendientes_revision or 0 }}</strong>
+                        <span>Por revisar ahora</span>
+                    </div>
                 </div>
             </aside>
         </div>

@@ -101,20 +101,34 @@ def _registrar_revision_pago(
     monto_usd,
     ocr=None,
     comprobante_url=None,
+    plan_tipo=None,
+    boost_dias=None,
+    boost_producto_id=None,
 ):
     """Manda a la bandeja administrativa un pago Binance no confirmado.
 
     Solo actúa con Binance y cuando la API no confirmó la orden: ``False``
     (no encontrada o monto que no cuadra) o ``None`` (no verificable). Los pagos
     confirmados y los de pago móvil no generan ticket. Nunca lanza.
+
+    ``plan_tipo`` / ``boost_*`` describen qué se estaba pagando, para que el
+    admin pueda confirmarlo o suspenderlo desde la propia alerta.
     """
     if not es_binance or confirmado is True:
         return
     try:
         from backend.verificacion_pagos import (
+            concepto_boost,
+            concepto_plan,
             describir_revision_pago,
             registrar_revision_pago,
         )
+
+        concepto = None
+        if plan_tipo:
+            concepto = concepto_plan(plan_tipo)
+        elif boost_dias and boost_producto_id:
+            concepto = concepto_boost(boost_dias, boost_producto_id)
 
         motivo, mensaje = describir_revision_pago(
             'binance',
@@ -137,6 +151,7 @@ def _registrar_revision_pago(
             usuario_id=session.get('usuario_id'),
             comprobante_url=comprobante_url,
             monto=monto_usd,
+            concepto=concepto,
         )
     except Exception as error:
         logger.warning(f'[Localis Pagos] no se registró la revisión: {error}')
@@ -560,7 +575,14 @@ def api_verificar_boost():
         confirmado = verificar_orden_binance(referencia, float(precio_usd))
         if confirmado is False:
             _registrar_revision_pago(
-                comercio, referencia, es_binance, confirmado, float(precio_usd), ocr=ocr
+                comercio,
+                referencia,
+                es_binance,
+                confirmado,
+                float(precio_usd),
+                ocr=ocr,
+                boost_dias=dias,
+                boost_producto_id=producto_id,
             )
             return (
                 jsonify(
@@ -636,6 +658,8 @@ def api_verificar_boost():
         float(precio_usd),
         ocr=ocr,
         comprobante_url=comprobante_url,
+        boost_dias=dias,
+        boost_producto_id=producto_id,
     )
 
     return (
@@ -753,6 +777,7 @@ def api_verificar_pago():
                 confirmado,
                 montos.get('monto_usd'),
                 ocr=ocr,
+                plan_tipo=plan_tipo,
             )
             return (
                 jsonify(
@@ -826,6 +851,7 @@ def api_verificar_pago():
         montos.get('monto_usd'),
         ocr=ocr,
         comprobante_url=comprobante_url,
+        plan_tipo=plan_tipo,
     )
 
     respuesta = {
