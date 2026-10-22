@@ -161,6 +161,7 @@ from backend.web_seguridad import (
     registrar_csrf,
 )
 from backend.rate_limit import configurar_rate_limit
+from backend.compresion import configurar_compresion
 from backend.vistas_imagenes import (
     debug_imagenes_antes_de_render as _debug_imagenes_antes_de_render,
     normalizar_imagenes_comercio as _normalizar_imagenes_comercio,
@@ -239,12 +240,23 @@ try:
     app.config['SUPABASE_CLIENT'] = obtener_cliente_storage()
     app.config['SUPABASE_BUCKET_IMAGENES'] = SUPABASE_BUCKET_IMAGENES
     app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_BYTES
-    app.config['TEMPLATES_AUTO_RELOAD'] = True
-    app.jinja_env.auto_reload = True
+    # En producción NO se recarga ni recompila plantillas en cada render: se
+    # comprueban con el sistema de ficheros y se pierde la caché de Jinja.
+    # Override explícito con LOCALIS_TEMPLATES_AUTORELOAD.
+    _auto_reload = (os.environ.get('LOCALIS_TEMPLATES_AUTORELOAD') or '').strip().lower()
+    if _auto_reload in ('1', 'true', 'yes', 'on'):
+        auto_reload = True
+    elif _auto_reload in ('0', 'false', 'no', 'off'):
+        auto_reload = False
+    else:
+        auto_reload = not es_entorno_produccion()
+    app.config['TEMPLATES_AUTO_RELOAD'] = auto_reload
+    app.jinja_env.auto_reload = auto_reload
     app.jinja_env.cache.clear()
     csrf = CSRFProtect(app)
     registrar_csrf(csrf)
     configurar_rate_limit(app)
+    configurar_compresion(app)
     registrar_request_logging(app)
     registrar_manejadores_errores(app)
     iniciar_error_tracking(app)
