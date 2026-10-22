@@ -12,25 +12,37 @@ import numpy as np
 from config import PAGO_MOVIL_DEFAULT
 
 _ocr_engine = None
-# Referencia etiquetada ("Referencia: 123456", "Ref123456", "Nro 123456").
+# Referencia etiquetada ("Referencia: 123456", "Ref 456.789", "Nro 45 6789").
+# El grupo captura una tirada que empieza y termina en dígito, para poder unir
+# referencias que el OCR separa con puntos o espacios (los recibos reales usan
+# separadores de miles). Unir a ciegas sería peligroso: se valida después que
+# queden exactamente 6 dígitos y como mucho un separador (ver _referencia_de_etiqueta).
 REFERENCIA_ETIQUETADA_RE = re.compile(
     r'(?:referencia|refer|ref\.?|nro\.?|n[uú]mero|operaci[oó]n|comprobante)'
-    r'[^\d]{0,15}(\d{6})(?!\d)',
+    r'[^\d]{0,15}(\d[\d\s.,-]*\d)',
     re.IGNORECASE,
 )
 # Token de 6 dígitos aislado: no forma parte de un número, fecha ni monto.
 REFERENCIA_TOKEN_RE = re.compile(r'(?<![\d/.,-])(\d{6})(?![\d/.,-])')
+# `_D` = dígito, tolerando la confusión O/0 típica del OCR.
+_D = r'[0-9Oo]'
+# Frontera tras un monto: ni otro dígito, ni una continuación de fecha
+# (evita que "21.10.2026" produzca el falso monto 21.10).
+_FIN_MONTO = r'(?![0-9Oo])(?![./-]\d)'
 MONTO_RE = re.compile(
-    r'(\d{1,3}(?:,\d{3})+\.\d{2}'       # 1,234.56 (formato US)
-    r'|\d{1,3}(?:[.\s]\d{3})*[.,]\d{2}'  # 1.234,56 / 1234,56
-    r'|\d+[.,]\d{2})'                    # 500.00
+    rf'({_D}{{1,3}}(?:,{_D}{{3}})+\.{_D}{{2}}{_FIN_MONTO}'      # 1,234.56 (US)
+    rf'|{_D}{{1,3}}(?:[.\s]{_D}{{3}})*[.,]{_D}{{2}}{_FIN_MONTO}'  # 1.234,56
+    rf'|{_D}+[.,]{_D}{{2}}{_FIN_MONTO}'                          # 500,00
+    rf'|{_D}{{1,3}}(?:[.\s]{_D}{{3}})+{_FIN_MONTO})'             # 2.000
 )
-# Monto con etiqueta y sin decimales ("Monto 500 Bs", "Total: 2.000").
+# Monto con etiqueta, con o sin decimales ("Monto 500 Bs", "Total: 2.000",
+# "Bs. 2.OOO,OO"). Anclado a una etiqueta, así que tolerar O/0 aquí es seguro.
 MONTO_ETIQUETADO_RE = re.compile(
     r'(?:monto|total|importe|pagado|bs\.?|bol[ií]vares)\s*[:.]?\s*'
-    r'(\d{1,3}(?:,\d{3})+\.\d{1,2}'
-    r'|\d{1,3}(?:[.\s]\d{3})*(?:[.,]\d{1,2})?'
-    r'|\d+(?:[.,]\d{1,2})?)',
+    rf'({_D}{{1,3}}(?:,{_D}{{3}})+\.{_D}{{1,2}}'
+    rf'|{_D}{{1,3}}(?:[.\s]{_D}{{3}})+(?:[.,]{_D}{{1,2}})?'
+    rf'|{_D}+(?:[.,]{_D}{{1,2}})?)'
+    rf'{_FIN_MONTO}',
     re.IGNORECASE,
 )
 # Fechas típicas de comprobantes bancarios: DD/MM/YYYY, YYYY-MM-DD y DD/MM/YY.
@@ -160,9 +172,28 @@ def _ocr_texto(imagen_bgr):
 
 
 def _parse_monto_ve(valor):
-    limpio = re.sub(r'[^\d.,]', '', str(valor or ''))
+    """Convierte a número un monto escrito en formato venezolano o US.
+
+    Tolera las confusiones típicas del OCR (O por 0, l/I por 1) y resuelve la
+    ambigüedad de ``2.000``: en un recibo venezolano son *dos mil*, no dos.
+    """
+    limpio = str(valor or '')
+    # OCR: O/o -> 0 y l/I -> 1 (solo dentro de la cifra que llega aquí).
+    limpio = (
+        limpio.replace('O', '0')
+        .replace('o', '0')
+        .replace('l', '1')
+        .replace('I', '1')
+    )
+    limpio = re.sub(r'[^\d.,]', '', limpio)
     if not limpio:
         return None
+    # "2.000" / "1.250.000": punto como separador de miles (sin decimales).
+    if re.fullmatch(r'\d{1,3}(?:\.\d{3})+', limpio):
+        try:
+            return round(float(limpio.replace('.', '')), 2)
+        except ValueError:
+            return None
     if ',' in limpio and '.' in limpio:
         if limpio.rfind(',') > limpio.rfind('.'):
             limpio = limpio.replace('.', '').replace(',', '.')
@@ -180,6 +211,24 @@ def _parse_monto_ve(valor):
         return None
 
 
+def _referencia_de_etiqueta(token):
+    """Referencia a partir del texto tras la etiqueta, o ``None``.
+
+    Une separadores ("456.789" y "45 6789" -> "456789") pero **solo** si quedan
+    exactamente 6 dígitos y hay como mucho un separador: así no se mezclan dos
+    campos distintos (p. ej. "456.789 21/10/2026").
+    """
+    if not token:
+        return None
+    limpio = token.strip().strip('.,- ').strip()
+    digitos = re.sub(r'\D', '', limpio)
+    if len(digitos) != 6:
+        return None
+    if len(limpio) - 6 > 1:
+        return None
+    return digitos
+
+
 def _extraer_referencia(texto):
     """Referencia de 6 dígitos, priorizando la que va junto a una etiqueta.
 
@@ -188,7 +237,9 @@ def _extraer_referencia(texto):
     if not texto:
         return None
     for match in REFERENCIA_ETIQUETADA_RE.finditer(texto):
-        return match.group(1)
+        referencia = _referencia_de_etiqueta(match.group(1))
+        if referencia:
+            return referencia
     for match in REFERENCIA_TOKEN_RE.finditer(texto):
         return match.group(1)
     return None
@@ -371,6 +422,130 @@ def extraer_referencia_desde_bytes(data_bytes):
     return resultado.get('referencia'), resultado.get('ms', 0.0)
 
 
+def _texto_pago_movil_incompleto(texto, banco=None, rif=None, telefono=None):
+    """True si con este texto el comprobante sería rechazado.
+
+    Se usa para decidir si merece la pena una segunda pasada de OCR sobre el
+    recorte central: solo se paga ese coste cuando el resultado iba a fallar.
+    """
+    if not texto:
+        return True
+    if not _extraer_referencia(texto):
+        return True
+    if not _contiene_banco(_normalizar_texto(texto), banco):
+        return True
+    if not _contiene_rif(texto, rif):
+        return True
+    if not _contiene_telefono(texto, telefono):
+        return True
+    if not _extraer_montos_candidatos(texto):
+        return True
+    if not _extraer_fechas(texto):
+        return True
+    return False
+
+
+def evaluar_texto_pago_movil(
+    texto_raw,
+    monto_esperado_bs,
+    ahora=None,
+    exigir_fecha=None,
+    max_dias=None,
+    banco=None,
+    rif=None,
+    telefono=None,
+):
+    """Evalúa el TEXTO ya extraído por OCR de un comprobante de pago móvil.
+
+    Separado de :func:`validar_comprobante_pago_movil` para poder probar y
+    afinar la lógica de lectura sin depender del motor OCR (rápido y
+    determinista). El contrato es el mismo, salvo ``ms``, que lo añade quien
+    llama. Nunca lanza.
+    """
+    errores = []
+    texto_norm = _normalizar_texto(texto_raw)
+
+    referencia = _extraer_referencia(texto_raw)
+    if not referencia:
+        errores.append(
+            'No se detectó una referencia válida de 6 dígitos. Escríbela a mano '
+            'o contacta a soporte técnico.'
+        )
+
+    if not _contiene_banco(texto_norm, banco):
+        errores.append(
+            f'El comprobante debe corresponder a {banco or BANCO_OFICIAL}.'
+        )
+
+    if not _contiene_rif(texto_raw, rif):
+        errores.append(
+            'El comprobante debe incluir el RIF/Cédula '
+            f'{rif or PAGO_MOVIL_DEFAULT["cedula_rif"]}.'
+        )
+
+    if not _contiene_telefono(texto_raw, telefono):
+        errores.append(
+            'El comprobante debe incluir el teléfono '
+            f'{telefono or PAGO_MOVIL_DEFAULT["telefono"]}.'
+        )
+
+    candidatos = _extraer_montos_candidatos(texto_raw)
+    monto_detectado = _elegir_monto(candidatos, float(monto_esperado_bs or 0))
+
+    estado_monto = None
+    diferencia_monto = None
+    if monto_esperado_bs and monto_esperado_bs > 0:
+        estado_monto, diferencia_monto = clasificar_monto(
+            monto_detectado, monto_esperado_bs, 'BS'
+        )
+        if estado_monto == MONTO_NO_DETECTADO:
+            errores.append('No se pudo leer el monto en bolívares del comprobante.')
+        elif estado_monto != MONTO_OK:
+            errores.append(
+                _mensaje_monto(
+                    estado_monto,
+                    monto_detectado,
+                    float(monto_esperado_bs),
+                    diferencia_monto,
+                    'Bs',
+                )
+            )
+
+    # Antifraude: la fecha del comprobante debe ser reciente (hoy/ayer por defecto).
+    exigir_fecha = (
+        EXIGIR_FECHA_COMPROBANTE if exigir_fecha is None else bool(exigir_fecha)
+    )
+    max_dias = MAX_DIAS_COMPROBANTE if max_dias is None else max(0, int(max_dias))
+    hoy = ahora or datetime.now().date()
+    fecha_comprobante, delta_dias = _elegir_fecha(_extraer_fechas(texto_raw), hoy)
+
+    if exigir_fecha:
+        if fecha_comprobante is None:
+            errores.append(
+                'No se detectó la fecha del comprobante (se espera DD/MM/AAAA).'
+            )
+        elif not (-1 <= delta_dias <= max_dias):
+            errores.append(
+                f'La fecha del comprobante '
+                f'({fecha_comprobante.strftime("%d/%m/%Y")}) está fuera del rango '
+                f'permitido (máximo {max_dias} día(s) de antigüedad).'
+            )
+
+    ok = not errores and bool(referencia)
+    return {
+        'ok': ok,
+        'referencia': referencia,
+        'monto_bs': monto_detectado,
+        'fecha_comprobante': (
+            fecha_comprobante.strftime('%Y-%m-%d') if fecha_comprobante else None
+        ),
+        'errores': errores,
+        'texto_ocr': (texto_raw or '')[:500],
+        'estado_monto': estado_monto,
+        'diferencia_monto': diferencia_monto,
+    }
+
+
 def validar_comprobante_pago_movil(
     data_bytes,
     monto_esperado_bs,
@@ -432,102 +607,36 @@ def validar_comprobante_pago_movil(
     imagen = _redimensionar_para_ocr(imagen)
     texto_completo = _ocr_texto(imagen)
     texto_raw = texto_completo
-    # Segunda pasada SOLO si la referencia no apareció: el recorte central la
-    # rescata en capturas donde el texto es muy pequeño. Evita duplicar el OCR
-    # (la mayor parte del tiempo) sin degradar la detección.
-    if not _extraer_referencia(texto_completo):
+    # Segunda pasada por el recorte central SOLO si con la imagen completa falta
+    # algún dato clave. Así, un comprobante que ya se lee bien no paga un OCR
+    # extra, y uno que iba a ser rechazado tiene una segunda oportunidad con el
+    # texto más grande. Antes la segunda pasada solo miraba la referencia, de
+    # modo que un comprobante con la referencia visible pero el teléfono o el
+    # monto ilegibles se rechazaba sin intentarlo.
+    if _texto_pago_movil_incompleto(texto_completo, banco, rif, telefono):
         roi = recortar_roi_central(imagen, ratio=0.45)
         texto_roi = _ocr_texto(roi)
-        texto_raw = f'{texto_completo} {texto_roi}'.strip()
-    texto_norm = _normalizar_texto(texto_raw)
+        if texto_roi:
+            texto_raw = f'{texto_completo} {texto_roi}'.strip()
 
-    referencia = _extraer_referencia(texto_raw)
-    if not referencia:
-        errores.append('No se detectó una referencia válida de 6 dígitos.')
-
-    if not _contiene_banco(texto_norm, banco):
-        errores.append(
-            f'El comprobante debe corresponder a {banco or BANCO_OFICIAL}.'
-        )
-
-    if not _contiene_rif(texto_raw, rif):
-        errores.append(
-            'El comprobante debe incluir el RIF/Cédula '
-            f'{rif or PAGO_MOVIL_DEFAULT["cedula_rif"]}.'
-        )
-
-    if not _contiene_telefono(texto_raw, telefono):
-        errores.append(
-            'El comprobante debe incluir el teléfono '
-            f'{telefono or PAGO_MOVIL_DEFAULT["telefono"]}.'
-        )
-
-    candidatos = _extraer_montos_candidatos(texto_raw)
-    monto_detectado = _elegir_monto(candidatos, float(monto_esperado_bs or 0))
-
-    estado_monto = None
-    diferencia_monto = None
-    if monto_esperado_bs and monto_esperado_bs > 0:
-        estado_monto, diferencia_monto = clasificar_monto(
-            monto_detectado, monto_esperado_bs, 'BS'
-        )
-        if estado_monto == MONTO_NO_DETECTADO:
-            errores.append('No se pudo leer el monto en bolívares del comprobante.')
-        elif estado_monto != MONTO_OK:
-            errores.append(
-                _mensaje_monto(
-                    estado_monto,
-                    monto_detectado,
-                    float(monto_esperado_bs),
-                    diferencia_monto,
-                    'Bs',
-                )
-            )
-
-    # Antifraude: la fecha del comprobante debe ser reciente (hoy/ayer por defecto).
-    exigir_fecha = (
-        EXIGIR_FECHA_COMPROBANTE if exigir_fecha is None else bool(exigir_fecha)
+    resultado = evaluar_texto_pago_movil(
+        texto_raw,
+        monto_esperado_bs,
+        ahora=ahora,
+        exigir_fecha=exigir_fecha,
+        max_dias=max_dias,
+        banco=banco,
+        rif=rif,
+        telefono=telefono,
     )
-    max_dias = (
-        MAX_DIAS_COMPROBANTE
-        if max_dias is None
-        else max(0, int(max_dias))
-    )
-    hoy = ahora or datetime.now().date()
-    fecha_comprobante, delta_dias = _elegir_fecha(_extraer_fechas(texto_raw), hoy)
-
-    if exigir_fecha:
-        if fecha_comprobante is None:
-            errores.append(
-                'No se detectó la fecha del comprobante (se espera DD/MM/AAAA).'
-            )
-        elif not (-1 <= delta_dias <= max_dias):
-            errores.append(
-                f'La fecha del comprobante '
-                f'({fecha_comprobante.strftime("%d/%m/%Y")}) está fuera del rango '
-                f'permitido (máximo {max_dias} día(s) de antigüedad).'
-            )
-
-    transcurrido_ms = (time.perf_counter() - inicio) * 1000
-    ok = not errores and bool(referencia)
+    resultado['ms'] = (time.perf_counter() - inicio) * 1000
     _registrar_metricas_ocr(
         'pago_movil',
-        'ok' if ok else 'rechazado',
-        transcurrido_ms,
-        estado_monto,
+        'ok' if resultado.get('ok') else 'rechazado',
+        resultado['ms'],
+        resultado.get('estado_monto'),
     )
-
-    return {
-        'ok': ok,
-        'referencia': referencia,
-        'monto_bs': monto_detectado,
-        'fecha_comprobante': fecha_comprobante.strftime('%Y-%m-%d') if fecha_comprobante else None,
-        'errores': errores,
-        'ms': transcurrido_ms,
-        'texto_ocr': texto_raw[:500],
-        'estado_monto': estado_monto,
-        'diferencia_monto': diferencia_monto,
-    }
+    return resultado
 
 
 # ==========================================================================
@@ -624,6 +733,25 @@ def evaluar_texto_binance(
     }
 
 
+def _texto_binance_incompleto(texto, monto_usd=None):
+    """True si falta algún dato clave de la captura de Binance.
+
+    Decide si merece la pena una segunda pasada de OCR sobre el recorte central.
+    """
+    if not texto:
+        return True
+    if not _extraer_order_id(texto):
+        return True
+    if not _extraer_fechas(texto):
+        return True
+    if monto_usd and float(monto_usd) > 0:
+        # Mismo criterio que ``evaluar_texto_binance``: la captura de Binance
+        # escribe el monto como "20 USDT", que no lleva decimales.
+        if not (_extraer_montos_candidatos(texto) or MONTO_USDT_RE.findall(texto)):
+            return True
+    return False
+
+
 def validar_comprobante_binance(
     data_bytes,
     monto_usd,
@@ -658,12 +786,14 @@ def validar_comprobante_binance(
     imagen = _redimensionar_para_ocr(imagen)
     texto_completo = _ocr_texto(imagen)
     texto_raw = texto_completo
-    # Igual que en pago móvil: la segunda pasada solo hace falta si el ID de la
-    # orden no se leyó en la imagen completa.
-    if not _extraer_order_id(texto_completo):
+    # Segunda pasada solo si con la imagen completa falta algo clave (ID de la
+    # orden, fecha o monto): antes se miraba solo el ID, así que una captura con
+    # el ID visible pero el monto ilegible se rechazaba sin intentarlo.
+    if _texto_binance_incompleto(texto_completo, monto_usd):
         roi = recortar_roi_central(imagen, ratio=0.45)
         texto_roi = _ocr_texto(roi)
-        texto_raw = f'{texto_completo} {texto_roi}'.strip()
+        if texto_roi:
+            texto_raw = f'{texto_completo} {texto_roi}'.strip()
 
     resultado = evaluar_texto_binance(
         texto_raw,
