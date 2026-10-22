@@ -26,10 +26,93 @@
             max-width: 1200px; margin: 2rem auto; padding: 0 1rem;
             display: grid; grid-template-columns: 1fr 2fr; gap: 2rem;
         }
-        @media (max-width: 992px) { .container { grid-template-columns: 1fr; } }
         .col-izquierda { display: flex; flex-direction: column; gap: 2rem; }
         /* La bandeja de revisión es lo operativo: va primero en la columna. */
         #bandeja-revision { order: -1; }
+
+        /* Barra rápida de navegación (solo móvil). */
+        .admin-nav-rapida { display: none; }
+
+        /* ===== Adaptación a teléfono =====
+           Sin esto, en móvil hay que recorrer 4 tarjetas de configuración antes
+           de llegar a los comercios, y la tabla obliga a scroll horizontal. */
+        @media (max-width: 992px) {
+            .container { display: flex; flex-direction: column; gap: 1.25rem; margin: 1rem auto; }
+            /* Los hijos de la columna pasan a ser items del contenedor para
+               poder reordenarlos: lo operativo primero. */
+            .col-izquierda { display: contents; }
+
+            #bandeja-revision { order: 4; }
+            #salud-pagos { order: 5; }
+            #config-economica { order: 6; }
+            #config-banner { order: 7; }
+            #nueva-precuenta { order: 8; }
+            .tabla-box { order: 3; }
+
+            /* Con pagos por revisar, la bandeja y el contador van arriba del todo. */
+            .container.hay-revisiones #bandeja-revision { order: 1; }
+            .container.hay-revisiones .tabla-box { order: 2; }
+        }
+
+        @media (max-width: 768px) {
+            header.admin-header-mobile {
+                position: sticky; top: 0; z-index: 50;
+                padding: 0.65rem 0.9rem !important;
+            }
+            header.admin-header-mobile h1 { font-size: 1.1rem; }
+            .admin-nav-rapida {
+                display: flex; gap: 0.4rem; overflow-x: auto;
+                -webkit-overflow-scrolling: touch; width: 100%;
+                padding-bottom: 2px; scrollbar-width: none;
+            }
+            .admin-nav-rapida::-webkit-scrollbar { display: none; }
+            .admin-nav-rapida a {
+                flex: 0 0 auto; font-size: 0.8rem; font-weight: 600;
+                padding: 6px 12px; border-radius: 999px; text-decoration: none;
+                background: #343a40; color: #fff; white-space: nowrap;
+            }
+            .admin-nav-rapida a.destacado { background: #dc3545; }
+
+            .card { padding: 1rem; }
+            .card h2 { font-size: 1.05rem; margin-bottom: 0.85rem; }
+
+            /* Objetivos táctiles cómodos y sin zoom automático en iOS. */
+            .btn-accion-tabla { padding: 9px 12px; font-size: 0.85rem; min-height: 40px; }
+            .btn-primario { padding: 0.75rem 1.2rem; min-height: 44px; }
+            .form-group input, .form-group select,
+            .cuenta-form input, .plan-form select,
+            .bandeja-filtros a, .busqueda-admin input, .busqueda-admin button {
+                font-size: 16px; min-height: 40px;
+            }
+            .acciones-comercio { gap: 6px; }
+            .acciones-comercio form { flex: 1 1 auto; }
+            .acciones-comercio .btn-accion-tabla { width: 100%; }
+
+            /* Tabla de comercios -> tarjetas apiladas (sin scroll horizontal). */
+            .tabla-responsive { overflow-x: visible; }
+            .tabla-responsive table { min-width: 0; }
+            .tabla-responsive thead { display: none; }
+            .tabla-responsive tbody tr {
+                display: block; background: #fff; border: 1px solid #e1e4e8;
+                border-radius: 10px; margin-bottom: 0.75rem; overflow: hidden;
+            }
+            .tabla-responsive tbody tr:nth-child(even) { background: #fff; }
+            .tabla-responsive td {
+                display: flex; align-items: flex-start; gap: 0.75rem;
+                padding: 0.5rem 0.75rem; border-bottom: 1px dashed #eef0f2;
+                font-size: 0.9rem;
+            }
+            .tabla-responsive td:last-child { border-bottom: none; }
+            .tabla-responsive td::before {
+                content: attr(data-etiqueta); flex: 0 0 34%;
+                font-size: 0.72rem; font-weight: 700; color: #6c757d;
+                text-transform: uppercase; letter-spacing: 0.02em; padding-top: 2px;
+            }
+            .tabla-responsive td[data-etiqueta=""]::before { content: none; }
+            .tabla-responsive td[data-etiqueta="Acciones"] { flex-direction: column; }
+            .tabla-responsive td[data-etiqueta="Acciones"]::before { padding-bottom: 4px; }
+            .tabla-responsive td[data-etiqueta="Acciones"] > * { width: 100%; }
+        }
         .card {
             background: white; padding: 1.5rem; border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.05); border: 1px solid #e1e4e8;
@@ -116,6 +199,17 @@
 
     <header class="admin-header-mobile">
         <h1>Localis | Panel Admin</h1>
+        <!-- Accesos rápidos: en el teléfono evitan scrollear todo el panel. -->
+        <nav class="admin-nav-rapida">
+            <a href="#bandeja-revision"
+               class="{{ 'destacado' if revisiones_pendientes else '' }}">
+                Revisión{% if revisiones_pendientes %} ({{ revisiones_pendientes }}){% endif %}
+            </a>
+            <a href="#control-comercios">Comercios</a>
+            <a href="#salud-pagos">Salud de pagos</a>
+            <a href="{{ url_for('admin.admin_usuarios') }}">Usuarios</a>
+            <a href="{{ url_for('index') }}">Ver sitio</a>
+        </nav>
         <div class="nav-links admin-nav-mobile">
             <a href="{{ url_for('admin.admin_usuarios') }}">Usuarios</a>
             <a href="https://wa.me/584125970507" target="_blank" class="wa-link">WhatsApp Soporte</a>
@@ -138,10 +232,10 @@
       {% endif %}
     {% endwith %}
 
-    <div class="container">
+    <div class="container{{ ' hay-revisiones' if revisiones_pendientes else '' }}">
         <div class="col-izquierda">
 
-            <aside class="card">
+            <aside class="card" id="config-economica">
                 <h2>Configuración Económica</h2>
                 <form action="{{ url_for('admin.actualizar_tasa') }}" method="POST">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -153,7 +247,7 @@
                 </form>
             </aside>
 
-            <aside class="card">
+            <aside class="card" id="config-banner">
                 <h2>Banner sección destacada (barra naranja)</h2>
                 <p style="font-size: 0.85rem; color: #666; margin-bottom: 1rem;">Esta imagen aparece en la franja promocional naranja del inicio público. Se guarda en el servidor.</p>
                 <img src="{{ banner_url }}" alt="Banner actual" class="banner-preview" onerror="this.onerror=null;this.src='{{ hero_local }}'">
@@ -167,7 +261,7 @@
                 </form>
             </aside>
 
-            <aside class="card">
+            <aside class="card" id="nueva-precuenta">
                 <h2>Nueva pre-cuenta</h2>
                 <p style="font-size:0.85rem;color:#666;margin-bottom:1rem;">
                     Crea una tienda <strong>sin dueño</strong> y arma su catálogo.
@@ -338,7 +432,7 @@
             </aside>
         </div>
 
-        <main class="tabla-box">
+        <main class="tabla-box" id="control-comercios">
             <div style="padding: 1.5rem; border-bottom: 1px solid #e1e4e8;">
                 <h2 style="font-size:1.3rem;">Control de Comercios</h2>
                 <!-- RESTAURAR_PAGOS_INICIO -->
@@ -377,8 +471,8 @@
                     <tbody>
                         {% for comercio in comercios %}
                         <tr>
-                            <td>{{ comercio.id }}</td>
-                            <td>
+                            <td data-etiqueta="ID">{{ comercio.id }}</td>
+                            <td data-etiqueta="Comercio">
                                 <a href="{{ url_for('admin.admin_comercio_detalle', comercio_id=comercio.id) }}"
                                    style="color:#0d6efd;font-weight:700;text-decoration:none;">
                                     {{ comercio.nombre }}
@@ -396,7 +490,7 @@
                                     onclick="var b=this,c=b.getAttribute('data-codigo');if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(c);}b.textContent='¡Copiado!';setTimeout(function(){b.textContent='Copiar';},1200);">Copiar</button>
                                 {% endif %}
                             </td>
-                            <td>
+                            <td data-etiqueta="Dueño / Doc.">
                                 {% if comercio.correo_dueno %}
                                     <small>{{ comercio.correo_dueno }}</small>
                                 {% elif comercio.owner_email %}
@@ -407,24 +501,24 @@
                                 {% endif %}
                                 <br><small>{{ comercio.documento_identidad or '' }}</small>
                             </td>
-                            <td>{{ comercio.categoria or '—' }}</td>
+                            <td data-etiqueta="Categoría">{{ comercio.categoria or '—' }}</td>
                             <!-- RESTAURAR_PAGOS_INICIO -->
                             {% if not pagos_congelados %}
-                            <td>
+                            <td data-etiqueta="Plan / Pago">
                                 <span class="badge badge-{{ comercio.estado_pago or 'gratis' }}">{{ comercio.plan_nombre or comercio.plan_tipo or 'gratis' }}</span>
                                 <br><small>Pago: {{ comercio.estado_pago or 'gratis' }}</small>
                             </td>
-                            <td><small>{{ comercio.fecha_vencimiento|fecha_corta }}</small></td>
+                            <td data-etiqueta="Vencimiento"><small>{{ comercio.fecha_vencimiento|fecha_corta }}</small></td>
                             {% endif %}
                             <!-- RESTAURAR_PAGOS_FIN -->
-                            <td>
+                            <td data-etiqueta="Visibilidad">
                                 {% if comercio.visible == 1 %}
                                     <span class="badge badge-visible">Visible</span>
                                 {% else %}
                                     <span class="badge badge-oculto">Oculto</span>
                                 {% endif %}
                             </td>
-                            <td>
+                            <td data-etiqueta="Acciones">
                                 <div class="acciones-comercio">
                                 <a href="{{ url_for('admin.admin_comercio_detalle', comercio_id=comercio.id) }}"
                                    class="btn-accion-tabla btn-resolver"
@@ -489,7 +583,7 @@
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="8" style="text-align:center;padding:2rem;color:#666;">No hay comercios registrados.</td>
+                            <td data-etiqueta="" colspan="8" style="text-align:center;padding:2rem;color:#666;">No hay comercios registrados.</td>
                         </tr>
                         {% endfor %}
                     </tbody>
