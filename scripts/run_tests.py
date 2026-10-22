@@ -45,6 +45,7 @@ SIN_RED = [
     'test_boost_referencias.py',
     'test_verificacion_pagos.py',
     'test_compresion.py',
+    'test_xlsx_reconocimiento.py',
     'test_backfill_lazy.py',
     'test_backup_utilidades.py',
     'test_cache.py',

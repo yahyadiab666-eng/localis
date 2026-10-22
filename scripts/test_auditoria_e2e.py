@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 import sys
 import time
+import unicodedata
 import uuid
 from pathlib import Path
 
@@ -357,10 +358,16 @@ def _probar_sandbox_comercio(cliente, errores):
         html_panel = panel.get_data(as_text=True)
         _ok(PREFIJO in html_panel or 'Tus Artículos' in html_panel, 'panel del comercio carga', errores)
         _ok('aviso-csv-imagenes' in html_panel, 'disclaimer CSV visible en el panel', errores)
+        _panel_norm = unicodedata.normalize('NFKD', html_panel.lower())
+        _panel_norm = ''.join(c for c in _panel_norm if not unicodedata.combining(c))
         _ok(
-            'asociación automática de imágenes' in html_panel.lower()
-            or 'asociacion automatica de imagenes' in html_panel.lower(),
-            'texto de advertencia CSV presente',
+            'imagenes automaticas' in _panel_norm,
+            'aviso de imágenes automáticas presente',
+            errores,
+        )
+        _ok(
+            'aviso-csv-precios' in html_panel and 'precio de venta' in _panel_norm,
+            'aviso de precio de venta (no de costo) presente',
             errores,
         )
 

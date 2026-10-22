@@ -267,10 +267,24 @@ def detectar_mapeo_columnas(encabezados):
     return mapeo, meta, None
 
 
+_RE_EXTENSION = re.compile(r'\.(csv|xlsx|xls)(?=$|[\s(])', re.IGNORECASE)
+_EXTENSIONES_VALIDAS = ('csv', 'xlsx', 'xls')
+
+
 def _extension_archivo(archivo):
-    if not archivo or not getattr(archivo, 'filename', ''):
+    """Extensión normalizada del archivo subido.
+
+    Tolera lo que rompía el reconocimiento en la práctica: espacios al final
+    (``inventario.xlsx ``), mayúsculas (``INVENTARIO.XLSX``) y sufijos de copia
+    que agregan el navegador o el sistema (``inventario.xlsx (1)``).
+    """
+    nombre = str(getattr(archivo, 'filename', '') or '').strip()
+    if not nombre:
         return None
-    return archivo.filename.rsplit('.', 1)[-1].lower()
+    coincidencia = _RE_EXTENSION.search(nombre)
+    if coincidencia:
+        return coincidencia.group(1).lower()
+    return nombre.rsplit('.', 1)[-1].strip().lower()
 
 
 def recortar_mensaje_importacion(mensaje):
