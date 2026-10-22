@@ -20,6 +20,12 @@ La búsqueda se limita a los últimos ``LOCALIS_BINANCE_VENTANA_DIAS`` días (3 
 defecto, frente a 1 día máximo exigido al comprobante) y pagina por tramos si
 una ventana viene llena (límite de 100 movimientos por respuesta), para no
 rechazar una orden legítima que quedó fuera de la primera página.
+
+Toda la operación tiene un **presupuesto de tiempo** duro
+(``LOCALIS_BINANCE_PRESUPUESTO_SEG``, 20 s por defecto). Si se agota, se
+devuelve ``None`` (no verificado → revisión manual) en lugar de seguir
+esperando: sin ese tope, el peor caso podía encadenar 13 peticiones de 12 s
+(156 s) y superar el timeout de Gunicorn, matando el worker a mitad de un pago.
 """
 
 from __future__ import annotations
@@ -41,6 +47,16 @@ _API_BASE = os.environ.get(
 ).rstrip('/')
 _TIMEOUT = 12
 
+# PRESUPUESTO DE TIEMPO (crítico).
+# Sin límite, la búsqueda podía hacer 1 + _MAX_SLICES peticiones de 12 s cada
+# una = 156 s, muy por encima del timeout de Gunicorn (120 s). Si la API de
+# Binance no falla pero se cuelga, el worker moría a mitad de un pago y el
+# comerciante se quedaba sin saber si había pagado. Ahora toda la operación
+# tiene un tope duro y, al agotarse, se responde "no verificado" (el pago sigue
+# a revisión manual) en vez de seguir esperando.
+_PRESUPUESTO_SEG = 20.0
+_TIMEOUT_MAX_PETICION = 8.0
+
 # La captura del comprobante se valida con fecha máxima de 1 día
 # (LOCALIS_COMPROBANTE_MAX_DIAS), así que 3 días de margen cubren cualquier
 # desfase de reloj/zona horaria. Cada ventana pide como máximo 100 movimientos.
@@ -55,6 +71,14 @@ _MAX_SLICES = 12
 MONEDA_ESPERADA = 'USDT'
 _TOLERANCIA_USD_ABS = 0.02
 _TOLERANCIA_USD_REL = 0.01
+
+
+def _presupuesto_segundos():
+    """Tope de tiempo para toda la verificación de una orden."""
+    try:
+        return max(1.0, float(os.environ.get('LOCALIS_BINANCE_PRESUPUESTO_SEG') or _PRESUPUESTO_SEG))
+    except (TypeError, ValueError):
+        return _PRESUPUESTO_SEG
 
 
 def _dias_ventana():
@@ -78,7 +102,7 @@ def _firmar(query, secret):
     ).hexdigest()
 
 
-def _get_firmado(path, params):
+def _get_firmado(path, params, timeout=None):
     key = (os.environ.get('LOCALIS_BINANCE_API_KEY') or '').strip()
     secret = (os.environ.get('LOCALIS_BINANCE_API_SECRET') or '').strip()
     datos = dict(params or {})
@@ -87,7 +111,8 @@ def _get_firmado(path, params):
     query = urllib.parse.urlencode(datos)
     url = f'{_API_BASE}{path}?{query}&signature={_firmar(query, secret)}'
     peticion = urllib.request.Request(url, headers={'X-MBX-APIKEY': key})
-    with urllib.request.urlopen(peticion, timeout=_TIMEOUT) as respuesta:
+    espera = _TIMEOUT if timeout is None else max(0.5, min(float(timeout), _TIMEOUT))
+    with urllib.request.urlopen(peticion, timeout=espera) as respuesta:
         return json.loads(respuesta.read().decode('utf-8'))
 
 
@@ -128,8 +153,15 @@ def _moneda_tx(tx):
     return None
 
 
-def _consultar_ventana(desde_ms, hasta_ms):
-    """Movimientos de Binance Pay en el rango (máx. 100 por respuesta)."""
+def _consultar_ventana(desde_ms, hasta_ms, presupuesto_restante=None):
+    """Movimientos de Binance Pay en el rango (máx. 100 por respuesta).
+
+    ``presupuesto_restante`` recorta el timeout de la petición para que una
+    sola llamada no se coma el presupuesto total de la verificación.
+    """
+    timeout = None
+    if presupuesto_restante is not None:
+        timeout = min(_TIMEOUT_MAX_PETICION, max(0.5, float(presupuesto_restante)))
     data = _get_firmado(
         '/sapi/v1/pay/transactions',
         {
@@ -137,6 +169,7 @@ def _consultar_ventana(desde_ms, hasta_ms):
             'endTime': int(hasta_ms),
             'limit': _TAMANO_PAGINA,
         },
+        timeout=timeout,
     )
     return _extraer_transacciones(data)
 
@@ -148,13 +181,27 @@ def _primera_coincidencia(transacciones, order_id):
     return None
 
 
-def _buscar_orden(order_id, desde_ms, hasta_ms):
+def _buscar_orden(order_id, desde_ms, hasta_ms, deadline=None):
     """Devuelve (encontrada, tx, concluyente).
 
-    ``concluyente`` es False solo si la API devolvió páginas llenas en toda la
-    ventana (volumen altísimo) y no se puede afirmar que la orden no exista.
+    ``concluyente`` es False cuando no se puede afirmar que la orden no exista:
+    la API devolvió páginas llenas en toda la ventana (volumen altísimo) o se
+    agotó el presupuesto de tiempo.
+
+    ``deadline`` es un instante de ``time.monotonic()``; antes de cada petición
+    se comprueba el tiempo restante y, si no queda, se corta y se devuelve
+    inconcluyente en lugar de seguir esperando a la API.
     """
-    transacciones = _consultar_ventana(desde_ms, hasta_ms)
+    def _restante():
+        if deadline is None:
+            return None
+        return deadline - time.monotonic()
+
+    restante = _restante()
+    if restante is not None and restante <= 0:
+        return False, None, False
+
+    transacciones = _consultar_ventana(desde_ms, hasta_ms, restante)
     tx = _primera_coincidencia(transacciones, order_id)
     if tx is not None:
         return True, tx, True
@@ -162,13 +209,20 @@ def _buscar_orden(order_id, desde_ms, hasta_ms):
         return False, None, True
 
     # Página llena: puede haber truncamiento. Barrer la ventana en tramos de
-    # 12 h, de lo más reciente a lo más antiguo.
+    # 12 h, de lo más reciente a lo más antiguo, sin pasarse del presupuesto.
     fin = hasta_ms
     for _ in range(_MAX_SLICES):
         if fin <= desde_ms:
             break
+        restante = _restante()
+        if restante is not None and restante <= 0:
+            logger.warning(
+                f'{_LOG} presupuesto de tiempo agotado buscando {order_id}; '
+                'se deja a revisión manual.'
+            )
+            return False, None, False
         inicio = max(desde_ms, fin - _SLICE_MS)
-        transacciones = _consultar_ventana(inicio, fin)
+        transacciones = _consultar_ventana(inicio, fin, restante)
         tx = _primera_coincidencia(transacciones, order_id)
         if tx is not None:
             return True, tx, True
@@ -193,9 +247,13 @@ def verificar_orden_binance(order_id, monto_usd=None):
 
     hasta_ms = int(time.time() * 1000)
     desde_ms = hasta_ms - (_dias_ventana() * 24 * 60 * 60 * 1000)
+    # Tope duro: la verificación completa nunca puede superar el presupuesto.
+    deadline = time.monotonic() + _presupuesto_segundos()
 
     try:
-        encontrada, tx, concluyente = _buscar_orden(order_id, desde_ms, hasta_ms)
+        encontrada, tx, concluyente = _buscar_orden(
+            order_id, desde_ms, hasta_ms, deadline
+        )
         if not encontrada:
             if concluyente:
                 logger.warning(
@@ -205,7 +263,7 @@ def verificar_orden_binance(order_id, monto_usd=None):
                 return False
             logger.warning(
                 f'{_LOG} no se pudo confirmar {order_id} (volumen alto en la '
-                f'ventana); se deja a revisión manual.'
+                f'ventana o presupuesto agotado); se deja a revisión manual.'
             )
             return None
 
