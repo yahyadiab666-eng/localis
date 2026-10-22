@@ -17,7 +17,19 @@ python init_db.py                      # crea/migra esquema (idempotente, aditiv
 python scripts/test_<nombre>.py         # "tests" (ver abajo)
 ```
 
-No hay CI, linter ni typecheck configurados. No inventes `pytest`/`ruff`/`npm run build`.
+Sí hay CI y linter, y **fallan el build si no pasan**:
+
+```bash
+ruff check .                             # lint (ruff.toml: solo E9+F; el CI lo corre ANTES de los tests)
+python scripts/run_tests.py --solo-sin-red   # lo mismo que ejecuta el CI
+```
+
+`.github/workflows/ci.yml` corre en cada push/PR dos trabajos: *«Compilar + pruebas
+sin red»* (instala `requirements-dev.txt`, `ruff check .`, luego el runner) e
+*«Integración (PostgreSQL efímero)»* (`python scripts/run_tests.py` completo con
+un Postgres de servicio). **Corre `ruff check .` antes de commitear**: el lint va
+primero, así que un error de lint tumba el CI en segundos sin llegar a los tests.
+Sigue sin haber `pytest`: los "tests" son los `scripts/test_*.py`.
 
 ## Base de datos (gotchas reales)
 
