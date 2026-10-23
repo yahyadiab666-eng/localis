@@ -2,7 +2,7 @@
    Estilos aislados con prefijo .asistente- para no depender de Tailwind.
    Discreto: botón circular pequeño abajo a la derecha y z-index bajo, de modo
    que no tapa contenido ni modales (el modal de producto usa z-index 100 y el
-   drawer de comercio 400). */
+   drawer de comercio 400). En el teléfono el panel se abre a pantalla completa. */
 
 .asistente-widget {
   position: fixed;
@@ -26,6 +26,7 @@
   opacity: 0.9;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
   transition: opacity 0.15s ease, transform 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
 }
 .asistente-burbuja:hover { opacity: 1; transform: translateY(-2px); }
 .asistente-burbuja:active { transform: translateY(0); }
@@ -38,7 +39,7 @@
   width: 360px;
   max-width: calc(100vw - 24px);
   height: 520px;
-  max-height: calc(100vh - 120px);
+  max-height: calc(100dvh - 120px);
   display: flex;
   flex-direction: column;
   background: #ffffff;
@@ -57,8 +58,9 @@
   padding: 12px 14px;
   background: #1c1917;
   color: #fafaf9;
+  flex: 0 0 auto;
 }
-.asistente-panel__titulo { display: flex; align-items: center; gap: 10px; }
+.asistente-panel__titulo { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .asistente-panel__titulo strong { display: block; font-size: 15px; }
 .asistente-panel__titulo small { display: block; font-size: 11px; opacity: 0.7; }
 .asistente-panel__punto {
@@ -68,7 +70,9 @@
 }
 .asistente-panel__cerrar {
   background: transparent; border: none; color: #fafaf9;
-  cursor: pointer; padding: 4px; border-radius: 8px; line-height: 0;
+  cursor: pointer; padding: 8px; border-radius: 8px; line-height: 0;
+  min-width: 40px; min-height: 40px;
+  display: inline-flex; align-items: center; justify-content: center;
 }
 .asistente-panel__cerrar:hover { background: rgba(255, 255, 255, 0.12); }
 .asistente-panel__cerrar svg { width: 18px; height: 18px; }
@@ -76,6 +80,8 @@
 .asistente-mensajes {
   flex: 1 1 auto;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 14px;
   display: flex;
   flex-direction: column;
@@ -84,10 +90,10 @@
 }
 
 .asistente-msg {
-  max-width: 85%;
+  max-width: 86%;
   padding: 10px 12px;
   border-radius: 14px;
-  font-size: 14px;
+  font-size: 14.5px;
   line-height: 1.45;
   white-space: pre-wrap;
   word-wrap: break-word;
@@ -111,7 +117,7 @@
   background: #fef2f2;
   border: 1px solid #fecaca;
   color: #991b1b;
-  font-size: 13px;
+  font-size: 13.5px;
 }
 
 .asistente-escribiendo { display: inline-flex; gap: 4px; align-items: center; }
@@ -126,24 +132,6 @@
   40% { opacity: 1; transform: translateY(-3px); }
 }
 
-.asistente-sugerencias {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 0 14px 10px;
-  background: #fefbf6;
-}
-.asistente-sugerencia {
-  border: 1px solid #e7e5e4;
-  background: #ffffff;
-  color: #44403c;
-  font-size: 12.5px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  cursor: pointer;
-}
-.asistente-sugerencia:hover { border-color: #f59e0b; color: #92400e; }
-
 .asistente-form {
   display: flex;
   align-items: flex-end;
@@ -151,6 +139,7 @@
   padding: 10px 12px;
   border-top: 1px solid #e7e5e4;
   background: #ffffff;
+  flex: 0 0 auto;
 }
 .asistente-form__sr {
   position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
@@ -161,28 +150,32 @@
   max-height: 120px;
   border: 1px solid #d6d3d1;
   border-radius: 12px;
-  padding: 9px 11px;
+  padding: 11px 12px;
   font: inherit;
-  font-size: 14px;
+  /* 16px evita el zoom automatico de iOS al enfocar. */
+  font-size: 16px;
+  line-height: 1.35;
   color: #292524;
   outline: none;
 }
 .asistente-form__entrada:focus { border-color: #f59e0b; }
 .asistente-form__enviar {
   flex: 0 0 auto;
-  width: 42px; height: 42px;
+  width: 46px; height: 46px;
   border: none; border-radius: 12px;
   background: #1c1917; color: #fafaf9;
   cursor: pointer; display: inline-flex;
   align-items: center; justify-content: center;
+  -webkit-tap-highlight-color: transparent;
 }
 .asistente-form__enviar:disabled { opacity: 0.5; cursor: default; }
 .asistente-form__enviar svg { width: 18px; height: 18px; }
 
 .asistente-panel__pie {
-  padding: 8px 12px 12px;
+  padding: 8px 12px calc(12px + env(safe-area-inset-bottom, 0px));
   background: #ffffff;
   border-top: 1px dashed #e7e5e4;
+  flex: 0 0 auto;
 }
 .asistente-soporte {
   width: 100%;
@@ -190,14 +183,16 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 9px;
+  padding: 11px;
   border-radius: 12px;
   border: 1px solid #d6d3d1;
   background: #fafaf9;
   color: #292524;
   font-weight: 600;
-  font-size: 13.5px;
+  font-size: 14px;
   cursor: pointer;
+  min-height: 44px;
+  -webkit-tap-highlight-color: transparent;
 }
 .asistente-soporte:hover { border-color: #22c55e; color: #166534; }
 .asistente-soporte svg { width: 16px; height: 16px; }
@@ -209,19 +204,30 @@
   text-align: center;
 }
 
-@media (max-width: 480px) {
+/* ---- Telefono: el panel se abre a pantalla completa ---- */
+@media (max-width: 640px) {
   .asistente-panel {
     position: fixed;
-    right: 8px;
-    left: 8px;
-    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     width: auto;
-    height: 72vh;
-    max-height: 72vh;
+    height: 100vh;
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+    border: none;
   }
+  .asistente-panel__cabecera {
+    padding-top: calc(12px + env(safe-area-inset-top, 0px));
+  }
+  .asistente-msg { max-width: 90%; font-size: 15px; }
   .asistente-burbuja {
-    width: 46px;
-    height: 46px;
+    width: 48px;
+    height: 48px;
     opacity: 0.85;
   }
+  /* Evita que el fondo haga scroll detras del chat abierto. */
+  body.asistente-abierto { overflow: hidden; }
 }

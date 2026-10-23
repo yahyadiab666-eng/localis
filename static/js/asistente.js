@@ -17,7 +17,6 @@
   var panel = document.getElementById('asistente-panel');
   var cerrar = document.getElementById('asistente-cerrar');
   var lista = document.getElementById('asistente-mensajes');
-  var cajaSugerencias = document.getElementById('asistente-sugerencias');
   var form = document.getElementById('asistente-form');
   var entrada = document.getElementById('asistente-entrada');
   var enviar = document.getElementById('asistente-enviar');
@@ -31,17 +30,10 @@
   var WHATSAPP = raiz.getAttribute('data-whatsapp') || '';
   var MAX_HISTORIAL = 8;
 
-  var SUGERENCIAS_INICIALES = {
-    cliente: ['¿Como busco un producto?', '¿Como contacto a un comercio?'],
-    invitado: ['¿Que es Localis?', '¿Como registro mi comercio?'],
-    comerciante: ['¿Como importo mi inventario?', '¿Por que mi producto no tiene foto?'],
-    admin: ['¿Como funciona la bandeja tecnica?', '¿Que estados de pago existen?']
-  };
-
   var SALUDO = {
-    cliente: 'Hola, soy el asistente de Localis. Te doy informacion y guia. ¿En que te ayudo?',
+    cliente: 'Hola, soy el asistente de Localis. Te doy informacion y guia. ¿Que necesitas?',
     invitado: 'Hola, soy el asistente de Localis. Puedo darte informacion para buscar productos o usar la plataforma.',
-    comerciante: 'Hola. Te doy informacion sobre tu tienda: inventario, imagenes, planes y mas.',
+    comerciante: 'Hola. Te doy informacion sobre tu tienda: inventario, imagenes, planes y pagos.',
     admin: 'Hola. Puedo darte informacion sobre la operacion y la bandeja tecnica.'
   };
 
@@ -57,10 +49,10 @@
   function abrir() {
     panel.hidden = false;
     burbuja.setAttribute('aria-expanded', 'true');
+    document.body.classList.add('asistente-abierto');
     if (!lista.dataset.iniciado) {
       lista.dataset.iniciado = '1';
       agregarMensaje(SALUDO[ROL] || SALUDO.invitado, 'asistente');
-      pintarSugerencias(SUGERENCIAS_INICIALES[ROL] || SUGERENCIAS_INICIALES.invitado);
     }
     entrada.focus();
   }
@@ -68,6 +60,7 @@
   function cerrarPanel() {
     panel.hidden = true;
     burbuja.setAttribute('aria-expanded', 'false');
+    document.body.classList.remove('asistente-abierto');
     burbuja.focus();
   }
 
@@ -78,22 +71,6 @@
     lista.appendChild(div);
     lista.scrollTop = lista.scrollHeight;
     return div;
-  }
-
-  function pintarSugerencias(sugerencias) {
-    cajaSugerencias.innerHTML = '';
-    if (!sugerencias || !sugerencias.length) return;
-    sugerencias.slice(0, 4).forEach(function (texto) {
-      var boton = document.createElement('button');
-      boton.type = 'button';
-      boton.className = 'asistente-sugerencia';
-      boton.textContent = texto;
-      boton.addEventListener('click', function () {
-        entrada.value = texto;
-        enviarMensaje();
-      });
-      cajaSugerencias.appendChild(boton);
-    });
   }
 
   function mostrarEscribiendo() {
@@ -124,7 +101,6 @@
     agregarMensaje(texto, 'usuario');
     entrada.value = '';
     autoAlto();
-    cajaSugerencias.innerHTML = '';
     bloquear(true);
     mostrarEscribiendo();
 
@@ -147,7 +123,6 @@
         datos = datos || {};
         if (datos.ok && datos.respuesta) {
           agregarMensaje(datos.respuesta, 'asistente');
-          pintarSugerencias(datos.sugerencias);
           historial.push({ autor: 'usuario', contenido: texto });
           historial.push({ autor: 'asistente', contenido: datos.respuesta });
           historial = historial.slice(-MAX_HISTORIAL);
