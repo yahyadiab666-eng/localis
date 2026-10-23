@@ -1,5 +1,15 @@
 apply plugin: 'com.android.application'
 
+// Firma del APK/AAB de release. Las credenciales NO se versionan: se leen de
+// android/keystore.properties (ignorado por git; hay plantilla en
+// android/keystore.properties.example). Si ese fichero no existe, el build de
+// release queda sin firmar, exactamente igual que antes.
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 android {
     namespace "com.onrender.localis.twa"
     compileSdk rootProject.ext.compileSdkVersion
@@ -7,8 +17,9 @@ android {
         applicationId "com.onrender.localis.twa"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // Súbelo en CADA subida a Google Play: Play rechaza repetir versionCode.
+        versionCode 2
+        versionName "1.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +27,26 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Sin keystore.properties no se declara la firma: la configuración queda
+    // igual que antes de este cambio.
+    if (keystorePropertiesFile.exists()) {
+        signingConfigs {
+            release {
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Se firma solo si existe keystore.properties; si no, igual que antes.
+            if (keystorePropertiesFile.exists()) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }
