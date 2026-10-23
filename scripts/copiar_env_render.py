@@ -161,22 +161,13 @@ def main():
             print('\nPara copiar: --desde <origen> --hacia <destino> [--apply]')
         return 0
 
-    if not args.hacia:
-        print('Falta --hacia (servicio destino).')
-        return 2
-
     servicios = listar_servicios(cabeceras)
     origen = _resolver(servicios, args.desde)
-    destino = _resolver(servicios, args.hacia)
     if not origen:
         print(f'No encontrado el servicio origen: {args.desde}')
         return 2
-    if not destino:
-        print(f'No encontrado el servicio destino: {args.hacia}')
-        return 2
 
     print(f"Origen : {origen['name']} (region={origen['region']}, id={origen['id']})")
-    print(f"Destino: {destino['name']} (region={destino['region']}, id={destino['id']})")
 
     variables = leer_env(cabeceras, origen['id'])
     print(f'\nVariables en el origen: {len(variables)}')
@@ -192,6 +183,20 @@ def main():
             json.dump(variables, fichero, ensure_ascii=False, indent=2)
         print(f'\nExportadas {len(variables)} variables a {args.export}')
         print('OJO: ese fichero tiene SECRETOS. Guárdalo fuera del repo y bórralo al terminar.')
+
+    if not args.hacia:
+        print(
+            '\nFalta --hacia (servicio destino) para copiarlas directamente.'
+            if not args.export
+            else '\nYa están guardadas: crea el servicio nuevo y usa --import.'
+        )
+        return 0 if args.export else 2
+
+    destino = _resolver(servicios, args.hacia)
+    if not destino:
+        print(f'No encontrado el servicio destino: {args.hacia}')
+        return 2
+    print(f"Destino: {destino['name']} (region={destino['region']}, id={destino['id']})")
 
     if not args.apply:
         print(f'\nDRY-RUN: se copiarían {len(variables)} variables al destino.')
