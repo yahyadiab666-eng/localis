@@ -172,8 +172,14 @@ def _bucle_trabajador():
 def _ejecutar_job(job_id):
     with _jobs_lock:
         job = _jobs.get(job_id)
-        if not job:
-            return
+    if not job:
+        # Otro worker lo encoló: el estado está en la base de datos.
+        job = _job_leer(job_id)
+    if not job:
+        _log(f'job={job_id} no encontrado (ni en memoria ni en BD)')
+        return
+    with _jobs_lock:
+        _jobs[job_id] = job
         job['estado'] = 'procesando'
         job['mensaje'] = 'Procesando catálogo…'
         job['actualizado'] = time.time()
@@ -214,37 +220,58 @@ def _ejecutar_job(job_id):
 
 
 def _finalizar_job(job_id, *, exito, mensaje, meta=None, duracion=None):
+    meta_limpio = _serializar_meta(meta)
+    estado = 'error' if not exito else 'completado'
+    # El éxito "real" solo cuando todas las imágenes son reales; si quedan
+    # pendientes, el trabajo se reporta como PARCIAL (sin falsos positivos).
+    if exito and meta_limpio.get('estado_imagenes') in ('parcial', 'sin_reales'):
+        estado = 'parcial'
+    duracion_redondeada = round(duracion, 2) if duracion is not None else None
+    mensaje_corto = str(mensaje or '')[:1400]
+    # El estado compartido va PRIMERO: así, en cuanto alguien ve el estado final
+    # (aunque sea desde otro worker), la base de datos ya lo refleja.
+    _job_actualizar(
+        job_id,
+        estado=estado,
+        exito=bool(exito),
+        mensaje=mensaje_corto,
+        meta=meta_limpio,
+        duracion=duracion_redondeada,
+        ruta=None,
+        actualizado=time.time(),
+    )
     with _jobs_lock:
         job = _jobs.get(job_id)
-        if not job:
-            return
-        meta_limpio = _serializar_meta(meta)
-        estado = 'error' if not exito else 'completado'
-        # El éxito "real" solo cuando todas las imágenes son reales; si quedan
-        # pendientes, el trabajo se reporta como PARCIAL (sin falsos positivos).
-        if exito and meta_limpio.get('estado_imagenes') in ('parcial', 'sin_reales'):
-            estado = 'parcial'
-        job['estado'] = estado
-        job['exito'] = bool(exito)
-        job['mensaje'] = str(mensaje or '')[:1400]
-        job['meta'] = meta_limpio
-        job['duracion'] = round(duracion, 2) if duracion is not None else None
-        job['actualizado'] = time.time()
-        job.pop('ruta', None)
-        job.pop('data', None)  # liberar memoria
+        if job:
+            job['estado'] = estado
+            job['exito'] = bool(exito)
+            job['mensaje'] = mensaje_corto
+            job['meta'] = meta_limpio
+            job['duracion'] = duracion_redondeada
+            job['actualizado'] = time.time()
+            job.pop('ruta', None)
+            job.pop('data', None)  # liberar memoria
 
 
 def _marcar_error(job_id, mensaje):
+    mensaje_corto = str(mensaje or 'Error al procesar el catálogo.')[:1400]
+    _job_actualizar(
+        job_id,
+        estado='error',
+        exito=False,
+        mensaje=mensaje_corto,
+        ruta=None,
+        actualizado=time.time(),
+    )
     with _jobs_lock:
         job = _jobs.get(job_id)
-        if not job:
-            return
-        job['estado'] = 'error'
-        job['exito'] = False
-        job['mensaje'] = str(mensaje or 'Error al procesar el catálogo.')[:1400]
-        job['actualizado'] = time.time()
-        job.pop('ruta', None)
-        job.pop('data', None)
+        if job:
+            job['estado'] = 'error'
+            job['exito'] = False
+            job['mensaje'] = mensaje_corto
+            job['actualizado'] = time.time()
+            job.pop('ruta', None)
+            job.pop('data', None)
 
 
 def _serializar_meta(meta):
@@ -257,8 +284,203 @@ def _serializar_meta(meta):
     return limpio
 
 
+def _meta_a_texto(meta):
+    import json
+
+    try:
+        return json.dumps(meta or {}, ensure_ascii=False)
+    except Exception:
+        return '{}'
+
+
+def _meta_desde_texto(texto):
+    import json
+
+    try:
+        valor = json.loads(texto or '{}')
+        return valor if isinstance(valor, dict) else {}
+    except Exception:
+        return {}
+
+
+def _job_guardar(job):
+    """Persiste el job (best-effort). Nunca lanza: si falla, queda solo en memoria."""
+    try:
+        from backend.db import get_db_connection
+
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                INSERT INTO import_jobs (
+                    job_id, comercio_id, usuario_id, filename, estado,
+                    exito, mensaje, meta, duracion, ruta, creado, actualizado
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (job_id) DO UPDATE SET
+                    estado = EXCLUDED.estado,
+                    exito = EXCLUDED.exito,
+                    mensaje = EXCLUDED.mensaje,
+                    meta = EXCLUDED.meta,
+                    duracion = EXCLUDED.duracion,
+                    ruta = EXCLUDED.ruta,
+                    actualizado = EXCLUDED.actualizado
+                """,
+                (
+                    job['job_id'],
+                    job.get('comercio_id'),
+                    job.get('usuario_id'),
+                    job.get('filename'),
+                    job.get('estado') or 'encolado',
+                    job.get('exito'),
+                    job.get('mensaje'),
+                    _meta_a_texto(job.get('meta')),
+                    job.get('duracion'),
+                    job.get('ruta'),
+                    job.get('creado'),
+                    job.get('actualizado'),
+                ),
+            )
+            conexion.commit()
+        return True
+    except Exception as error:
+        logger.debug(f'{_LOG} estado de job no persistido ({type(error).__name__}): {error}')
+        return False
+
+
+def _job_actualizar(job_id, **campos):
+    """Actualiza campos del job en BD (best-effort)."""
+    if not campos:
+        return False
+    columnas = []
+    valores = []
+    for clave in ('estado', 'exito', 'mensaje', 'duracion', 'ruta', 'actualizado'):
+        if clave in campos:
+            columnas.append(f'{clave} = ?')
+            valores.append(campos[clave])
+    if 'meta' in campos:
+        columnas.append('meta = ?')
+        valores.append(_meta_a_texto(campos['meta']))
+    if not columnas:
+        return False
+    valores.append(job_id)
+    try:
+        from backend.db import get_db_connection
+
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                f"UPDATE import_jobs SET {', '.join(columnas)} WHERE job_id = ?",
+                tuple(valores),
+            )
+            conexion.commit()
+        return True
+    except Exception as error:
+        logger.debug(f'{_LOG} job no actualizado ({type(error).__name__}): {error}')
+        return False
+
+
+def _job_leer(job_id):
+    """Lee el job de BD. ``None`` si no existe o si la BD no responde."""
+    try:
+        from backend.db import get_db_connection
+
+        with get_db_connection(row_factory=True) as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT job_id, comercio_id, usuario_id, filename, estado, exito,
+                       mensaje, meta, duracion, creado, actualizado
+                FROM import_jobs WHERE job_id = ?
+                """,
+                (job_id,),
+            )
+            fila = cursor.fetchone()
+        if not fila:
+            return None
+        job = dict(fila)
+        job['meta'] = _meta_desde_texto(job.get('meta'))
+        return job
+    except Exception as error:
+        logger.debug(f'{_LOG} job no leído ({type(error).__name__}): {error}')
+        return None
+
+
+def _job_borrar(job_id):
+    try:
+        from backend.db import get_db_connection
+
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute('DELETE FROM import_jobs WHERE job_id = ?', (job_id,))
+            conexion.commit()
+        return True
+    except Exception:
+        return False
+
+
+_PURGA_MIN_INTERVALO = max(30, int(os.getenv('LOCALIS_IMPORT_PURGA_SEC', '120')))
+_ultima_purga = [0.0]
+
+
+def _job_purgar():
+    """Borra en BD los jobs terminados hace rato y recorta el total.
+
+    Con freno: el polling llama aquí cada pocos segundos y un ``DELETE`` por
+    petición castigaría la base de datos sin necesidad.
+    """
+    if time.monotonic() - _ultima_purga[0] < _PURGA_MIN_INTERVALO:
+        return False
+    _ultima_purga[0] = time.monotonic()
+    try:
+        from backend.db import get_db_connection
+
+        ahora = time.time()
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                'DELETE FROM import_jobs WHERE estado IN (?, ?, ?) AND actualizado < ?',
+                ('completado', 'parcial', 'error', ahora - _JOB_TTL_SEG),
+            )
+            cursor.execute(
+                """
+                DELETE FROM import_jobs WHERE job_id IN (
+                    SELECT job_id FROM import_jobs
+                    ORDER BY actualizado ASC
+                    OFFSET ?
+                )
+                """,
+                (_MAX_JOBS,),
+            )
+            conexion.commit()
+        return True
+    except Exception:
+        return False
+
+
+def _jobs_por_estado():
+    """Conteo por estado desde BD (vacío si no hay conexión)."""
+    try:
+        from backend.db import get_db_connection
+
+        with get_db_connection(row_factory=True) as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                'SELECT estado, COUNT(*) AS n FROM import_jobs GROUP BY estado'
+            )
+            return {
+                str(fila['estado']): int(fila['n'])
+                for fila in (cursor.fetchall() or [])
+                if fila.get('estado') is not None
+            }
+    except Exception:
+        return {}
+
+
 def _limpiar_jobs_antiguos():
     ahora = time.time()
+    # También en BD (best-effort): es la fuente compartida entre workers.
+    _job_purgar()
     with _jobs_lock:
         vencidos = [
             jid
@@ -317,11 +539,14 @@ def encolar_importacion(comercio_id, filename, data, usuario_id=None):
     # (job eternamente en 'encolado'). Este orden elimina la carrera.
     with _jobs_lock:
         _jobs[job_id] = job
+    # Estado compartido: cualquier worker puede responder al polling.
+    _job_guardar(job)
     try:
         cola.put_nowait(job_id)
     except queue.Full as error:
         with _jobs_lock:
             _jobs.pop(job_id, None)
+        _job_borrar(job_id)
         _borrar_spool(ruta_spool)
         raise ColaImportacionLlena(
             'El servidor está procesando varios catálogos a la vez. '
@@ -344,41 +569,58 @@ def obtener_estado_job(job_id, *, comercio_id=None, usuario_id=None):
     _limpiar_jobs_antiguos()
     with _jobs_lock:
         job = _jobs.get(job_id)
-        if not job:
-            return None
-        if comercio_id is not None and job.get('comercio_id') != int(comercio_id):
-            return None
-        if usuario_id is not None and job.get('usuario_id') not in (None, usuario_id):
-            return None
-        return {
-            'job_id': job['job_id'],
-            'estado': job['estado'],
-            'exito': job.get('exito'),
-            'mensaje': job.get('mensaje'),
-            'meta': dict(job.get('meta') or {}),
-            'creado': job.get('creado'),
-            'actualizado': job.get('actualizado'),
-            'duracion': job.get('duracion'),
-        }
+    if not job:
+        # Con varios workers, el job puede haberlo encolado otro: se lee de BD.
+        job = _job_leer(job_id)
+    if not job:
+        return None
+    if comercio_id is not None and job.get('comercio_id') != int(comercio_id):
+        return None
+    if usuario_id is not None and job.get('usuario_id') not in (None, usuario_id):
+        return None
+    return {
+        'job_id': job.get('job_id') or job_id,
+        'estado': job.get('estado'),
+        'exito': job.get('exito'),
+        'mensaje': job.get('mensaje'),
+        'meta': dict(job.get('meta') or {}),
+        'creado': job.get('creado'),
+        'actualizado': job.get('actualizado'),
+        'duracion': job.get('duracion'),
+    }
 
 
 def estadisticas_cola():
-    """Métricas simples para /health o diagnóstico."""
+    """Métricas simples para /health o diagnóstico.
+
+    El estado vive en la base de datos (compartido entre workers); la cola y los
+    trabajadores son de este proceso.
+    """
     with _jobs_lock:
-        por_estado = {}
+        locales = {}
         for job in _jobs.values():
             estado = job.get('estado') or 'desconocido'
-            por_estado[estado] = por_estado.get(estado, 0) + 1
+            locales[estado] = locales.get(estado, 0) + 1
+    compartidos = _jobs_por_estado()
+    por_estado = compartidos or locales
     return {
         'trabajadores': _WORKERS,
         'capacidad': _QUEUE_MAX,
         'en_cola': _cola.qsize() if _cola is not None else 0,
-        'jobs': len(_jobs),
+        'jobs': sum(por_estado.values()),
         'por_estado': por_estado,
+        'en_memoria': len(_jobs),
     }
 
 
 def reiniciar_para_pruebas():
-    """Solo para tests: vacía el registro de jobs (no detiene los hilos)."""
+    """Solo para tests: vacía el registro de jobs (no detiene los hilos).
+
+    Borra de la BD **solo los jobs que este proceso tiene registrados** (los de
+    la prueba). Vaciar la tabla entera eliminaría trabajos reales de comercios.
+    """
     with _jobs_lock:
+        ids = list(_jobs.keys())
         _jobs.clear()
+    for job_id in ids:
+        _job_borrar(job_id)

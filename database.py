@@ -151,6 +151,7 @@ TABLAS_PERMITIDAS = frozenset({
     'boosts',
     'referidos',
     'canjes_puntos',
+    'import_jobs',
 })
 
 # Columnas que deben existir en tablas ya creadas (ADD COLUMN IF NOT EXISTS).
@@ -1856,6 +1857,33 @@ def _crear_tabla_interacciones_comercio(cursor):
     )
 
 
+def _crear_tabla_import_jobs(cursor):
+    """Estado de las importaciones de inventario (compartido entre workers).
+
+    Antes vivía solo en memoria del worker: con más de un proceso, el *polling*
+    podía caer en otro worker y responder "trabajo no encontrado". Persistirlo
+    permite ``WEB_CONCURRENCY > 1`` (y por tanto aprovechar más vCPU).
+    """
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS import_jobs (
+            job_id TEXT PRIMARY KEY,
+            comercio_id INTEGER,
+            usuario_id INTEGER,
+            filename TEXT,
+            estado TEXT NOT NULL,
+            exito BOOLEAN,
+            mensaje TEXT,
+            meta TEXT,
+            duracion DOUBLE PRECISION,
+            ruta TEXT,
+            creado DOUBLE PRECISION,
+            actualizado DOUBLE PRECISION
+        )
+        """
+    )
+
+
 def _crear_tabla_boosts(cursor):
     cursor.execute(
         """
@@ -1969,6 +1997,7 @@ def _crear_tablas(cursor):
         ('metricas_diarias', _crear_tabla_metricas_diarias),
         ('imagenes_automaticas', _crear_tabla_imagenes_automaticas),
         ('boosts', _crear_tabla_boosts),
+        ('import_jobs', _crear_tabla_import_jobs),
         ('referidos', _crear_tabla_referidos),
         ('canjes_puntos', _crear_tabla_canjes_puntos),
         ('contadores_publicos', _crear_tabla_contadores_publicos),
