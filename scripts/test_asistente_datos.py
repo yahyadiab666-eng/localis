@@ -94,6 +94,31 @@ def _probar_observacion():
     _ok(estado['feedback_util'] == 1, 'cuenta feedback')
 
 
+def _probar_venta():
+    print('\n=== Modo venta (planes/precios/beneficios) ===')
+    from backend.asistente import venta
+
+    _ok('MODO VENTA' in venta.MODO_VENTA, 'texto de modo venta presente')
+    _ok(venta.es_tema_comercial('¿Cuanto cuesta el plan Pro?'), 'plan -> venta')
+    _ok(venta.es_tema_comercial('Que beneficios tiene Localis?'), 'beneficios -> venta')
+    _ok(venta.es_tema_comercial('Es gratis?'), 'es gratis -> venta')
+    _ok(venta.es_tema_comercial('Quiero vender en Localis'), 'quiero vender -> venta')
+    _ok(not venta.es_tema_comercial('Cuanto cuesta la harina pan?'), 'precio de producto -> NO venta')
+    _ok(not venta.es_tema_comercial('Mi importacion fallo'), 'soporte -> NO venta')
+    _ok(not venta.es_tema_comercial('vendo plantas'), 'planta -> NO venta (limite de palabra)')
+    _ok(venta.es_tema_comercial(None) is False, 'None -> False')
+
+
+def _probar_reintento_pagos():
+    print('\n=== Reintento automatico de pagos (no lanza) ===')
+    from backend.asistente import pagos
+
+    _ok(isinstance(pagos._reintento_habilitado(), bool), 'estado del reintento es booleano')
+    pagos.reintento_oportunista()  # sin BD -> lista vacia, sin excepcion
+    _ok(True, 'reintento_oportunista no lanza sin BD')
+    _ok(pagos.asegurar_reintento_activo() is None, 'asegurar no lanza')
+
+
 def _probar_pagos():
     print('\n=== Soporte de pagos (rutas puras) ===')
     from backend.asistente import pagos
@@ -187,6 +212,8 @@ def main() -> int:
     _probar_presupuesto()
     _probar_observacion()
     _probar_pagos()
+    _probar_venta()
+    _probar_reintento_pagos()
     _probar_acciones()
 
     print('\n=== RESULTADO ===')

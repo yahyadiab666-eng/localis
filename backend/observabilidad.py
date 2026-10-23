@@ -101,6 +101,14 @@ def registrar_request_logging(app):
             asegurar_recordatorios_activos()
         except Exception:
             pass
+        # Arranca (post-fork) el reintento automatico de pagos sin verificar
+        # (solo cierra la revision si Binance ya confirma; nunca toca el dinero).
+        try:
+            from backend.asistente.pagos import asegurar_reintento_activo
+
+            asegurar_reintento_activo()
+        except Exception:
+            pass
 
     @app.after_request
     def _registrar_acceso(response):

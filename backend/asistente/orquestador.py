@@ -19,7 +19,7 @@ from config import (
     asistente_habilitado,
 )
 
-from backend.asistente import acciones, datos_vivos, pagos, presupuesto, proveedor
+from backend.asistente import acciones, datos_vivos, pagos, presupuesto, proveedor, venta
 from backend.asistente.conocimiento import contexto_para
 from backend.asistente.prompts import mensajes_para
 from backend.asistente.seguridad import redactar, sanear_entrada
@@ -172,7 +172,10 @@ def responder(usuario, mensaje, historial=None):
             }
 
     contexto = _construir_contexto(usuario, rol, texto)
-    mensajes = mensajes_para(rol, texto, contexto, _limpiar_historial(historial))
+    instruccion = venta.MODO_VENTA if venta.es_tema_comercial(texto) else None
+    mensajes = mensajes_para(
+        rol, texto, contexto, _limpiar_historial(historial), instruccion
+    )
 
     with cupo_disponible() as cupo:
         if not cupo:

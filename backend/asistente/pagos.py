@@ -25,7 +25,10 @@ Reutiliza la logica ya probada del proyecto (``verificar_orden_binance``,
 from __future__ import annotations
 
 import logging
+import os
 import secrets
+import threading
+import time
 
 from backend.asistente.acciones import habilitado
 
@@ -220,17 +223,15 @@ def proponer(comercio_id, texto):
         return None
 
 
-def reverificar(usuario_id, comercio_id):
-    """Revalidacion acotada. Devuelve ``(ok, mensaje)``. Nunca cambia el plan."""
-    if not habilitado():
-        return False, 'Las acciones no estan disponibles en este momento.'
-    if not usuario_id or not comercio_id:
-        return False, 'Necesitas iniciar sesion como comerciante.'
-    revision = _revision_reverificable(comercio_id)
-    if not revision:
-        return False, 'No encontre un pago de Binance pendiente de revisar.'
+def _reverificar_revision(comercio_id, revision, usuario_id=None):
+    """Revalida ESA revision en Binance y, si se confirma, cierra el ticket.
 
+    NO toca el plan, el vencimiento ni el monto: el pago ya se activo con el OCR.
+    Devuelve ``(ok, mensaje)``. Nunca lanza.
+    """
     referencia = str(revision.get('referencia_pago') or '').strip()
+    if not referencia:
+        return False, 'La revision no tiene referencia.'
     monto = _monto_esperado(comercio_id, revision)
 
     try:
@@ -252,8 +253,6 @@ def reverificar(usuario_id, comercio_id):
             'escribenos por WhatsApp con el boton "Escribir a soporte".'
         )
 
-    # Confirmado: solo se cierra la revision del PROPIO comercio. El plan ya
-    # estaba activo; aqui no se toca nada de dinero.
     try:
         from backend.db import get_db_connection
 
@@ -261,8 +260,8 @@ def reverificar(usuario_id, comercio_id):
             cursor = conexion.cursor()
             cursor.execute(
                 "UPDATE soporte_y_reportes SET estado = 'resuelto', "
-                "mensaje = COALESCE(mensaje, '') || ' | Revalidado por el asistente: "
-                "orden confirmada en Binance.' "
+                "mensaje = COALESCE(mensaje, '') || ' | Revalidado: orden confirmada "
+                "en Binance.' "
                 "WHERE id = ? AND tipo = ? AND estado = 'pendiente' AND referencia_id = ?",
                 (int(revision.get('id')), TIPO_REVISION, int(comercio_id)),
             )
@@ -274,15 +273,134 @@ def reverificar(usuario_id, comercio_id):
 
     if cambiadas <= 0:
         return False, 'La revision ya estaba cerrada.'
+    if usuario_id:
+        try:
+            from backend.asistente.acciones import _auditar
 
-    try:
-        from backend.asistente.acciones import _auditar
-
-        _auditar(usuario_id, 'pago_reverificar', f'revision={revision.get("id")} ref={referencia}')
-    except Exception:
-        pass
-
+            _auditar(
+                usuario_id,
+                'pago_reverificar',
+                f'revision={revision.get("id")} ref={referencia}',
+            )
+        except Exception:
+            pass
     return True, (
         f'Confirmado: Binance ya tiene la orden «{referencia}». Cerre la revision y '
         f'tu pago quedo verificado.'
     )
+
+
+def reverificar(usuario_id, comercio_id):
+    """Revalidacion pedida por el comerciante. Nunca cambia el plan."""
+    if not habilitado():
+        return False, 'Las acciones no estan disponibles en este momento.'
+    if not usuario_id or not comercio_id:
+        return False, 'Necesitas iniciar sesion como comerciante.'
+    revision = _revision_reverificable(comercio_id)
+    if not revision:
+        return False, 'No encontre un pago de Binance pendiente de revisar.'
+    return _reverificar_revision(comercio_id, revision, usuario_id=usuario_id)
+
+
+# ==========================================================
+# Reintento automatico en segundo plano (sin humanos)
+# ==========================================================
+# Revalida SOLO las revisiones de Binance que quedaron "sin verificar" por un
+# fallo transitorio de la API. Cierra el ticket si ahora se confirma. Nunca toca
+# dinero. Acotado: N por ciclo y cada _REINTENTO_SEG segundos.
+_REINTENTO_SEG = max(120, int(os.environ.get('LOCALIS_PAGOS_REINTENTO_SEG', '900') or 900))
+_REINTENTO_LOTE = max(1, min(5, int(os.environ.get('LOCALIS_PAGOS_REINTENTO_LOTE', '1') or 1)))
+_ultimo_reintento = 0.0
+_reintento_iniciado = False
+_reintento_lock = threading.Lock()
+_ultimo_arranque = 0.0
+
+
+def _reintento_habilitado():
+    valor = str(os.environ.get('LOCALIS_PAGOS_REINTENTO', '1')).strip().lower()
+    return valor not in ('0', 'false', 'no', 'off')
+
+
+def _revisiones_reverificables(limite):
+    """Revisiones pendientes de Binance 'sin verificar' (cualquier comercio)."""
+    try:
+        from backend.db import get_db_connection
+
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                'SELECT r.id, r.referencia_id AS comercio_id, r.referencia_pago, '
+                'r.concepto, r.mensaje, r.fecha '
+                'FROM soporte_y_reportes r '
+                'JOIN solicitudes_pago s ON s.referencia = r.referencia_pago '
+                'AND s.comercio_id = r.referencia_id '
+                "WHERE r.tipo = ? AND r.estado = 'pendiente' AND s.verificacion = ? "
+                'ORDER BY r.fecha ASC LIMIT ?',
+                (TIPO_REVISION, VERIF_BINANCE_NO_VERIFICADO, int(limite)),
+            )
+            return [dict(f) if not isinstance(f, dict) else f for f in cursor.fetchall()]
+    except Exception as error:
+        _log.warning('no se pudieron listar revisiones para reintento: %s', error)
+        return []
+
+
+def reintento_oportunista():
+    """Revalida algunas revisiones 'sin verificar'. Acotado y sin lanzar."""
+    global _ultimo_reintento
+    if not habilitado() or not _reintento_habilitado():
+        return
+    ahora = time.time()
+    if ahora - _ultimo_reintento < _REINTENTO_SEG:
+        return
+    _ultimo_reintento = ahora
+    for revision in _revisiones_reverificables(_REINTENTO_LOTE):
+        try:
+            comercio_id = revision.get('comercio_id') or revision.get('referencia_id')
+            if comercio_id:
+                _reverificar_revision(int(comercio_id), revision)
+        except Exception as error:
+            _log.warning('reintento de pago fallo: %s', error)
+
+
+def _bucle_reintento():
+    while True:
+        try:
+            reintento_oportunista()
+        except Exception:
+            pass
+        time.sleep(_REINTENTO_SEG)
+
+
+def iniciar_reintento_periodico():
+    """Hilo daemon de reintento. Idempotente. Nunca lanza. No llamar al importar."""
+    global _reintento_iniciado
+    if not _reintento_habilitado():
+        return None
+    with _reintento_lock:
+        if _reintento_iniciado:
+            return None
+        try:
+            hilo = threading.Thread(
+                target=_bucle_reintento, name='localis-pagos-reintento', daemon=True
+            )
+            hilo.start()
+        except Exception as error:
+            _log.warning('no se pudo iniciar el reintento de pagos: %s', error)
+            return None
+        _reintento_iniciado = True
+        return hilo
+
+
+def asegurar_reintento_activo():
+    """Arranca el reintento desde el request (post-fork). Throttle 30 s."""
+    global _ultimo_arranque
+    try:
+        if _reintento_iniciado or not _reintento_habilitado():
+            return
+        ahora = time.time()
+        if ahora - _ultimo_arranque < 30:
+            return
+        _ultimo_arranque = ahora
+        iniciar_reintento_periodico()
+    except Exception:
+        pass
