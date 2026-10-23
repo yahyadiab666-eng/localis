@@ -214,6 +214,11 @@ def main():
         metavar='RUTA',
         help='configuración guardada con --export-config (permite crear sin origen vivo)',
     )
+    parser.add_argument(
+        '--set-start-command',
+        metavar='COMANDO',
+        help='cambia el comando de arranque de un servicio existente (dispara despliegue)',
+    )
     parser.add_argument('--si-borrar', action='store_true', help='confirmación explícita para borrar')
     args = parser.parse_args()
 
@@ -236,6 +241,37 @@ def main():
         r = requests.delete(f"{API}/services/{svc['id']}", headers=cabeceras, timeout=60)
         print('DELETE ->', r.status_code)
         return 0 if r.status_code in (200, 202, 204) else 1
+
+    if args.set_start_command:
+        svc = buscar(cabeceras, args.servicio)
+        if not svc:
+            print(f'No encontrado: {args.servicio}')
+            return 2
+        detalles = svc.get('serviceDetails') or {}
+        anterior = (detalles.get('envSpecificDetails') or {}).get('startCommand')
+        print(f"Servicio: {svc['name']} ({svc['id']})  region={detalles.get('region')}")
+        print(f'Start command ACTUAL : {anterior}')
+        print(f'Start command NUEVO  : {args.set_start_command}')
+        r = requests.patch(
+            f"{API}/services/{svc['id']}",
+            headers=cabeceras,
+            json={
+                'serviceDetails': {
+                    'envSpecificDetails': {'startCommand': args.set_start_command}
+                }
+            },
+            timeout=60,
+        )
+        print('PATCH ->', r.status_code)
+        if r.status_code == 200:
+            nuevo = ((r.json().get('serviceDetails') or {}).get('envSpecificDetails') or {}).get(
+                'startCommand'
+            )
+            print('Confirmado:', nuevo)
+            print('(dispara un despliegue automático)')
+        else:
+            print(r.text[:500])
+        return 0 if r.status_code == 200 else 1
 
     if args.renombrar:
         svc = buscar(cabeceras, args.nombre_nuevo)
