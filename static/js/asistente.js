@@ -32,6 +32,8 @@
   var ROL = raiz.getAttribute('data-rol') || 'invitado';
   var WHATSAPP = raiz.getAttribute('data-whatsapp') || '';
   var LOGUEADO = raiz.getAttribute('data-logueado') === '1';
+  var ACCION_OK_URL = raiz.getAttribute('data-accion-confirmar-url') || '/api/asistente/accion/confirmar';
+  var ACCION_NO_URL = raiz.getAttribute('data-accion-cancelar-url') || '/api/asistente/accion/cancelar';
   var MAX_HISTORIAL = 8;
 
   var SALUDO = {
@@ -136,6 +138,7 @@
           historial.push({ autor: 'asistente', contenido: datos.respuesta });
           historial = historial.slice(-MAX_HISTORIAL);
           if (feedback) feedback.hidden = false;
+          if (datos.accion) mostrarAccion(datos.accion);
         } else {
           agregarMensaje(
             datos.mensaje || 'No pude responder ahora mismo. Intenta de nuevo.',
@@ -156,6 +159,73 @@
   function autoAlto() {
     entrada.style.height = 'auto';
     entrada.style.height = Math.min(entrada.scrollHeight, 120) + 'px';
+  }
+
+  function mostrarAccion(accion) {
+    if (!accion || !accion.id) return;
+    var caja = document.createElement('div');
+    caja.className = 'asistente-accion';
+
+    var texto = document.createElement('div');
+    texto.className = 'asistente-accion__texto';
+    texto.textContent = accion.resumen || 'Accion pendiente de confirmar';
+
+    var botones = document.createElement('div');
+    botones.className = 'asistente-accion__botones';
+    var confirmar = document.createElement('button');
+    confirmar.type = 'button';
+    confirmar.className = 'asistente-accion__ok';
+    confirmar.textContent = 'Confirmar';
+    var cancelar = document.createElement('button');
+    cancelar.type = 'button';
+    cancelar.className = 'asistente-accion__no';
+    cancelar.textContent = 'Cancelar';
+    botones.appendChild(confirmar);
+    botones.appendChild(cancelar);
+
+    caja.appendChild(texto);
+    caja.appendChild(botones);
+    lista.appendChild(caja);
+    lista.scrollTop = lista.scrollHeight;
+
+    var bloquearBotones = function () {
+      confirmar.disabled = true;
+      cancelar.disabled = true;
+    };
+
+    confirmar.addEventListener('click', function () {
+      bloquearBotones();
+      fetch(ACCION_OK_URL, {
+        method: 'POST',
+        headers: cabeceras(),
+        body: JSON.stringify({ id: accion.id })
+      })
+        .then(function (r) {
+          return r.json().catch(function () { return {}; });
+        })
+        .then(function (datos) {
+          if (caja.parentNode) caja.parentNode.removeChild(caja);
+          agregarMensaje(
+            (datos && datos.mensaje) || 'No pude aplicar el cambio.',
+            datos && datos.ok ? 'asistente' : 'error'
+          );
+        })
+        .catch(function () {
+          if (caja.parentNode) caja.parentNode.removeChild(caja);
+          agregarMensaje('No pude aplicar el cambio. Intenta de nuevo.', 'error');
+        });
+    });
+
+    cancelar.addEventListener('click', function () {
+      bloquearBotones();
+      fetch(ACCION_NO_URL, {
+        method: 'POST',
+        headers: cabeceras(),
+        body: JSON.stringify({ id: accion.id })
+      }).catch(function () {});
+      if (caja.parentNode) caja.parentNode.removeChild(caja);
+      agregarMensaje('Cancelado: no cambie nada.', 'asistente');
+    });
   }
 
   function enviarFeedback(util) {

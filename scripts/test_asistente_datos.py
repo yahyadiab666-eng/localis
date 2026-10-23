@@ -94,6 +94,49 @@ def _probar_observacion():
     _ok(estado['feedback_util'] == 1, 'cuenta feedback')
 
 
+def _probar_acciones():
+    print('\n=== Acciones confirmadas (whitelist y deteccion) ===')
+    from backend.asistente import acciones
+
+    _ok(set(acciones.ACCIONES) == {
+        'producto_desactivar', 'producto_activar', 'producto_reintentar_imagen',
+    }, 'whitelist cerrada (solo 3 acciones)')
+    _ok(
+        acciones.detectar('Desactiva el producto Arroz Mary') == ('producto_desactivar', 'Arroz Mary'),
+        'detecta desactivar + nombre',
+    )
+    _ok(
+        acciones.detectar('activa el producto arroz mary')[0] == 'producto_activar',
+        'detecta activar',
+    )
+    _ok(
+        acciones.detectar('reintenta la foto del producto arroz')[0] == 'producto_reintentar_imagen',
+        'detecta reintentar imagen',
+    )
+    _ok(acciones.detectar('¿como hago una importacion?') is None, 'no dispara con preguntas')
+    _ok(acciones.detectar('cuanto cuesta el arroz') is None, 'no dispara con precios')
+    _ok(acciones.detectar('Desactiva el producto') is None, 'sin nombre -> no propone')
+    _ok(acciones.detectar(None) is None, 'None no lanza')
+
+    # Rechazos estrictos ANTES de tocar la BD.
+    _ok(
+        acciones.ejecutar(1, 1, 'borrar_todo', 1)[0] is False,
+        'rechaza accion fuera de la whitelist',
+    )
+    _ok(
+        acciones.ejecutar(1, 1, 'producto_activar', 'x')[0] is False,
+        'rechaza producto_id invalido',
+    )
+    _ok(
+        acciones.ejecutar(1, None, 'producto_activar', 1)[0] is False,
+        'rechaza sin comercio en sesion',
+    )
+    _ok(
+        acciones.ejecutar(None, None, 'producto_desactivar', 1)[0] is False,
+        'rechaza sin usuario',
+    )
+
+
 def _probar_formato():
     print('\n=== Formato de precios ===')
     from backend.asistente.datos_vivos import formatear_productos
@@ -132,6 +175,7 @@ def main() -> int:
     _probar_saltos_seguros()
     _probar_presupuesto()
     _probar_observacion()
+    _probar_acciones()
 
     print('\n=== RESULTADO ===')
     if _ERRORES:

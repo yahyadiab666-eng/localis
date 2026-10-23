@@ -17,7 +17,7 @@ from urllib.parse import quote
 
 from flask import Blueprint, jsonify, request, session
 
-from backend.asistente import observacion, orquestador
+from backend.asistente import acciones, observacion, orquestador
 from backend.rate_limit import limite
 from config import (
     ASISTENTE_WHATSAPP_URL,
@@ -28,6 +28,53 @@ from config import (
 logger = logging.getLogger('localis.blueprints.asistente')
 
 bp = Blueprint('asistente', __name__, url_prefix='/api/asistente')
+
+# Acciones pendientes de confirmar (en la sesion del servidor: un solo uso, con
+# caducidad). El cliente solo envia el ``id``; el resto lo guarda el servidor.
+CLAVE_ACCIONES = 'asistente_acciones'
+_MAX_ACCIONES = 5
+_EXPIRA_ACCION_SEG = 600
+
+
+def _guardar_accion(propuesta):
+    pendientes = session.get(CLAVE_ACCIONES)
+    if not isinstance(pendientes, dict):
+        pendientes = {}
+    pendientes[propuesta['id']] = {
+        'accion': propuesta.get('accion'),
+        'producto_id': (propuesta.get('parametros') or {}).get('producto_id'),
+        'titulo': propuesta.get('resumen'),
+        'ts': time.time(),
+    }
+    ahora = time.time()
+    for clave in list(pendientes):
+        if ahora - float(pendientes[clave].get('ts') or 0) > _EXPIRA_ACCION_SEG:
+            pendientes.pop(clave, None)
+    if len(pendientes) > _MAX_ACCIONES:
+        sobran = len(pendientes) - _MAX_ACCIONES
+        for clave, _ in sorted(
+            pendientes.items(), key=lambda kv: kv[1].get('ts') or 0
+        )[:sobran]:
+            pendientes.pop(clave, None)
+    session[CLAVE_ACCIONES] = pendientes
+    session.modified = True
+
+
+def _tomar_accion(nonce):
+    """Extrae y consume una accion pendiente (un solo uso). Nunca lanza."""
+    if not nonce:
+        return None
+    pendientes = session.get(CLAVE_ACCIONES)
+    if not isinstance(pendientes, dict):
+        return None
+    datos = pendientes.pop(nonce, None)
+    session[CLAVE_ACCIONES] = pendientes
+    session.modified = True
+    if not datos:
+        return None
+    if time.time() - float(datos.get('ts') or 0) > _EXPIRA_ACCION_SEG:
+        return None
+    return datos
 
 
 def _rol_sesion():
@@ -78,6 +125,16 @@ def chat():
     inicio = time.time()
     resultado = orquestador.responder(_contexto_usuario(), mensaje, historial)
     observacion.registrar_mensaje(bool(resultado.get('ok')), (time.time() - inicio) * 1000)
+
+    # Guardar la propuesta de accion en la sesion (el cambio solo ocurre al
+    # confirmar). El nonce es de un solo uso.
+    propuesta = resultado.get('accion')
+    if isinstance(propuesta, dict) and propuesta.get('id'):
+        try:
+            _guardar_accion(propuesta)
+        except Exception as error:
+            logger.warning('no se pudo guardar la accion pendiente: %s', error)
+            resultado.pop('accion', None)
 
     if resultado.get('ok'):
         return jsonify(resultado), 200
@@ -155,3 +212,38 @@ def escalar():
             'whatsapp_url': f'{base}{separador}text={texto}',
         }
     ), 200
+
+
+@bp.route('/accion/confirmar', methods=['POST'])
+@limite('10 per minute')
+def accion_confirmar():
+    """Aplica una accion previamente propuesta (nonce de un solo uso)."""
+    datos = request.get_json(silent=True) or {}
+    nonce = str(datos.get('id') or '').strip()
+    if not nonce:
+        return jsonify({'ok': False, 'mensaje': 'Solicitud no valida.'}), 400
+
+    pendiente = _tomar_accion(nonce)
+    if not pendiente:
+        return (
+            jsonify({'ok': False, 'mensaje': 'La confirmacion expiro. Vuelve a pedirlo.'}),
+            400,
+        )
+
+    usuario = _contexto_usuario()
+    ok, mensaje = acciones.ejecutar(
+        usuario.get('usuario_id'),
+        usuario.get('comercio_id'),
+        pendiente.get('accion'),
+        pendiente.get('producto_id'),
+    )
+    return jsonify({'ok': ok, 'mensaje': mensaje}), (200 if ok else 400)
+
+
+@bp.route('/accion/cancelar', methods=['POST'])
+@limite('30 per minute')
+def accion_cancelar():
+    """Descarta una accion pendiente sin aplicar nada."""
+    datos = request.get_json(silent=True) or {}
+    _tomar_accion(str(datos.get('id') or '').strip())
+    return jsonify({'ok': True}), 200
