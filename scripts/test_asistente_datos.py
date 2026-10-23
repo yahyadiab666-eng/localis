@@ -80,6 +80,20 @@ def _probar_presupuesto():
     _ok(presupuesto.estado()['limite'] == 0, 'limite 0 (desactivado)')
 
 
+def _probar_observacion():
+    print('\n=== Observacion del asistente ===')
+    from backend.asistente import observacion
+
+    observacion.registrar_mensaje(True, 100)
+    observacion.registrar_mensaje(False, 300)
+    observacion.registrar_feedback(True)
+    estado = observacion.estado()
+    _ok(estado['mensajes'] == 2, 'cuenta mensajes')
+    _ok(estado['respuestas_ok'] == 1 and estado['respuestas_error'] == 1, 'cuenta ok/error')
+    _ok(estado['ms_promedio'] == 200.0, 'promedio de latencia')
+    _ok(estado['feedback_util'] == 1, 'cuenta feedback')
+
+
 def _probar_formato():
     print('\n=== Formato de precios ===')
     from backend.asistente.datos_vivos import formatear_productos
@@ -117,6 +131,7 @@ def main() -> int:
     _probar_tiendas()
     _probar_saltos_seguros()
     _probar_presupuesto()
+    _probar_observacion()
 
     print('\n=== RESULTADO ===')
     if _ERRORES:

@@ -117,6 +117,39 @@ def _probar_mensaje_vacio():
         _ok(respuesta.get_json().get('estado') == 'vacio', 'estado vacio')
 
 
+def _probar_escalado():
+    print('\n=== Escalado a una persona (ticket + WhatsApp) ===')
+    cliente = _app().test_client()
+    respuesta = cliente.post(
+        '/api/asistente/escalar',
+        json={'motivo': 'necesito ayuda con un pago', 'historial': [
+            {'autor': 'usuario', 'contenido': 'hola'},
+            {'autor': 'asistente', 'contenido': '¿en que te ayudo?'},
+        ]},
+    )
+    datos = respuesta.get_json()
+    _ok(respuesta.status_code == 200 and datos.get('ok'), 'escalar responde 200')
+    _ok('wa.me' in (datos.get('whatsapp_url') or ''), 'devuelve enlace de WhatsApp')
+    _ok(datos.get('ticket_creado') is False, 'sin correo no crea ticket')
+
+
+def _probar_feedback():
+    print('\n=== Feedback (util / no util) ===')
+    cliente = _app().test_client()
+    respuesta = cliente.post('/api/asistente/feedback', json={'util': True})
+    _ok(respuesta.status_code == 200, 'feedback responde 200')
+    _ok(respuesta.get_json().get('ok') is True, 'marca ok')
+
+
+def _probar_metricas_en_estado():
+    print('\n=== Metricas en /estado ===')
+    cliente = _app().test_client()
+    with patch.dict(os.environ, {'LOCALIS_ASISTENTE_API_KEY': 'clave-test'}, clear=True):
+        datos = cliente.get('/api/asistente/estado').get_json()
+    _ok(datos.get('habilitado') is True, 'informa habilitado')
+    _ok(isinstance(datos.get('metricas'), dict), 'incluye metricas')
+
+
 def _probar_proveedor_caido():
     print('\n=== Proveedor no disponible ===')
     from backend.asistente.proveedor import ProveedorNoDisponible
@@ -140,6 +173,9 @@ def main() -> int:
     _probar_chat_ok()
     _probar_historial_del_cliente()
     _probar_mensaje_vacio()
+    _probar_escalado()
+    _probar_feedback()
+    _probar_metricas_en_estado()
     _probar_proveedor_caido()
 
     print('\n=== RESULTADO ===')
