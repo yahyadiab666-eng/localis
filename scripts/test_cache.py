@@ -49,6 +49,29 @@ def main() -> int:
     get_or_load('grupoB:x', cargador, 60)
     fallos.append(not _ok(estado['n'] == antes + 1, 'solo recarga el prefijo invalidado'))
 
+    print('=== Single flight: 8 concurrentes -> 1 sola carga ===')
+    from concurrent.futures import ThreadPoolExecutor
+    import time as _tiempo
+
+    invalidate()
+    estado['n'] = 0
+
+    def cargador_lento():
+        _tiempo.sleep(0.15)
+        estado['n'] += 1
+        return f'v{estado["n"]}'
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        valores = list(
+            pool.map(lambda _: get_or_load('sf:clave', cargador_lento, 60), range(8))
+        )
+    fallos.append(
+        not _ok(estado['n'] == 1, f'el cargador se ejecuto 1 vez con 8 concurrentes ({estado["n"]})')
+    )
+    fallos.append(
+        not _ok(all(v == 'v1' for v in valores), f'todos reciben el mismo valor ({set(valores)})')
+    )
+
     print('\n=== RESULTADO ===')
     total = sum(1 for f in fallos if f)
     if total:
