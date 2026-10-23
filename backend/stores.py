@@ -1077,6 +1077,7 @@ def _base_query_productos_publicos(con_maestro=True, con_categoria=False, solo_p
             p.descripcion,
             p.precio_usd,
             p.codigo_barras,
+            p.categoria_manual,
             {_SQL_IMAGEN_URL},
             c.nombre AS comercio_nombre,
             c.telefono AS comercio_telefono,
@@ -1707,6 +1708,7 @@ def obtener_productos_comercio(comercio_id):
                     p.precio_usd,
                     p.codigo_barras,
                     p.imagen_estado,
+                    p.categoria_manual,
                     {_SQL_IMAGEN_URL}
                 FROM productos p
                 WHERE p.comercio_id = ?

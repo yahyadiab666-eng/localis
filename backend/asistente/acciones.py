@@ -56,6 +56,14 @@ ACCIONES = {
         ),
         'ok': 'Listo: reintentaré la foto de «{nombre}» en segundo plano.',
     },
+    'producto_categoria': {
+        'verbo': 'Cambiar la categoria del producto',
+        'mensaje': (
+            'Puedo **cambiar la categoría** de «{nombre}» a «{categoria}». '
+            'Confirma para aplicarlo.'
+        ),
+        'ok': 'Listo: «{nombre}» ahora está en la categoría «{categoria}».',
+    },
 }
 
 # Deteccion deterministica. Exige la palabra "producto/articulo" para que la
@@ -92,6 +100,72 @@ _DETECTORES = (
 )
 
 _RUIDO = re.compile(r'\b(por favor|gracias|ya|ahora|mismo)\b', re.I)
+
+# Deteccion de cambio de categoria (dos ordenes habituales). Devuelve el nombre
+# del producto y el de la categoria.
+_RE_CAT_A = re.compile(
+    r'\b(?:cambia|cambiar|corrige|corregir|ajusta|ajustar|pon|poner|ponle|asigna|'
+    r'asignar|actualiza|actualizar)\b'
+    r'.{0,50}?categor[ií]a\s+(?:de(?:l)?\s+)?(?:producto|articulo|art[ií]culo)\s+'
+    r'(.+?)\s+(?:a|al|por|en|como)\s+(.+)$',
+    re.I | re.S,
+)
+_RE_CAT_B = re.compile(
+    r'\b(?:pon|poner|ponle|asigna|asignar|cambia|cambiar|corrige|corregir)\b'
+    r'.{0,30}?categor[ií]a\s+(.+?)\s+(?:al?|para el|del?)\s*'
+    r'(?:producto|articulo|art[ií]culo)\s+(.+)$',
+    re.I | re.S,
+)
+
+
+def _sin_acentos(texto):
+    import unicodedata
+
+    base = unicodedata.normalize('NFKD', str(texto or ''))
+    return ''.join(c for c in base if not unicodedata.combining(c)).strip().lower()
+
+
+def detectar_categoria(texto):
+    """Devuelve ``(nombre_producto, categoria)`` o ``None``. Nunca lanza."""
+    if not texto:
+        return None
+    try:
+        coincidencia = _RE_CAT_A.search(str(texto))
+        if coincidencia:
+            return _limpiar_nombre(coincidencia.group(1)), _limpiar_nombre(coincidencia.group(2))
+        coincidencia = _RE_CAT_B.search(str(texto))
+        if coincidencia:
+            return _limpiar_nombre(coincidencia.group(2)), _limpiar_nombre(coincidencia.group(1))
+    except Exception as error:
+        _log.warning('deteccion de categoria fallo: %s', error)
+    return None
+
+
+def _resolver_categoria(texto):
+    """Convierte el texto del usuario en una clave de categoria valida (o None)."""
+    try:
+        from backend.categorias_producto import CLAVES_CATEGORIA, ETIQUETAS_CATEGORIA
+
+        objetivo = _sin_acentos(texto)
+        if not objetivo:
+            return None
+        if objetivo in CLAVES_CATEGORIA:
+            return objetivo
+        for clave, nombre in ETIQUETAS_CATEGORIA.items():
+            if _sin_acentos(nombre) == objetivo:
+                return clave
+    except Exception as error:
+        _log.warning('resolucion de categoria fallo: %s', error)
+    return None
+
+
+def _categorias_validas():
+    try:
+        from backend.categorias_producto import CLAVES_CATEGORIA
+
+        return CLAVES_CATEGORIA
+    except Exception:
+        return frozenset()
 
 
 def habilitado():
@@ -158,11 +232,54 @@ def _elegir_producto(productos, nombre):
     return None  # ambiguo: no se propone (evita tocar el producto equivocado)
 
 
+def _construir_propuesta(accion, producto, parametros=None, categoria=None):
+    definicion = ACCIONES[accion]
+    resumen = f'{definicion["verbo"]} «{producto.get("nombre")}»'
+    if categoria:
+        resumen += f' a «{categoria}»'
+    return {
+        'id': secrets.token_urlsafe(16),
+        'accion': accion,
+        'resumen': resumen,
+        'mensaje': definicion['mensaje'].format(
+            nombre=producto.get('nombre'), categoria=categoria or ''
+        ),
+        'parametros': parametros or {'producto_id': int(producto.get('id'))},
+        'producto': {
+            'id': int(producto.get('id')),
+            'nombre': producto.get('nombre'),
+            'activo': int(producto.get('activo') or 0),
+            'imagen_estado': producto.get('imagen_estado') or 'pendiente',
+        },
+    }
+
+
 def proponer(comercio_id, texto):
     """Propuesta de accion (NO cambia nada) o ``None``. Nunca lanza."""
     if not habilitado() or not comercio_id:
         return None
     try:
+        # 1) Cambio de categoria (necesita categoria valida + producto unico).
+        categoria_det = detectar_categoria(texto)
+        if categoria_det:
+            nombre, categoria_texto = categoria_det
+            categoria = _resolver_categoria(categoria_texto)
+            if not categoria:
+                return None
+            producto = _elegir_producto(_buscar_productos(comercio_id, nombre), nombre)
+            if not producto:
+                return None
+            return _construir_propuesta(
+                'producto_categoria',
+                producto,
+                parametros={
+                    'producto_id': int(producto.get('id')),
+                    'categoria': categoria,
+                },
+                categoria=categoria,
+            )
+
+        # 2) Acciones simples de producto.
         deteccion = detectar(texto)
         if not deteccion:
             return None
@@ -170,20 +287,7 @@ def proponer(comercio_id, texto):
         producto = _elegir_producto(_buscar_productos(comercio_id, nombre), nombre)
         if not producto:
             return None
-        definicion = ACCIONES[accion]
-        return {
-            'id': secrets.token_urlsafe(16),
-            'accion': accion,
-            'resumen': f'{definicion["verbo"]} «{producto.get("nombre")}»',
-            'mensaje': definicion['mensaje'].format(nombre=producto.get('nombre')),
-            'parametros': {'producto_id': int(producto.get('id'))},
-            'producto': {
-                'id': int(producto.get('id')),
-                'nombre': producto.get('nombre'),
-                'activo': int(producto.get('activo') or 0),
-                'imagen_estado': producto.get('imagen_estado') or 'pendiente',
-            },
-        }
+        return _construir_propuesta(accion, producto)
     except Exception as error:
         _log.warning('propuesta de accion fallo: %s', error)
         return None
@@ -205,7 +309,7 @@ def _auditar(usuario_id, accion, detalle):
         _log.warning('no se pudo auditar la accion: %s', error)
 
 
-def ejecutar(usuario_id, comercio_id, accion, producto_id):
+def ejecutar(usuario_id, comercio_id, accion, parametros):
     """Aplica la accion (con revalidacion estricta). Devuelve ``(ok, mensaje)``."""
     if not habilitado():
         return False, 'Las acciones no estan disponibles en este momento.'
@@ -213,12 +317,19 @@ def ejecutar(usuario_id, comercio_id, accion, producto_id):
         return False, 'Esa accion no esta permitida.'
     if not usuario_id or not comercio_id:
         return False, 'Necesitas iniciar sesion como comerciante.'
+    if not isinstance(parametros, dict):
+        return False, 'Solicitud no valida.'
     try:
-        pid = int(producto_id)
+        pid = int(parametros.get('producto_id'))
     except (TypeError, ValueError):
         return False, 'Producto invalido.'
     if pid <= 0:
         return False, 'Producto invalido.'
+    if accion == 'producto_categoria':
+        categoria = str(parametros.get('categoria') or '').strip().lower()
+        if categoria not in _categorias_validas():
+            return False, 'Esa categoria no es valida.'
+        parametros = {**parametros, 'categoria': categoria}
 
     try:
         from backend.db import get_db_connection
@@ -252,6 +363,12 @@ def ejecutar(usuario_id, comercio_id, accion, producto_id):
                     'WHERE id = ? AND comercio_id = ?',
                     (pid, int(comercio_id)),
                 )
+            elif accion == 'producto_categoria':
+                cursor.execute(
+                    'UPDATE productos SET categoria_manual = ? '
+                    'WHERE id = ? AND comercio_id = ?',
+                    (parametros.get('categoria'), pid, int(comercio_id)),
+                )
             else:
                 return False, 'Esa accion no esta permitida.'
             cambiadas = int(getattr(cursor, 'rowcount', 0) or 0)
@@ -263,4 +380,7 @@ def ejecutar(usuario_id, comercio_id, accion, producto_id):
     if cambiadas <= 0:
         return False, 'No se aplico ningun cambio.'
     _auditar(usuario_id, accion, f'producto={pid} nombre={nombre}')
-    return True, ACCIONES[accion]['ok'].format(nombre=nombre or 'el producto')
+    return True, ACCIONES[accion]['ok'].format(
+        nombre=nombre or 'el producto',
+        categoria=str(parametros.get('categoria') or ''),
+    )

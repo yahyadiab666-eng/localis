@@ -242,7 +242,7 @@ def accion_confirmar():
             usuario.get('usuario_id'),
             usuario.get('comercio_id'),
             accion,
-            parametros.get('producto_id'),
+            parametros,
         )
     return jsonify({'ok': ok, 'mensaje': mensaje}), (200 if ok else 400)
 

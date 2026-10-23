@@ -336,6 +336,11 @@ def anotar_categoria_producto(producto):
     Retrocompatible: si el dict ya trae una categoría válida, se respeta.
     """
     try:
+        manual = str(producto.get('categoria_manual') or '').strip().lower()
+        if manual and manual in CLAVES_CATEGORIA:
+            producto['categoria_id'] = manual
+            producto['categoria_nombre'] = etiqueta_categoria(manual)
+            return producto
         existente = str(producto.get('categoria_id') or '').strip().lower()
         if existente and existente in CLAVES_CATEGORIA:
             producto.setdefault('categoria_nombre', etiqueta_categoria(existente))

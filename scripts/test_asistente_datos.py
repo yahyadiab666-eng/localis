@@ -98,7 +98,11 @@ def _probar_venta():
     print('\n=== Modo venta (planes/precios/beneficios) ===')
     from backend.asistente import venta
 
-    _ok('MODO VENTA' in venta.MODO_VENTA, 'texto de modo venta presente')
+    _ok('COMPRADOR' in venta.MODO_VENTA_CLIENTE, 'modo venta de comprador')
+    _ok('COMERCIANTE' in venta.MODO_VENTA_COMERCIANTE, 'modo venta de comerciante')
+    _ok(venta.modo_venta('comerciante') == venta.MODO_VENTA_COMERCIANTE, 'rol comerciante -> su modo')
+    _ok(venta.modo_venta('cliente') == venta.MODO_VENTA_CLIENTE, 'rol cliente -> comprador')
+    _ok(venta.modo_venta('invitado') == venta.MODO_VENTA_CLIENTE, 'invitado -> comprador')
     _ok(venta.es_tema_comercial('¿Cuanto cuesta el plan Pro?'), 'plan -> venta')
     _ok(venta.es_tema_comercial('Que beneficios tiene Localis?'), 'beneficios -> venta')
     _ok(venta.es_tema_comercial('Es gratis?'), 'es gratis -> venta')
@@ -136,7 +140,8 @@ def _probar_acciones():
 
     _ok(set(acciones.ACCIONES) == {
         'producto_desactivar', 'producto_activar', 'producto_reintentar_imagen',
-    }, 'whitelist cerrada (solo 3 acciones)')
+        'producto_categoria',
+    }, 'whitelist cerrada (4 acciones)')
     _ok(
         acciones.detectar('Desactiva el producto Arroz Mary') == ('producto_desactivar', 'Arroz Mary'),
         'detecta desactivar + nombre',
@@ -154,22 +159,46 @@ def _probar_acciones():
     _ok(acciones.detectar('Desactiva el producto') is None, 'sin nombre -> no propone')
     _ok(acciones.detectar(None) is None, 'None no lanza')
 
+    # Deteccion y resolucion de categoria.
+    _ok(
+        acciones.detectar_categoria('cambia la categoria del producto arroz a bebidas')
+        == ('arroz', 'bebidas'),
+        'detecta cambio de categoria (orden A)',
+    )
+    _ok(
+        acciones.detectar_categoria('pon la categoria bebidas al producto arroz')
+        == ('arroz', 'bebidas'),
+        'detecta cambio de categoria (orden B)',
+    )
+    _ok(acciones._resolver_categoria('Bebidas') == 'bebidas', 'resuelve etiqueta -> clave')
+    _ok(acciones._resolver_categoria('bebidas') == 'bebidas', 'resuelve clave directa')
+    _ok(acciones._resolver_categoria('inventada') is None, 'categoria inexistente -> None')
+
     # Rechazos estrictos ANTES de tocar la BD.
     _ok(
-        acciones.ejecutar(1, 1, 'borrar_todo', 1)[0] is False,
+        acciones.ejecutar(1, 1, 'borrar_todo', {})[0] is False,
         'rechaza accion fuera de la whitelist',
     )
     _ok(
-        acciones.ejecutar(1, 1, 'producto_activar', 'x')[0] is False,
+        acciones.ejecutar(1, 1, 'producto_activar', {'producto_id': 'x'})[0] is False,
         'rechaza producto_id invalido',
     )
     _ok(
-        acciones.ejecutar(1, None, 'producto_activar', 1)[0] is False,
+        acciones.ejecutar(1, 1, 'producto_categoria', 'no-dict')[0] is False,
+        'rechaza parametros que no son dict',
+    )
+    _ok(
+        acciones.ejecutar(1, None, 'producto_activar', {'producto_id': 1})[0] is False,
         'rechaza sin comercio en sesion',
     )
     _ok(
-        acciones.ejecutar(None, None, 'producto_desactivar', 1)[0] is False,
+        acciones.ejecutar(None, None, 'producto_desactivar', {'producto_id': 1})[0] is False,
         'rechaza sin usuario',
+    )
+    _ok(
+        acciones.ejecutar(1, 1, 'producto_categoria', {'producto_id': 1, 'categoria': 'xyz'})[0]
+        is False,
+        'rechaza categoria invalida',
     )
 
 

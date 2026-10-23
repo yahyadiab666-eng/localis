@@ -263,6 +263,9 @@ COLUMNAS_ESQUEMA = {
         # Destacados / Boosts (micro-pago) a nivel de producto. UTC estricto.
         ('boost_inicio', 'TIMESTAMPTZ'),
         ('boost_fin', 'TIMESTAMPTZ'),
+        # Categoria elegida a mano por el comerciante (tiene prioridad sobre la
+        # inferida automaticamente). Aditiva y opcional.
+        ('categoria_manual', 'TEXT'),
         # Identificador visible (PROD-0001) independiente de la PK.
         ('codigo_publico', 'TEXT'),
     ],
