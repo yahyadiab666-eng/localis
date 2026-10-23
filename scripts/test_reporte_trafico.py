@@ -28,7 +28,49 @@ def _ok(cond, mensaje):
     return bool(cond)
 
 
+def _probar_contenido():
+    """Comprueba el contenido del informe con datos simulados (sin red ni BD)."""
+    fake = {
+        'disponible': True,
+        'por_dia': [
+            {'fecha': '2026-10-22', 'claves': {
+                'peticiones': 1000, 'peticiones_app': 400, 'peticiones_bots': 50,
+                'visitas_unicas': 37, 'pwa_instalaciones': 2, 'pwa_aperturas': 5}},
+            {'fecha': '2026-10-23', 'claves': {
+                'peticiones': 300, 'peticiones_app': 120, 'peticiones_bots': 10,
+                'visitas_unicas': 15}},
+            {'fecha': '2026-10-24', 'claves': {
+                'peticiones': 5, 'peticiones_app': 5, 'peticiones_bots': 0,
+                'visitas_unicas': 3}},
+        ],
+        'totales_periodo': {},
+        'totales_historicos': {'peticiones': 5000},
+    }
+    original_resumen = rt.trafico.resumen_trafico
+    original_ahora = rt._ahora_utc
+    rt.trafico.resumen_trafico = lambda dias=1: fake
+    rt._ahora_utc = lambda: _dt.datetime(2026, 10, 23, 13, 5, tzinfo=_dt.timezone.utc)
+    try:
+        texto = rt.construir_reporte(dias=1)['texto']
+    finally:
+        rt.trafico.resumen_trafico = original_resumen
+        rt._ahora_utc = original_ahora
+
+    _ok('--- Ayer (2026-10-22, día completo) ---' in texto, 'incluye seccion Ayer completa')
+    _ok('Visitantes únicos (aprox.): 37' in texto, 'unicos de ayer correctos')
+    _ok('Tráfico de la app (humanos, sin bots): 350' in texto, 'humanos ayer = app-bots')
+    _ok('--- Hoy (2026-10-23, en curso) ---' in texto, 'Hoy marcado como en curso')
+    _ok('en hora de Venezuela' in texto, 'aclara zona horaria')
+    _ok(
+        '--- Totales del período (1 día(s)) ---\n'
+        '  Peticiones totales (incl. salud y estáticos): 300' in texto,
+        'totales del periodo solo de hoy (no el dia futuro)',
+    )
+
+
 def main() -> int:
+    _probar_contenido()
+
     enviados = []
     estado = {'correo': True, 'marca': None}
 
