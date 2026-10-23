@@ -10,8 +10,11 @@
      class="asistente-widget"
      data-rol="{{ _asistente_rol }}"
      data-chat-url="{{ url_for('asistente.chat') }}"
+     data-escalar-url="{{ url_for('asistente.escalar') }}"
+     data-feedback-url="{{ url_for('asistente.feedback') }}"
      data-csrf="{{ csrf_token() }}"
-     data-whatsapp="{{ asistente_whatsapp_url }}">
+     data-whatsapp="{{ asistente_whatsapp_url }}"
+     data-logueado="{{ '1' if session.get('usuario_id') else '0' }}">
 
   <button type="button" id="asistente-burbuja" class="asistente-burbuja"
           aria-label="Abrir asistente de Localis" title="Asistente de Localis"
@@ -37,6 +40,12 @@
 
     <div id="asistente-mensajes" class="asistente-mensajes"
          role="log" aria-live="polite"></div>
+
+    <div id="asistente-feedback" class="asistente-feedback" hidden>
+      <span>¿Te sirvió?</span>
+      <button type="button" data-util="1" aria-label="Respuesta útil">👍</button>
+      <button type="button" data-util="0" aria-label="Respuesta no útil">👎</button>
+    </div>
 
     <form id="asistente-form" class="asistente-form" autocomplete="off">
       <label class="asistente-form__sr" for="asistente-entrada">Escribe tu pregunta</label>

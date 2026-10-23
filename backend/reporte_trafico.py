@@ -16,7 +16,7 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from config import ADMIN_EMAILS
 from backend import trafico
@@ -75,8 +75,13 @@ def _ahora_utc():
 
 def construir_reporte(dias=1):
     """Devuelve ``{'texto', 'datos', 'disponible'}``. Nunca lanza."""
-    hoy = _ahora_utc().date().isoformat()
-    datos = trafico.resumen_trafico(dias=dias)
+    dias = max(1, int(dias or 1))
+    hoy_fecha = _ahora_utc().date()
+    hoy = hoy_fecha.isoformat()
+    ayer = (hoy_fecha - timedelta(days=1)).isoformat()
+    # Se piden 2 dias como minimo para poder mostrar "Ayer" completo aunque el
+    # informe sea de 1 dia; los totales del periodo se recalculan despues.
+    datos = trafico.resumen_trafico(dias=max(dias, 2))
     lineas = []
     lineas.append('Localis — Reporte de tráfico y PWA')
     lineas.append('=' * 44)
@@ -90,10 +95,12 @@ def construir_reporte(dias=1):
         lineas.append('   reciba tráfico tras el despliegue.)')
         return {'texto': '\n'.join(lineas), 'datos': datos, 'disponible': False}
 
-    diario = {d['fecha']: d['claves'] for d in datos.get('por_dia', [])}
+    por_dia = datos.get('por_dia', [])
+    diario = {d['fecha']: d['claves'] for d in por_dia}
     hoy_claves = diario.get(hoy, {})
+    ayer_claves = diario.get(ayer, {})
 
-    lineas.append(f'--- Hoy ({hoy}) ---')
+    lineas.append(f'--- Hoy ({hoy}, en curso) ---')
     if hoy_claves:
         for clave, etiqueta in _ETIQUETAS:
             lineas.append(f'  {etiqueta}: {_fmt(_valor_clave(hoy_claves, clave))}')
@@ -101,8 +108,22 @@ def construir_reporte(dias=1):
         lineas.append('  (sin tráfico registrado hoy todavía)')
     lineas.append('')
 
+    lineas.append(f'--- Ayer ({ayer}, día completo) ---')
+    if ayer_claves:
+        for clave, etiqueta in _ETIQUETAS:
+            lineas.append(f'  {etiqueta}: {_fmt(_valor_clave(ayer_claves, clave))}')
+    else:
+        lineas.append('  (sin datos de ayer)')
+    lineas.append('')
+
+    # Totales del periodo: solo los ultimos `dias` (no incluir el dia extra).
+    recientes = por_dia[-dias:] if dias else por_dia
+    totales = {}
+    for dia in recientes:
+        for clave, valor in (dia.get('claves') or {}).items():
+            totales[clave] = totales.get(clave, 0) + int(valor or 0)
+
     lineas.append(f'--- Totales del período ({dias} día(s)) ---')
-    totales = datos.get('totales_periodo', {})
     for clave, etiqueta in _ETIQUETAS:
         lineas.append(f'  {etiqueta}: {_fmt(_valor_clave(totales, clave))}')
     lineas.append('')
@@ -142,6 +163,10 @@ def construir_reporte(dias=1):
         lineas.append('')
 
     lineas.append('Notas:')
+    lineas.append('- El informe se envía a las 13:00 UTC (09:00 en Venezuela): la')
+    lineas.append('  sección "Hoy" es un día EN CURSO (parcial). Para el día completo,')
+    lineas.append('  usa la sección "Ayer".')
+    lineas.append('- Los días se cuentan en UTC, no en hora de Venezuela (UTC-4).')
     lineas.append('- "Tráfico de la app (humanos)" excluye bots/crawlers detectados')
     lineas.append('  por User-Agent; los no detectados aún cuentan como humanos.')
     lineas.append('- "Visitantes únicos" es aproximado (huella IP+navegador; se')

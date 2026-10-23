@@ -1,11 +1,11 @@
-/* Asistente de IA de Localis: widget flotante, solo informativo.
+/* Asistente de IA de Localis: widget flotante (informativo, con datos en vivo).
  *
- * Vanilla JS, sin dependencias. Habla con /api/asistente/chat y arma el enlace
- * de WhatsApp para el soporte humano. Todo es defensivo: si falta un elemento
- * o la red falla, se muestra un aviso en vez de romper la pagina.
- *
- * El contexto de la conversacion vive AQUI (en el navegador) y se envia con
- * cada pregunta; el servidor no guarda nada ni toca la base de datos.
+ * Vanilla JS, sin dependencias. Habla con:
+ *   - /api/asistente/chat     (responder)
+ *   - /api/asistente/escalar  (derivar a una persona -> ticket + WhatsApp)
+ *   - /api/asistente/feedback (👍/👎)
+ * Todo es defensivo: si falta un elemento o la red falla, se avisa en vez de
+ * romper la pagina. El contexto de la conversacion vive AQUI (navegador).
  */
 (function () {
   'use strict';
@@ -21,13 +21,17 @@
   var entrada = document.getElementById('asistente-entrada');
   var enviar = document.getElementById('asistente-enviar');
   var soporte = document.getElementById('asistente-soporte');
+  var feedback = document.getElementById('asistente-feedback');
 
   if (!burbuja || !panel || !lista || !form || !entrada) return;
 
   var CHAT_URL = raiz.getAttribute('data-chat-url') || '/api/asistente/chat';
+  var ESCALAR_URL = raiz.getAttribute('data-escalar-url') || '/api/asistente/escalar';
+  var FEEDBACK_URL = raiz.getAttribute('data-feedback-url') || '/api/asistente/feedback';
   var CSRF = raiz.getAttribute('data-csrf') || '';
   var ROL = raiz.getAttribute('data-rol') || 'invitado';
   var WHATSAPP = raiz.getAttribute('data-whatsapp') || '';
+  var LOGUEADO = raiz.getAttribute('data-logueado') === '1';
   var MAX_HISTORIAL = 8;
 
   var SALUDO = {
@@ -44,6 +48,14 @@
     if (window.lucide && typeof window.lucide.createIcons === 'function') {
       window.lucide.createIcons();
     }
+  }
+
+  function cabeceras() {
+    return {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'X-CSRFToken': CSRF
+    };
   }
 
   function abrir() {
@@ -103,14 +115,11 @@
     autoAlto();
     bloquear(true);
     mostrarEscribiendo();
+    if (feedback) feedback.hidden = true;
 
     fetch(CHAT_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'X-CSRFToken': CSRF
-      },
+      headers: cabeceras(),
       body: JSON.stringify({ mensaje: texto, historial: historial.slice(-MAX_HISTORIAL) })
     })
       .then(function (resp) {
@@ -126,6 +135,7 @@
           historial.push({ autor: 'usuario', contenido: texto });
           historial.push({ autor: 'asistente', contenido: datos.respuesta });
           historial = historial.slice(-MAX_HISTORIAL);
+          if (feedback) feedback.hidden = false;
         } else {
           agregarMensaje(
             datos.mensaje || 'No pude responder ahora mismo. Intenta de nuevo.',
@@ -148,21 +158,51 @@
     entrada.style.height = Math.min(entrada.scrollHeight, 120) + 'px';
   }
 
+  function enviarFeedback(util) {
+    if (feedback) feedback.hidden = true;
+    fetch(FEEDBACK_URL, {
+      method: 'POST',
+      headers: cabeceras(),
+      body: JSON.stringify({ util: util })
+    }).catch(function () {});
+  }
+
   function abrirSoporte() {
-    if (!WHATSAPP) {
-      agregarMensaje(
-        'Escribenos por WhatsApp para casos que requieran revision (pagos, edicion de tu comercio, errores concretos). La atencion puede tardar un poco.',
-        'asistente'
+    var cuerpo = {
+      motivo: 'El usuario pidio hablar con una persona.',
+      historial: historial.slice(-MAX_HISTORIAL)
+    };
+    var continuar = function () {
+      fetch(ESCALAR_URL, {
+        method: 'POST',
+        headers: cabeceras(),
+        body: JSON.stringify(cuerpo)
+      })
+        .then(function (r) {
+          return r.json().catch(function () { return {}; });
+        })
+        .then(function (datos) {
+          var url = (datos && datos.whatsapp_url) || WHATSAPP;
+          if (url) window.open(url, '_blank', 'noopener');
+          agregarMensaje(
+            datos && datos.ticket_creado
+              ? 'Abrimos WhatsApp y registramos tu caso para seguimiento. La atencion puede tardar un poco.'
+              : 'Abrimos WhatsApp con el soporte. La atencion puede tardar un poco.',
+            'asistente'
+          );
+        })
+        .catch(function () {
+          if (WHATSAPP) window.open(WHATSAPP, '_blank', 'noopener');
+        });
+    };
+
+    if (!LOGUEADO) {
+      var correo = window.prompt(
+        'Para dar seguimiento a tu caso, dejamos tu correo (opcional):'
       );
-      return;
+      if (correo) cuerpo.correo = correo;
     }
-    var texto = 'Hola, necesito ayuda con Localis.';
-    var separador = WHATSAPP.indexOf('?') === -1 ? '?' : '&';
-    window.open(WHATSAPP + separador + 'text=' + encodeURIComponent(texto), '_blank', 'noopener');
-    agregarMensaje(
-      'Te abrimos WhatsApp con el soporte. La atencion puede tardar un poco; gracias por la paciencia.',
-      'asistente'
-    );
+    continuar();
   }
 
   burbuja.addEventListener('click', function () {
@@ -174,6 +214,13 @@
   });
   if (cerrar) cerrar.addEventListener('click', cerrarPanel);
   if (soporte) soporte.addEventListener('click', abrirSoporte);
+  if (feedback) {
+    feedback.addEventListener('click', function (evento) {
+      var boton = evento.target.closest('button[data-util]');
+      if (!boton) return;
+      enviarFeedback(boton.getAttribute('data-util') === '1');
+    });
+  }
 
   form.addEventListener('submit', function (evento) {
     evento.preventDefault();

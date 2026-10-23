@@ -27,7 +27,8 @@ _STOPWORDS = frozenset(
     'como cuando donde cual cuales mas menos muy no ni si ya pero tambien solo '
     'cada todo toda todos todas hay ser estoy hacer tiene tienen puedo puede '
     'pueden yo cuanto cuanta cuantos cuantas cuesta cuestan vale uno precio '
-    'precios costo cuesta sale cuanto donde'.split()
+    'precios costo cuesta sale cuanto donde hola buenas buenos dias tardes '
+    'noches gracias ayuda favor saludo'.split()
 )
 
 # Palabras que sugieren una consulta sobre la cuenta del comercio.
@@ -199,6 +200,24 @@ def _contar_sin_foto(comercio_id):
         return None
 
 
+def _dias_restantes(valor):
+    """Dias hasta una fecha (str ISO, date o datetime), o None. Nunca lanza."""
+    try:
+        from datetime import date, datetime
+
+        if valor is None:
+            return None
+        if isinstance(valor, datetime):
+            fecha = valor.date()
+        elif isinstance(valor, date):
+            fecha = valor
+        else:
+            fecha = datetime.fromisoformat(str(valor)[:10]).date()
+        return (fecha - date.today()).days
+    except Exception:
+        return None
+
+
 def resumen_comercio(usuario_id, comercio_id, incluir_imagenes=False):
     """Plan, limite, uso y vencimiento del comercio del usuario (o '')."""
     if not usuario_id:
@@ -230,6 +249,12 @@ def resumen_comercio(usuario_id, comercio_id, incluir_imagenes=False):
         ]
         if comercio.get('fecha_vencimiento'):
             lineas.append(f'Vence: {comercio.get("fecha_vencimiento")}')
+            restantes = _dias_restantes(comercio.get('fecha_vencimiento'))
+            if restantes is not None:
+                if restantes < 0:
+                    lineas.append(f'Vencido hace {-restantes} dia(s)')
+                else:
+                    lineas.append(f'Dias restantes: {restantes}')
         if incluir_imagenes:
             sin_foto = _contar_sin_foto(comercio.get('id'))
             if sin_foto is not None:
