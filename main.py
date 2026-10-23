@@ -1548,13 +1548,19 @@ def _inyectar_asistente():
     """
     try:
         from config import ASISTENTE_WHATSAPP_URL, asistente_habilitado
+        from backend.asistente import version_assets
 
         return {
             'asistente_habilitado': asistente_habilitado(),
             'asistente_whatsapp_url': ASISTENTE_WHATSAPP_URL,
+            'asistente_asset_v': version_assets(),
         }
     except Exception:
-        return {'asistente_habilitado': False, 'asistente_whatsapp_url': ''}
+        return {
+            'asistente_habilitado': False,
+            'asistente_whatsapp_url': '',
+            'asistente_asset_v': '1',
+        }
 
 
 port = int(os.environ.get('PORT', 10000))
