@@ -978,6 +978,79 @@ def tarea_reporte_trafico():
     return jsonify({'ok': estado != 'error', 'estado': estado, 'detalle': detalle}), codigo
 
 
+def _ocr_a_float(valor):
+    try:
+        return float(valor)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+@app.route('/tareas/ocr/<string:tipo>', methods=['POST'])
+@exento_csrf
+def tarea_ocr(tipo):
+    """Ejecuta el OCR de comprobantes en el WORKER (servicio aparte).
+
+    Lo usa ``backend.ocr_remoto`` cuando ``LOCALIS_OCR_SERVICE_URL`` está
+    definida, para que la CPU del OCR no compita con el servidor web. Está
+    protegido por token (``LOCALIS_OCR_TOKEN`` o ``LOCALIS_CRON_TOKEN``); sin
+    token configurado responde 404 (no existe). Nunca lanza.
+    """
+    import base64
+
+    token = (
+        (os.environ.get('LOCALIS_OCR_TOKEN') or '').strip()
+        or (os.environ.get('LOCALIS_CRON_TOKEN') or '').strip()
+    )
+    if not token:
+        return jsonify({'ok': False, 'error': 'no configurado'}), 404
+    recibido = (
+        request.headers.get('X-Localis-Ocr-Token') or request.args.get('token') or ''
+    ).strip()
+    try:
+        autorizado = hmac.compare_digest(token, recibido)
+    except Exception:
+        autorizado = False
+    if not autorizado:
+        return jsonify({'ok': False, 'error': 'no autorizado'}), 401
+
+    datos = request.get_json(silent=True) or {}
+    imagen_b64 = datos.get('imagen_b64') or ''
+    try:
+        data_bytes = base64.b64decode(imagen_b64, validate=False)
+    except Exception:
+        return jsonify({'ok': False, 'error': 'imagen invalida'}), 400
+    if not data_bytes:
+        return jsonify({'ok': False, 'error': 'imagen vacia'}), 400
+
+    try:
+        from backend.payment_ocr import (
+            OCR_SEMAFORO,
+            validar_comprobante_binance,
+            validar_comprobante_pago_movil,
+        )
+
+        with OCR_SEMAFORO:
+            if tipo == 'binance':
+                resultado = validar_comprobante_binance(
+                    data_bytes, _ocr_a_float(datos.get('monto_esperado_usd'))
+                )
+            elif tipo == 'pago-movil':
+                resultado = validar_comprobante_pago_movil(
+                    data_bytes,
+                    _ocr_a_float(datos.get('monto_esperado_bs')),
+                    banco=datos.get('banco'),
+                    rif=datos.get('rif'),
+                    telefono=datos.get('telefono'),
+                )
+            else:
+                return jsonify({'ok': False, 'error': 'tipo no soportado'}), 400
+    except Exception as error:
+        logger.error(f'[Localis OCR] fallo en el worker: {type(error).__name__}: {error}')
+        return jsonify({'ok': False, 'error': 'ocr fallo'}), 500
+
+    return jsonify({'ok': True, 'resultado': resultado}), 200
+
+
 # /api/tasa-bcv y /api/actualizar-tasa viven ahora en backend/blueprints/api.py
 
 
