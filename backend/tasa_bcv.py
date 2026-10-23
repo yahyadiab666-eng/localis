@@ -227,7 +227,9 @@ def _tasa_respaldo_db():
 def _respuesta_ok(tasa, fuente, fecha_bcv=None, actualizado_en=None):
     return {
         'ok': True,
-        'tasa': float(tasa),
+        # La tasa se publica con 2 decimales (igual que el BCV): el resto de la
+        # app calcula precios en Bs con este valor.
+        'tasa': round(float(tasa), 2),
         'fecha': date.today().isoformat(),
         'fecha_bcv': fecha_bcv,
         'fuente': fuente,

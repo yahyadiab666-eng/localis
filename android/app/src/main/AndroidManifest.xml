@@ -32,4 +32,12 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Geolocalización: la necesita el botón "Usar mi ubicación actual" de los
+         formularios de comercio. Sin declararlas aquí, Android no puede conceder
+         el permiso que pide el WebView (BridgeWebChromeClient de Capacitor) y la
+         geolocalización falla siempre dentro de la app. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- No obligar a tener GPS: en tablets/WiFi se usa ubicación aproximada. -->
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 </manifest>

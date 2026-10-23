@@ -52,6 +52,67 @@
       return nodo;
     }
 
+    // Rellena el enlace de Maps de la fila con la ubicación actual del usuario.
+    function obtenerUbicacionActual(boton) {
+      var fila = boton.closest('.ubicacion-fila');
+      var campoMaps = fila ? fila.querySelector('input[name="ubicacion_maps"]') : null;
+      if (!campoMaps) return;
+
+      function ayudaManual(mensaje) {
+        alert(mensaje + ' Puedes pegar el enlace de Google Maps a mano.');
+        campoMaps.focus();
+      }
+
+      if (!navigator.geolocation) {
+        ayudaManual('Tu navegador no soporta geolocalización.');
+        return;
+      }
+      if (!window.isSecureContext) {
+        ayudaManual('La ubicación solo funciona en conexiones seguras (https).');
+        return;
+      }
+
+      var htmlOriginal = boton.innerHTML;
+      function restaurar() {
+        boton.disabled = false;
+        boton.removeAttribute('aria-busy');
+        boton.innerHTML = htmlOriginal;
+        if (window.lucide && typeof window.lucide.createIcons === 'function') {
+          window.lucide.createIcons();
+        }
+      }
+
+      boton.disabled = true;
+      boton.setAttribute('aria-busy', 'true');
+      boton.textContent = 'Obteniendo…';
+
+      navigator.geolocation.getCurrentPosition(
+        function (pos) {
+          campoMaps.value =
+            'https://www.google.com/maps?q=' +
+            pos.coords.latitude.toFixed(6) +
+            ',' +
+            pos.coords.longitude.toFixed(6);
+          campoMaps.dispatchEvent(new Event('input', { bubbles: true }));
+          restaurar();
+        },
+        function (error) {
+          restaurar();
+          var codigo = error && error.code;
+          if (codigo === 1) {
+            ayudaManual('Permiso de ubicación denegado.');
+          } else if (codigo === 2) {
+            ayudaManual('Tu ubicación no está disponible (revisa el GPS o la conexión).');
+          } else if (codigo === 3) {
+            ayudaManual('Se agotó el tiempo al obtener tu ubicación.');
+          } else {
+            ayudaManual('No se pudo obtener tu ubicación.');
+          }
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      );
+    }
+
     lista.addEventListener('click', function (evento) {
       var quitar = evento.target.closest('.btn-quitar-ubicacion');
       if (quitar) {
@@ -66,25 +127,7 @@
       }
       var usarActual = evento.target.closest('.btn-ubicacion-actual');
       if (usarActual) {
-        var filaSede = usarActual.closest('.ubicacion-fila');
-        var campoMaps = filaSede ? filaSede.querySelector('input[name="ubicacion_maps"]') : null;
-        if (!campoMaps) return;
-        if (!navigator.geolocation) {
-          alert('Tu navegador no soporta geolocalización.');
-          return;
-        }
-        navigator.geolocation.getCurrentPosition(
-          function (pos) {
-            campoMaps.value =
-              'https://www.google.com/maps?q=' +
-              pos.coords.latitude +
-              ',' +
-              pos.coords.longitude;
-          },
-          function () {
-            alert('No se pudo obtener tu ubicación. Verifica los permisos del navegador.');
-          }
-        );
+        obtenerUbicacionActual(usarActual);
       }
     });
 

@@ -277,7 +277,8 @@ def resolver_ticket_soporte(ticket_id):
 
 def actualizar_tasa_dolar(admin_id, nueva_tasa):
     try:
-        tasa_limpia = float(nueva_tasa)
+        # La tasa se maneja con 2 decimales (igual que el BCV).
+        tasa_limpia = round(float(nueva_tasa), 2)
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
             cursor.execute(
@@ -292,12 +293,12 @@ def actualizar_tasa_dolar(admin_id, nueva_tasa):
                 VALUES ('tasa_dolar', ?)
                 ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor
                 """,
-                (str(tasa_limpia),),
+                (f'{tasa_limpia:.2f}',),
             )
 
             detalles_log = (
                 f'Cambio de tasa de cambio. Anterior: {tasa_anterior} Bs.'
-                f' Nueva: {tasa_limpia} Bs.'
+                f' Nueva: {tasa_limpia:.2f} Bs.'
             )
             cursor.execute(
                 """
