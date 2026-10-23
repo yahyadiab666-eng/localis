@@ -147,6 +147,35 @@ def _payload_nuevo(svc, region, nombre, start_command=None, variables=None):
     return cuerpo
 
 
+def _config_para_replicar(svc):
+    """Subconjunto del servicio necesario para recrearlo (sin secretos).
+
+    Se guarda en JSON para poder recrear el servicio **aunque ya no exista** el
+    original (si te quedas sin origen, el script no puede leer su configuración).
+    """
+    detalles = svc.get('serviceDetails') or {}
+    return {
+        'type': svc.get('type') or 'web_service',
+        'ownerId': svc.get('ownerId'),
+        'repo': svc.get('repo'),
+        'branch': svc.get('branch'),
+        'autoDeploy': svc.get('autoDeploy') or 'yes',
+        'rootDir': svc.get('rootDir') or '',
+        'serviceDetails': {
+            'env': detalles.get('env') or 'python',
+            'runtime': detalles.get('runtime') or 'python',
+            'plan': detalles.get('plan'),
+            'healthCheckPath': detalles.get('healthCheckPath') or '/health/live',
+            'envSpecificDetails': {
+                'buildCommand': (detalles.get('envSpecificDetails') or {}).get('buildCommand')
+                or 'pip install -r requirements.txt',
+                'startCommand': (detalles.get('envSpecificDetails') or {}).get('startCommand')
+                or 'gunicorn main:app',
+            },
+        },
+    }
+
+
 def _comparar(viejo, nuevo):
     a, b = _config_actual(viejo), _config_actual(nuevo)
     diferencias = []
@@ -174,6 +203,16 @@ def main():
         '--env-json',
         metavar='RUTA',
         help='JSON con las variables (de copiar_env_render.py --export) para crearlas de una vez',
+    )
+    parser.add_argument(
+        '--export-config',
+        metavar='RUTA',
+        help='guardar la configuración del origen para poder recrearlo luego (sin secretos)',
+    )
+    parser.add_argument(
+        '--config-json',
+        metavar='RUTA',
+        help='configuración guardada con --export-config (permite crear sin origen vivo)',
     )
     parser.add_argument('--si-borrar', action='store_true', help='confirmación explícita para borrar')
     args = parser.parse_args()
@@ -220,9 +259,23 @@ def main():
         return 0 if r.status_code == 200 else 1
 
     viejo = buscar(cabeceras, args.servicio)
-    if not viejo:
+    if not viejo and not args.config_json:
         print(f'No encontrado el servicio origen: {args.servicio}')
+        print(
+            'Si ya lo borraste, pasa --config-json con la configuración que guardaste '
+            'antes con --export-config.'
+        )
         return 2
+
+    if args.export_config:
+        if not viejo:
+            print('Para --export-config hace falta el servicio origen vivo.')
+            return 2
+        with open(args.export_config, 'w', encoding='utf-8') as fichero:
+            json.dump(_config_para_replicar(viejo), fichero, ensure_ascii=False, indent=2)
+        print(f'Configuración guardada en {args.export_config} (sin secretos).')
+        print('Guárdala junto al JSON de variables: permite recrear sin el origen vivo.')
+        return 0
 
     if args.ver:
         print('=== Configuración ACTUAL ===')
@@ -238,6 +291,9 @@ def main():
         return 0
 
     if args.comparar:
+        if not viejo:
+            print('Para --comparar hace falta el servicio origen vivo.')
+            return 2
         nuevo = buscar(cabeceras, args.nombre_nuevo)
         if not nuevo:
             print(f'Aún no existe: {args.nombre_nuevo}')
@@ -257,8 +313,13 @@ def main():
         if existente:
             print(f'Ya existe "{args.nombre_nuevo}" ({existente["id"]}); no se crea nada.')
             return 0
+        base = viejo
+        if base is None:
+            with open(args.config_json, encoding='utf-8') as fichero:
+                base = json.load(fichero)
+            print(f'Usando la configuración guardada en {args.config_json}.')
         cuerpo = _payload_nuevo(
-            viejo, args.region, args.nombre_nuevo, args.start_command, variables
+            base, args.region, args.nombre_nuevo, args.start_command, variables
         )
         # Nunca imprimir los valores de las variables: solo el conteo.
         visible = {clave: valor for clave, valor in cuerpo.items() if clave != 'envVars'}
