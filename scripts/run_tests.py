@@ -63,6 +63,7 @@ SIN_RED = [
     'test_cobertura_universal.py',
     'test_asistente_guardarrailes.py',
     'test_asistente_conocimiento.py',
+    'test_asistente_datos.py',
     'test_asistente_rutas.py',
 ]
 INTEGRACION = [
