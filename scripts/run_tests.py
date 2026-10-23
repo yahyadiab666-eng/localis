@@ -65,6 +65,7 @@ SIN_RED = [
     'test_asistente_conocimiento.py',
     'test_asistente_datos.py',
     'test_asistente_rutas.py',
+    'test_ocr_remoto.py',
 ]
 INTEGRACION = [
     'test_migraciones.py',
