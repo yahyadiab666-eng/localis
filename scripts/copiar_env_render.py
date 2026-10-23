@@ -15,7 +15,9 @@ Sin ``--apply`` es **dry-run**: solo muestra qué haría (y oculta los valores).
 ``--lista`` imprime los servicios con su **región**, que es el dato que decide si
 merece la pena mover algo.
 
-La clave NUNCA se escribe en ficheros: se lee de ``RENDER_API_KEY``.
+La clave se lee de ``RENDER_API_KEY`` (variable de entorno o el ``.env`` local,
+que está ignorado por git). El script **nunca imprime la clave**: en el dry-run
+solo muestra los 4 primeros caracteres de cada valor.
 """
 
 from __future__ import annotations
@@ -25,6 +27,15 @@ import os
 import sys
 
 import requests
+
+# Igual que el resto de scripts: se puede poner RENDER_API_KEY en el .env local
+# (ignorado por git) y el script la lee sin que haya que exportarla a mano.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'), override=False)
+except Exception:
+    pass
 
 API = 'https://api.render.com/v1'
 
