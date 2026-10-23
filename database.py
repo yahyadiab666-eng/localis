@@ -2325,6 +2325,54 @@ def _backfill_codigos_publicos(cursor):
             print(f'[Localis Codigos] {tabla}: {error}', flush=True)
 
 
+def _asegurar_indices_trigram(cursor):
+    """Indices GIN (pg_trgm) para las busquedas ``ILIKE '%texto%'``.
+
+    Las busquedas del catalogo y de tiendas usan ``LIKE '%palabra%'``, que **no
+    puede usar un indice B-tree** (comodin al inicio) y obliga a PostgreSQL a
+    recorrer la tabla completa en CADA busqueda. El asistente busca en el catalogo
+    en cada pregunta de precio, asi que esto es critico al crecer el catalogo.
+
+    Se crea la extension ``pg_trgm`` y los indices GIN correspondientes. Todo va
+    con savepoint: si la extension no esta disponible (o faltan permisos), se
+    omite sin romper ``init_db``. Idempotente.
+    """
+    sentencias = (
+        'CREATE EXTENSION IF NOT EXISTS pg_trgm',
+        'CREATE INDEX IF NOT EXISTS idx_productos_nombre_trgm '
+        'ON productos USING gin (nombre gin_trgm_ops)',
+        'CREATE INDEX IF NOT EXISTS idx_productos_descripcion_trgm '
+        'ON productos USING gin (descripcion gin_trgm_ops)',
+        'CREATE INDEX IF NOT EXISTS idx_productos_codigo_trgm '
+        'ON productos USING gin (codigo_barras gin_trgm_ops)',
+        'CREATE INDEX IF NOT EXISTS idx_comercios_nombre_trgm '
+        'ON comercios USING gin (nombre gin_trgm_ops)',
+        'CREATE INDEX IF NOT EXISTS idx_comercios_descripcion_trgm '
+        'ON comercios USING gin (descripcion gin_trgm_ops)',
+        'CREATE INDEX IF NOT EXISTS idx_comercios_ciudad_trgm '
+        'ON comercios USING gin (ciudad gin_trgm_ops)',
+        'CREATE INDEX IF NOT EXISTS idx_comercios_zona_trgm '
+        'ON comercios USING gin (zona gin_trgm_ops)',
+        'CREATE INDEX IF NOT EXISTS idx_comercios_direccion_trgm '
+        'ON comercios USING gin (direccion gin_trgm_ops)',
+        'CREATE INDEX IF NOT EXISTS idx_sucursales_nombre_trgm '
+        'ON sucursales USING gin (nombre gin_trgm_ops)',
+        'CREATE INDEX IF NOT EXISTS idx_sucursales_direccion_trgm '
+        'ON sucursales USING gin (direccion gin_trgm_ops)',
+        'CREATE INDEX IF NOT EXISTS idx_sucursales_ciudad_trgm '
+        'ON sucursales USING gin (ciudad gin_trgm_ops)',
+        'CREATE INDEX IF NOT EXISTS idx_sucursales_zona_trgm '
+        'ON sucursales USING gin (zona gin_trgm_ops)',
+        'CREATE INDEX IF NOT EXISTS idx_sucursales_maps_trgm '
+        'ON sucursales USING gin (maps_url gin_trgm_ops)',
+    )
+    creados = 0
+    for ddl in sentencias:
+        if _ejecutar_ddl_seguro(cursor, ddl):
+            creados += 1
+    print(f'[Localis Indices] trigram: {creados}/{len(sentencias)} ok', flush=True)
+
+
 def _crear_indices(cursor):
     existentes = _indices_existentes(cursor)
     indices = [
@@ -2397,6 +2445,8 @@ def _crear_indices(cursor):
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_productos_codigo_publico ON productos(codigo_publico)',
         # Búsqueda de pre-cuentas por correo del futuro dueño (case-insensitive).
         'CREATE INDEX IF NOT EXISTS idx_comercios_owner_email ON comercios(LOWER(owner_email)) WHERE owner_email IS NOT NULL',
+        # Cola de importación: último trabajo de un comercio (panel y asistente).
+        'CREATE INDEX IF NOT EXISTS idx_import_jobs_comercio ON import_jobs(comercio_id, creado DESC)',
     ]
     for ddl in indices:
         _ejecutar_indice_si_falta(cursor, ddl, existentes)
@@ -2628,6 +2678,7 @@ def init_db():
                 _crear_vista_tiendas(cursor)
                 _sembrar_configuracion(cursor)
                 _crear_indices(cursor)
+                _asegurar_indices_trigram(cursor)
                 conexion.commit()
             except Exception:
                 try:
