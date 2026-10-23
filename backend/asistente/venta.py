@@ -49,10 +49,37 @@ _MODO_POR_ROL = {
     'admin': MODO_VENTA_COMERCIANTE,
 }
 
+# Consultas claramente de NEGOCIO (aunque quien pregunte sea visitante).
+_PATRONES_COMERCIANTE = (
+    r'\bplan(?:es)?\b',
+    r'\bsuscrip\w*',
+    r'\bmembres\w*',
+    r'\btarif\w*',
+    r'cu[aá]nto cuesta localis',
+    r'precio de localis',
+    r'prueba gratis',
+    r'quiero vender',
+    r'\bvend\w*',
+    r'(crear|registrar|abrir) mi (tienda|comercio|negocio)',
+    r'\bcomerciante\b',
+    r'\bnegocio\b',
+    r'\btienda\b.*\b(publicar|vender|productos)\b',
+)
+_RE_COMERCIANTE = re.compile('|'.join(_PATRONES_COMERCIANTE), re.I)
 
-def modo_venta(rol):
-    """Instruccion de venta segun la audiencia (comprador o comerciante)."""
-    return _MODO_POR_ROL.get(str(rol or 'invitado').lower(), MODO_VENTA_CLIENTE)
+
+def modo_venta(rol, texto=None):
+    """Instruccion de venta segun la audiencia.
+
+    Comerciante si el rol lo es **o** si la consulta es claramente de negocio
+    (planes, vender, crear tienda...). Si no, comprador.
+    """
+    rol_norm = str(rol or 'invitado').lower()
+    if rol_norm in ('comerciante', 'admin'):
+        return MODO_VENTA_COMERCIANTE
+    if texto and _RE_COMERCIANTE.search(str(texto)):
+        return MODO_VENTA_COMERCIANTE
+    return MODO_VENTA_CLIENTE
 
 
 # Intenciones comerciales (conservador: solo Localis como servicio).
