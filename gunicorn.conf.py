@@ -11,7 +11,14 @@ threads = int(os.environ.get('GUNICORN_THREADS', '8'))
 timeout = int(os.environ.get('GUNICORN_TIMEOUT', '120'))
 graceful_timeout = 30
 keepalive = 5
-accesslog = '-'
+# La app ya emite su propia linea de acceso (localis.acceso) con MAS informacion
+# (request-id, duracion). Con el accesslog de gunicorn activo se escriben DOS
+# lineas por peticion, y ese I/O extra se paga en cada request. Por defecto solo
+# la de la app; para depurar, define GUNICORN_ACCESSLOG=1.
+_accesslog_on = str(os.environ.get('GUNICORN_ACCESSLOG', '0')).strip().lower() not in (
+    '0', 'false', 'no', 'off',
+)
+accesslog = '-' if _accesslog_on else None
 errorlog = '-'
 loglevel = os.environ.get('GUNICORN_LOGLEVEL', 'info')
 # No preload: el master enlaza el puerto antes de que cada worker importe main.
