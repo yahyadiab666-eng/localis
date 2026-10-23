@@ -64,6 +64,7 @@ SIN_RED = [
 ]
 INTEGRACION = [
     'test_migraciones.py',
+    'test_cola_importacion.py',
     'test_ubicaciones_integracion.py',
     'test_trafico_bd.py',
     'test_recordatorios.py',

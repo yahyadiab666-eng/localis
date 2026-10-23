@@ -21,7 +21,21 @@ RAIZ = Path(__file__).resolve().parents[1]
 if str(RAIZ) not in sys.path:
     sys.path.insert(0, str(RAIZ))
 
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(RAIZ / '.env', override=False)
+except Exception:
+    pass
+
 from backend import import_queue  # noqa: E402  (ruta del proyecto)
+
+
+def _hay_bd():
+    """True si hay base de datos (la parte de estado compartido la necesita)."""
+    import os
+
+    return bool((os.environ.get('DATABASE_URL') or '').strip())
 
 _ERRORES = []
 
@@ -47,6 +61,57 @@ def _esperar(job_id, objetivos, comercio_id=None, timeout=12.0):
             return estado
         time.sleep(0.05)
     return None
+
+
+def _probar_estado_compartido():
+    """El estado del trabajo debe sobrevivir a 'otro worker' (se lee de la BD).
+
+    Es lo que permite ``WEB_CONCURRENCY > 1``: el polling puede caer en un
+    proceso distinto del que procesó el archivo.
+    """
+    print('\n=== Estado compartido entre workers (base de datos) ===')
+    if not _hay_bd():
+        print('  SKIP  sin DATABASE_URL: no se puede probar el estado compartido')
+        return
+
+    def procesador(comercio_id, filename, data):
+        return True, 'Importación completada.', {'filas': 2}
+
+    import_queue._procesador = procesador
+    import_queue.configurar_cola(None)
+    import_queue.reiniciar_para_pruebas()
+
+    job = import_queue.encolar_importacion(103, 'compartido.csv', b'a,b\n1,2\n')
+    job_id = job['job_id']
+    estado = _esperar(job_id, {'completado', 'parcial', 'error'}, comercio_id=103)
+    _ok(estado is not None, f"el job termina ({estado and estado['estado']})")
+
+    # Simula OTRO worker: se vacía la memoria local del proceso.
+    with import_queue._jobs_lock:
+        import_queue._jobs.clear()
+
+    desde_bd = import_queue.obtener_estado_job(job_id, comercio_id=103)
+    _ok(desde_bd is not None, 'otro worker encuentra el job (estado leído de la BD)')
+    _ok(
+        desde_bd and desde_bd['estado'] in ('completado', 'parcial'),
+        f"estado compartido = {desde_bd and desde_bd['estado']}",
+    )
+    _ok(
+        desde_bd and desde_bd['meta'].get('filas') == 2,
+        'la meta también viaja por la BD',
+    )
+    _ok(
+        import_queue.obtener_estado_job(job_id, comercio_id=999) is None,
+        'otro comercio sigue sin verlo (aislamiento)',
+    )
+
+    # El test vació la memoria a propósito (simula otro worker), así que el borrado
+    # se hace por id, que es justo lo que usa la limpieza real.
+    import_queue._job_borrar(job_id)
+    _ok(
+        import_queue.obtener_estado_job(job_id, comercio_id=103) is None,
+        'la limpieza borra también la fila en BD',
+    )
 
 
 def _probar_mecanica():
@@ -106,11 +171,16 @@ def _probar_cola_llena():
 
 def _auditar_fuente():
     print('\n=== Auditoría de fuente (contrato HTTP 202 + polling) ===')
-    main = _leer('main.py')
-    _ok('202,' in main, 'la ruta responde HTTP 202')
-    _ok('estado_importacion' in main, 'existe la ruta de estado del trabajo')
-    _ok('encolar_importacion(' in main, 'la ruta encola (no procesa en línea)')
-    _ok('procesar_csv_productos(comercio' not in main, 'la ruta ya NO procesa el CSV en línea')
+    # Las rutas viven ahora en el blueprint de comercio (antes estaban en main.py);
+    # se auditan en el módulo donde están de verdad.
+    rutas = _leer('backend/blueprints/comercio.py')
+    _ok('202,' in rutas, 'la ruta responde HTTP 202')
+    _ok('estado_importacion' in rutas, 'existe la ruta de estado del trabajo')
+    _ok('encolar_importacion(' in rutas, 'la ruta encola (no procesa en línea)')
+    _ok(
+        'procesar_csv_productos(comercio' not in rutas,
+        'la ruta ya NO procesa el CSV en línea',
+    )
 
     cola = _leer('backend/import_queue.py')
     _ok('queue.Queue' in cola and 'maxsize=' in cola, 'cola acotada por maxsize')
@@ -136,6 +206,7 @@ def main() -> int:
     _probar_mecanica()
     _probar_cola_llena()
     _auditar_fuente()
+    _probar_estado_compartido()
 
     print('\n=== RESULTADO ===')
     if _ERRORES:
