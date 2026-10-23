@@ -17,7 +17,7 @@ from urllib.parse import quote
 
 from flask import Blueprint, jsonify, request, session
 
-from backend.asistente import acciones, observacion, orquestador
+from backend.asistente import acciones, observacion, orquestador, pagos
 from backend.rate_limit import limite
 from config import (
     ASISTENTE_WHATSAPP_URL,
@@ -42,7 +42,7 @@ def _guardar_accion(propuesta):
         pendientes = {}
     pendientes[propuesta['id']] = {
         'accion': propuesta.get('accion'),
-        'producto_id': (propuesta.get('parametros') or {}).get('producto_id'),
+        'parametros': dict(propuesta.get('parametros') or {}),
         'titulo': propuesta.get('resumen'),
         'ts': time.time(),
     }
@@ -231,12 +231,19 @@ def accion_confirmar():
         )
 
     usuario = _contexto_usuario()
-    ok, mensaje = acciones.ejecutar(
-        usuario.get('usuario_id'),
-        usuario.get('comercio_id'),
-        pendiente.get('accion'),
-        pendiente.get('producto_id'),
-    )
+    accion = pendiente.get('accion')
+    parametros = pendiente.get('parametros') or {}
+    if accion == 'pago_reverificar':
+        ok, mensaje = pagos.reverificar(
+            usuario.get('usuario_id'), usuario.get('comercio_id')
+        )
+    else:
+        ok, mensaje = acciones.ejecutar(
+            usuario.get('usuario_id'),
+            usuario.get('comercio_id'),
+            accion,
+            parametros.get('producto_id'),
+        )
     return jsonify({'ok': ok, 'mensaje': mensaje}), (200 if ok else 400)
 
 

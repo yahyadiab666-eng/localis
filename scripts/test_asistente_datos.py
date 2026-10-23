@@ -94,6 +94,17 @@ def _probar_observacion():
     _ok(estado['feedback_util'] == 1, 'cuenta feedback')
 
 
+def _probar_pagos():
+    print('\n=== Soporte de pagos (rutas puras) ===')
+    from backend.asistente import pagos
+
+    _ok(pagos.estado_pago(None) == '', 'sin comercio -> cadena vacia')
+    _ok(pagos.proponer(None, 'revisar mi pago') is None, 'sin comercio no propone')
+    _ok(pagos.proponer(1, 'hola') is None, 'sin claves de pago no propone')
+    _ok(pagos.reverificar(None, None)[0] is False, 'sin sesion no ejecuta')
+    _ok(pagos.reverificar(1, None)[0] is False, 'sin comercio no ejecuta')
+
+
 def _probar_acciones():
     print('\n=== Acciones confirmadas (whitelist y deteccion) ===')
     from backend.asistente import acciones
@@ -175,6 +186,7 @@ def main() -> int:
     _probar_saltos_seguros()
     _probar_presupuesto()
     _probar_observacion()
+    _probar_pagos()
     _probar_acciones()
 
     print('\n=== RESULTADO ===')

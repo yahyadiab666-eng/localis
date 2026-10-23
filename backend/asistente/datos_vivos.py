@@ -333,34 +333,6 @@ def resumen_imagenes(comercio_id, maximo_ejemplos=3):
         return ''
 
 
-def pago_pendiente(comercio_id):
-    """Revisiones de pago pendientes del comercio (o '')."""
-    if not comercio_id:
-        return ''
-    try:
-        from backend.db import get_db_connection
-
-        with get_db_connection() as conexion:
-            cursor = conexion.cursor()
-            cursor.execute(
-                "SELECT COUNT(*), MAX(fecha) FROM soporte_y_reportes "
-                "WHERE tipo = 'revision_pago' AND referencia_id = ? "
-                "AND estado = 'pendiente'",
-                (int(comercio_id),),
-            )
-            fila = cursor.fetchone()
-        cantidad = int(fila[0] or 0) if fila else 0
-        if not cantidad:
-            return 'No hay pagos pendientes de revision.'
-        lineas = [f'Pagos pendientes de revision manual: {cantidad}']
-        if fila and fila[1]:
-            lineas.append(f'El mas reciente: {fila[1]}')
-        return '\n'.join(lineas)
-    except Exception as error:
-        _log.warning('pago pendiente fallo: %s', error)
-        return ''
-
-
 def buscar_tiendas(mensaje, maximo=4):
     """Tiendas publicas que mejor encajan con el mensaje (o '')."""
     claves = [clave for clave in _keywords(mensaje) if len(clave) >= 4]

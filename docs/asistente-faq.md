@@ -65,6 +65,16 @@ Después del pago:
 4. Si no es concluyente, el pago queda "sin verificar" y pasa a **revisión manual**
    del equipo; al aprobarse, el plan se activa.
 
+### Problemas al pagar
+
+- **El comprobante se rechaza:** verifica que el monto sea el exacto, que la fecha
+  del comprobante sea reciente (del día) y que no hayas usado el mismo comprobante
+  antes. Debe ser al banco y teléfono que muestra la app.
+- **Binance no encuentra la orden:** el ID de la orden debe estar exacto y el monto
+  exacto en USDT. Copia el ID desde Binance (no lo escribas a mano).
+- **Quedó "sin verificar":** a veces es un fallo temporal de la API de Binance. Se
+  puede volver a consultar para confirmarlo sin esperar.
+
 ## Cambios de plan
 
 - Subir de plan (upgrade) se aplica de inmediato.
