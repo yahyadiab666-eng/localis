@@ -19,7 +19,7 @@ from config import (
     asistente_habilitado,
 )
 
-from backend.asistente import datos_vivos, presupuesto, proveedor
+from backend.asistente import acciones, datos_vivos, presupuesto, proveedor
 from backend.asistente.conocimiento import contexto_para
 from backend.asistente.prompts import mensajes_para
 from backend.asistente.seguridad import redactar, sanear_entrada
@@ -154,6 +154,19 @@ def responder(usuario, mensaje, historial=None):
             'estado': 'vacio',
             'mensaje': 'Escribe tu pregunta para poder ayudarte.',
         }
+
+    # Acciones confirmadas (solo comerciante): el SERVIDOR detecta y propone con
+    # un objetivo inequivoco; el modelo no decide nada. Proponer NO cambia nada.
+    if rol == 'comerciante' and usuario.get('comercio_id'):
+        propuesta = acciones.proponer(usuario.get('comercio_id'), texto)
+        if propuesta:
+            return {
+                'ok': True,
+                'estado': 'accion',
+                'respuesta': propuesta['mensaje'],
+                'accion': propuesta,
+                'sugerencias': [],
+            }
 
     contexto = _construir_contexto(usuario, rol, texto)
     mensajes = mensajes_para(rol, texto, contexto, _limpiar_historial(historial))

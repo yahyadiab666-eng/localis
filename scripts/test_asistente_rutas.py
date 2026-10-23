@@ -150,6 +150,18 @@ def _probar_metricas_en_estado():
     _ok(isinstance(datos.get('metricas'), dict), 'incluye metricas')
 
 
+def _probar_accion_nonce():
+    print('\n=== Acciones: nonce invalido y cancelar ===')
+    cliente = _app().test_client()
+    respuesta = cliente.post('/api/asistente/accion/confirmar', json={'id': 'no-existe'})
+    _ok(respuesta.status_code == 400, 'confirmar con nonce invalido -> 400')
+    _ok(respuesta.get_json().get('ok') is False, 'no aplica nada')
+    respuesta = cliente.post('/api/asistente/accion/cancelar', json={'id': 'no-existe'})
+    _ok(respuesta.status_code == 200, 'cancelar -> 200')
+    respuesta = cliente.post('/api/asistente/accion/confirmar', json={})
+    _ok(respuesta.status_code == 400, 'confirmar sin id -> 400')
+
+
 def _probar_proveedor_caido():
     print('\n=== Proveedor no disponible ===')
     from backend.asistente.proveedor import ProveedorNoDisponible
@@ -176,6 +188,7 @@ def main() -> int:
     _probar_escalado()
     _probar_feedback()
     _probar_metricas_en_estado()
+    _probar_accion_nonce()
     _probar_proveedor_caido()
 
     print('\n=== RESULTADO ===')

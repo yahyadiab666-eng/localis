@@ -12,6 +12,8 @@
      data-chat-url="{{ url_for('asistente.chat') }}"
      data-escalar-url="{{ url_for('asistente.escalar') }}"
      data-feedback-url="{{ url_for('asistente.feedback') }}"
+     data-accion-confirmar-url="{{ url_for('asistente.accion_confirmar') }}"
+     data-accion-cancelar-url="{{ url_for('asistente.accion_cancelar') }}"
      data-csrf="{{ csrf_token() }}"
      data-whatsapp="{{ asistente_whatsapp_url }}"
      data-logueado="{{ '1' if session.get('usuario_id') else '0' }}">
