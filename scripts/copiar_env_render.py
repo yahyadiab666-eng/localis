@@ -100,9 +100,44 @@ def main():
     parser.add_argument('--desde', help='servicio origen (nombre o id)')
     parser.add_argument('--hacia', help='servicio destino (nombre o id)')
     parser.add_argument('--apply', action='store_true', help='escribe de verdad (si no, dry-run)')
+    parser.add_argument(
+        '--export',
+        metavar='RUTA',
+        help='guarda las variables del origen en un JSON (¡contiene secretos!)',
+    )
+    parser.add_argument(
+        '--import',
+        dest='importar',
+        metavar='RUTA',
+        help='escribe en --hacia las variables de un JSON exportado antes',
+    )
     args = parser.parse_args()
 
     cabeceras = _cabeceras()
+
+    # --- Importar desde un JSON exportado (ruta "borrar y recrear con el mismo
+    # nombre" para conservar la URL y no tocar el APK). -----------------------
+    if args.importar:
+        import json
+
+        if not args.hacia:
+            print('Falta --hacia (servicio destino).')
+            return 2
+        with open(args.importar, encoding='utf-8') as fichero:
+            variables = json.load(fichero)
+        servicios = listar_servicios(cabeceras)
+        destino = _resolver(servicios, args.hacia)
+        if not destino:
+            print(f'No encontrado el servicio destino: {args.hacia}')
+            return 2
+        print(f"Destino: {destino['name']} (region={destino['region']})")
+        print(f'Variables a escribir: {len(variables)}')
+        if not args.apply:
+            print('DRY-RUN: repite con --apply para escribirlas.')
+            return 0
+        escribir_env(cabeceras, destino['id'], variables, reemplazar=True)
+        print(f'Listo: {len(variables)} variables escritas en {destino["name"]}.')
+        return 0
 
     if args.lista or not args.desde:
         print('Servicios en tu cuenta de Render:')
@@ -138,6 +173,14 @@ def main():
         valor = v['value'] or ''
         muestra = '(vacío)' if not valor else f'{valor[:4]}…{valor[-2:]} ({len(valor)} caracteres)'
         print(f"  {v['key']:<38} {muestra}")
+
+    if args.export:
+        import json
+
+        with open(args.export, 'w', encoding='utf-8') as fichero:
+            json.dump(variables, fichero, ensure_ascii=False, indent=2)
+        print(f'\nExportadas {len(variables)} variables a {args.export}')
+        print('OJO: ese fichero tiene SECRETOS. Guárdalo fuera del repo y bórralo al terminar.')
 
     if not args.apply:
         print(f'\nDRY-RUN: se copiarían {len(variables)} variables al destino.')
