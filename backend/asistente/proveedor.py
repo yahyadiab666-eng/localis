@@ -16,6 +16,7 @@ from config import (
     ASISTENTE_BASE_URL,
     ASISTENTE_MAX_TOKENS,
     ASISTENTE_MODELO,
+    ASISTENTE_ORDEN_PROVEEDOR,
     ASISTENTE_SITIO,
     ASISTENTE_TEMPERATURA,
     ASISTENTE_TIMEOUT_SEG,
@@ -53,6 +54,9 @@ def responder(mensajes, herramientas=None, timeout=None):
     if herramientas:
         payload['tools'] = herramientas
         payload['tool_choice'] = 'auto'
+    if ASISTENTE_ORDEN_PROVEEDOR:
+        # OpenRouter: elegir el proveedor mas rapido para bajar la latencia.
+        payload['provider'] = {'sort': ASISTENTE_ORDEN_PROVEEDOR}
 
     cabeceras = {
         'Authorization': f'Bearer {clave}',

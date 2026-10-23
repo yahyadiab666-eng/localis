@@ -256,7 +256,7 @@ ASISTENTE_SITIO = os.environ.get(
 )
 ASISTENTE_TITULO = os.environ.get('LOCALIS_ASISTENTE_TITULO', 'Localis')
 ASISTENTE_TIMEOUT_SEG = float(os.environ.get('LOCALIS_ASISTENTE_TIMEOUT_SEG', '20'))
-ASISTENTE_MAX_TOKENS = int(os.environ.get('LOCALIS_ASISTENTE_MAX_TOKENS', '300'))
+ASISTENTE_MAX_TOKENS = int(os.environ.get('LOCALIS_ASISTENTE_MAX_TOKENS', '250'))
 ASISTENTE_TEMPERATURA = float(os.environ.get('LOCALIS_ASISTENTE_TEMPERATURA', '0.1'))
 # Tope de consultas simultaneas al LLM (1 worker + pocos hilos): evita que una
 # rafaga de chats acapare el proceso. Excedente -> aviso y derivacion a WhatsApp.
@@ -265,7 +265,12 @@ ASISTENTE_MAX_CONCURRENTES = int(
 )
 ASISTENTE_MAX_HISTORIAL = int(os.environ.get('LOCALIS_ASISTENTE_MAX_HISTORIAL', '8'))
 ASISTENTE_LIMITE_MENSAJE = int(os.environ.get('LOCALIS_ASISTENTE_LIMITE_MENSAJE', '1500'))
-ASISTENTE_MAX_CONTEXTO = int(os.environ.get('LOCALIS_ASISTENTE_MAX_CONTEXTO', '4000'))
+ASISTENTE_MAX_CONTEXTO = int(os.environ.get('LOCALIS_ASISTENTE_MAX_CONTEXTO', '2500'))
+# Enrutado de OpenRouter: 'throughput' elige el proveedor mas rapido para el
+# modelo (menos latencia). Vacio = dejar que OpenRouter decida.
+ASISTENTE_ORDEN_PROVEEDOR = os.environ.get(
+    'LOCALIS_ASISTENTE_ORDEN_PROVEEDOR', 'throughput'
+).strip()
 ASISTENTE_WHATSAPP_URL = (
     os.environ.get('LOCALIS_ASISTENTE_WHATSAPP_URL') or WHATSAPP_SOPORTE_URL
 )
