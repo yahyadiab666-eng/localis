@@ -73,7 +73,7 @@ def chat():
         return jsonify(resultado), 200
 
     motivo = resultado.get('estado')
-    if motivo == 'ocupado':
+    if motivo in ('ocupado', 'presupuesto'):
         codigo = 429
     elif motivo == 'vacio':
         codigo = 400
