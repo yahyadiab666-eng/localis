@@ -1026,6 +1026,8 @@ def _diagnosticar_postgresql_real():
         'latencia_ms': None,
         'version': None,
         'tablas_criticas': {},
+        'indices_trgm': None,
+        'pg_trgm': None,
         'pool_min': DB_POOL_MIN,
         'pool_max': DB_POOL_MAX,
         'error': None,
@@ -1078,6 +1080,32 @@ def _diagnosticar_postgresql_real():
                     resultado['tablas_criticas'][tabla] = bool(existe[0])
                 else:
                     resultado['tablas_criticas'][tabla] = False
+            # Optimizacion de busquedas ILIKE '%texto%': indices GIN (pg_trgm).
+            try:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM pg_indexes "
+                    "WHERE schemaname = 'public' AND indexname LIKE '%trgm'"
+                )
+                fila_trgm = cursor.fetchone()
+                if isinstance(fila_trgm, dict):
+                    resultado['indices_trgm'] = int(next(iter(fila_trgm.values()), 0) or 0)
+                elif isinstance(fila_trgm, tuple):
+                    resultado['indices_trgm'] = int(fila_trgm[0] or 0)
+                else:
+                    resultado['indices_trgm'] = 0
+                cursor.execute(
+                    "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm')"
+                )
+                fila_ext = cursor.fetchone()
+                if isinstance(fila_ext, dict):
+                    resultado['pg_trgm'] = bool(next(iter(fila_ext.values()), False))
+                elif isinstance(fila_ext, tuple):
+                    resultado['pg_trgm'] = bool(fila_ext[0])
+                else:
+                    resultado['pg_trgm'] = False
+            except Exception:
+                resultado['indices_trgm'] = None
+                resultado['pg_trgm'] = None
             conexion.rollback()
         resultado['latencia_ms'] = round((time.time() - inicio) * 1000, 1)
         resultado['ok'] = all(resultado['tablas_criticas'].values())
