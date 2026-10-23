@@ -31,6 +31,11 @@ try:
 except Exception:
     pass
 
+# Las pruebas no salen a la red ni escriben configuración: se apaga la
+# sincronización automática de la tasa del BCV. Tiene su propio test con la red
+# y la BD simuladas (test_tasa_automatica.py).
+os.environ.setdefault('LOCALIS_TASA_AUTO_BCV', '0')
+
 SIN_RED = [
     'test_config_seguridad.py',
     'test_estructura_blueprints.py',
@@ -45,6 +50,7 @@ SIN_RED = [
     'test_ocr_robustez.py',
     'test_ubicaciones_maps.py',
     'test_geocodificacion_maps.py',
+    'test_tasa_automatica.py',
     'test_boost_referencias.py',
     'test_verificacion_pagos.py',
     'test_compresion.py',

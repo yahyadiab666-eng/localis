@@ -38,6 +38,8 @@ def _cargar_entorno():
     # Sin red de terceros en pruebas: la geocodificación de ubicaciones tiene su
     # propio test (test_geocodificacion_maps.py). Aquí se mantiene determinista.
     os.environ['LOCALIS_GEOCODIFICACION'] = '0'
+    # Igual con la tasa: su sincronización diaria sale al BCV y escribe config.
+    os.environ['LOCALIS_TASA_AUTO_BCV'] = '0'
 
 
 def _ok(condicion, mensaje, errores):

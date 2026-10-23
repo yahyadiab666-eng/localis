@@ -177,8 +177,21 @@ def api_actualizar_tasa():
     if 'usuario_id' not in session:
         return jsonify({'ok': False, 'error': 'No autorizado.'}), 401
     try:
-        resultado = obtener_tasa_bcv(forzar_actualizacion=True)
-        return jsonify(resultado), (200 if resultado.get('ok') else 503)
+        from backend.tasa_automatica import sincronizar_tasa_diaria
+
+        # Fuerza la consulta a la web del BCV y **guarda** el valor (2 decimales)
+        # como tasa del día, igual que la sincronización automática.
+        resultado = sincronizar_tasa_diaria(forzar=True)
+        return (
+            jsonify(
+                {
+                    'ok': bool(resultado.get('ok')),
+                    'sincronizacion': resultado,
+                    'tasa_bcv': obtener_tasa_bcv(),
+                }
+            ),
+            200 if resultado.get('ok') else 503,
+        )
     except Exception as error:
         return jsonify({'ok': False, 'error': f'{type(error).__name__}: {error}'}), 500
 

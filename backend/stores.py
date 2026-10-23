@@ -338,6 +338,14 @@ def _cargar_tasa_dolar_db():
 
 
 def obtener_tasa_dolar():
+    # Sin bloquear: si la tasa del día aún no se sincronizó con el BCV, se lanza
+    # en segundo plano. En el caso normal es solo una comprobación de fecha.
+    try:
+        from backend.tasa_automatica import asegurar_tasa_del_dia
+
+        asegurar_tasa_del_dia()
+    except Exception:
+        pass
     return get_or_load('config:tasa_dolar', _cargar_tasa_dolar_db, _CONFIG_TTL_SEG)
 
 

@@ -121,6 +121,16 @@ def _estado_proceso():
     }
 
 
+def _estado_tasa():
+    """Estado NO secreto de la tasa de cambio (BCV). No hace red."""
+    try:
+        from backend.tasa_automatica import estado_tasa_automatica
+
+        return estado_tasa_automatica()
+    except Exception as error:
+        return {'ok': False, 'error': f'{type(error).__name__}: {error}'}
+
+
 def obtener_estado_sistema(*, probar_supabase: bool = False):
     """Estado consolidado para health checks y arranque."""
     diag_bd = diagnosticar_postgresql()
@@ -141,6 +151,7 @@ def obtener_estado_sistema(*, probar_supabase: bool = False):
         'supabase_conectado': ok_supabase,
         'pagos': _estado_pagos(),
         'proceso': _estado_proceso(),
+        'tasa': _estado_tasa(),
     }
 
 

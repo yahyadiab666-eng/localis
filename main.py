@@ -467,6 +467,24 @@ def _calentar_ocr():
         logger.error(f'[Localis OCR] warm-up omitido: {type(error).__name__}: {error}')
 
 
+def _programar_tasa_automatica():
+    """Mantiene la tasa de cambio oficial del BCV al día (una vez al día).
+
+    Arranca el hilo de fondo y hace un primer intento. Nunca rompe el arranque:
+    si el BCV no responde se conserva la tasa anterior.
+    """
+    try:
+        from backend.tasa_automatica import asegurar_tasa_del_dia, programar_hilo_diario
+
+        programar_hilo_diario()
+        asegurar_tasa_del_dia()
+    except Exception as error:
+        logger.error(
+            f'[Localis Tasa] no se pudo programar la actualización diaria: '
+            f'{type(error).__name__}: {error}'
+        )
+
+
 def _inicializar_aplicacion():
     """Migraciones y diagnóstico fuera del hilo que importa el WSGI (Gunicorn ya puede bind)."""
     logger.info('[Localis] Inicialización en segundo plano...')
@@ -493,6 +511,7 @@ def _inicializar_aplicacion():
         ejecutar_diagnostico_inicio()
         _diagnosticar_serper()
         _calentar_ocr()
+        _programar_tasa_automatica()
         # --- RESTAURAR_PAGOS_INICIO ---
         # En la fase gratuita no se expiran tiendas por suscripción al arrancar.
         if pagos_habilitados():
