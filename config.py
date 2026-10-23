@@ -256,8 +256,8 @@ ASISTENTE_SITIO = os.environ.get(
 )
 ASISTENTE_TITULO = os.environ.get('LOCALIS_ASISTENTE_TITULO', 'Localis')
 ASISTENTE_TIMEOUT_SEG = float(os.environ.get('LOCALIS_ASISTENTE_TIMEOUT_SEG', '20'))
-ASISTENTE_MAX_TOKENS = int(os.environ.get('LOCALIS_ASISTENTE_MAX_TOKENS', '500'))
-ASISTENTE_TEMPERATURA = float(os.environ.get('LOCALIS_ASISTENTE_TEMPERATURA', '0.3'))
+ASISTENTE_MAX_TOKENS = int(os.environ.get('LOCALIS_ASISTENTE_MAX_TOKENS', '300'))
+ASISTENTE_TEMPERATURA = float(os.environ.get('LOCALIS_ASISTENTE_TEMPERATURA', '0.1'))
 # Tope de consultas simultaneas al LLM (1 worker + pocos hilos): evita que una
 # rafaga de chats acapare el proceso. Excedente -> aviso y derivacion a WhatsApp.
 ASISTENTE_MAX_CONCURRENTES = int(
