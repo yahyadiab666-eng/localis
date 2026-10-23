@@ -116,12 +116,14 @@ def construir_reporte(dias=1):
         lineas.append('  (sin datos de ayer)')
     lineas.append('')
 
-    # Totales del periodo: solo los ultimos `dias` (no incluir el dia extra).
-    recientes = por_dia[-dias:] if dias else por_dia
+    # Totales del periodo: solo los dias dentro de [hoy-dias+1, hoy].
+    desde_periodo = (hoy_fecha - timedelta(days=dias - 1)).isoformat()
     totales = {}
-    for dia in recientes:
-        for clave, valor in (dia.get('claves') or {}).items():
-            totales[clave] = totales.get(clave, 0) + int(valor or 0)
+    for dia in por_dia:
+        fecha_dia = str(dia.get('fecha') or '')
+        if desde_periodo <= fecha_dia <= hoy:
+            for clave, valor in (dia.get('claves') or {}).items():
+                totales[clave] = totales.get(clave, 0) + int(valor or 0)
 
     lineas.append(f'--- Totales del período ({dias} día(s)) ---')
     for clave, etiqueta in _ETIQUETAS:
