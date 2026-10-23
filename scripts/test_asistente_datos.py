@@ -103,6 +103,14 @@ def _probar_venta():
     _ok(venta.modo_venta('comerciante') == venta.MODO_VENTA_COMERCIANTE, 'rol comerciante -> su modo')
     _ok(venta.modo_venta('cliente') == venta.MODO_VENTA_CLIENTE, 'rol cliente -> comprador')
     _ok(venta.modo_venta('invitado') == venta.MODO_VENTA_CLIENTE, 'invitado -> comprador')
+    _ok(
+        venta.modo_venta('invitado', 'cuanto cuesta el plan Pro') == venta.MODO_VENTA_COMERCIANTE,
+        'invitado que pregunta por planes -> comerciante',
+    )
+    _ok(
+        venta.modo_venta('invitado', 'que es localis') == venta.MODO_VENTA_CLIENTE,
+        'invitado sin tema de negocio -> comprador',
+    )
     _ok(venta.es_tema_comercial('¿Cuanto cuesta el plan Pro?'), 'plan -> venta')
     _ok(venta.es_tema_comercial('Que beneficios tiene Localis?'), 'beneficios -> venta')
     _ok(venta.es_tema_comercial('Es gratis?'), 'es gratis -> venta')

@@ -172,7 +172,7 @@ def responder(usuario, mensaje, historial=None):
             }
 
     contexto = _construir_contexto(usuario, rol, texto)
-    instruccion = venta.modo_venta(rol) if venta.es_tema_comercial(texto) else None
+    instruccion = venta.modo_venta(rol, texto) if venta.es_tema_comercial(texto) else None
     mensajes = mensajes_para(
         rol, texto, contexto, _limpiar_historial(historial), instruccion
     )
