@@ -98,6 +98,20 @@ def _estado_pagos():
         }
 
 
+def _memoria_rss_mb():
+    """Memoria residente del proceso en MB (0 si no se puede leer).
+
+    Importante con planes pequeños (512 MB): el stack de OCR (onnxruntime,
+    rembg, opencv) es lo que más RAM consume y un pico provoca un OOM.
+    """
+    try:
+        with open('/proc/self/statm', encoding='ascii') as fichero:
+            paginas = int((fichero.read().split() or ['0'])[1])
+        return round(paginas * (os.sysconf('SC_PAGE_SIZE') / (1024 * 1024)), 1)
+    except Exception:
+        return None
+
+
 def _estado_proceso():
     """Datos NO secretos del proceso: sirven para detectar mala configuración.
 
@@ -113,6 +127,7 @@ def _estado_proceso():
     concurrencia = (os.environ.get('WEB_CONCURRENCY') or '').strip()
     return {
         'pid': os.getpid(),
+        'memoria_rss_mb': _memoria_rss_mb(),
         'web_concurrency': concurrencia or None,
         # El sistema asume 1 worker; con 2 la cola de importación se rompe.
         'configurado_para_un_worker': concurrencia in ('', '1'),
