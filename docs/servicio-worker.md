@@ -121,27 +121,33 @@ Cuellos reales encontrados y corregidos:
    NAT/CGNAT (móvil venezolano) muchos usuarios reales comparten IP y 240/min podía
    dar falsos positivos ("demasiadas peticiones" para gente legítima).
 
-### Test de carga real (asyncio, conexiones reutilizadas)
+### Test de carga REAL (desde la nube, misma región)
 
-Un solo cliente con hilos serializaba; con **asyncio** se mantienen cientos de
-peticiones en vuelo. Resultado (0 errores en TODOS los niveles):
+Se desplegó un **servicio temporal de generación de carga** en la misma región
+(Render virginia) para que la medición fuera **datacenter a datacenter** y no
+dependiera de la red del operador. El generador se probó a 0,5 vCPU y a 2 vCPU
+(para descartar que él fuera el cuello). **Se borró al terminar.**
 
-| Nivel | Caudal | p50 cliente | p95 cliente |
-|---|---|---|---|
-| `/health/live` 50 conc | **54 req/s** | 0,6 s | 1,6 s |
-| `/health/live` 100 conc | 43 req/s | 1,2 s | 5,6 s |
-| `/health/live` 200 conc | 39 req/s | 2,5 s | 10,9 s |
-| `/` portada 25 conc | 27 req/s | 0,8 s | 1,1 s |
-| `/` portada 50 conc | **35 req/s** | 0,8 s | 2,3 s |
+Con el generador a 2 vCPU (0 errores en todas estas corridas):
 
-Métricas del **servidor** durante la prueba: **p50 = 0,2 ms · p95 = 80 ms**
-(el cliente veía cientos de ms). Es decir, la diferencia es **cola + red del
-cliente**, no el servidor.
+| Nivel | Caudal | p50 cliente |
+|---|---|---|
+| `/health/live` 50 conc | 48,5 req/s | 103 ms |
+| `/health/live` 200 conc | **64,3 req/s** | 329 ms |
+| `/health/live` 400 conc | 60,9 req/s | 496 ms |
+| `/` portada 25 conc | 20,4 req/s | 580 ms |
+| `/` portada 100 conc | 26,0 req/s | 1.464 ms |
+| `/` portada 200 conc | **29,9 req/s** | 2.502 ms |
 
-Conclusión: el servidor sostiene **≥35 req/s con 0 errores** y su latencia interna
-bajo carga es de **milisegundos**. Para 200–300 usuarios navegando (≈13–20 req/s)
-hay **holgura de sobra** en 0,5 vCPU. La cifra exacta del techo necesita un test
-desde **varios puntos** (un cliente solo no puede medirlo).
+Métricas del **servidor** durante la prueba: **p50 = 7–22 ms · p95 = 78–176 ms**.
+
+**Diluvio (portada, 1.400 peticiones, 200 concurrentes):** 30,6 req/s y
+**15–20 respuestas 502** (~1,4 %). Es decir, sostener la portada **por encima de
+~30 req/s** hace crecer la cola hasta que el proxy de Render corta por timeout.
+
+**Capacidad real:** ~30 páginas/segundo ⇒ **~300–450 usuarios navegando a la vez**
+(una página cada 10–15 s). El objetivo de 200–300 queda **cubierto**. Si quieres
+margen para un pico viral, subir el web a **1c-2g** (~2×) da ~60 páginas/s.
 
 ### Revisión de la base de datos
 
