@@ -32,6 +32,7 @@ from backend.utils import (
 from backend.ubicaciones import (
     adjuntar_ubicaciones,
     datos_ubicacion_principal,
+    geocodificar_comercio_en_segundo_plano,
     guardar_ubicaciones,
     normalizar_ubicaciones,
 )
@@ -476,9 +477,7 @@ def registrar_comercio_completo(
     if ubicaciones is not None:
         # Flujo nuevo: solo sedes (nombre + enlace de Google Maps). El sistema
         # deriva de la principal la dirección y el enlace históricos.
-        ok_ubicaciones, resultado_ubicaciones = normalizar_ubicaciones(
-            ubicaciones, geocodificar=True
-        )
+        ok_ubicaciones, resultado_ubicaciones = normalizar_ubicaciones(ubicaciones)
         if not ok_ubicaciones:
             return False, resultado_ubicaciones
         lista_ubicaciones = resultado_ubicaciones
@@ -637,6 +636,9 @@ def registrar_comercio_completo(
 
             conexion.commit()
             asegurar_slug_comercio(nuevo_id, nombre)
+            # Ciudad/zona desde el enlace de Maps, ya fuera del request (no bloquea).
+            if lista_ubicaciones:
+                geocodificar_comercio_en_segundo_plano(nuevo_id)
             return True, 'Comercio registrado con éxito.'
 
     except psycopg2.IntegrityError as e:
@@ -661,9 +663,7 @@ def actualizar_datos_comercio(
 ):
     lista_ubicaciones = []
     if ubicaciones is not None:
-        ok_ubicaciones, resultado_ubicaciones = normalizar_ubicaciones(
-            ubicaciones, geocodificar=True
-        )
+        ok_ubicaciones, resultado_ubicaciones = normalizar_ubicaciones(ubicaciones)
         if not ok_ubicaciones:
             return False, resultado_ubicaciones
         lista_ubicaciones = resultado_ubicaciones
@@ -746,6 +746,10 @@ def actualizar_datos_comercio(
 
             filas_afectadas = cursor.rowcount
             conexion.commit()
+
+        # Ciudad/zona desde el enlace de Maps, fuera del request (no bloquea).
+        if ubicaciones is not None and lista_ubicaciones:
+            geocodificar_comercio_en_segundo_plano(comercio_id)
 
         return filas_afectadas > 0, 'Datos del comercio actualizados.'
     except Exception as e:
@@ -1199,6 +1203,74 @@ def buscar_y_filtrar_productos(
             return []
     logger.error(f'Error en la búsqueda de productos: {ultimo_error}')
     return []
+
+
+def _entero_env(nombre, defecto):
+    try:
+        return int(float(os.getenv(nombre, str(defecto)) or defecto))
+    except (TypeError, ValueError):
+        return defecto
+
+
+# Caché corta de listados públicos. La página de tienda y las búsquedas son lo
+# más visitado y cada una cuesta varias consultas con ~0,7 s de ida y vuelta a la
+# BD; servirla de memoria multiplica la capacidad ante picos. TTL corto (como la
+# portada) para que un cambio del comerciante se vea en segundos.
+_CACHE_TIENDA_SEG = _entero_env('LOCALIS_CACHE_TIENDA_SEG', 20)
+_CACHE_CATALOGO_SEG = _entero_env('LOCALIS_CACHE_CATALOGO_SEG', 10)
+
+
+def productos_tienda_publica(comercio_id, palabra_clave=None, solo_publicos=True):
+    """Productos de una tienda con caché corta. Degrada a la consulta directa."""
+    if not comercio_id:
+        return []
+    if _CACHE_TIENDA_SEG <= 0:
+        return buscar_y_filtrar_productos(
+            palabra_clave=palabra_clave,
+            comercio_id=comercio_id,
+            solo_publicos=solo_publicos,
+        )
+    termino = (palabra_clave or '').strip().lower()[:60]
+    clave = f'tienda:prod:{comercio_id}:{1 if solo_publicos else 0}:{termino}'
+
+    def _cargar():
+        return buscar_y_filtrar_productos(
+            palabra_clave=palabra_clave,
+            comercio_id=comercio_id,
+            solo_publicos=solo_publicos,
+        )
+
+    try:
+        return get_or_load(clave, _cargar, _CACHE_TIENDA_SEG)
+    except Exception:
+        return _cargar()
+
+
+def buscar_productos_catalogo(palabra_clave=None, categoria_nombre=None):
+    """Búsqueda del catálogo público con caché corta (clave: término+categoría)."""
+    if _CACHE_CATALOGO_SEG <= 0:
+        return buscar_y_filtrar_productos(
+            palabra_clave=palabra_clave,
+            categoria_nombre=categoria_nombre,
+            limit=None,
+            orden_aleatorio=False,
+        )
+    termino = (palabra_clave or '').strip().lower()[:60]
+    categoria = (categoria_nombre or '').strip().lower()[:40]
+    clave = f'catalogo:busq:{categoria}:{termino}'
+
+    def _cargar():
+        return buscar_y_filtrar_productos(
+            palabra_clave=palabra_clave,
+            categoria_nombre=categoria_nombre,
+            limit=None,
+            orden_aleatorio=False,
+        )
+
+    try:
+        return get_or_load(clave, _cargar, _CACHE_CATALOGO_SEG)
+    except Exception:
+        return _cargar()
 
 
 def _cap_productos_por_comercio(cursor, limit):

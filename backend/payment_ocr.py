@@ -2,6 +2,7 @@
 
 import os
 import re
+import threading
 import time
 import unicodedata
 from datetime import date, datetime
@@ -10,6 +11,19 @@ import cv2
 import numpy as np
 
 from config import PAGO_MOVIL_DEFAULT
+
+
+def _max_ocr_concurrentes():
+    try:
+        return max(1, int(os.getenv('LOCALIS_OCR_MAX_CONCURRENTES', '2')))
+    except (TypeError, ValueError):
+        return 2
+
+
+# El OCR es caro (CPU + ~1-3 s por comprobante) y el contenedor tiene muy poca
+# CPU. Sin tope, una ráfaga de pagos acapara todos los hilos y deja el resto del
+# sitio lento. Con ``LOCALIS_OCR_MAX_CONCURRENTES=0`` se desactiva el tope.
+OCR_SEMAFORO = threading.BoundedSemaphore(_max_ocr_concurrentes())
 
 _ocr_engine = None
 # Referencia etiquetada ("Referencia: 123456", "Ref 456.789", "Nro 45 6789").

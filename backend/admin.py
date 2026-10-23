@@ -10,9 +10,10 @@ from backend.plans import PLANES, limite_para_plan, obtener_plan_por_codigo
 from backend.runtime_cache import get_or_load
 from backend.ubicaciones import (
     cargar_ubicaciones,
+    datos_ubicacion_principal,
+    geocodificar_comercio_en_segundo_plano,
     guardar_ubicaciones,
     normalizar_ubicaciones,
-    datos_ubicacion_principal,
 )
 from backend.utils import parsear_visible_form, url_banner_principal
 
@@ -1102,9 +1103,7 @@ def actualizar_comercio_admin(
             # es la principal); sin él se conserva el comportamiento legado.
             lista_ubicaciones = None
             if datos.get('ubicaciones') is not None:
-                ok_ubic, resultado_ubic = normalizar_ubicaciones(
-                    datos.get('ubicaciones'), geocodificar=True
-                )
+                ok_ubic, resultado_ubic = normalizar_ubicaciones(datos.get('ubicaciones'))
                 if not ok_ubic:
                     return False, resultado_ubic
                 lista_ubicaciones = resultado_ubic
@@ -1175,6 +1174,9 @@ def actualizar_comercio_admin(
                 f'Comercio ID {int(comercio_id)} editado por el administrador.',
             )
             conexion.commit()
+        # Ciudad/zona desde el enlace de Maps, fuera del request (no bloquea).
+        if lista_ubicaciones:
+            geocodificar_comercio_en_segundo_plano(comercio_id)
         return True, 'Datos de la tienda actualizados por el administrador.'
     except Exception as e:
         return False, f'Error al actualizar la tienda: {str(e)}'

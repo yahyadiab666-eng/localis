@@ -244,9 +244,7 @@ def crear_pre_cuenta_admin(admin_id, datos):
     lista_ubicaciones = []
     principal = None
     if datos.get('ubicaciones') is not None:
-        ok_ubic, resultado_ubic = normalizar_ubicaciones(
-            datos.get('ubicaciones'), geocodificar=True
-        )
+        ok_ubic, resultado_ubic = normalizar_ubicaciones(datos.get('ubicaciones'))
         if not ok_ubic:
             return False, resultado_ubic, None
         lista_ubicaciones = resultado_ubic
@@ -332,6 +330,11 @@ def crear_pre_cuenta_admin(admin_id, datos):
             conexion.commit()
 
         _asegurar_slug(comercio_id, nombre)
+        if lista_ubicaciones:
+            # Ciudad/zona desde el enlace de Maps, fuera del request.
+            from backend.ubicaciones import geocodificar_comercio_en_segundo_plano
+
+            geocodificar_comercio_en_segundo_plano(comercio_id)
         return (
             True,
             'Pre-cuenta creada. Al transferir la propiedad se agrega el correo '

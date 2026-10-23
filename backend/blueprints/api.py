@@ -29,6 +29,7 @@ from backend.auth import obtener_usuario_por_id
 from backend.boosts import activar_boost_producto, precio_boost
 from backend.image_lookup import persistir_imagen_producto_hibrida
 from backend.payment_ocr import (
+    OCR_SEMAFORO,
     validar_comprobante_binance,
     validar_comprobante_pago_movil,
 )
@@ -553,17 +554,18 @@ def api_verificar_boost():
     # b) OCR estricto. Pago móvil: banco nacional, RIF/cédula y teléfono
     #    destino, monto exacto y fecha reciente. Binance: monto en USDT, fecha
     #    reciente e ID de orden.
-    if es_binance:
-        ocr = validar_comprobante_binance(data_bytes, float(precio_usd))
-    else:
-        destino = _destino_pago_movil()
-        ocr = validar_comprobante_pago_movil(
-            data_bytes,
-            monto_bs,
-            banco=destino.get('banco'),
-            rif=destino.get('cedula_rif'),
-            telefono=destino.get('telefono'),
-        )
+    with OCR_SEMAFORO:
+        if es_binance:
+            ocr = validar_comprobante_binance(data_bytes, float(precio_usd))
+        else:
+            destino = _destino_pago_movil()
+            ocr = validar_comprobante_pago_movil(
+                data_bytes,
+                monto_bs,
+                banco=destino.get('banco'),
+                rif=destino.get('cedula_rif'),
+                telefono=destino.get('telefono'),
+            )
     if not ocr.get('ok'):
         return (
             jsonify(
@@ -753,17 +755,18 @@ def api_verificar_pago():
 
     metodo = (request.form.get('metodo') or 'pago_movil').strip().lower()
     es_binance = metodo == 'binance'
-    if es_binance:
-        ocr = validar_comprobante_binance(data_bytes, montos.get('monto_usd'))
-    else:
-        destino = _destino_pago_movil()
-        ocr = validar_comprobante_pago_movil(
-            data_bytes,
-            montos['monto_bs'],
-            banco=destino.get('banco'),
-            rif=destino.get('cedula_rif'),
-            telefono=destino.get('telefono'),
-        )
+    with OCR_SEMAFORO:
+        if es_binance:
+            ocr = validar_comprobante_binance(data_bytes, montos.get('monto_usd'))
+        else:
+            destino = _destino_pago_movil()
+            ocr = validar_comprobante_pago_movil(
+                data_bytes,
+                montos['monto_bs'],
+                banco=destino.get('banco'),
+                rif=destino.get('cedula_rif'),
+                telefono=destino.get('telefono'),
+            )
     if not ocr.get('ok'):
         return jsonify(
             {
