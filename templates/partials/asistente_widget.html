@@ -5,7 +5,7 @@
    Incluir este partial justo antes de </body>. #}
 {% if asistente_habilitado %}
 {% set _asistente_rol = 'admin' if session.get('es_admin') else ('comerciante' if (session.get('es_comerciante') or session.get('comercio_id')) else ('cliente' if session.get('usuario_id') else 'invitado')) %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/asistente.css') }}?v=2">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/asistente.css') }}?v={{ asistente_asset_v }}">
 <div id="asistente-widget"
      class="asistente-widget"
      data-rol="{{ _asistente_rol }}"
@@ -62,5 +62,5 @@
     </footer>
   </section>
 </div>
-<script src="{{ url_for('static', filename='js/asistente.js') }}?v=2" defer></script>
+<script src="{{ url_for('static', filename='js/asistente.js') }}?v={{ asistente_asset_v }}" defer></script>
 {% endif %}
