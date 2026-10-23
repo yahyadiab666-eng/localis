@@ -37,6 +37,7 @@ def _rol_sesion():
 def _contexto_usuario():
     return {
         'usuario_id': session.get('usuario_id'),
+        'comercio_id': session.get('comercio_id'),
         'rol': _rol_sesion(),
     }
 

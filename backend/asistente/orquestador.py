@@ -19,7 +19,7 @@ from config import (
     asistente_habilitado,
 )
 
-from backend.asistente import proveedor
+from backend.asistente import datos_vivos, proveedor
 from backend.asistente.conocimiento import contexto_para
 from backend.asistente.prompts import mensajes_para
 from backend.asistente.seguridad import redactar, sanear_entrada
@@ -84,6 +84,33 @@ def _limpiar_historial(historial):
     return limpio
 
 
+def _construir_contexto(usuario, rol, texto):
+    """Une documentacion (RAG) + datos en vivo (precios, tasa, mi comercio)."""
+    partes = []
+    documentacion = contexto_para(texto, max_chars=ASISTENTE_MAX_CONTEXTO)
+    if documentacion:
+        partes.append(documentacion)
+
+    tasa = datos_vivos.tasa_del_dia()
+    if tasa:
+        partes.append(f'TASA DEL DIA: {tasa:.2f} Bs por USD')
+
+    precios = datos_vivos.buscar_precios(texto)
+    if precios:
+        partes.append('PRECIOS DEL CATALOGO (datos en vivo):\n' + precios)
+
+    if rol == 'comerciante' and datos_vivos.menciona_comercio(texto):
+        resumen = datos_vivos.resumen_comercio(
+            usuario.get('usuario_id'),
+            usuario.get('comercio_id'),
+            incluir_imagenes=datos_vivos.menciona_imagenes(texto),
+        )
+        if resumen:
+            partes.append('DATOS DE TU COMERCIO (datos en vivo):\n' + resumen)
+
+    return '\n\n---\n\n'.join(partes)
+
+
 def responder(usuario, mensaje, historial=None):
     usuario = usuario or {}
     rol = usuario.get('rol') or 'invitado'
@@ -99,7 +126,7 @@ def responder(usuario, mensaje, historial=None):
             'mensaje': 'Escribe tu pregunta para poder ayudarte.',
         }
 
-    contexto = contexto_para(texto, max_chars=ASISTENTE_MAX_CONTEXTO)
+    contexto = _construir_contexto(usuario, rol, texto)
     mensajes = mensajes_para(rol, texto, contexto, _limpiar_historial(historial))
 
     with cupo_disponible() as cupo:
