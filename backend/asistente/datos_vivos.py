@@ -39,6 +39,10 @@ _CLAVES_COMERCIO = (
 )
 
 _CLAVES_IMAGENES = ('foto', 'fotos', 'imagen', 'imagenes')
+_CLAVES_IMPORTACION = ('importa', 'importacion', 'inventario', 'csv', 'excel', 'archivo')
+_CLAVES_PAGO = ('pago', 'pagar', 'comprobante', 'verific', 'revision', 'transferencia', 'binance')
+_CLAVES_TIENDA = ('tienda', 'comercio', 'sucursal', 'vende', 'venden', 'donde queda', 'ubicacion', 'local')
+_CLAVES_CATEGORIA = ('categoria', 'categorias')
 
 # Hechos canonicos que se inyectan SIEMPRE: son pequenos y evitan que el modelo
 # invente precios de planes, destacados o puntos cuando el RAG no los recupera.
@@ -90,6 +94,26 @@ def menciona_comercio(mensaje):
 def menciona_imagenes(mensaje):
     bajo = _normalizar(mensaje)
     return any(clave in bajo for clave in _CLAVES_IMAGENES)
+
+
+def menciona_importacion(mensaje):
+    bajo = _normalizar(mensaje)
+    return any(clave in bajo for clave in _CLAVES_IMPORTACION)
+
+
+def menciona_pago(mensaje):
+    bajo = _normalizar(mensaje)
+    return any(clave in bajo for clave in _CLAVES_PAGO)
+
+
+def menciona_tienda(mensaje):
+    bajo = _normalizar(mensaje)
+    return any(clave in bajo for clave in _CLAVES_TIENDA)
+
+
+def menciona_categoria(mensaje):
+    bajo = _normalizar(mensaje)
+    return any(clave in bajo for clave in _CLAVES_CATEGORIA)
 
 
 def formatear_productos(productos, maximo=6):
@@ -213,4 +237,161 @@ def resumen_comercio(usuario_id, comercio_id, incluir_imagenes=False):
         return '\n'.join(lineas)
     except Exception as error:
         _log.warning('resumen del comercio fallo: %s', error)
+        return ''
+
+
+def ultima_importacion(comercio_id):
+    """Estado de la ultima importacion del comercio (o '')."""
+    if not comercio_id:
+        return ''
+    try:
+        from backend.db import get_db_connection
+
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                'SELECT job_id, estado, exito, mensaje, filename, creado '
+                'FROM import_jobs WHERE comercio_id = ? ORDER BY creado DESC LIMIT 1',
+                (int(comercio_id),),
+            )
+            fila = cursor.fetchone()
+        if not fila:
+            return 'No hay importaciones registradas.'
+        lineas = [
+            f'Archivo: {fila[4] or "(sin nombre)"}',
+            f'Estado: {fila[1] or "desconocido"}',
+        ]
+        if fila[3]:
+            lineas.append(f'Mensaje: {str(fila[3])[:300]}')
+        if fila[5]:
+            lineas.append(f'Fecha: {fila[5]}')
+        return '\n'.join(lineas)
+    except Exception as error:
+        _log.warning('ultima importacion fallo: %s', error)
+        return ''
+
+
+def resumen_imagenes(comercio_id, maximo_ejemplos=3):
+    """Conteo de productos por estado de imagen y ejemplos sin foto real (o '')."""
+    if not comercio_id:
+        return ''
+    try:
+        from backend.db import get_db_connection
+
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                "SELECT COALESCE(imagen_estado, '') AS estado, COUNT(*) "
+                'FROM productos WHERE comercio_id = ? GROUP BY 1',
+                (int(comercio_id),),
+            )
+            conteos = {str(f[0] or 'sin_estado'): int(f[1] or 0) for f in cursor.fetchall()}
+            cursor.execute(
+                "SELECT nombre FROM productos WHERE comercio_id = ? "
+                "AND COALESCE(imagen_estado, '') <> 'real' "
+                'ORDER BY id DESC LIMIT ?',
+                (int(comercio_id), int(maximo_ejemplos)),
+            )
+            ejemplos = [str(f[0]) for f in cursor.fetchall() if f and f[0]]
+        total = sum(conteos.values())
+        reales = conteos.get('real', 0)
+        lineas = [f'Productos: {total}; con foto real: {reales}']
+        otros = {k: v for k, v in conteos.items() if k != 'real' and v}
+        if otros:
+            detalle = ', '.join(f'{k}: {v}' for k, v in sorted(otros.items()))
+            lineas.append(f'Sin foto real por estado: {detalle}')
+        if ejemplos:
+            lineas.append('Ejemplos sin foto: ' + '; '.join(ejemplos))
+        return '\n'.join(lineas)
+    except Exception as error:
+        _log.warning('resumen de imagenes fallo: %s', error)
+        return ''
+
+
+def pago_pendiente(comercio_id):
+    """Revisiones de pago pendientes del comercio (o '')."""
+    if not comercio_id:
+        return ''
+    try:
+        from backend.db import get_db_connection
+
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                "SELECT COUNT(*), MAX(fecha) FROM soporte_y_reportes "
+                "WHERE tipo = 'revision_pago' AND referencia_id = ? "
+                "AND estado = 'pendiente'",
+                (int(comercio_id),),
+            )
+            fila = cursor.fetchone()
+        cantidad = int(fila[0] or 0) if fila else 0
+        if not cantidad:
+            return 'No hay pagos pendientes de revision.'
+        lineas = [f'Pagos pendientes de revision manual: {cantidad}']
+        if fila and fila[1]:
+            lineas.append(f'El mas reciente: {fila[1]}')
+        return '\n'.join(lineas)
+    except Exception as error:
+        _log.warning('pago pendiente fallo: %s', error)
+        return ''
+
+
+def buscar_tiendas(mensaje, maximo=4):
+    """Tiendas publicas que mejor encajan con el mensaje (o '')."""
+    claves = [clave for clave in _keywords(mensaje) if len(clave) >= 4]
+    if not claves:
+        return ''
+    try:
+        from backend.stores import buscar_y_filtrar_comercios
+    except Exception:
+        return ''
+    for consulta in [' '.join(claves[:2])] + claves[:2]:
+        consulta = consulta.strip()
+        if not consulta:
+            continue
+        try:
+            tiendas = buscar_y_filtrar_comercios(palabra_clave=consulta) or []
+        except Exception as error:
+            _log.warning('busqueda de tiendas fallo: %s', error)
+            return ''
+        if tiendas:
+            return formatear_tiendas(tiendas, maximo=maximo)
+    return ''
+
+
+def formatear_tiendas(tiendas, maximo=4):
+    """Lista compacta de tiendas con ubicacion y contacto."""
+    lineas = []
+    for tienda in (tiendas or [])[:maximo]:
+        nombre = str(tienda.get('nombre') or '').strip()
+        if not nombre:
+            continue
+        ciudad = str(tienda.get('ciudad') or '').strip()
+        zona = str(tienda.get('zona') or '').strip()
+        ubicacion = ', '.join(p for p in (zona, ciudad) if p)
+        telefono = str(tienda.get('telefono') or '').strip()
+        extra = []
+        if ubicacion:
+            extra.append(ubicacion)
+        if telefono:
+            extra.append(f'WhatsApp {telefono}')
+        sufijo = (' - ' + ' | '.join(extra)) if extra else ''
+        lineas.append(f'- {nombre}{sufijo}')
+    return '\n'.join(lineas)
+
+
+def categorias_disponibles():
+    """Categorias activas del catalogo (o '')."""
+    try:
+        from backend.db import get_db_connection
+
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                'SELECT nombre FROM categorias WHERE activo = 1 ORDER BY nombre'
+            )
+            nombres = [str(f[0]) for f in cursor.fetchall() if f and f[0]]
+        return ', '.join(nombres)
+    except Exception as error:
+        _log.warning('categorias fallo: %s', error)
         return ''

@@ -36,12 +36,48 @@ def _probar_keywords():
 
 def _probar_menciones():
     print('\n=== Deteccion de tema ===')
-    from backend.asistente.datos_vivos import menciona_comercio, menciona_imagenes
+    from backend.asistente.datos_vivos import (
+        menciona_categoria,
+        menciona_comercio,
+        menciona_imagenes,
+        menciona_importacion,
+        menciona_pago,
+        menciona_tienda,
+    )
 
     _ok(menciona_comercio('Cuantos productos permite mi plan?'), 'plan -> comercio')
     _ok(not menciona_comercio('cuanto cuesta el arroz'), 'arroz -> NO comercio')
     _ok(menciona_imagenes('por que mi producto no tiene foto'), 'foto -> imagenes')
     _ok(not menciona_imagenes('cuanto cuesta el arroz'), 'arroz -> NO imagenes')
+    _ok(menciona_importacion('mi importacion quedo pendiente'), 'importacion')
+    _ok(menciona_pago('necesito revisar mi pago movil'), 'pago')
+    _ok(menciona_tienda('donde queda la tienda?'), 'tienda')
+    _ok(menciona_categoria('que categorias hay?'), 'categoria')
+
+
+def _probar_tiendas():
+    print('\n=== Formato de tiendas ===')
+    from backend.asistente.datos_vivos import formatear_tiendas
+
+    texto = formatear_tiendas(
+        [
+            {'nombre': 'Abastos El Sol', 'ciudad': 'Porlamar', 'zona': 'Centro',
+             'telefono': '04121234567'},
+            {'nombre': '', 'ciudad': 'X'},
+        ]
+    )
+    _ok('Abastos El Sol - Centro, Porlamar | WhatsApp 04121234567' in texto, 'tienda con ubicacion y contacto')
+    _ok(texto.count('\n') == 0, 'ignora tiendas sin nombre')
+    _ok(formatear_tiendas([]) == '', 'lista vacia -> cadena vacia')
+
+
+def _probar_presupuesto():
+    print('\n=== Presupuesto diario (desactivado por defecto) ===')
+    from backend.asistente import presupuesto
+
+    _ok(presupuesto.disponible() is True, 'desactivado -> siempre disponible')
+    presupuesto.registrar(1000)
+    _ok(presupuesto.estado()['limite'] == 0, 'limite 0 (desactivado)')
 
 
 def _probar_formato():
@@ -78,7 +114,9 @@ def main() -> int:
     _probar_keywords()
     _probar_menciones()
     _probar_formato()
+    _probar_tiendas()
     _probar_saltos_seguros()
+    _probar_presupuesto()
 
     print('\n=== RESULTADO ===')
     if _ERRORES:
