@@ -90,34 +90,36 @@ La idea de un **segundo servicio** solo se justifica si carga con el **trabajo
 pesado** (OCR e imágenes), no solo con el asistente (que es ligero: casi todo su
 tiempo es esperar a OpenRouter).
 
-### Capacidad estimada (con las suposiciones a la vista)
+### Capacidad real (corregido tras medir bien)
 
-El web es **CPU-bound** (render + gzip ≈ 250 ms por página sobre 0,5 vCPU ≈ 3,8 req/s).
+**Mi primera medición estaba mal**: la hice desde **una sola máquina creando una
+conexión TLS nueva por petición**, así que el techo medido (~3,8 req/s) era **mi
+red**, no el servidor. La prueba: `/health/live` (93 bytes, sin CPU) daba **el
+mismo techo** que la portada de 223 KB.
 
-| Usuarios navegando a la vez* | Peticiones/s necesarias | ¿Aguanta 0,5 vCPU? |
-|---|---|---|
-| 50 | ~3,3 | **sí, al límite** |
-| 100 | ~6,7 | no (latencia ~5 s) |
-| 200 | ~13 | no |
+Medición correcta:
 
-\* suponiendo que cada usuario carga una página cada ~15 s.
+| Prueba | Resultado |
+|---|---|
+| `ping` (red pura, media) | ~62 ms |
+| `/health/live` con conexión reutilizada | ~151 ms |
+| **Portada (223 KB) con conexión reutilizada** | **~152 ms (igual que la trivial)** |
+| Métricas internas del servidor | **p50 = 0,2 ms · p95 = 21 ms · 0 errores** |
 
-Como el límite es CPU, subir de plan **escala casi lineal**:
+→ El servidor **renderiza y sirve la portada completa en ~1–20 ms**. **No es la CPU
+ni el plan** para 200–300 usuarios de navegación: la app va en milisegundos y el
+límite real solo aparece al sumar *esperas* (una consulta a la BD en un fallo de
+caché, o OpenRouter en el asistente).
 
-| Plan | Caudal estimado | Usuarios navegando |
-|---|---|---|
-| 0,5 vCPU (hoy) | ~3,8 req/s | **~50** |
-| 1 vCPU | ~8 req/s | **~100–120** |
-| 2 vCPU | ~15 req/s | **~200–250** |
+Cuellos reales encontrados y corregidos:
 
-El **asistente** tiene su propio tope: **2 consultas simultáneas** al LLM (~1 s
-cada una → ~120/min); el excedente recibe "ocupado" (se puede subir con
-`LOCALIS_ASISTENTE_MAX_CONCURRENTES`). El **OCR y las imágenes ya no cuentan**
-(viven en el worker).
-
-Palanca barata de CPU sin subir de plan: bajar `LOCALIS_CATALOGO_PAGINA`
-(menos tarjetas por página = menos render). No se puede cachear el HTML tal cual
-porque lleva el token CSRF de cada sesión.
+1. **Thundering herd** (el más importante): al expirar las cachés públicas (15–20 s),
+   varias peticiones concurrentes ejecutaban la consulta a la BD a la vez (de ahí el
+   pico de 679 ms visto en `peticiones_max`). Ahora hay **single flight**: una sola
+   consulta y el resto espera y reutiliza (`backend/runtime_cache.py`, con test).
+2. **Límite por IP** en `/` y `/tienda`: subido de **240 a 600 req/min**. Con
+   NAT/CGNAT (móvil venezolano) muchos usuarios reales comparten IP y 240/min podía
+   dar falsos positivos ("demasiadas peticiones" para gente legítima).
 
 ## Fase 1 — OCR remoto (LISTO, apagado por defecto)
 

@@ -1109,7 +1109,7 @@ def inicializar_base_de_datos():
 
 
 @app.route('/')
-@limite('240 per minute')
+@limite('600 per minute')
 def index():
     palabra_clave = request.args.get('q', '').strip()
     categoria = request.args.get('categoria', '').strip()
@@ -1387,7 +1387,7 @@ def _contexto_tienda(comercio, palabra_clave, origen, solo_publicos=True, origen
 
 @app.route('/tienda/<int:comercio_id>')
 @app.route('/tienda/<string:slug>')
-@limite('240 per minute')
+@limite('600 per minute')
 def tienda_publica(comercio_id=None, slug=None):
     if comercio_id is None and slug:
         comercio = obtener_comercio_por_slug(slug)
