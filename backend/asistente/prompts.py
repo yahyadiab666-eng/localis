@@ -93,9 +93,11 @@ def system_prompt(rol):
     return f'{_BASE}\n\n{extra}'
 
 
-def mensajes_para(rol, texto, contexto, historial):
+def mensajes_para(rol, texto, contexto, historial, instruccion_extra=None):
     """Arma la lista de mensajes para la API del LLM (formato OpenAI)."""
     mensajes = [{'role': 'system', 'content': system_prompt(rol)}]
+    if instruccion_extra:
+        mensajes.append({'role': 'system', 'content': instruccion_extra})
     if contexto:
         mensajes.append(
             {

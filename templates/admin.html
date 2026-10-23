@@ -437,6 +437,44 @@
                     </div>
                 </div>
             </aside>
+
+            <aside class="card" id="asistente-ia">
+                <h2>Asistente IA</h2>
+                <p style="font-size:0.85rem;color:#666;margin-bottom:0.75rem;">
+                    Uso del asistente desde que arrancó el worker. El feedback son los
+                    👍/👎 que dejan los usuarios en el chat.
+                </p>
+                <div class="salud-pagos">
+                    <div class="metrica">
+                        <strong>{{ metricas_asistente.mensajes or 0 }}</strong>
+                        <span>Consultas</span>
+                    </div>
+                    <div class="metrica">
+                        <strong>{{ metricas_asistente.respuestas_ok or 0 }}</strong>
+                        <span>Respondidas</span>
+                    </div>
+                    <div class="metrica {{ 'alerta' if metricas_asistente.respuestas_error }}">
+                        <strong>{{ metricas_asistente.respuestas_error or 0 }}</strong>
+                        <span>Con error</span>
+                    </div>
+                    <div class="metrica">
+                        <strong>{{ metricas_asistente.ms_promedio or 0 }}</strong>
+                        <span>ms promedio</span>
+                    </div>
+                    <div class="metrica">
+                        <strong>{{ metricas_asistente.ms_max or 0 }}</strong>
+                        <span>ms máximo</span>
+                    </div>
+                    <div class="metrica">
+                        <strong>{{ metricas_asistente.feedback_util or 0 }}</strong>
+                        <span>👍 útiles</span>
+                    </div>
+                    <div class="metrica {{ 'alerta' if metricas_asistente.feedback_no_util }}">
+                        <strong>{{ metricas_asistente.feedback_no_util or 0 }}</strong>
+                        <span>👎 no útiles</span>
+                    </div>
+                </div>
+            </aside>
         </div>
 
         <main class="tabla-box" id="control-comercios">

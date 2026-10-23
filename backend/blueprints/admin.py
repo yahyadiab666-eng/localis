@@ -101,6 +101,13 @@ def panel_admin():
     banner_url = url_hero_inicio(obtener_banner_principal()) or DEFAULT_BANNER_URL
     whatsapp = obtener_config('whatsapp_soporte', WHATSAPP_SOPORTE)
 
+    from backend.asistente.observacion import estado as _estado_asistente
+
+    try:
+        metricas_asistente = _estado_asistente()
+    except Exception:
+        metricas_asistente = {}
+
     return render_template(
         'admin.html',
         tasa=tasa_actual,
@@ -108,6 +115,7 @@ def panel_admin():
         tickets=tickets,
         revisiones_pendientes=contar_revisiones_pago_pendientes(),
         salud=salud_pagos(),
+        metricas_asistente=metricas_asistente,
         estado_ticket=estado_filtro or '',
         tipo_ticket=tipo_filtro or '',
         banner_url=banner_url,
