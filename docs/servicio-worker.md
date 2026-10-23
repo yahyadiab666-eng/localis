@@ -53,12 +53,28 @@ si la CPU es realmente el cuello (hoy el cuello medido es la **latencia de BD**,
 
 ## Coste y recomendación
 
-- El segundo servicio **cuesta** (es otro contenedor). Como el asistente es
-  ligero y el OCR tiene poco volumen (solo pagos), el ahorro de CPU puede no
-  compensar.
-- **Recomendación**: mantener **1 servicio** y activar la Fase 1 solo si notas
-  lentitud durante picos de pagos, o la Fase 2 si el backfill de imágenes está
-  compitiendo con las visitas.
-- Alternativa sin segundo servidor: alinear la **región de Render con la de
-  Supabase** (la mejora de mayor impacto medida, ×5-10) y/o subir de plan para
-  tener más CPU en el mismo contenedor.
+### Estado real medido (verificado en producción)
+
+- **Render**: región `virginia`, plan **`0.5c-512mb`** → **0,5 vCPU y 512 MB**.
+- **Supabase**: `aws-0-us-east-1.pooler…` → **us-east-1 (N. Virginia)** → **misma
+  región que Render** ✅. Ya están alineadas.
+- **Latencia de BD medida**: **~59 ms** (rtt ~2,6 ms) → **ya NO es el cuello**
+  (el ~0,7 s histórico ya no aplica).
+- **Memoria**: ~265 MB de 512 MB en uso (el stack de OCR/rembg es lo que más pesa).
+
+**El cuello real es la CPU: 0,5 vCPU.** Con 1 worker y varios hilos, el trabajo de
+Python queda muy limitado, y cualquier pico de OCR/rembg roba CPU a las peticiones
+web (que sí son ligeras: esperan a la BD y a OpenRouter).
+
+### Recomendación (actualizada)
+
+1. **Subir de plan en el MISMO servicio** (más CPU y RAM): es la vía más directa y
+   **no añade un segundo contenedor**. Con 0,5 vCPU casi cualquier pico compite.
+2. **Solo si aun así no basta**, sacar el trabajo pesado a un worker: la Fase 1
+   (OCR remoto) ya está lista y apagada; la Fase 2 (imágenes) es más compleja.
+3. Alinear la región **ya está hecho**: se descarta como palanca.
+
+Alternativa sin servidor extra y sin subir de plan: reducir trabajo de CPU
+(menos concurrencia de OCR, backfill de imágenes más espaciado), a costa de
+resolver pagos/imágenes más lento.
+
