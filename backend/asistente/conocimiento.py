@@ -27,6 +27,7 @@ _log = logging.getLogger('localis.asistente.conocimiento')
 # (.env.example, AGENTS.md, docs/arquitectura.md...) meten ruido y empeoran la
 # recuperacion de preguntas reales ("cuesta", "plan", "pago"...).
 _ARCHIVOS = (
+    'docs/asistente-app.md',
     'docs/asistente-faq.md',
     'templates/como_funciona.html',
 )

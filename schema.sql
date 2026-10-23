@@ -115,6 +115,7 @@ CREATE TABLE IF NOT EXISTS productos (
     imagen_fuente TEXT, -- serper | override_manual | placeholder
     stock INTEGER DEFAULT 0,
     codigo_barras TEXT,
+    categoria_manual TEXT, -- categoría elegida a mano por el comerciante (prioridad sobre la inferida)
     codigo_publico TEXT, -- Identificador visible (PROD-00001)
     FOREIGN KEY (comercio_id) REFERENCES comercios(id) ON DELETE CASCADE
 );

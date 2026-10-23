@@ -1,29 +1,59 @@
 """Modo venta: tono comercial para planes, precios y beneficios.
 
-Cuando la consulta es sobre **Localis como servicio** (planes, precios,
-beneficios, registro, prueba gratis), el asistente debe vender: destacar el valor
-y cerrar con una llamada a la accion. Es el contacto directo con el cliente.
+Es el contacto directo con el cliente, asi que responde con tono atractivo. Hay
+DOS variantes para NO mezclar beneficios:
+
+  - **Comprador** (cliente/invitado): gratis, precios en USD y Bs, comparar entre
+    comercios, contacto directo por WhatsApp.
+  - **Comerciante** (comerciante/admin): publicar catalogo, clientes por WhatsApp,
+    enlace/QR, plan Gratis/Prueba y planes para crecer, premios y destacados.
 
 Reglas:
   - Es SOLO tono: no cambia la veracidad ni permite inventar cifras o prometer
     de mas (el prompt base sigue prohibiendolo).
-  - NO se activa para precios de productos del catalogo ni para soporte tecnico
-    (para no sonar comercial ante un problema).
+  - NO se activa para precios de productos del catalogo ni para soporte tecnico.
 """
 
 from __future__ import annotations
 
 import re
 
-MODO_VENTA = (
-    'MODO VENTA (la consulta es sobre planes, precios, beneficios o registro de '
-    'Localis): responde de forma atractiva y comercial, sin exagerar ni prometer '
-    'nada que no este en el contexto. Destaca beneficios concretos, compara planes '
-    'cuando venga al caso y cierra SIEMPRE con una invitacion clara a la accion '
-    '(por ejemplo: "crea tu tienda con tu cuenta de Google y publica tu catalogo", '
-    'o "sube al plan Pro para publicar hasta 300 productos"). Tono cercano, '
-    'positivo y vendedor; 3 a 5 frases; cifras exactas.'
+MODO_VENTA_CLIENTE = (
+    'MODO VENTA (habla pensando en el COMPRADOR): responde de forma atractiva '
+    'destacando que Localis es **gratis**, que ves **precios en dolares y '
+    'bolivares** (con la tasa del dia), que puedes **comparar entre comercios '
+    'locales** y **contactar directo por WhatsApp**. Cierra con una invitacion a '
+    'la accion (por ejemplo: "busca lo que necesitas en la barra de busqueda" o '
+    '"toca el boton de WhatsApp del comercio"). NO prometas envios, garantias ni '
+    'pagos dentro de la app (no existen). Tono cercano y vendedor; 3 a 5 frases; '
+    'cifras exactas.'
 )
+
+MODO_VENTA_COMERCIANTE = (
+    'MODO VENTA (habla pensando en el COMERCIANTE): responde de forma atractiva '
+    'destacando que puede **publicar su catalogo**, que **los clientes lo '
+    'contactan directo por WhatsApp**, el **enlace publico y el codigo QR**, el '
+    '**plan Gratis/Prueba (30 dias, hasta 50 productos)** y los planes para crecer '
+    '(Basico 10 USD/100, Pro 15 USD/300, Business 35 USD/ilimitados), ademas de '
+    '**premios** y **destacados**. Cierra con una invitacion a la accion (por '
+    'ejemplo: "crea tu tienda con tu cuenta de Google y publica tu catalogo" o '
+    '"sube al plan Pro para publicar hasta 300 productos"). NO mezcles beneficios '
+    'de comprador (como comparar precios). Tono cercano, positivo y vendedor; 3 a 5 '
+    'frases; cifras exactas.'
+)
+
+_MODO_POR_ROL = {
+    'cliente': MODO_VENTA_CLIENTE,
+    'invitado': MODO_VENTA_CLIENTE,
+    'comerciante': MODO_VENTA_COMERCIANTE,
+    'admin': MODO_VENTA_COMERCIANTE,
+}
+
+
+def modo_venta(rol):
+    """Instruccion de venta segun la audiencia (comprador o comerciante)."""
+    return _MODO_POR_ROL.get(str(rol or 'invitado').lower(), MODO_VENTA_CLIENTE)
+
 
 # Intenciones comerciales (conservador: solo Localis como servicio).
 _PATRONES = (
