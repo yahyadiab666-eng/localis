@@ -1,0 +1,68 @@
+{# Widget flotante del asistente de IA (solo informativo).
+   Botón discreto abajo a la derecha; no tapa contenido ni modales (z-index bajo).
+   Se auto-oculta si `asistente_habilitado` es falso (sin clave o apagado).
+   El contexto de la conversación vive en el navegador; el servidor no guarda nada.
+   Incluir este partial justo antes de </body>. #}
+{% if asistente_habilitado %}
+{% set _asistente_rol = 'admin' if session.get('es_admin') else ('comerciante' if (session.get('es_comerciante') or session.get('comercio_id')) else ('cliente' if session.get('usuario_id') else 'invitado')) %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/asistente.css') }}?v=2">
+<div id="asistente-widget"
+     class="asistente-widget"
+     data-rol="{{ _asistente_rol }}"
+     data-chat-url="{{ url_for('asistente.chat') }}"
+     data-csrf="{{ csrf_token() }}"
+     data-whatsapp="{{ asistente_whatsapp_url }}">
+
+  <button type="button" id="asistente-burbuja" class="asistente-burbuja"
+          aria-label="Abrir asistente de Localis" title="Asistente de Localis"
+          aria-expanded="false" aria-controls="asistente-panel">
+    <i data-lucide="message-circle"></i>
+  </button>
+
+  <section id="asistente-panel" class="asistente-panel" role="dialog"
+           aria-modal="false" aria-label="Asistente de Localis" hidden>
+    <header class="asistente-panel__cabecera">
+      <div class="asistente-panel__titulo">
+        <span class="asistente-panel__punto" aria-hidden="true"></span>
+        <div>
+          <strong>Asistente Localis</strong>
+          <small>Solo informacion y guia</small>
+        </div>
+      </div>
+      <button type="button" id="asistente-cerrar" class="asistente-panel__cerrar"
+              aria-label="Cerrar asistente">
+        <i data-lucide="x"></i>
+      </button>
+    </header>
+
+    <div id="asistente-mensajes" class="asistente-mensajes"
+         role="log" aria-live="polite"></div>
+
+    <div id="asistente-sugerencias" class="asistente-sugerencias"></div>
+
+    <form id="asistente-form" class="asistente-form" autocomplete="off">
+      <label class="asistente-form__sr" for="asistente-entrada">Escribe tu pregunta</label>
+      <textarea id="asistente-entrada" class="asistente-form__entrada" rows="1"
+                maxlength="1500" placeholder="Escribe tu pregunta…"
+                aria-label="Escribe tu pregunta"></textarea>
+      <button type="submit" id="asistente-enviar" class="asistente-form__enviar"
+              aria-label="Enviar">
+        <i data-lucide="send"></i>
+      </button>
+    </form>
+
+    <footer class="asistente-panel__pie">
+      <button type="button" id="asistente-soporte" class="asistente-soporte">
+        <i data-lucide="life-buoy"></i>
+        <span>Escribir a soporte (WhatsApp)</span>
+      </button>
+      <p class="asistente-aviso">
+        Respuestas con IA, solo informativas. Para revisar un pago, editar tu
+        comercio o resolver un caso concreto, escribe a soporte: la atencion
+        puede tardar un poco.
+      </p>
+    </footer>
+  </section>
+</div>
+<script src="{{ url_for('static', filename='js/asistente.js') }}?v=2" defer></script>
+{% endif %}
