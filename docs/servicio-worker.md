@@ -121,6 +121,46 @@ Cuellos reales encontrados y corregidos:
    NAT/CGNAT (móvil venezolano) muchos usuarios reales comparten IP y 240/min podía
    dar falsos positivos ("demasiadas peticiones" para gente legítima).
 
+### Test de carga real (asyncio, conexiones reutilizadas)
+
+Un solo cliente con hilos serializaba; con **asyncio** se mantienen cientos de
+peticiones en vuelo. Resultado (0 errores en TODOS los niveles):
+
+| Nivel | Caudal | p50 cliente | p95 cliente |
+|---|---|---|---|
+| `/health/live` 50 conc | **54 req/s** | 0,6 s | 1,6 s |
+| `/health/live` 100 conc | 43 req/s | 1,2 s | 5,6 s |
+| `/health/live` 200 conc | 39 req/s | 2,5 s | 10,9 s |
+| `/` portada 25 conc | 27 req/s | 0,8 s | 1,1 s |
+| `/` portada 50 conc | **35 req/s** | 0,8 s | 2,3 s |
+
+Métricas del **servidor** durante la prueba: **p50 = 0,2 ms · p95 = 80 ms**
+(el cliente veía cientos de ms). Es decir, la diferencia es **cola + red del
+cliente**, no el servidor.
+
+Conclusión: el servidor sostiene **≥35 req/s con 0 errores** y su latencia interna
+bajo carga es de **milisegundos**. Para 200–300 usuarios navegando (≈13–20 req/s)
+hay **holgura de sobra** en 0,5 vCPU. La cifra exacta del techo necesita un test
+desde **varios puntos** (un cliente solo no puede medirlo).
+
+### Revisión de la base de datos
+
+Lo que se encontró y arregló:
+
+1. **`ILIKE '%texto%'` sin índice** (el cuello de BD de verdad): las búsquedas del
+   catálogo y de tiendas usan comodín al inicio, así que un índice B-tree **no
+   sirve** y PostgreSQL recorría la tabla completa en **cada** búsqueda (y el
+   asistente busca en el catálogo en cada pregunta de precio). Se añadió la
+   extensión **`pg_trgm`** y **13 índices GIN** (3 en `productos`, 5 en `comercios`,
+   5 en `sucursales`). Verificable en `/health/ready`: `pg_trgm` e `indices_trgm`.
+2. **`import_jobs` sin índice por comercio**: la última importación se consultaba
+   con recorrido completo. Añadido `idx_import_jobs_comercio(comercio_id, creado DESC)`.
+
+Lo que ya estaba bien (verificado): `metricas_diarias` con `PRIMARY KEY (fecha,
+clave)` (el UPSERT usa índice), índices de la portada (`comercios(visible,
+estado_pago)`, `productos(comercio_id, id DESC)`), `comercios(slug)`, pool
+(min 2 / máx 20) y **RTT de BD de 7,7 ms** (misma región).
+
 ## Fase 1 — OCR remoto (LISTO, apagado por defecto)
 
 Ya está implementado y **no cambia nada** mientras `LOCALIS_OCR_SERVICE_URL` esté
