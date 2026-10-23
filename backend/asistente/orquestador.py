@@ -19,7 +19,7 @@ from config import (
     asistente_habilitado,
 )
 
-from backend.asistente import acciones, datos_vivos, presupuesto, proveedor
+from backend.asistente import acciones, datos_vivos, pagos, presupuesto, proveedor
 from backend.asistente.conocimiento import contexto_para
 from backend.asistente.prompts import mensajes_para
 from backend.asistente.seguridad import redactar, sanear_entrada
@@ -118,7 +118,7 @@ def _construir_contexto(usuario, rol, texto):
         bloque = ''
         titulo = ''
         if datos_vivos.menciona_pago(texto):
-            bloque = datos_vivos.pago_pendiente(comercio_id)
+            bloque = pagos.estado_pago(comercio_id)
             titulo = 'PAGOS DE TU COMERCIO'
         elif datos_vivos.menciona_importacion(texto):
             bloque = datos_vivos.ultima_importacion(comercio_id)
@@ -158,7 +158,10 @@ def responder(usuario, mensaje, historial=None):
     # Acciones confirmadas (solo comerciante): el SERVIDOR detecta y propone con
     # un objetivo inequivoco; el modelo no decide nada. Proponer NO cambia nada.
     if rol == 'comerciante' and usuario.get('comercio_id'):
-        propuesta = acciones.proponer(usuario.get('comercio_id'), texto)
+        comercio_id = usuario.get('comercio_id')
+        propuesta = acciones.proponer(comercio_id, texto)
+        if not propuesta:
+            propuesta = pagos.proponer(comercio_id, texto)
         if propuesta:
             return {
                 'ok': True,
