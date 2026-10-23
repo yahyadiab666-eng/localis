@@ -28,6 +28,11 @@ la entrega se acuerdan con cada comercio.
 
 ## Planes y precios (concreto)
 
+En resumen: el plan Gratis/Prueba cuesta 0 USD (hasta 50 productos), el Básico
+cuesta 10 USD al mes (hasta 100 productos), el Pro cuesta 15 USD al mes (hasta
+300 productos) y el Business cuesta 35 USD al mes (productos ilimitados). Todos
+se renuevan cada 30 días.
+
 Todos los planes se renuevan cada 30 días:
 
 | Plan | Precio | Límite de productos | Notas |

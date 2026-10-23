@@ -23,14 +23,11 @@ from config import RUTA_RAIZ
 _log = logging.getLogger('localis.asistente.conocimiento')
 
 # Orden = prioridad de indexado. Los que no existan se omiten sin fallar.
+# Solo contenido orientado al USUARIO: los documentos de desarrollo
+# (.env.example, AGENTS.md, docs/arquitectura.md...) meten ruido y empeoran la
+# recuperacion de preguntas reales ("cuesta", "plan", "pago"...).
 _ARCHIVOS = (
     'docs/asistente-faq.md',
-    'docs/README-imagenes.md',
-    'docs/arquitectura.md',
-    'docs/despliegue-seguro.md',
-    'docs/plan-correccion.md',
-    'AGENTS.md',
-    '.env.example',
     'templates/como_funciona.html',
 )
 
@@ -45,7 +42,7 @@ _STOPWORDS = frozenset(
     'al del lo se su sus mi mis tu te me le les nos es son esta estan este esto '
     'como cuando donde cual cuales mas menos muy no ni si ya pero tambien solo '
     'cada todo toda todos todas hay ser estoy hacer tiene tienen puedo puede '
-    'pueden yo'.split()
+    'pueden yo cuanto cuanta cuantos cuantas cuesta cuestan vale uno'.split()
 )
 
 
