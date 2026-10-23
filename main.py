@@ -130,7 +130,13 @@ from utils.images import (
 from backend.image_lookup import (
     obtener_imagen_url_producto,
 )
-from database import BaseDatosNoDisponible, calentar_pool_bd, init_db, normalize_database_url
+from database import (
+    BaseDatosNoDisponible,
+    calentar_pool_bd,
+    init_db,
+    normalize_database_url,
+    programar_keepalive_bd,
+)
 try:
     from backend.payment_ocr import validar_comprobante_pago_movil
 except Exception:
@@ -162,6 +168,7 @@ from backend.web_seguridad import (
 )
 from backend.rate_limit import configurar_rate_limit
 from backend.compresion import configurar_compresion
+from backend.rate_limit import limite
 from backend.vistas_imagenes import (
     debug_imagenes_antes_de_render as _debug_imagenes_antes_de_render,
     normalizar_imagenes_comercio as _normalizar_imagenes_comercio,
@@ -173,7 +180,7 @@ from backend.import_queue import (
     configurar_cola,
 )
 from backend.stores import (
-    buscar_y_filtrar_productos,
+    buscar_productos_catalogo,
     listar_comercios_publicos_para_sitemap,
     listar_portada_hibrida,
     listar_productos_publicos_para_sitemap,
@@ -182,6 +189,7 @@ from backend.stores import (
     obtener_producto_publico,
     obtener_producto_publico_por_slug,
     obtener_tasa_dolar,
+    productos_tienda_publica,
 )
 from backend.tasa_bcv import obtener_tasa_bcv
 from backend.apariencia import (
@@ -256,6 +264,15 @@ try:
     csrf = CSRFProtect(app)
     registrar_csrf(csrf)
     configurar_rate_limit(app)
+    # Detrás del proxy de Render, sin esto ``request.remote_addr`` es la IP del
+    # proxy: las analíticas mezclan visitantes y el límite por IP sería inútil.
+    # ProxyFix toma la IP real del cliente (1 salto de confianza).
+    try:
+        from werkzeug.middleware.proxy_fix import ProxyFix
+
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    except Exception as error:
+        logger.warning(f'[Localis] ProxyFix no disponible: {type(error).__name__}: {error}')
     configurar_compresion(app)
     registrar_request_logging(app)
     registrar_manejadores_errores(app)
@@ -498,6 +515,12 @@ def _inicializar_aplicacion():
         # Warm-up explícito: deja el pool y la conexión verificados antes de
         # que la primera petición real pague el connect en frío del pooler.
         calentar_pool_bd()
+        # Ping periódico al pool: abrir conexión cuesta ~1 s, así que mantenerlas
+        # calientes evita que el primer usuario tras un rato pague el peaje.
+        try:
+            programar_keepalive_bd()
+        except Exception:
+            traceback.print_exc()
         print(
             '[Localis] Catálogo maestro: sin relleno ni sincronización al arrancar.',
             flush=True,
@@ -971,6 +994,7 @@ def inicializar_base_de_datos():
 
 
 @app.route('/')
+@limite('240 per minute')
 def index():
     palabra_clave = request.args.get('q', '').strip()
     categoria = request.args.get('categoria', '').strip()
@@ -992,12 +1016,11 @@ def index():
         pagina = 1
 
     if hay_filtros:
-        # Búsqueda/filtro: se muestran TODOS los resultados (sin truncar).
-        productos = buscar_y_filtrar_productos(
+        # Búsqueda/filtro: se muestran TODOS los resultados (sin truncar), con
+        # caché corta por término+categoría para aguantar picos de tráfico.
+        productos = buscar_productos_catalogo(
             palabra_clave=palabra_clave,
             categoria_nombre=categoria,
-            limit=None,
-            orden_aleatorio=False,
         )
         hay_mas = False
         pagina = 1
@@ -1178,9 +1201,11 @@ def producto_publico(producto_id=None, slug=None):
 def _contexto_tienda(comercio, palabra_clave, origen, solo_publicos=True, origen_debug='tienda_publica'):
     """Contexto compartido por la tienda publica y la vista previa (solo lectura)."""
     comercio_id = comercio.get('id')
-    productos = buscar_y_filtrar_productos(
+    # Caché corta: ésta es la página pública más visitada y cuesta varias
+    # consultas con ~0,7 s de ida y vuelta a la BD en cada visita.
+    productos = productos_tienda_publica(
+        comercio_id,
         palabra_clave=palabra_clave,
-        comercio_id=comercio_id,
         solo_publicos=solo_publicos,
     )
     tasa_actual = obtener_tasa_dolar() or 1.0
@@ -1247,6 +1272,7 @@ def _contexto_tienda(comercio, palabra_clave, origen, solo_publicos=True, origen
 
 @app.route('/tienda/<int:comercio_id>')
 @app.route('/tienda/<string:slug>')
+@limite('240 per minute')
 def tienda_publica(comercio_id=None, slug=None):
     if comercio_id is None and slug:
         comercio = obtener_comercio_por_slug(slug)

@@ -13,8 +13,12 @@ Reglas:
 """
 
 import logging
+import threading
 
-from backend.geo_ubicacion import enriquecer_ubicaciones_geo
+from backend.geo_ubicacion import (
+    enriquecer_ubicaciones_geo,
+    geocodificacion_habilitada,
+)
 from backend.utils import derivar_datos_maps, url_maps_comercio
 
 logger = logging.getLogger('localis.ubicaciones')
@@ -23,6 +27,11 @@ logger = logging.getLogger('localis.ubicaciones')
 MAX_UBICACIONES = 10
 
 LOG_PREFIX = '[Localis Ubicaciones]'
+
+# Geocodificación en segundo plano: NO se hace esperar al comerciante. Cada
+# comercio se procesa una sola vez a la vez.
+_geo_en_curso = set()
+_geo_lock = threading.Lock()
 
 
 def _valor(fila, clave, indice=0):
@@ -245,6 +254,91 @@ def adjuntar_ubicaciones(comercio):
     except Exception as error:
         logger.error(f'{LOG_PREFIX} adjuntar: {error}')
     return comercio
+
+
+def _geocodificar_comercio(comercio_id):
+    """Trabajo real: completa ciudad/zona/dirección de las sedes y las guarda."""
+    from backend.db import get_db_connection
+
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            sedes = cargar_ubicaciones(cursor, comercio_id)
+            if not sedes:
+                return
+            enriquecidas = enriquecer_ubicaciones_geo(sedes)
+            if enriquecidas == sedes:
+                return  # nada nuevo que guardar
+            guardar_ubicaciones(cursor, comercio_id, enriquecidas)
+            principal = datos_ubicacion_principal(enriquecidas)
+            cursor.execute(
+                """
+                UPDATE comercios
+                SET direccion = ?, ciudad = ?, zona = ?,
+                    maps_url = ?, ubicacion_maps_url = ?
+                WHERE id = ?
+                """,
+                (
+                    principal['direccion'],
+                    principal['ciudad'],
+                    principal['zona'],
+                    principal['maps_url'],
+                    principal['ubicacion_maps_url'],
+                    int(comercio_id),
+                ),
+            )
+            conexion.commit()
+        logger.info(f'{LOG_PREFIX} sedes geocodificadas (comercio {comercio_id})')
+    except Exception as error:
+        logger.error(f'{LOG_PREFIX} geocodificación comercio {comercio_id}: {error}')
+
+
+def geocodificar_comercio_en_segundo_plano(comercio_id):
+    """Completa la ubicación de las sedes **sin bloquear** la petición.
+
+    El enlace de Maps se resuelve y geocodifica en un hilo aparte: el formulario
+    responde al instante y ``ciudad``/``zona`` aparecen unos segundos después.
+    Nunca lanza; si la geocodificación está apagada no hace nada.
+    """
+    if not comercio_id or not geocodificacion_habilitada():
+        return
+    try:
+        with _geo_lock:
+            if comercio_id in _geo_en_curso:
+                return
+            _geo_en_curso.add(comercio_id)
+        hilo = threading.Thread(
+            target=_geocodificar_en_hilo,
+            args=(comercio_id,),
+            name=f'localis-geo-{comercio_id}',
+            daemon=True,
+        )
+        hilo.start()
+    except Exception as error:
+        with _geo_lock:
+            _geo_en_curso.discard(comercio_id)
+        logger.error(f'{LOG_PREFIX} no se pudo lanzar la geocodificación: {error}')
+
+
+def _marcar_geocodificacion_terminada(comercio_id):
+    """Libera la marca del comercio (la usa el envoltorio del hilo)."""
+    with _geo_lock:
+        _geo_en_curso.discard(comercio_id)
+
+
+def _geocodificar_en_hilo(comercio_id):
+    """Envuelve el trabajo para garantizar que SIEMPRE se libera la marca.
+
+    La liberación va aquí (no dentro del trabajo): si fallara el import o algo
+    previo al ``try``, el comercio quedaría marcado para siempre y nunca se
+    geocodificaría.
+    """
+    try:
+        _geocodificar_comercio(comercio_id)
+    except Exception as error:
+        logger.error(f'{LOG_PREFIX} hilo de geocodificación {comercio_id}: {error}')
+    finally:
+        _marcar_geocodificacion_terminada(comercio_id)
 
 
 def ubicaciones_desde_comercio(comercio):

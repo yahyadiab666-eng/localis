@@ -40,6 +40,9 @@ def _cargar_entorno():
     os.environ['LOCALIS_GEOCODIFICACION'] = '0'
     # Igual con la tasa: su sincronización diaria sale al BCV y escribe config.
     os.environ['LOCALIS_TASA_AUTO_BCV'] = '0'
+    # Sin caché de listados: el sandbox crea productos y verifica verlos al instante.
+    os.environ['LOCALIS_CACHE_TIENDA_SEG'] = '0'
+    os.environ['LOCALIS_CACHE_CATALOGO_SEG'] = '0'
 
 
 def _ok(condicion, mensaje, errores):

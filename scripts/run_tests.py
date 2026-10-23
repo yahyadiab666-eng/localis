@@ -51,6 +51,7 @@ SIN_RED = [
     'test_ubicaciones_maps.py',
     'test_geocodificacion_maps.py',
     'test_tasa_automatica.py',
+    'test_cache_rendimiento.py',
     'test_boost_referencias.py',
     'test_verificacion_pagos.py',
     'test_compresion.py',

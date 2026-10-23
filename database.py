@@ -1010,8 +1010,12 @@ def ejecutar_escritura(query, params=()):
         return afectadas
 
 
-def diagnosticar_postgresql():
-    """Diagnóstico automático de conexión, latencia y tablas críticas."""
+def _diagnosticar_postgresql_real():
+    """Diagnóstico real: 6 consultas a ``information_schema`` (~0,7 s medidos).
+
+    No llamar directamente en cada petición: usar :func:`diagnosticar_postgresql`
+    (con caché) salvo que se quiera el dato fresco.
+    """
     resultado = {
         'ok': False,
         'database_url_configurada': bool(DATABASE_URL),
@@ -1037,6 +1041,19 @@ def diagnosticar_postgresql():
                 resultado['version'] = (
                     fila_version[0] if isinstance(fila_version, tuple) else fila_version.get('version')
                 )
+            # RTT puro de una consulta (conexión ya abierta, sin contar creación):
+            # es el dato que dice si el servidor y la base están en la misma
+            # región. Si son ~1-10 ms están cerca; si son >40 ms, están lejos.
+            try:
+                muestras = []
+                for _ in range(3):
+                    t0 = time.perf_counter()
+                    cursor.execute('SELECT 1')
+                    cursor.fetchone()
+                    muestras.append((time.perf_counter() - t0) * 1000)
+                resultado['rtt_ms'] = round(sum(muestras) / len(muestras), 1)
+            except Exception:
+                resultado['rtt_ms'] = None
             for tabla in tablas_criticas:
                 cursor.execute(
                     """
@@ -1065,6 +1082,73 @@ def diagnosticar_postgresql():
         resultado['latencia_ms'] = round((time.time() - inicio) * 1000, 1)
 
     return resultado
+
+
+_diag_cache = {'valor': None, 'ts': 0.0}
+
+
+def _diag_ttl_seg():
+    try:
+        return max(0.0, float(os.getenv('LOCALIS_DIAG_CACHE_SEG', '30')))
+    except (TypeError, ValueError):
+        return 30.0
+
+
+def diagnosticar_postgresql(forzar=False):
+    """Diagnóstico de BD con caché corta (evita 6 consultas pesadas por llamada).
+
+    El diagnóstico recorre ``information_schema`` y cuesta ~0,7 s en producción;
+    cachearlo unos segundos hace que ``/health/ready`` sea barato. Con
+    ``forzar=True`` (o ``LOCALIS_DIAG_CACHE_SEG=0``) siempre se recalcula.
+    """
+    ttl = _diag_ttl_seg()
+    cacheado = _diag_cache['valor']
+    if not forzar and ttl > 0 and cacheado and (time.monotonic() - _diag_cache['ts']) < ttl:
+        return cacheado
+    resultado = _diagnosticar_postgresql_real()
+    _diag_cache.update({'valor': resultado, 'ts': time.monotonic()})
+    return resultado
+
+
+def _hilo_keepalive_bd():
+    """Ping periódico a las conexiones del pool.
+
+    Abrir una conexión a Supabase cuesta ~1 s (medido). Si el pooler cierra las
+    conexiones inactivas, la siguiente petición paga ese segundo completo. Este
+    ping las mantiene calientes para que el primer usuario tras un rato de
+    calma no sea el que pague el peaje.
+    """
+    try:
+        intervalo = max(30, int(os.getenv('LOCALIS_DB_KEEPALIVE_SEG', '240')))
+    except (TypeError, ValueError):
+        intervalo = 240
+    while True:
+        time.sleep(intervalo)
+        try:
+            for _ in range(max(1, min(3, DB_POOL_MIN))):
+                with get_db_connection() as conexion:
+                    cursor = conexion.cursor()
+                    cursor.execute('SELECT 1')
+                    cursor.fetchone()
+        except Exception as error:
+            print(
+                f'[Localis] keepalive BD: {type(error).__name__}: {error}',
+                flush=True,
+            )
+
+
+def programar_keepalive_bd():
+    """Arranca el ping de conexiones una sola vez por proceso (idempotente)."""
+    valor = str(os.getenv('LOCALIS_DB_KEEPALIVE', '1')).strip().lower()
+    if valor in ('0', 'false', 'no', 'off'):
+        return False
+    if getattr(programar_keepalive_bd, '_lanzado', False):
+        return True
+    programar_keepalive_bd._lanzado = True
+    threading.Thread(
+        target=_hilo_keepalive_bd, name='localis-db-keepalive', daemon=True
+    ).start()
+    return True
 
 
 def ejecutar_con_reintentos_bd(operacion, reintentos=None):
