@@ -65,11 +65,13 @@ def _probar_formato():
 
 def _probar_saltos_seguros():
     print('\n=== No busca catalogo en temas de documentacion ===')
-    from backend.asistente.datos_vivos import buscar_precios
+    from backend.asistente.datos_vivos import HECHOS_CLAVE, buscar_precios
 
     _ok(buscar_precios('cuanto cuesta el plan Pro?') == '', 'plan -> no busca catalogo')
     _ok(buscar_precios('   ') == '', 'vacio -> cadena vacia')
     _ok(buscar_precios('a b c') == '', 'sin palabras utiles -> cadena vacia')
+    _ok('10 USD' in HECHOS_CLAVE and '15 USD' in HECHOS_CLAVE, 'hechos clave con precios')
+    _ok('35 USD' in HECHOS_CLAVE and 'ilimitados' in HECHOS_CLAVE, 'hechos clave con Business')
 
 
 def main() -> int:

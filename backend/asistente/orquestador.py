@@ -86,7 +86,7 @@ def _limpiar_historial(historial):
 
 def _construir_contexto(usuario, rol, texto):
     """Une documentacion (RAG) + datos en vivo (precios, tasa, mi comercio)."""
-    partes = []
+    partes = [datos_vivos.HECHOS_CLAVE]
     documentacion = contexto_para(texto, max_chars=ASISTENTE_MAX_CONTEXTO)
     if documentacion:
         partes.append(documentacion)

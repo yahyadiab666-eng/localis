@@ -40,6 +40,20 @@ _CLAVES_COMERCIO = (
 
 _CLAVES_IMAGENES = ('foto', 'fotos', 'imagen', 'imagenes')
 
+# Hechos canonicos que se inyectan SIEMPRE: son pequenos y evitan que el modelo
+# invente precios de planes, destacados o puntos cuando el RAG no los recupera.
+HECHOS_CLAVE = (
+    'DATOS CLAVE DE LOCALIS (cifras oficiales; usalas tal cual):\n'
+    '- Planes (renovacion cada 30 dias): Gratis/Prueba 0 USD (hasta 50 '
+    'productos); Basico 10 USD/mes (hasta 100); Pro 15 USD/mes (hasta 300); '
+    'Business 35 USD/mes (productos ilimitados).\n'
+    '- Pago de planes: Pago Movil o Binance Pay (USDT). Se sube una captura del '
+    'comprobante; se verifica con OCR o pasa a revision manual.\n'
+    '- Destacados: 3 dias 2 USD; 5 dias 3 USD; 7 dias 4 USD.\n'
+    '- Puntos: 1 punto por comercio referido; canjes: 3 puntos = 3 dias, '
+    '4 puntos = 5 dias, 5 puntos = 7 dias de destacado.'
+)
+
 # Si el mensaje trata de estos temas, NO se busca en el catalogo (lo cubre la
 # documentacion) para no inyectar productos irrelevantes.
 _CLAVES_NO_CATALOGO = (
