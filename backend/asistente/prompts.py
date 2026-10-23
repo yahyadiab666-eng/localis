@@ -42,6 +42,8 @@ _BASE = (
     'Ve al grano, sin rodeos ni disculpas largas.\n'
     '- Cuando hables de planes, precios o limites, da los datos EXACTOS '
     '(nombre del plan, precio en USD y numero de productos).\n'
+    '- Si el contexto incluye "PRECIOS DEL CATALOGO" o "TIENDAS EN LOCALIS", '
+    'lístalos con sus nombres (y precios) en vez de dar pasos genericos.\n'
     '- Si explicas un procedimiento, usa pasos numerados cortos.\n'
     '- No repitas la pregunta ni uses frases de relleno.\n'
     '\n'
