@@ -16,6 +16,7 @@ from config import (
     ASISTENTE_BASE_URL,
     ASISTENTE_MAX_TOKENS,
     ASISTENTE_MODELO,
+    ASISTENTE_MODELO_RESPALDO,
     ASISTENTE_ORDEN_PROVEEDOR,
     ASISTENTE_SITIO,
     ASISTENTE_TEMPERATURA,
@@ -36,17 +37,33 @@ def disponible():
 
 
 def responder(mensajes, herramientas=None, timeout=None):
-    """Envia los mensajes y devuelve contenido, tool_calls y tokens.
+    """Intenta el modelo principal y, si falla, el de respaldo.
 
-    ``herramientas`` (function calling) queda listo para la fase de soporte
-    tecnico con acciones; en el MVP no se usa.
+    ``herramientas`` (function calling) queda listo para acciones futuras; en
+    esta fase no se usa. Devuelve contenido, tool_calls y tokens.
     """
+    modelos = [ASISTENTE_MODELO]
+    if ASISTENTE_MODELO_RESPALDO and ASISTENTE_MODELO_RESPALDO not in modelos:
+        modelos.append(ASISTENTE_MODELO_RESPALDO)
+
+    ultimo_error = None
+    for modelo in modelos:
+        try:
+            return _llamar(modelo, mensajes, herramientas, timeout)
+        except ProveedorNoDisponible as error:
+            ultimo_error = error
+            _log.warning('modelo %s no disponible: %s', modelo, error)
+
+    raise ultimo_error or ProveedorNoDisponible('sin modelos configurados')
+
+
+def _llamar(modelo, mensajes, herramientas=None, timeout=None):
     clave = clave_asistente()
     if not clave:
         raise ProveedorNoDisponible('falta LOCALIS_ASISTENTE_API_KEY')
 
     payload = {
-        'model': ASISTENTE_MODELO,
+        'model': modelo,
         'messages': mensajes,
         'temperature': ASISTENTE_TEMPERATURA,
         'max_tokens': ASISTENTE_MAX_TOKENS,
@@ -77,7 +94,7 @@ def responder(mensajes, herramientas=None, timeout=None):
 
     if respuesta.status_code >= 400:
         # No se registra el cuerpo: puede contener datos de la peticion.
-        _log.error('LLM respondio HTTP %s', respuesta.status_code)
+        _log.error('LLM (%s) respondio HTTP %s', modelo, respuesta.status_code)
         raise ProveedorNoDisponible(f'HTTP {respuesta.status_code}')
 
     try:
@@ -95,5 +112,5 @@ def responder(mensajes, herramientas=None, timeout=None):
         'contenido': mensaje.get('content') or '',
         'tool_calls': mensaje.get('tool_calls') or [],
         'tokens': int(uso.get('total_tokens') or 0),
-        'modelo': datos.get('model') or ASISTENTE_MODELO,
+        'modelo': datos.get('model') or modelo,
     }

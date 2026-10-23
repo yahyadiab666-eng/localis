@@ -118,6 +118,27 @@ Se puede destacar un producto o la tienda para aparecer con prioridad:
 - Las categorías las define la plataforma. El sistema clasifica cada producto; si
   no está seguro lo deja en "otros". El comerciante puede ajustar la categoría.
 
+## Compartir tu tienda
+
+- Cada comercio tiene un enlace público (su tienda) y un código QR que se puede
+  descargar desde el panel para compartirlo en redes, vitrinas o volantes.
+
+## Subir la foto de un producto a mano
+
+- Desde el panel se puede subir una imagen para un producto. Esa foto siempre
+  tiene prioridad sobre las automáticas.
+
+## Buscar por ubicación
+
+- La búsqueda tiene en cuenta las sedes de los comercios (ciudad, zona y el
+  enlace de Google Maps que declaró cada comercio).
+
+## Eliminar la cuenta y privacidad
+
+- La cuenta se puede eliminar desde la app (opción de eliminar cuenta). Hay una
+  página de privacidad con el detalle de datos y de los terceros que se usan
+  (Google para el acceso, Supabase para las imágenes y Render para el hosting).
+
 ## Soporte técnico: problemas comunes
 
 - No puedo iniciar sesión: el acceso es con la cuenta de Google; si la sesión

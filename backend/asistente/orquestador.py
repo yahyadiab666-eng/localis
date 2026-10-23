@@ -19,7 +19,7 @@ from config import (
     asistente_habilitado,
 )
 
-from backend.asistente import datos_vivos, proveedor
+from backend.asistente import datos_vivos, presupuesto, proveedor
 from backend.asistente.conocimiento import contexto_para
 from backend.asistente.prompts import mensajes_para
 from backend.asistente.seguridad import redactar, sanear_entrada
@@ -36,6 +36,10 @@ _MENSAJE_OCUPADO = (
 _MENSAJE_NO_DISPONIBLE = (
     'No pude responder ahora mismo. Puedes escribirnos por WhatsApp con el boton '
     '"Escribir a soporte".'
+)
+_MENSAJE_PRESUPUESTO = (
+    'He alcanzado el limite de consultas de hoy. Vuelve manana o escribenos por '
+    'WhatsApp con el boton "Escribir a soporte".'
 )
 
 _SUGERENCIAS = {
@@ -99,14 +103,36 @@ def _construir_contexto(usuario, rol, texto):
     if precios:
         partes.append('PRECIOS DEL CATALOGO (datos en vivo):\n' + precios)
 
-    if rol == 'comerciante' and datos_vivos.menciona_comercio(texto):
-        resumen = datos_vivos.resumen_comercio(
-            usuario.get('usuario_id'),
-            usuario.get('comercio_id'),
-            incluir_imagenes=datos_vivos.menciona_imagenes(texto),
-        )
-        if resumen:
-            partes.append('DATOS DE TU COMERCIO (datos en vivo):\n' + resumen)
+    if datos_vivos.menciona_tienda(texto):
+        tiendas = datos_vivos.buscar_tiendas(texto)
+        if tiendas:
+            partes.append('TIENDAS EN LOCALIS (datos en vivo):\n' + tiendas)
+
+    if datos_vivos.menciona_categoria(texto):
+        categorias = datos_vivos.categorias_disponibles()
+        if categorias:
+            partes.append('CATEGORIAS DISPONIBLES (datos en vivo):\n' + categorias)
+
+    if rol == 'comerciante' and usuario.get('comercio_id'):
+        comercio_id = usuario.get('comercio_id')
+        bloque = ''
+        titulo = ''
+        if datos_vivos.menciona_pago(texto):
+            bloque = datos_vivos.pago_pendiente(comercio_id)
+            titulo = 'PAGOS DE TU COMERCIO'
+        elif datos_vivos.menciona_importacion(texto):
+            bloque = datos_vivos.ultima_importacion(comercio_id)
+            titulo = 'ULTIMA IMPORTACION DE TU COMERCIO'
+        elif datos_vivos.menciona_imagenes(texto):
+            bloque = datos_vivos.resumen_imagenes(comercio_id)
+            titulo = 'IMAGENES DE TU COMERCIO'
+        elif datos_vivos.menciona_comercio(texto):
+            bloque = datos_vivos.resumen_comercio(
+                usuario.get('usuario_id'), comercio_id
+            )
+            titulo = 'DATOS DE TU COMERCIO'
+        if bloque:
+            partes.append(f'{titulo} (datos en vivo):\n{bloque}')
 
     return '\n\n---\n\n'.join(partes)
 
@@ -117,6 +143,9 @@ def responder(usuario, mensaje, historial=None):
 
     if not asistente_habilitado():
         return {'ok': False, 'estado': 'apagado', 'mensaje': _MENSAJE_NO_DISPONIBLE}
+
+    if not presupuesto.disponible():
+        return {'ok': False, 'estado': 'presupuesto', 'mensaje': _MENSAJE_PRESUPUESTO}
 
     texto = sanear_entrada(mensaje, ASISTENTE_LIMITE_MENSAJE)
     if not texto:
@@ -145,6 +174,8 @@ def responder(usuario, mensaje, historial=None):
     respuesta = redactar((salida.get('contenido') or '').strip())
     if not respuesta:
         return {'ok': False, 'estado': 'no_disponible', 'mensaje': _MENSAJE_NO_DISPONIBLE}
+
+    presupuesto.registrar(salida.get('tokens'))
 
     return {
         'ok': True,

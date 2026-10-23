@@ -251,6 +251,11 @@ ASISTENTE_BASE_URL = os.environ.get(
 ASISTENTE_MODELO = os.environ.get(
     'LOCALIS_ASISTENTE_MODELO', 'openai/gpt-4o-mini'
 )
+# Modelo de respaldo: si el principal falla (429/5xx/proveedor caido) se intenta
+# este, para que el asistente no dependa de un solo proveedor.
+ASISTENTE_MODELO_RESPALDO = os.environ.get(
+    'LOCALIS_ASISTENTE_MODELO_RESPALDO', 'mistralai/mistral-nemo'
+).strip()
 ASISTENTE_SITIO = os.environ.get(
     'LOCALIS_ASISTENTE_SITIO', 'https://localis.onrender.com'
 )
@@ -266,6 +271,10 @@ ASISTENTE_MAX_CONCURRENTES = int(
 ASISTENTE_MAX_HISTORIAL = int(os.environ.get('LOCALIS_ASISTENTE_MAX_HISTORIAL', '8'))
 ASISTENTE_LIMITE_MENSAJE = int(os.environ.get('LOCALIS_ASISTENTE_LIMITE_MENSAJE', '1500'))
 ASISTENTE_MAX_CONTEXTO = int(os.environ.get('LOCALIS_ASISTENTE_MAX_CONTEXTO', '2500'))
+# Tope diario de tokens del asistente (0 = desactivado). Guarda contra abuso.
+ASISTENTE_PRESUPUESTO_DIA_TOKENS = int(
+    os.environ.get('LOCALIS_ASISTENTE_PRESUPUESTO_DIA_TOKENS', '0')
+)
 # Enrutado de OpenRouter: 'throughput' elige el proveedor mas rapido para el
 # modelo (menos latencia). Vacio = dejar que OpenRouter decida.
 ASISTENTE_ORDEN_PROVEEDOR = os.environ.get(
