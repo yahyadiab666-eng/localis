@@ -1530,11 +1530,31 @@ from backend.blueprints.api import bp as _api_bp
 from backend.blueprints.admin import bp as _admin_bp
 from backend.blueprints.comercio import bp as _comercio_bp
 from backend.blueprints.auth import bp as _auth_bp
+from backend.blueprints.asistente import bp as _asistente_bp
 
 app.register_blueprint(_api_bp)
 app.register_blueprint(_admin_bp)
 app.register_blueprint(_comercio_bp)
 app.register_blueprint(_auth_bp)
+app.register_blueprint(_asistente_bp)
+
+
+@app.context_processor
+def _inyectar_asistente():
+    """Estado del asistente de IA disponible en TODAS las plantillas.
+
+    El widget se auto-oculta si no hay clave o si se apago con
+    ``LOCALIS_ASISTENTE=0``; no hay que tocar ninguna vista.
+    """
+    try:
+        from config import ASISTENTE_WHATSAPP_URL, asistente_habilitado
+
+        return {
+            'asistente_habilitado': asistente_habilitado(),
+            'asistente_whatsapp_url': ASISTENTE_WHATSAPP_URL,
+        }
+    except Exception:
+        return {'asistente_habilitado': False, 'asistente_whatsapp_url': ''}
 
 
 port = int(os.environ.get('PORT', 10000))

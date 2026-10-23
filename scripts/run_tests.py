@@ -61,6 +61,9 @@ SIN_RED = [
     'test_cache.py',
     'test_clasificador_categorias.py',
     'test_cobertura_universal.py',
+    'test_asistente_guardarrailes.py',
+    'test_asistente_conocimiento.py',
+    'test_asistente_rutas.py',
 ]
 INTEGRACION = [
     'test_migraciones.py',

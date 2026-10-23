@@ -234,3 +234,59 @@ def aplicar_config_sesion_flask(app):
         SESSION_COOKIE_SECURE=es_entorno_produccion(),
         PERMANENT_SESSION_LIFETIME=timedelta(days=SESSION_LIFETIME_DAYS),
     )
+
+
+# ==========================================
+# ASISTENTE DE IA (atencion al cliente, SOLO informativo)
+# ==========================================
+# Apagado salvo que exista una clave de API y no se fuerce a 0. Con
+# LOCALIS_ASISTENTE=0 el widget no se muestra y la API responde 503.
+# Por ahora NO toca la base de datos: solo responde con la documentacion (RAG)
+# y deriva a WhatsApp cuando hace falta una intervencion humana.
+# El proveedor es compatible con la API de OpenAI (OpenRouter por defecto),
+# asi que cambiar de modelo/proveedor es solo variable de entorno.
+ASISTENTE_BASE_URL = os.environ.get(
+    'LOCALIS_ASISTENTE_BASE_URL', 'https://openrouter.ai/api/v1'
+).rstrip('/')
+ASISTENTE_MODELO = os.environ.get(
+    'LOCALIS_ASISTENTE_MODELO', 'openai/gpt-4o-mini'
+)
+ASISTENTE_SITIO = os.environ.get(
+    'LOCALIS_ASISTENTE_SITIO', 'https://localis.onrender.com'
+)
+ASISTENTE_TITULO = os.environ.get('LOCALIS_ASISTENTE_TITULO', 'Localis')
+ASISTENTE_TIMEOUT_SEG = float(os.environ.get('LOCALIS_ASISTENTE_TIMEOUT_SEG', '20'))
+ASISTENTE_MAX_TOKENS = int(os.environ.get('LOCALIS_ASISTENTE_MAX_TOKENS', '500'))
+ASISTENTE_TEMPERATURA = float(os.environ.get('LOCALIS_ASISTENTE_TEMPERATURA', '0.3'))
+# Tope de consultas simultaneas al LLM (1 worker + pocos hilos): evita que una
+# rafaga de chats acapare el proceso. Excedente -> aviso y derivacion a WhatsApp.
+ASISTENTE_MAX_CONCURRENTES = int(
+    os.environ.get('LOCALIS_ASISTENTE_MAX_CONCURRENTES', '2')
+)
+ASISTENTE_MAX_HISTORIAL = int(os.environ.get('LOCALIS_ASISTENTE_MAX_HISTORIAL', '8'))
+ASISTENTE_LIMITE_MENSAJE = int(os.environ.get('LOCALIS_ASISTENTE_LIMITE_MENSAJE', '1500'))
+ASISTENTE_MAX_CONTEXTO = int(os.environ.get('LOCALIS_ASISTENTE_MAX_CONTEXTO', '4000'))
+ASISTENTE_WHATSAPP_URL = (
+    os.environ.get('LOCALIS_ASISTENTE_WHATSAPP_URL') or WHATSAPP_SOPORTE_URL
+)
+
+
+def clave_asistente():
+    """Clave del proveedor LLM (acepta el alias habitual de OpenRouter)."""
+    return (
+        os.environ.get('LOCALIS_ASISTENTE_API_KEY')
+        or os.environ.get('OPENROUTER_API_KEY')
+        or ''
+    ).strip()
+
+
+def asistente_habilitado():
+    """True si el asistente debe estar activo.
+
+    Requiere una clave de API (sin ella no hay nada que consultar) y que no se
+    haya apagado explicitamente con ``LOCALIS_ASISTENTE=0``.
+    """
+    valor = str(os.environ.get('LOCALIS_ASISTENTE', '1')).strip().lower()
+    if valor in ('0', 'false', 'no', 'off'):
+        return False
+    return bool(clave_asistente())
