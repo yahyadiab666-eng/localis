@@ -36,20 +36,28 @@ El web envía la captura y recibe el mismo JSON que producía el OCR local.
   no penalizar cada pago con un timeout.
 - Timeout configurable (`LOCALIS_OCR_REMOTO_TIMEOUT_SEG`, por defecto 12 s).
 
-## Fase 2 — Pipeline de imágenes (pendiente, más complejo)
+## Fase 2 — Pipeline de imágenes (LISTO, apagado por defecto)
 
-El backfill de imágenes (`backend/image_backfill.py`) es un hilo que ya lee de la
-BD y trabaja en segundo plano: es el mejor candidato a moverse, pero escribe en
-la BD y en Supabase Storage y comparte estado con la importación. Requiere:
+El contenedor **WEB** se queda solo con lo barato: en la importación y en el alta
+de producto asigna fotos del **catálogo maestro** (sin CPU) y deja el resto como
+`pendiente`. El **WORKER** hace la búsqueda web + rembg (pipeline profesional) y
+también el backfill.
 
-- Un proceso de worker dedicado (no web) para el backfill, o un cron que lo
-  dispare por lotes.
-- Decidir si la importación (que hoy enriquece imágenes en el request) también se
-  mueve.
+| Contenedor | Variables |
+|---|---|
+| **WEB** | `LOCALIS_WORKER=0`, `LOCALIS_IMG_PIPELINE_PESADO=0`, `LOCALIS_IMG_BACKFILL=0`, `LOCALIS_OCR_SERVICE_URL=<worker>` |
+| **WORKER** | `LOCALIS_WORKER=1`, `LOCALIS_IMG_PIPELINE_PESADO=1`, `LOCALIS_IMG_BACKFILL=1` (sin URL de OCR) |
 
-No se implementa todavía: es el cambio de mayor riesgo y conviene medir primero
-si la CPU es realmente el cuello (hoy el cuello medido es la **latencia de BD**,
-~0,7 s por ida y vuelta).
+Con `LOCALIS_WORKER=1` el worker **arranca el backfill de imágenes y el reintento
+de pagos al iniciar**, sin depender de que lleguen peticiones (un worker con poco
+tráfico no dispararía el arranque perezoso).
+
+**Consecuencia a tener en cuenta**: si el worker está caído, las fotos nuevas **no
+se generan** (quedan `pendiente` y el catálogo muestra el marcador). El sitio y el
+resto siguen funcionando.
+
+**Ahorro de RAM en el web**: si `LOCALIS_OCR_SERVICE_URL` está definida, el web
+**no precarga** el modelo de OCR (libera memoria del contenedor de 512 MB).
 
 ## Coste y recomendación
 

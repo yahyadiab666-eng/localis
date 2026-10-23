@@ -473,6 +473,14 @@ def _calentar_ocr():
     activo = str(os.getenv('LOCALIS_OCR_WARMUP', '1')).strip().lower()
     if activo in ('0', 'false', 'no', 'off'):
         return
+    # Si el OCR se delega a un worker, este contenedor no necesita el modelo
+    # (ahorra CPU y, sobre todo, RAM).
+    if (os.getenv('LOCALIS_OCR_SERVICE_URL') or '').strip():
+        print(
+            '[Localis OCR] OCR remoto configurado; no se precarga el modelo local',
+            flush=True,
+        )
+        return
     try:
         inicio = time.perf_counter()
         from backend.payment_ocr import calentar_motor_ocr
@@ -535,6 +543,8 @@ def _inicializar_aplicacion():
         _diagnosticar_serper()
         _calentar_ocr()
         _programar_tasa_automatica()
+        # Worker dedicado: arranca el trabajo pesado sin depender de un request.
+        _arrancar_tareas_de_worker()
         # --- RESTAURAR_PAGOS_INICIO ---
         # En la fase gratuita no se expiran tiendas por suscripción al arrancar.
         if pagos_habilitados():
@@ -550,6 +560,38 @@ def _inicializar_aplicacion():
             reportar_error_critico_async(error, request=None)
         except Exception:
             traceback.print_exc()
+
+
+def _es_worker_dedicado():
+    """True si este contenedor es el WORKER (hace el trabajo pesado)."""
+    valor = str(os.environ.get('LOCALIS_WORKER', '0')).strip().lower()
+    return valor in ('1', 'true', 'yes', 'on')
+
+
+def _arrancar_tareas_de_worker():
+    """En un worker dedicado, inicia el trabajo pesado sin depender de requests.
+
+    El backfill de imagenes y el reintento de pagos se arrancan de forma perezosa
+    desde el primer request; un worker que recibe pocas peticiones podria no
+    arrancarlos nunca. Con ``LOCALIS_WORKER=1`` se inician aqui (hilo de arranque,
+    post-fork). Idempotente y nunca lanza.
+    """
+    if not _es_worker_dedicado():
+        return
+    try:
+        from backend.image_backfill import iniciar_backfill_periodico
+
+        iniciar_backfill_periodico()
+        logger.info('[Localis Worker] backfill de imagenes iniciado')
+    except Exception as error:
+        logger.warning(f'[Localis Worker] backfill no iniciado: {error}')
+    try:
+        from backend.asistente.pagos import iniciar_reintento_periodico
+
+        iniciar_reintento_periodico()
+        logger.info('[Localis Worker] reintento de pagos iniciado')
+    except Exception as error:
+        logger.warning(f'[Localis Worker] reintento de pagos no iniciado: {error}')
 
 
 _hilo_init = threading.Thread(

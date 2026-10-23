@@ -196,6 +196,17 @@ def preparar_mapa_imagenes_importacion(productos, snapshot_imagenes=None):
     return mapa
 
 
+def _pipeline_pesado_habilitado():
+    """False cuando este contenedor no debe hacer el trabajo pesado de imagenes.
+
+    El pago del pipeline (busqueda web + rembg) lo hace el WORKER; el contenedor
+    web solo asigna fotos del catalogo maestro (barato) y deja el resto como
+    ``pendiente`` para que lo drene el backfill del worker.
+    """
+    valor = str(os.environ.get('LOCALIS_IMG_PIPELINE_PESADO', '1')).strip().lower()
+    return valor not in ('0', 'false', 'no', 'off')
+
+
 def asociar_imagenes_inventario(comercio_id):
     """Tras CSV: asigna fotos profesionales en segundo plano (pipeline local).
 
@@ -213,6 +224,12 @@ def asociar_imagenes_inventario(comercio_id):
 
 def programar_asociacion_imagenes_inventario(comercio_id):
     if comercio_id is None:
+        return None
+    if not _pipeline_pesado_habilitado():
+        logger.info(
+            f'{_LOG_CSV} pipeline pesado desactivado en este contenedor '
+            f'(lo hara el worker); comercio={comercio_id}'
+        )
         return None
     with _descubrimiento_lock:
         if comercio_id in _asociacion_en_vuelo:
@@ -256,6 +273,12 @@ def programar_descubrimiento_producto(producto_id, categoria=None):
         logger.info(f'{_LOG_IMAGEN} descubrimiento omitido: producto_id vacío')
         return False
     pid = int(producto_id)
+    if not _pipeline_pesado_habilitado():
+        logger.info(
+            f'{_LOG_IMAGEN} pipeline pesado desactivado en este contenedor '
+            f'(lo hara el worker); producto={pid}'
+        )
+        return False
     with _descubrimiento_lock:
         if pid in _descubrimiento_en_vuelo:
             logger.info(f'{_LOG_IMAGEN} descubrimiento producto={pid} ya en vuelo, omitido')
