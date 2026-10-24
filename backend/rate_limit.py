@@ -30,11 +30,14 @@ def _deshabilitado():
 
 def _clave():
     try:
-        from flask import session
+        from flask import current_app, request, session
 
-        uid = session.get('usuario_id')
-        if uid:
-            return f'usuario:{uid}'
+        # Sin cookie de sesion no se toca ``session``: una simple lectura marca
+        # ``Vary: Cookie`` y eso impide cachear las paginas publicas anonimas.
+        if request.cookies.get(current_app.session_cookie_name):
+            uid = session.get('usuario_id')
+            if uid:
+                return f'usuario:{uid}'
     except Exception:
         pass
     try:

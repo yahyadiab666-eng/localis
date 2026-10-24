@@ -1301,7 +1301,7 @@ def como_funciona():
     """Guía de uso para consumidores y comercios."""
     comercio = None
     es_comerciante = False
-    usuario_id = session.get('usuario_id')
+    usuario_id = session.get('usuario_id') if _peticion_con_sesion() else None
     if usuario_id:
         try:
             comercio_db, _, _, categorias = _cargar_datos_comercio_usuario(usuario_id)
@@ -1476,7 +1476,8 @@ def vista_previa_comercio(comercio_id, token):
                 codigo=404,
                 titulo='Enlace no valido',
                 mensaje='El enlace de vista previa no es valido o expiro.',
-                sesion_activa=bool(session.get('usuario_id')),
+                sesion_activa=_peticion_con_sesion()
+                and bool(session.get('usuario_id')),
             ),
             404,
         )
@@ -1489,7 +1490,8 @@ def vista_previa_comercio(comercio_id, token):
                 codigo=404,
                 titulo='Tienda no encontrada',
                 mensaje='La tienda no existe.',
-                sesion_activa=bool(session.get('usuario_id')),
+                sesion_activa=_peticion_con_sesion()
+                and bool(session.get('usuario_id')),
             ),
             404,
         )
