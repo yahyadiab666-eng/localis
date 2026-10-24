@@ -34,7 +34,10 @@ def _clave():
 
         # Sin cookie de sesion no se toca ``session``: una simple lectura marca
         # ``Vary: Cookie`` y eso impide cachear las paginas publicas anonimas.
-        if request.cookies.get(current_app.session_cookie_name):
+        # OJO: el nombre sale de la config; ``current_app.session_cookie_name``
+        # no existe en esta version de Flask.
+        nombre = current_app.config.get('SESSION_COOKIE_NAME', 'session')
+        if request.cookies.get(nombre):
             uid = session.get('usuario_id')
             if uid:
                 return f'usuario:{uid}'

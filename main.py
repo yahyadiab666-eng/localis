@@ -451,11 +451,17 @@ def _peticion_con_sesion():
 
     El objeto ``session`` no se debe tocar en peticiones sin cookie: una simple
     lectura marca ``Vary: Cookie`` y una escritura añade ``Set-Cookie``, y con
-    eso ningún CDN puede cachear las páginas públicas anónimas (medido: la
-    portada y la tienda devolvían ``Set-Cookie: localis_session=...``).
+    eso ningún CDN cachea las páginas públicas anónimas.
+
+    ⚠️ El nombre de la cookie **no** se saca de ``app.session_cookie_name``: ese
+    atributo **no existe** en esta versión de Flask, lanzaba ``AttributeError`` y
+    el aviso silencioso hacía que la comprobación devolviera siempre True (con lo
+    que la caché de HTML nunca se activaba y la sesión se tocaba igual). Se
+    detectó con la cabecera ``X-Localis-HTML``. El nombre vive en la config.
     """
     try:
-        return bool(request.cookies.get(app.session_cookie_name))
+        nombre = app.config.get('SESSION_COOKIE_NAME', 'session')
+        return bool(request.cookies.get(nombre))
     except Exception:
         return True
 
