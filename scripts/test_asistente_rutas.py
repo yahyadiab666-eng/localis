@@ -108,6 +108,54 @@ def _probar_historial_del_cliente():
             )
 
 
+def _probar_chat_flujo():
+    print('\n=== Chat en streaming (SSE) ===')
+    import json
+
+    cliente = _app().test_client()
+    falso = {
+        'contenido': 'Puedes importar tu inventario con un archivo CSV o Excel.',
+        'tool_calls': [],
+        'tokens': 42,
+        'modelo': 'test',
+    }
+    with patch.dict(os.environ, {'LOCALIS_ASISTENTE_API_KEY': 'clave-test'}, clear=True):
+        with patch('backend.asistente.proveedor.responder', return_value=falso):
+            resp = cliente.post(
+                '/api/asistente/chat/flujo', json={'mensaje': '¿Como importo mi inventario?'}
+            )
+            _ok(resp.status_code == 200, 'responde 200')
+            _ok(
+                'text/event-stream' in (resp.headers.get('Content-Type') or ''),
+                'content-type event-stream',
+            )
+            cuerpo = resp.get_data(as_text=True)
+            _ok('event: delta' in cuerpo, 'emite eventos delta')
+            _ok('event: fin' in cuerpo, 'cierra con evento fin')
+
+            # Reensambla los fragmentos delta y comprueba que la respuesta llega.
+            unido = ''
+            for bloque in cuerpo.split('\n\n'):
+                payload = ''
+                for linea in bloque.split('\n'):
+                    if linea.startswith('data:'):
+                        payload += linea[5:].replace(' ', '', 1)
+                if not payload:
+                    continue
+                try:
+                    objeto = json.loads(payload)
+                except Exception:
+                    continue
+                if isinstance(objeto, dict) and 'texto' in objeto:
+                    unido += objeto['texto']
+            _ok('inventario' in unido, 'la respuesta completa se reensambla')
+
+    with patch.dict(os.environ, {'LOCALIS_ASISTENTE_API_KEY': 'clave-test'}, clear=True):
+        resp = cliente.post('/api/asistente/chat/flujo', json={'mensaje': '   '})
+        _ok(resp.status_code == 400, 'mensaje vacio -> 400 (JSON, no SSE)')
+        _ok('event:' not in resp.get_data(as_text=True), 'el error no se emite como SSE')
+
+
 def _probar_mensaje_vacio():
     print('\n=== Mensaje vacio ===')
     cliente = _app().test_client()
@@ -183,6 +231,7 @@ def _probar_proveedor_caido():
 def main() -> int:
     _probar_apagado()
     _probar_chat_ok()
+    _probar_chat_flujo()
     _probar_historial_del_cliente()
     _probar_mensaje_vacio()
     _probar_escalado()

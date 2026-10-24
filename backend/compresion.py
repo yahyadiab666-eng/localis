@@ -59,6 +59,10 @@ def comprimir_respuesta(response):
             return response
         if response.direct_passthrough:
             return response
+        # Eventos SSE (asistente): comprimirlos obligaria a materializar el flujo
+        # y perderia el envio incremental. Se dejan intactos.
+        if 'text/event-stream' in (response.content_type or '').lower():
+            return response
         if response.headers.get('Content-Encoding'):
             return response
         if 'gzip' not in (request.headers.get('Accept-Encoding') or '').lower():

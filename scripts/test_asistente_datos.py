@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parents[1]
@@ -20,6 +22,20 @@ def _ok(condicion, mensaje):
     print(f'  FALLO  {mensaje}')
     _ERRORES.append(mensaje)
     return False
+
+
+@contextmanager
+def _pagos(valor):
+    """Fija LOCALIS_PAGOS_HABILITADOS durante el bloque y restaura al salir."""
+    previo = os.environ.get('LOCALIS_PAGOS_HABILITADOS')
+    os.environ['LOCALIS_PAGOS_HABILITADOS'] = valor
+    try:
+        yield
+    finally:
+        if previo is None:
+            os.environ.pop('LOCALIS_PAGOS_HABILITADOS', None)
+        else:
+            os.environ['LOCALIS_PAGOS_HABILITADOS'] = previo
 
 
 def _probar_keywords():
@@ -100,13 +116,8 @@ def _probar_venta():
 
     _ok('COMPRADOR' in venta.MODO_VENTA_CLIENTE, 'modo venta de comprador')
     _ok('COMERCIANTE' in venta.MODO_VENTA_COMERCIANTE, 'modo venta de comerciante')
-    _ok(venta.modo_venta('comerciante') == venta.MODO_VENTA_COMERCIANTE, 'rol comerciante -> su modo')
     _ok(venta.modo_venta('cliente') == venta.MODO_VENTA_CLIENTE, 'rol cliente -> comprador')
     _ok(venta.modo_venta('invitado') == venta.MODO_VENTA_CLIENTE, 'invitado -> comprador')
-    _ok(
-        venta.modo_venta('invitado', 'cuanto cuesta el plan Pro') == venta.MODO_VENTA_COMERCIANTE,
-        'invitado que pregunta por planes -> comerciante',
-    )
     _ok(
         venta.modo_venta('invitado', 'que es localis') == venta.MODO_VENTA_CLIENTE,
         'invitado sin tema de negocio -> comprador',
@@ -119,6 +130,28 @@ def _probar_venta():
     _ok(not venta.es_tema_comercial('Mi importacion fallo'), 'soporte -> NO venta')
     _ok(not venta.es_tema_comercial('vendo plantas'), 'planta -> NO venta (limite de palabra)')
     _ok(venta.es_tema_comercial(None) is False, 'None -> False')
+
+    # Planes ACTIVOS: el comerciante recibe el modo con planes/precios.
+    with _pagos('1'):
+        _ok(
+            venta.modo_venta('comerciante') == venta.MODO_VENTA_COMERCIANTE,
+            'planes activos: comerciante -> su modo',
+        )
+        _ok(
+            venta.modo_venta('invitado', 'cuanto cuesta el plan Pro') == venta.MODO_VENTA_COMERCIANTE,
+            'planes activos: pregunta por planes -> comerciante',
+        )
+    # FASE GRATUITA (planes ocultos): el comerciante NO recibe planes.
+    with _pagos('0'):
+        _ok(
+            venta.modo_venta('comerciante') == venta.MODO_VENTA_COMERCIANTE_GRATIS,
+            'fase gratuita: comerciante -> modo sin planes',
+        )
+        _ok(
+            'gratis' in venta.MODO_VENTA_COMERCIANTE_GRATIS.lower()
+            and '10 USD' not in venta.MODO_VENTA_COMERCIANTE_GRATIS,
+            'fase gratuita: destaca que es gratis (sin precios de plan)',
+        )
 
 
 def _probar_reintento_pagos():
@@ -140,6 +173,47 @@ def _probar_pagos():
     _ok(pagos.proponer(1, 'hola') is None, 'sin claves de pago no propone')
     _ok(pagos.reverificar(None, None)[0] is False, 'sin sesion no ejecuta')
     _ok(pagos.reverificar(1, None)[0] is False, 'sin comercio no ejecuta')
+
+
+def _probar_reactivacion_pagos():
+    print('\n=== Reactivacion de pagos (concepto y guardas) ===')
+    from backend.asistente import pagos
+
+    _ok(
+        pagos._concepto_de({'concepto': 'plan:pro'}) == {'tipo': 'plan', 'plan_tipo': 'pro'},
+        'interpreta concepto de plan',
+    )
+    _ok(
+        pagos._concepto_de({'concepto': 'boost:7:prod:12'})
+        == {'tipo': 'boost', 'dias': 7, 'producto_id': 12},
+        'interpreta concepto de destacado',
+    )
+    _ok(pagos._concepto_de({'concepto': 'basura'}) is None, 'concepto raro -> None')
+    _ok(pagos._concepto_de(None) is None, 'sin concepto -> None')
+
+    # Ante un error de BD, ``_ya_aplicado`` es conservador (True) para no duplicar
+    # activaciones. Se fuerza el fallo de conexion para no depender del entorno.
+    from unittest.mock import patch as _patch
+
+    with _patch('backend.db.get_db_connection', side_effect=RuntimeError('sin BD')):
+        _ok(
+            pagos._ya_aplicado(1, '123456') is True,
+            'ante error de BD asume ya aplicado (conservador)',
+        )
+
+    # Guardas que no tocan la BD.
+    _ok(
+        pagos._activar_concepto(1, {'tipo': 'plan', 'plan_tipo': 'gratis'})[0] is False,
+        'no reactiva un plan gratis',
+    )
+    _ok(
+        pagos._activar_concepto(1, {'tipo': 'desconocido'})[0] is False,
+        'concepto desconocido no reactiva',
+    )
+    _ok(
+        pagos._reverificar_revision(1, {'referencia_pago': ''})[0] is False,
+        'sin referencia no reverifica',
+    )
 
 
 def _probar_acciones():
@@ -240,15 +314,51 @@ def _probar_saltos_seguros():
     _ok('35 USD' in HECHOS_CLAVE and 'ilimitados' in HECHOS_CLAVE, 'hechos clave con Business')
 
 
+def _probar_hechos_clave_dinamicos():
+    print('\n=== Hechos clave derivados de su fuente real ===')
+    from backend.asistente.datos_vivos import (
+        _resumen_destacados,
+        _resumen_puntos,
+        hechos_clave,
+    )
+
+    destacados = _resumen_destacados()
+    _ok(
+        '2 USD' in destacados and '3 USD' in destacados and '4 USD' in destacados,
+        'destacados reales por duracion',
+    )
+    _ok('puntos' in _resumen_puntos().lower(), 'programa de puntos real')
+
+    # Planes ACTIVOS: los datos clave incluyen planes y precios.
+    with _pagos('1'):
+        texto = hechos_clave()
+        _ok(isinstance(texto, str) and bool(texto), 'planes activos: hechos_clave devuelve texto')
+        _ok('10 USD' in texto and '15 USD' in texto, 'planes activos: precios de planes reales')
+        _ok('35 USD' in texto and 'ilimitados' in texto, 'planes activos: incluye el plan Business')
+
+    # FASE GRATUITA (planes ocultos): SIN planes, con destacados.
+    with _pagos('0'):
+        texto_gratis = hechos_clave()
+        _ok(isinstance(texto_gratis, str) and bool(texto_gratis), 'fase gratuita: hechos_clave devuelve texto')
+        _ok(
+            '10 USD' not in texto_gratis and '15 USD' not in texto_gratis
+            and '35 USD' not in texto_gratis,
+            'fase gratuita: SIN precios de planes en los datos clave',
+        )
+        _ok('2 USD' in texto_gratis and '4 USD' in texto_gratis, 'fase gratuita: mantiene destacados')
+
+
 def main() -> int:
     _probar_keywords()
     _probar_menciones()
     _probar_formato()
     _probar_tiendas()
     _probar_saltos_seguros()
+    _probar_hechos_clave_dinamicos()
     _probar_presupuesto()
     _probar_observacion()
     _probar_pagos()
+    _probar_reactivacion_pagos()
     _probar_venta()
     _probar_reintento_pagos()
     _probar_acciones()

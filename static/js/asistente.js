@@ -26,6 +26,7 @@
   if (!burbuja || !panel || !lista || !form || !entrada) return;
 
   var CHAT_URL = raiz.getAttribute('data-chat-url') || '/api/asistente/chat';
+  var FLUJO_URL = raiz.getAttribute('data-flujo-url') || '/api/asistente/chat/flujo';
   var ESCALAR_URL = raiz.getAttribute('data-escalar-url') || '/api/asistente/escalar';
   var FEEDBACK_URL = raiz.getAttribute('data-feedback-url') || '/api/asistente/feedback';
   var CSRF = raiz.getAttribute('data-csrf') || '';
@@ -73,6 +74,9 @@
 
   var historial = [];
   var esperando = false;
+  // Cierra el turno actual (guarda historial, feedback y accion). Se reasigna en
+  // cada envio para conocer el texto exacto que se envio.
+  var cerrarTurno = function () {};
 
   function iconos() {
     if (window.lucide && typeof window.lucide.createIcons === 'function') {
@@ -106,10 +110,35 @@
     burbuja.focus();
   }
 
+  function escaparHtml(texto) {
+    return String(texto == null ? '' : texto).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  // El modelo responde con markdown ligero (**negrita**, `codigo`, vinetas y
+  // numeraciones). Se escapa TODO primero y despues se aplica un subconjunto
+  // seguro, de modo que nunca se inyecta HTML: solo se embellece el texto.
+  function formatearAsistente(texto) {
+    var t = escaparHtml(texto);
+    t = t.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+    t = t.replace(/(^|[\s(])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+    t = t.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+    // Normaliza vinetas "- " / "* " al inicio de linea a un punto medio.
+    t = t.replace(/(^|\n)\s*[-*]\s+/g, '$1\u2022 ');
+    // Conserva listas numeradas ("1. ") y convierte los saltos de linea.
+    t = t.replace(/\n/g, '<br>');
+    return t;
+  }
+
   function agregarMensaje(texto, tipo) {
     var div = document.createElement('div');
     div.className = 'asistente-msg asistente-msg--' + (tipo || 'asistente');
-    div.textContent = texto;
+    if (tipo === 'asistente') {
+      div.innerHTML = formatearAsistente(texto);
+    } else {
+      div.textContent = texto;
+    }
     lista.appendChild(div);
     lista.scrollTop = lista.scrollHeight;
     return div;
@@ -147,41 +176,143 @@
     mostrarEscribiendo();
     if (feedback) feedback.hidden = true;
 
-    peticionAsistente(CHAT_URL, {
-      method: 'POST',
-      headers: cabeceras(),
-      body: JSON.stringify({ mensaje: texto, historial: historial.slice(-MAX_HISTORIAL) })
-    })
-      .then(function (resp) {
-        return resp.json().catch(function () {
-          return { ok: false, mensaje: 'No pude leer la respuesta del asistente.' };
+    var cuerpo = JSON.stringify({
+      mensaje: texto,
+      historial: historial.slice(-MAX_HISTORIAL)
+    });
+
+    cerrarTurno = function (mensajeAsistente, accion) {
+      historial.push({ autor: 'usuario', contenido: texto });
+      if (mensajeAsistente) {
+        historial.push({ autor: 'asistente', contenido: mensajeAsistente });
+      }
+      historial = historial.slice(-MAX_HISTORIAL);
+      if (feedback && mensajeAsistente) feedback.hidden = false;
+      if (accion) mostrarAccion(accion);
+      bloquear(false);
+      entrada.focus();
+    };
+
+    // Camino clasico (JSON). Se usa si el navegador no soporta leer el cuerpo en
+    // streaming o si el endpoint de flujo no esta disponible.
+    var porJson = function () {
+      peticionAsistente(CHAT_URL, { method: 'POST', headers: cabeceras(), body: cuerpo })
+        .then(function (resp) {
+          return resp.json().catch(function () {
+            return { ok: false, mensaje: 'No pude leer la respuesta del asistente.' };
+          });
+        })
+        .then(function (datos) {
+          quitarEscribiendo();
+          datos = datos || {};
+          if (datos.ok && datos.respuesta) {
+            agregarMensaje(datos.respuesta, 'asistente');
+            cerrarTurno(datos.respuesta, datos.accion);
+          } else {
+            agregarMensaje(
+              datos.mensaje || 'No pude responder ahora mismo. Intenta de nuevo.',
+              'error'
+            );
+            cerrarTurno('');
+          }
+        })
+        .catch(function () {
+          quitarEscribiendo();
+          agregarMensaje('Error de conexion con el asistente. Revisa tu internet.', 'error');
+          cerrarTurno('');
         });
-      })
-      .then(function (datos) {
-        quitarEscribiendo();
-        datos = datos || {};
-        if (datos.ok && datos.respuesta) {
-          agregarMensaje(datos.respuesta, 'asistente');
-          historial.push({ autor: 'usuario', contenido: texto });
-          historial.push({ autor: 'asistente', contenido: datos.respuesta });
-          historial = historial.slice(-MAX_HISTORIAL);
-          if (feedback) feedback.hidden = false;
-          if (datos.accion) mostrarAccion(datos.accion);
-        } else {
-          agregarMensaje(
-            datos.mensaje || 'No pude responder ahora mismo. Intenta de nuevo.',
-            'error'
-          );
+    };
+
+    if (typeof window.ReadableStream === 'undefined' || !window.fetch) {
+      porJson();
+      return;
+    }
+
+    // Camino en streaming (Server-Sent Events). Nunca reenvia la peticion: si algo
+    // falla tras empezar, se muestra el aviso en vez de repetir (evita duplicar).
+    peticionAsistente(FLUJO_URL, { method: 'POST', headers: cabeceras(), body: cuerpo })
+      .then(function (resp) {
+        var tipo = resp.headers.get('Content-Type') || '';
+        if (!resp.ok || tipo.indexOf('text/event-stream') === -1 || !resp.body) {
+          // Error del servidor (JSON) o sin soporte: mostrar y cerrar el turno.
+          return resp
+            .json()
+            .catch(function () { return {}; })
+            .then(function (datos) {
+              quitarEscribiendo();
+              agregarMensaje(
+                (datos && datos.mensaje) ||
+                  'No pude responder ahora mismo. Intenta de nuevo.',
+                'error'
+              );
+              cerrarTurno('');
+            });
         }
+        return leerFlujo(resp, cerrarTurno);
       })
       .catch(function () {
         quitarEscribiendo();
         agregarMensaje('Error de conexion con el asistente. Revisa tu internet.', 'error');
-      })
-      .then(function () {
-        bloquear(false);
-        entrada.focus();
+        cerrarTurno('');
       });
+  }
+
+  function leerFlujo(resp, cerrarTurno) {
+    var lector = resp.body.getReader();
+    var decodificador = new TextDecoder('utf-8');
+    var pendiente = '';
+    var acumulado = '';
+    var burbuja = null;
+    var accion = null;
+
+    function aplicar(evento, data) {
+      var obj = {};
+      try { obj = JSON.parse(data); } catch (e) { obj = {}; }
+      if (evento === 'accion') {
+        accion = obj;
+      } else if (evento === 'delta') {
+        acumulado += obj.texto || '';
+        if (!burbuja) {
+          quitarEscribiendo();
+          burbuja = agregarMensaje('', 'asistente');
+        }
+        burbuja.innerHTML = formatearAsistente(acumulado);
+        lista.scrollTop = lista.scrollHeight;
+      }
+    }
+
+    function consumir() {
+      var bloques = pendiente.split('\n\n');
+      pendiente = bloques.pop();
+      bloques.forEach(function (bloque) {
+        var evento = 'message';
+        var data = '';
+        bloque.split('\n').forEach(function (linea) {
+          if (linea.indexOf('event:') === 0) evento = linea.slice(6).trim();
+          else if (linea.indexOf('data:') === 0) data += linea.slice(5).replace(/^ /, '');
+        });
+        aplicar(evento, data);
+      });
+    }
+
+    function paso() {
+      return lector.read().then(function (lectura) {
+        if (lectura.done) {
+          consumir();
+          quitarEscribiendo();
+          if (!burbuja) {
+            agregarMensaje('No pude responder ahora mismo. Intenta de nuevo.', 'error');
+          }
+          cerrarTurno(acumulado, accion);
+          return;
+        }
+        pendiente += decodificador.decode(lectura.value, { stream: true });
+        consumir();
+        return paso();
+      });
+    }
+
+    return paso();
   }
 
   function autoAlto() {

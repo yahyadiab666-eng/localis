@@ -18,9 +18,43 @@ import re
 import threading
 import unicodedata
 
-from config import RUTA_RAIZ
+from config import RUTA_RAIZ, fase_gratuita
 
 _log = logging.getLogger('localis.asistente.conocimiento')
+
+# Marcadores de bloques que SOLO se indexan cuando los planes estan activos.
+# En la fase gratuita (planes ocultos) su contenido se excluye del RAG, pero el
+# texto NO se borra de los documentos: se reactiva con LOCALIS_PAGOS_HABILITADOS=1.
+_MARCADORES_PLANES = (
+    ('<!-- PLANES_INICIO -->', '<!-- PLANES_FIN -->'),
+    ('<!-- RESTAURAR_PAGOS_INICIO -->', '<!-- RESTAURAR_PAGOS_FIN -->'),
+)
+# Marcadores de bloques que SOLO se indexan en la fase gratuita (p. ej. la
+# revalidacion centrada en DESTACADOS, sin planes). Con los planes activos se
+# excluyen, pero el texto permanece en el documento.
+_MARCADORES_GRATIS = (
+    ('<!-- GRATIS_INICIO -->', '<!-- GRATIS_FIN -->'),
+)
+
+
+def _quitar_bloques_planes(texto):
+    """Maneja los bloques segun la fase. Nunca lanza.
+
+    - Bloques ``PLANES_INICIO/FIN``: en fase gratuita se elimina el bloque
+      completo; con planes activos solo se quitan los comentarios-marcador.
+    - Bloques ``GRATIS_INICIO/FIN``: al reves (solo se indexan en fase gratuita).
+    """
+    try:
+        gratis = fase_gratuita()
+        for inicio, fin in _MARCADORES_PLANES:
+            patron = re.escape(inicio) + r'([\s\S]*?)' + re.escape(fin)
+            texto = re.sub(patron, ' ' if gratis else r'\1', texto)
+        for inicio, fin in _MARCADORES_GRATIS:
+            patron = re.escape(inicio) + r'([\s\S]*?)' + re.escape(fin)
+            texto = re.sub(patron, r'\1' if gratis else ' ', texto)
+        return texto
+    except Exception:
+        return texto
 
 # Orden = prioridad de indexado. Los que no existan se omiten sin fallar.
 # Solo contenido orientado al USUARIO: los documentos de desarrollo
@@ -30,6 +64,8 @@ _ARCHIVOS = (
     'docs/asistente-app.md',
     'docs/asistente-faq.md',
     'templates/como_funciona.html',
+    'templates/privacidad.html',
+    'templates/eliminar_cuenta.html',
 )
 
 _LARGO_CHUNK = 1200
@@ -69,9 +105,15 @@ def _texto_de_archivo(ruta):
             crudo = archivo.read()
     except Exception:
         return ''
+    # Antes de limpiar etiquetas: quita los bloques de planes en fase gratuita.
+    crudo = _quitar_bloques_planes(crudo)
     if ruta.endswith('.html'):
         crudo = re.sub(r'(?is)<(script|style).*?</\1>', ' ', crudo)
         crudo = re.sub(r'(?s)<[^>]+>', ' ', crudo)
+        # Quita la sintaxis Jinja ({{ ... }} y {% ... %}) para que no ensucie el
+        # texto recuperable de las plantillas.
+        crudo = re.sub(r'(?s)\{\{.*?\}\}', ' ', crudo)
+        crudo = re.sub(r'(?s)\{%.*?%\}', ' ', crudo)
         crudo = crudo.replace('&nbsp;', ' ').replace('&amp;', '&')
     return crudo
 

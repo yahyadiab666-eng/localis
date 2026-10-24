@@ -37,19 +37,35 @@ def url_banner_por_defecto():
     return DEFAULT_BANNER_URL
 
 # ==========================================
-# INTERRUPTOR DE PAGOS (MODELO TRADICIONAL RESTAURADO)
+# INTERRUPTOR DE PAGOS (FASE DE LANZAMIENTO GRATUITA)
 # ==========================================
-# El modelo base de suscripciones/planes está restaurado y ACTIVO por defecto:
-# período de gracia (30 días de prueba) y límites de productos por volumen.
-# Mientras ``LOCALIS_PAGOS_HABILITADOS`` esté en 1 (por defecto), el panel del
-# comerciante muestra Planes/Suscripción/Pago Móvil y se aplican los límites.
-# La lógica de pagos permanece físicamente intacta; si en el futuro se quiere
-# volver a congelar (fase gratuita), basta con definir
-# ``LOCALIS_PAGOS_HABILITADOS=0`` en el entorno (sin tocar el código).
+# Modelo de lanzamiento TEMPORAL: Localis es 100% gratuito y sin límites; el
+# ÚNICO pago opcional es el destaque ("Destacados") de un producto.
+#
+# Por defecto ``LOCALIS_PAGOS_HABILITADOS`` vale 0 (fase gratuita): el panel del
+# comerciante NO muestra Planes/Suscripción/Pago Móvil, no se aplican límites de
+# productos y no se expiran tiendas por suscripción. Los Destacados (pago
+# opcional: pago móvil, Binance o canje de puntos) siguen visibles y funcionando.
+#
+# Toda la lógica de planes/suscripciones permanece FÍSICAMENTE INTACTA: para
+# retomar el modelo en su momento basta con definir ``LOCALIS_PAGOS_HABILITADOS=1``
+# en el entorno (sin tocar el código).
 def pagos_habilitados():
-    """True si el sistema de pagos está activo. Por defecto: ACTIVO."""
-    valor = str(os.environ.get('LOCALIS_PAGOS_HABILITADOS', '1')).strip().lower()
+    """True si el sistema de planes/suscripciones está activo.
+
+    Por defecto: DESACTIVADO (fase de lanzamiento gratuita).
+    """
+    valor = str(os.environ.get('LOCALIS_PAGOS_HABILITADOS', '0')).strip().lower()
     return valor in ('1', 'true', 'yes', 'on')
+
+
+def fase_gratuita():
+    """True en la fase de lanzamiento: planes ocultos, solo Destacados.
+
+    Es el inverso de :func:`pagos_habilitados` y centraliza el interruptor para
+    que la web y el asistente decidan con un único criterio.
+    """
+    return not pagos_habilitados()
 
 
 MENSAJE_PAGOS_CONGELADOS = (

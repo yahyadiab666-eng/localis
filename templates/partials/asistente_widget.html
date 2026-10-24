@@ -10,6 +10,7 @@
      class="asistente-widget"
      data-rol="{{ _asistente_rol }}"
      data-chat-url="{{ url_for('asistente.chat') }}"
+     data-flujo-url="{{ url_for('asistente.chat_flujo') }}"
      data-escalar-url="{{ url_for('asistente.escalar') }}"
      data-feedback-url="{{ url_for('asistente.feedback') }}"
      data-accion-confirmar-url="{{ url_for('asistente.accion_confirmar') }}"
@@ -66,9 +67,9 @@
         <span>Escribir a soporte (WhatsApp)</span>
       </button>
       <p class="asistente-aviso">
-        Respuestas con IA, solo informativas. Para revisar un pago, editar tu
-        comercio o resolver un caso concreto, escribe a soporte: la atencion
-        puede tardar un poco.
+        Respuestas con IA, solo informativas. Puede revalidar un pago en Binance y
+        activar lo que pagaste. Para editar tu comercio o un caso concreto, escribe
+        a soporte: la atencion puede tardar un poco.
       </p>
     </footer>
   </section>

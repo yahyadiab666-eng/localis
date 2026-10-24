@@ -11,11 +11,12 @@ Es aditivo: si ``LOCALIS_ASISTENTE`` esta apagado o falta la clave, responde
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from urllib.parse import quote
 
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, Response, jsonify, request, session
 
 from backend.asistente import acciones, observacion, orquestador, pagos
 from backend.rate_limit import limite
@@ -166,6 +167,78 @@ def chat():
     else:
         codigo = 503
     return jsonify(resultado), codigo
+
+
+# Fragmentos del flujo SSE (presentacion): tamano y pausa entre envios.
+_FLUJO_CHUNK = 24
+_FLUJO_PAUSA = 0.012
+
+
+def _sse(evento, datos):
+    """Serializa un evento Server-Sent Events (una linea ``data:`` por evento)."""
+    return f'event: {evento}\ndata: {json.dumps(datos, ensure_ascii=False)}\n\n'
+
+
+@bp.route('/chat/flujo', methods=['POST'])
+@limite('15 per minute;80 per hour')
+def chat_flujo():
+    """Como ``/chat`` pero emite la respuesta en fragmentos (``text/event-stream``).
+
+    Seguridad: la respuesta se genera y se **redacta completa** antes de emitirla
+    (la redaccion de secretos no se debilita: el flujo solo mejora la sensacion de
+    escritura). Los errores se devuelven como JSON con el codigo habitual.
+    """
+    if not asistente_habilitado():
+        return (
+            jsonify(
+                {
+                    'ok': False,
+                    'estado': 'apagado',
+                    'mensaje': 'El asistente no esta disponible en este momento.',
+                }
+            ),
+            503,
+        )
+
+    datos = request.get_json(silent=True) or {}
+    mensaje = datos.get('mensaje') or request.form.get('mensaje')
+    historial = datos.get('historial')
+
+    inicio = time.time()
+    resultado = orquestador.responder(_contexto_usuario(), mensaje, historial)
+    observacion.registrar_mensaje(bool(resultado.get('ok')), (time.time() - inicio) * 1000)
+
+    propuesta = resultado.get('accion')
+    if isinstance(propuesta, dict) and propuesta.get('id'):
+        try:
+            _guardar_accion(propuesta)
+        except Exception as error:
+            logger.warning('no se pudo guardar la accion pendiente: %s', error)
+            resultado.pop('accion', None)
+
+    if not resultado.get('ok'):
+        motivo = resultado.get('estado')
+        if motivo in ('ocupado', 'presupuesto'):
+            codigo = 429
+        elif motivo == 'vacio':
+            codigo = 400
+        else:
+            codigo = 503
+        return jsonify(resultado), codigo
+
+    respuesta = resultado.get('respuesta') or ''
+    accion = resultado.get('accion')
+
+    def _flujo():
+        if accion:
+            yield _sse('accion', accion)
+        for indice in range(0, len(respuesta), _FLUJO_CHUNK):
+            yield _sse('delta', {'texto': respuesta[indice:indice + _FLUJO_CHUNK]})
+            time.sleep(_FLUJO_PAUSA)
+        yield _sse('fin', {'ok': True})
+
+    cabeceras = {'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no'}
+    return Response(_flujo(), mimetype='text/event-stream', headers=cabeceras)
 
 
 @bp.route('/feedback', methods=['POST'])
