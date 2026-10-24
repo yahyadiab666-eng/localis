@@ -23,6 +23,8 @@ from backend.correo import _base_url, correo_configurado, enviar_correo
 logger = logging.getLogger('localis.recordatorios')
 
 _LOG = '[Localis Recordatorios]'
+# Candado de BD para que solo una instancia del web envíe correos a la vez.
+_LOCK_ENVIOS = 774412001
 _HORA_UTC = 13          # a partir de las 09:00 VET
 _DIAS_AVISO = 5         # avisa cuando faltan ≤ 5 días
 _DIAS_TOLERANCIA = 30   # no insiste a vencidos hace más de 30 días
@@ -140,6 +142,26 @@ def _marcar_enviado(comercio_id):
         return False
 
 
+def _tomar_candado_envios(cursor):
+    """Candado de BD para que solo una instancia envíe correos a la vez.
+
+    Con 2+ instancias del web, dos procesos pueden listar la misma tienda y
+    mandar el recordatorio dos veces (o el reporte diario). Un candado por
+    transacción lo evita; se libera solo al hacer commit/rollback.
+
+    Si el motor no soporta el candado (p. ej. SQLite en pruebas) devuelve True
+    para conservar el comportamiento anterior.
+    """
+    try:
+        cursor.execute('SELECT pg_try_advisory_xact_lock(?)', (_LOCK_ENVIOS,))
+        fila = cursor.fetchone()
+        if isinstance(fila, dict):
+            return bool(list(fila.values())[0])
+        return bool(fila[0]) if fila else True
+    except Exception:
+        return True
+
+
 def enviar_recordatorios_vencimiento():
     """Envía los recordatorios correspondientes. Devuelve cuántos envió. Nunca lanza."""
     try:
@@ -147,6 +169,23 @@ def enviar_recordatorios_vencimiento():
             return 0
         if _ahora_utc().hour < _HORA_UTC:
             return 0
+        from backend.db import get_db_connection
+
+        # El candado se mantiene mientras dura el envío: otra instancia que
+        # llegue a la vez sale por aquí sin enviar nada.
+        with get_db_connection() as conexion:
+            curso = conexion.cursor()
+            if not _tomar_candado_envios(curso):
+                return 0
+            return _enviar_recordatorios()
+    except Exception as error:
+        logger.error(f'{_LOG} fallo inesperado: {type(error).__name__}: {error}')
+        return 0
+
+
+def _enviar_recordatorios():
+    """Recorre las tiendas por vencer y envía (ya con el candado tomado)."""
+    try:
         enviados = 0
         for tienda in _tiendas_por_vencer():
             destino = (tienda.get('owner_email') or '').strip()
