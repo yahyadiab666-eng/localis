@@ -43,11 +43,12 @@ al origen.
 2. **Cloudflare delante** de Render: registro `A/CNAME` hacia `localis.onrender.com`
    (proxy activado, naranja) y el dominio propio añadido en Render
    (`/v1/services/{id}/custom-domains`) para que emita el TLS.
-3. **Cachear el HTML anónimo** (esto es **código**, no infra): hoy el HTML lleva
-   un **token CSRF por sesión**, así que cachearlo en el borde serviría el token
-   de un usuario a otro. Hay que sacar el token del HTML anónimo (por cookie
-   aparte o endpoint propio) y enviar `Cache-Control: public, s-maxage=60` en las
-   páginas públicas (portada, tienda, categorías).
+3. ~~**Cachear el HTML anónimo**~~ **HECHO** (falta el CDN): el token CSRF ya no
+   se incrusta en las páginas públicas — el widget lo pide aparte en
+   `GET /api/asistente/csrf` — y una visita anónima **no escribe la sesión**
+   (sin `Set-Cookie` ni `Vary: Cookie`), así que el HTML es idéntico para todos
+   los anónimos y cacheable. Falta añadir `Cache-Control: public, s-maxage=60` a
+   las vistas públicas cuando exista Cloudflare.
 4. **Reglas de caché** en Cloudflare: HTML anónimo 60 s en el borde, estáticos
    1 año (`/static/*` ya manda `max-age=604800`).
 
