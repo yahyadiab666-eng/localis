@@ -35,6 +35,34 @@
   var ACCION_OK_URL = raiz.getAttribute('data-accion-confirmar-url') || '/api/asistente/accion/confirmar';
   var ACCION_NO_URL = raiz.getAttribute('data-accion-cancelar-url') || '/api/asistente/accion/cancelar';
   var MAX_HISTORIAL = 8;
+  var CSRF_URL = raiz.getAttribute('data-csrf-url') || '/api/asistente/csrf';
+  // El token ya no viaja en el HTML (la pagina publica debe poder cachearse en
+  // un CDN): se pide una sola vez y se reutiliza. Se pide en paralelo al
+  // arranque del widget, asi que al primer clic suele estar ya listo.
+  var csrfListo = CSRF ? Promise.resolve(CSRF) : cargarCsrf();
+
+  function cargarCsrf() {
+    return fetch(CSRF_URL, {
+      credentials: 'same-origin',
+      headers: { 'Accept': 'application/json' }
+    })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { CSRF = (d && d.csrf_token) || ''; return CSRF; })
+      .catch(function () { return ''; });
+  }
+
+  function peticionAsistente(url, opciones) {
+    return csrfListo.then(function (token) {
+      var base = Object.assign({}, opciones || {});
+      base.credentials = 'same-origin';
+      base.headers = Object.assign({}, (opciones && opciones.headers) || {}, {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'X-CSRFToken': token || CSRF || ''
+      });
+      return fetch(url, base);
+    });
+  }
 
   var SALUDO = {
     cliente: 'Hola, soy el asistente de Localis. Te doy informacion y guia. ¿Que necesitas?',
@@ -119,7 +147,7 @@
     mostrarEscribiendo();
     if (feedback) feedback.hidden = true;
 
-    fetch(CHAT_URL, {
+    peticionAsistente(CHAT_URL, {
       method: 'POST',
       headers: cabeceras(),
       body: JSON.stringify({ mensaje: texto, historial: historial.slice(-MAX_HISTORIAL) })
@@ -195,7 +223,7 @@
 
     confirmar.addEventListener('click', function () {
       bloquearBotones();
-      fetch(ACCION_OK_URL, {
+      peticionAsistente(ACCION_OK_URL, {
         method: 'POST',
         headers: cabeceras(),
         body: JSON.stringify({ id: accion.id })
@@ -218,7 +246,7 @@
 
     cancelar.addEventListener('click', function () {
       bloquearBotones();
-      fetch(ACCION_NO_URL, {
+      peticionAsistente(ACCION_NO_URL, {
         method: 'POST',
         headers: cabeceras(),
         body: JSON.stringify({ id: accion.id })
@@ -230,7 +258,7 @@
 
   function enviarFeedback(util) {
     if (feedback) feedback.hidden = true;
-    fetch(FEEDBACK_URL, {
+    peticionAsistente(FEEDBACK_URL, {
       method: 'POST',
       headers: cabeceras(),
       body: JSON.stringify({ util: util })
@@ -243,7 +271,7 @@
       historial: historial.slice(-MAX_HISTORIAL)
     };
     var continuar = function () {
-      fetch(ESCALAR_URL, {
+      peticionAsistente(ESCALAR_URL, {
         method: 'POST',
         headers: cabeceras(),
         body: JSON.stringify(cuerpo)

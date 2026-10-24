@@ -391,34 +391,68 @@ def _injectar_estado_pagos():
     }
 
 
+def _peticion_con_sesion():
+    """True si la petición trae cookie de sesión.
+
+    El objeto ``session`` no se debe tocar en peticiones sin cookie: una simple
+    lectura marca ``Vary: Cookie`` y una escritura añade ``Set-Cookie``, y con
+    eso ningún CDN puede cachear las páginas públicas anónimas (medido: la
+    portada y la tienda devolvían ``Set-Cookie: localis_session=...``).
+    """
+    try:
+        return bool(request.cookies.get(app.session_cookie_name))
+    except Exception:
+        return True
+
+
 @app.context_processor
 def _injectar_usuario_publico():
     """Datos del usuario en sesión disponibles en TODAS las plantillas (Fase 3).
 
     Se exponen solo claves de sesión (sin consultar la BD) para que la barra
     pública pueda pintar el avatar y el menú sin tocar rutas ni lógica.
+
+    Sin cookie de sesión **no se toca ``session``**: así la página anónima es
+    idéntica para todos y un CDN puede cachearla.
     """
+    vacio = {
+        'usuario_id': None,
+        'username': '',
+        'correo': '',
+        'foto_url': '',
+        'es_admin': False,
+        'es_comerciante': False,
+        'logueado': False,
+        'rol_asistente': 'invitado',
+    }
+    if not _peticion_con_sesion():
+        return vacio
     try:
         usuario_id = session.get('usuario_id')
+        es_admin = bool(session.get('es_admin'))
+        es_comerciante = bool(session.get('es_comerciante')) or bool(
+            session.get('comercio_id')
+        )
         return {
             'usuario_id': usuario_id,
             'username': session.get('username') or '',
             'correo': session.get('correo') or '',
             'foto_url': session.get('foto_url') or '',
-            'es_admin': bool(session.get('es_admin')),
-            # Comerciante si la sesión lo marca o si ya tiene comercio vinculado.
-            'es_comerciante': bool(session.get('es_comerciante'))
-            or bool(session.get('comercio_id')),
+            'es_admin': es_admin,
+            'es_comerciante': es_comerciante,
+            'logueado': bool(usuario_id),
+            'rol_asistente': (
+                'admin'
+                if es_admin
+                else (
+                    'comerciante'
+                    if es_comerciante
+                    else ('cliente' if usuario_id else 'invitado')
+                )
+            ),
         }
     except Exception:
-        return {
-            'usuario_id': None,
-            'username': '',
-            'correo': '',
-            'foto_url': '',
-            'es_admin': False,
-            'es_comerciante': False,
-        }
+        return vacio
 
 
 @app.context_processor
@@ -674,6 +708,9 @@ def sincronizar_vencimientos_suscripcion():
                 name='localis-vencimientos',
                 daemon=True,
             ).start()
+
+        if not _peticion_con_sesion():
+            return
 
         if 'usuario_id' not in session:
             return

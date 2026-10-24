@@ -103,6 +103,25 @@ def estado():
     ), 200
 
 
+@bp.route('/csrf')
+@limite('30 per minute;300 per hour')
+def csrf_token_widget():
+    """Entrega el token CSRF al widget cuando lo necesita.
+
+    Antes el token viajaba dentro del HTML de **todas** las páginas públicas, lo
+    que obligaba a escribir la sesión en cada visita (``Set-Cookie`` +
+    ``Vary: Cookie``) e impedía que un CDN cacheara las páginas anónimas. Ahora
+    se pide una sola vez, la primera vez que se usa el asistente.
+
+    ``no-store``: es un dato por sesión, nunca se cachea.
+    """
+    from flask_wtf.csrf import generate_csrf
+
+    respuesta = jsonify({'ok': True, 'csrf_token': generate_csrf()})
+    respuesta.headers['Cache-Control'] = 'no-store'
+    return respuesta, 200
+
+
 @bp.route('/chat', methods=['POST'])
 @limite('15 per minute;80 per hour')
 def chat():
