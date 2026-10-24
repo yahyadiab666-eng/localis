@@ -91,6 +91,18 @@ def construir_reporte(dias=1):
     lineas.append(f'Período: últimos {dias} día(s) (días en UTC)')
     lineas.append('')
 
+    # Aviso de vencimiento del dominio propio: NIC.ve NO avisa ni renueva solo.
+    # Si vence, se caen la web y el APK (el TWA carga la web remota).
+    try:
+        from backend.dominio import aviso_vencimiento
+
+        aviso_dominio = aviso_vencimiento()
+        if aviso_dominio:
+            lineas.append(f'!! {aviso_dominio}')
+            lineas.append('')
+    except Exception:
+        pass
+
     if not datos.get('disponible'):
         lineas.append('⚠ Aún no hay datos de tráfico persistidos.')
         lineas.append('  (La tabla metricas_diarias estará vacía hasta que la app')

@@ -26,11 +26,17 @@ LOG_PREFIX = '[Localis Correo]'
 
 
 def _base_url():
-    return (
-        os.environ.get('LOCALIS_BASE_URL')
-        or os.environ.get('RENDER_EXTERNAL_URL')
-        or 'https://localis.onrender.com'
-    ).rstrip('/')
+    """URL pública para los enlaces de los correos (una sola fuente: ``config.SITIO_URL``)."""
+    try:
+        from config import SITIO_URL
+
+        return SITIO_URL
+    except Exception:
+        return (
+            os.environ.get('LOCALIS_BASE_URL')
+            or os.environ.get('RENDER_EXTERNAL_URL')
+            or 'https://localis.onrender.com'
+        ).rstrip('/')
 
 
 def correo_configurado():
