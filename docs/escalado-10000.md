@@ -55,6 +55,7 @@ al origen.
 **Efecto:** si 9 de cada 10 visitas anónimas las sirve el borde, el origen sólo
 recibe el 10 %: 500-1.000 req/s de entrada → **50-100 req/s en el origen**.
 **Coste:** dominio (~$10-15/año) + Cloudflare gratis.
+**Paso a paso exacto (con las reglas de caché listas):** `docs/cloudflare.md`.
 
 > Mientras no haya dominio, el CDN de Render ya cubre los estáticos; sin dominio
 > no se puede activar Cloudflare.
