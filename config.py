@@ -256,9 +256,22 @@ ASISTENTE_MODELO = os.environ.get(
 ASISTENTE_MODELO_RESPALDO = os.environ.get(
     'LOCALIS_ASISTENTE_MODELO_RESPALDO', 'mistralai/mistral-nemo'
 ).strip()
-ASISTENTE_SITIO = os.environ.get(
-    'LOCALIS_ASISTENTE_SITIO', 'https://localis.onrender.com'
-)
+def _url_sitio():
+    """URL pública del sitio: **un solo lugar** para cambiar de dominio.
+
+    Orden: ``LOCALIS_SITIO_URL`` > ``LOCALIS_BASE_URL`` > ``RENDER_EXTERNAL_URL``
+    > el dominio actual de Render. Al añadir el dominio propio solo hay que
+    definir ``LOCALIS_SITIO_URL`` en el panel (sin tocar código).
+    """
+    for clave in ('LOCALIS_SITIO_URL', 'LOCALIS_BASE_URL', 'RENDER_EXTERNAL_URL'):
+        valor = (os.environ.get(clave) or '').strip()
+        if valor:
+            return valor.rstrip('/')
+    return 'https://localis.onrender.com'
+
+
+SITIO_URL = _url_sitio()
+ASISTENTE_SITIO = os.environ.get('LOCALIS_ASISTENTE_SITIO') or SITIO_URL
 ASISTENTE_TITULO = os.environ.get('LOCALIS_ASISTENTE_TITULO', 'Localis')
 ASISTENTE_TIMEOUT_SEG = float(os.environ.get('LOCALIS_ASISTENTE_TIMEOUT_SEG', '20'))
 ASISTENTE_MAX_TOKENS = int(os.environ.get('LOCALIS_ASISTENTE_MAX_TOKENS', '250'))
