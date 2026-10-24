@@ -4,7 +4,7 @@
    El contexto de la conversación vive en el navegador; el servidor no guarda nada.
    Incluir este partial justo antes de </body>. #}
 {% if asistente_habilitado %}
-{% set _asistente_rol = 'admin' if session.get('es_admin') else ('comerciante' if (session.get('es_comerciante') or session.get('comercio_id')) else ('cliente' if session.get('usuario_id') else 'invitado')) %}
+{% set _asistente_rol = rol_asistente or 'invitado' %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/asistente.css') }}?v={{ asistente_asset_v }}">
 <div id="asistente-widget"
      class="asistente-widget"
@@ -14,9 +14,9 @@
      data-feedback-url="{{ url_for('asistente.feedback') }}"
      data-accion-confirmar-url="{{ url_for('asistente.accion_confirmar') }}"
      data-accion-cancelar-url="{{ url_for('asistente.accion_cancelar') }}"
-     data-csrf="{{ csrf_token() }}"
+     data-csrf-url="{{ url_for('asistente.csrf_token_widget') }}"
      data-whatsapp="{{ asistente_whatsapp_url }}"
-     data-logueado="{{ '1' if session.get('usuario_id') else '0' }}">
+     data-logueado="{{ '1' if logueado else '0' }}">
 
   <button type="button" id="asistente-burbuja" class="asistente-burbuja"
           aria-label="Abrir asistente de Localis" title="Asistente de Localis"
