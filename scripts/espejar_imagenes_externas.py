@@ -133,7 +133,12 @@ def _actualizar_urls(conexion, espejadas, no_imagenes):
     paralelo, y aquí sí queremos sustituir esa reasignación.
 
     Además marca ``imagen_estado='real'``: sin eso, el backfill vuelve a resolver
-    el producto desde el catálogo maestro (URL externa) y pisa el espejo.
+    el producto desde el catálogo maestro (URL externa) y pisa el espejo
+    (medido: sobrevivían 55 de 76 espejos).
+
+    Para las que no eran imagen, se borra también la entrada de las cachés
+    globales (``catalogo_maestro_imagenes`` / ``imagenes_automaticas``): si no,
+    el backfill vuelve a asignar la misma URL de HTML en el siguiente ciclo.
     """
     aplicadas = 0
     cursor = conexion.cursor()
@@ -149,7 +154,7 @@ def _actualizar_urls(conexion, espejadas, no_imagenes):
             (url, pid, MARCA_STORAGE),
         )
         aplicadas += int(cursor.rowcount or 0)
-    for pid in no_imagenes:
+    for pid, url_mala in no_imagenes:
         cursor.execute(
             """
             UPDATE productos
@@ -160,6 +165,13 @@ def _actualizar_urls(conexion, espejadas, no_imagenes):
             """,
             (pid, MARCA_STORAGE),
         )
+        for tabla in ('catalogo_maestro_imagenes', 'imagenes_automaticas'):
+            try:
+                cursor.execute(
+                    f'DELETE FROM {tabla} WHERE url_imagen = ?', (url_mala,)
+                )
+            except Exception:
+                pass
     conexion.commit()
     return aplicadas
 
@@ -196,7 +208,9 @@ def main() -> int:
 
     espejadas = [(pid, url) for pid, url, aviso, _t, _original in resultados if url]
     no_imagenes = [
-        pid for pid, _u, aviso, _t, _original in resultados if aviso == NO_ES_IMAGEN
+        (pid, original)
+        for pid, _u, aviso, _t, original in resultados
+        if aviso == NO_ES_IMAGEN
     ]
 
     aplicadas = 0
@@ -219,7 +233,7 @@ def main() -> int:
         print('  (hosts que bloquean al datacenter; en el navegador siguen viendose)')
 
     if no_imagenes:
-        print(f'\nDevueltas al pipeline (no eran imagenes): {no_imagenes}')
+        print(f'\nDevueltas al pipeline (no eran imagenes): {[p for p, _u in no_imagenes]}')
     return 0
 
 
