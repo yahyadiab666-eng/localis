@@ -26,6 +26,8 @@ logger = logging.getLogger('localis.reporte_trafico')
 
 _LOG = '[Localis Reporte Trafico]'
 _CLAVE_MARCA = 'reporte_trafico_ultimo_envio'
+# Candado de BD para que solo una instancia del web envíe el reporte diario.
+_LOCK_ENVIO = 774412002
 
 # Planificador diario dentro de la app (sin cron externo). El hilo se arranca de
 # forma perezosa desde el request (post-fork): un hilo creado al importar el
@@ -289,6 +291,27 @@ def _hora_objetivo_utc():
         return 13
 
 
+def _tomar_candado_envio(cursor):
+    """Candado de BD: con 2+ instancias solo una envía el reporte diario.
+
+    Tras un deploy, las instancias arrancan a la vez y las dos podían decidir
+    "enviar" en el mismo ciclo (la marca se guarda *después* del envío) y mandar
+    el correo dos veces. El candado por transacción lo serializa y se libera solo
+    al hacer commit/rollback.
+
+    Si el motor no soporta el candado (p. ej. SQLite en pruebas), devuelve True
+    para conservar el comportamiento anterior.
+    """
+    try:
+        cursor.execute('SELECT pg_try_advisory_xact_lock(?)', (_LOCK_ENVIO,))
+        fila = cursor.fetchone()
+        if isinstance(fila, dict):
+            return bool(list(fila.values())[0])
+        return bool(fila[0]) if fila else True
+    except Exception:
+        return True
+
+
 def quizas_enviar_reporte_diario():
     """Envía el reporte si ya pasó la hora diaria y no se envió hoy. Nunca lanza.
 
@@ -303,7 +326,17 @@ def quizas_enviar_reporte_diario():
             return
         if _leer_marca() == ahora.date().isoformat():
             return
-        enviar_reporte_admin(forzar=False)
+        from backend.db import get_db_connection
+
+        with get_db_connection() as conexion:
+            curso = conexion.cursor()
+            if not _tomar_candado_envio(curso):
+                return
+            # Re-chequeo ya con el candado: otra instancia pudo enviarlo entre
+            # la comprobación de arriba y la toma del candado.
+            if _leer_marca() == ahora.date().isoformat():
+                return
+            enviar_reporte_admin(forzar=False)
     except Exception as error:
         logger.error(f'{_LOG} envío diario falló: {type(error).__name__}: {error}')
 
