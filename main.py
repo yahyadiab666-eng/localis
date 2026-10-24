@@ -392,7 +392,8 @@ def _html_publico_cacheado(clave, render, *, permitir=True):
     ttl = _ttl_html_publico()
     if not permitir or ttl <= 0 or _peticion_con_sesion():
         respuesta = make_response(render())
-        respuesta.headers['X-Localis-HTML'] = 'off'
+        motivo = 'permiso' if not permitir else ('ttl' if ttl <= 0 else 'cookie')
+        respuesta.headers['X-Localis-HTML'] = f'off:{motivo}(ttl={ttl})'
         return respuesta
 
     marca = {'cargado': False}
