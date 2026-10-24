@@ -175,6 +175,17 @@ def url_imagen_local_valida(valor):
     return url_upload_local_valida(valor)
 
 
+def url_imagen_local_utilizable(valor):
+    """Como ``url_imagen_local_valida`` pero exige que el archivo exista.
+
+    Evita servir (y cachear) un 404 cuando un deploy borró la foto de
+    ``static/uploads`` o cuando la petición cayó en otra instancia.
+    """
+    from backend.uploads_locales import url_upload_local_utilizable
+
+    return url_upload_local_utilizable(valor)
+
+
 # Alias histórico
 url_imagen_supabase_valida = url_imagen_subida_storage_valida
 

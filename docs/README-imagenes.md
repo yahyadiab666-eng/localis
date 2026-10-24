@@ -2,6 +2,29 @@
 
 Hay **dos caminos**, sin mezclarlos.
 
+## 0. Reglas de almacenamiento y caché (medido en producción)
+
+**La base de datos no guarda bytes.** `productos.imagen_url` es `TEXT`: solo URLs.
+Los archivos viven en **Supabase Storage** (bucket `imagenes`) y, como último
+recurso, en `static/uploads/` (disco **efímero** de Render).
+
+| Regla | Por qué (medido) |
+|---|---|
+| En producción Storage es la única fuente de verdad | `static/uploads/` se borra en cada deploy y no se comparte entre instancias → **3 fotos quedaron en 404**. Se controla con `LOCALIS_SUBIDA_LOCAL_PRIMERO` (0 en producción, 1 en desarrollo). |
+| Al subir, siempre `cache-control` largo | Sin la cabecera Supabase devuelve `Cache-Control: no-cache` y el navegador re-pide cada foto en cada visita. Con `cache-control: max-age=31536000` devuelve `public, max-age=31536000`. Valor en `LOCALIS_STORAGE_CACHE_CONTROL`. |
+| Inspeccionar con `GET`, nunca con `HEAD` | A un `HEAD` Supabase responde `private, no-cache` y `cf-cache-status: DYNAMIC` **aunque** el `GET` del mismo objeto devuelva `max-age` largo y `HIT`. El `HEAD` engaña: no sirve para auditar caché. |
+| El CDN ya cachea en el borde | Los `GET` de las fotos devuelven `x-smart-cdn: true` y `cf-cache-status: HIT`. |
+| Miniaturas por el endpoint de transformación | `/storage/v1/render/image/public/<bucket>/<ruta>?width=200&height=180&resize=cover&quality=70` → **3,5 KB** frente a ~15 KB del original. |
+| Nunca cachear un 404 | El hook de `/static/` solo marca respuestas 200; antes un 404 quedaba cacheado 7 días en el navegador y en el CDN. |
+
+Mantenimiento (dry-run por defecto; `--apply` para aplicar):
+
+```
+python scripts/reparar_cache_imagenes.py     # reaplica cache-control (inspecciona con GET)
+python scripts/reparar_imagenes_locales.py   # recupera a Storage o marca pendiente lo de static/uploads
+python scripts/reparar_imagenes_rotas.py     # URLs de Storage que responden 400/404
+```
+
 ## 1. Foto manual (prioridad, costo API = 0)
 
 Si el comerciante sube un archivo desde el dispositivo, se comprime y se guarda en el bucket Supabase `imagenes` (`productos/…`) o, si Storage no está disponible, en `/static/uploads/productos/`.
@@ -32,6 +55,8 @@ LOCALIS_IMG_BLUR_MIN=35
 LOCALIS_IMG_LADO_FINAL=800
 LOCALIS_IMG_MAX_CONCURRENT=1
 LOCALIS_REMBG_MODEL=u2net
+LOCALIS_STORAGE_CACHE_CONTROL=max-age=31536000
+LOCALIS_SUBIDA_LOCAL_PRIMERO=0   # 0 en producción: Storage es la única fuente de verdad
 ```
 
 La primera ejecución descarga el modelo de `rembg` (~176 MB) al disco del worker.
