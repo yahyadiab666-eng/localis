@@ -1563,14 +1563,53 @@ def _contexto_tienda(comercio, palabra_clave, origen, solo_publicos=True, origen
     }
 
 
+def _comercio_publico_cacheado(slug=None, comercio_id=None):
+    """Resuelve el comercio (por slug o id) con caché corta.
+
+    Medido: esta consulta se hacía en **cada** visita a la tienda y quedaba
+    **fuera** de la caché de HTML. Con 150-300 concurrentes saturaba el pool de
+    20 conexiones por instancia: la petición esperaba (p95 de 19-28 s) y el proxy
+    cortaba con **502**. Cachearla unos segundos la deja en memoria, igual que el
+    resto de la página, y un acierto ya no toca la base de datos.
+    """
+    ttl = 20
+    try:
+        ttl = max(0, int(os.environ.get('LOCALIS_CACHE_TIENDA_SEG', '20') or '20'))
+    except (TypeError, ValueError):
+        ttl = 20
+    if ttl <= 0:
+        return (
+            obtener_comercio_por_slug(slug)
+            if slug
+            else obtener_comercio_por_id(comercio_id, solo_visible=True)
+        )
+    try:
+        from backend.runtime_cache import get_or_load
+
+        if slug:
+            return get_or_load(
+                f'comercio_slug:{str(slug)[:80].lower()}',
+                lambda: obtener_comercio_por_slug(slug),
+                ttl,
+            )
+        return get_or_load(
+            f'comercio_id:{int(comercio_id)}',
+            lambda: obtener_comercio_por_id(comercio_id, solo_visible=True),
+            ttl,
+        )
+    except Exception:
+        return (
+            obtener_comercio_por_slug(slug)
+            if slug
+            else obtener_comercio_por_id(comercio_id, solo_visible=True)
+        )
+
+
 @app.route('/tienda/<int:comercio_id>')
 @app.route('/tienda/<string:slug>')
 @limite('600 per minute')
 def tienda_publica(comercio_id=None, slug=None):
-    if comercio_id is None and slug:
-        comercio = obtener_comercio_por_slug(slug)
-    else:
-        comercio = obtener_comercio_por_id(comercio_id, solo_visible=True)
+    comercio = _comercio_publico_cacheado(slug=slug, comercio_id=comercio_id)
     if not comercio:
         flash('Tienda no encontrada o no disponible.', 'error')
         return redirect(url_for('index'))
