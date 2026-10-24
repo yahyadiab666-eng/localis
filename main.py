@@ -368,6 +368,41 @@ def _ttl_html_publico():
         return 0
 
 
+def _empaquetar_html(html):
+    """Deja el HTML y su versión comprimida listos para servir.
+
+    Comprimir 220-730 KB en **cada** petición cuesta CPU en el camino de
+    respuesta, y medido resulta ser el coste dominante de la tienda (728 KB →
+    ~15-30 ms). Aquí se comprime **una sola vez** por entrada de caché.
+    """
+    paquete = {'html': html or '', 'gz': b''}
+    try:
+        import gzip as _gzip
+
+        datos = paquete['html'].encode('utf-8')
+        if len(datos) >= 500:
+            comprimido = _gzip.compress(datos, 6)
+            if len(comprimido) < len(datos):
+                paquete['gz'] = comprimido
+    except Exception:
+        paquete['gz'] = b''
+    return paquete
+
+
+def _respuesta_html(paquete):
+    """Respuesta desde la caché: sirve los bytes ya comprimidos si el cliente los acepta."""
+    try:
+        acepta = (request.headers.get('Accept-Encoding') or '').lower()
+        if paquete.get('gz') and 'gzip' in acepta:
+            respuesta = Response(paquete['gz'], mimetype='text/html')
+            respuesta.headers['Content-Encoding'] = 'gzip'
+            respuesta.headers['Vary'] = 'Accept-Encoding'
+            return respuesta
+    except Exception:
+        pass
+    return Response(paquete.get('html') or '', mimetype='text/html')
+
+
 def _html_publico_cacheado(clave, render, *, permitir=True):
     """Sirve una página pública cacheando el **HTML ya renderizado**.
 
@@ -405,8 +440,8 @@ def _html_publico_cacheado(clave, render, *, permitir=True):
     try:
         from backend.runtime_cache import get_or_load
 
-        html = get_or_load(clave, _render_contando, ttl)
-        respuesta = Response(str(html or ''), mimetype='text/html')
+        paquete = get_or_load(clave, lambda: _empaquetar_html(_render_contando()), ttl)
+        respuesta = _respuesta_html(paquete)
         respuesta.headers['X-Localis-HTML'] = 'miss' if marca['cargado'] else 'hit'
         return respuesta
     except Exception:
