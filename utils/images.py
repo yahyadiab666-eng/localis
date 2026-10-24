@@ -316,6 +316,35 @@ def url_imagen_producto(producto=None, imagen_url=None, codigo_barras=None):
 url_imagen_producto_segura = url_imagen_producto
 
 
+def _thumb_desde_storage(url):
+    """URL de la miniatura (``thumb_<archivo>``) si ``url`` es de nuestro Storage."""
+    texto = str(url or '')
+    marca = '/storage/v1/object/public/'
+    if marca not in texto:
+        return ''
+    base, _, resto = texto.partition(marca)
+    carpeta, _, nombre = resto.rpartition('/')
+    if not carpeta or not nombre or nombre.startswith('thumb_'):
+        return ''
+    return f'{base}{marca}{carpeta}/thumb_{nombre}'
+
+
+@imagen_fail_safe(placeholder=PLACEHOLDER_PRODUCTO)
+def url_imagen_producto_miniatura(producto=None, imagen_url=None, codigo_barras=None):
+    """Miniatura para las tarjetas del catálogo; si no aplica, la imagen completa.
+
+    La tarjeta muestra la foto en una franja de 180 px (``object-fit: contain``),
+    así que una miniatura de 400 px se ve igual y pesa varias veces menos. Si el
+    objeto no está en nuestro Storage —o todavía no tiene miniatura— devuelve la
+    imagen completa; la plantilla añade ``data-respaldo`` por si la miniatura
+    aún no existe.
+    """
+    completa = url_imagen_producto(
+        producto=producto, imagen_url=imagen_url, codigo_barras=codigo_barras
+    )
+    return _thumb_desde_storage(completa) or completa
+
+
 @imagen_fail_safe(placeholder=DEFAULT_BANNER_URL, permitir_estatico=True, permitir_hero=True)
 def url_banner_segura(valor, default=None):
     if valor:

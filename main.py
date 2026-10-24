@@ -124,6 +124,7 @@ from backend.error_tracking import iniciar_error_tracking
 from utils.images import (
     PLACEHOLDER_PRODUCTO,
     url_hero_inicio,
+    url_imagen_producto_miniatura,
     url_imagen_producto_segura,
     url_storage_o_vacio,
 )
@@ -329,6 +330,18 @@ def _filtro_url_imagen_producto(producto):
             'Filtro url_imagen_producto fallo', exc_info=True
         )
         traceback.print_exc()
+        return PLACEHOLDER_PRODUCTO
+
+
+@app.template_filter('url_imagen_producto_miniatura')
+def _filtro_url_imagen_producto_miniatura(producto):
+    """Miniatura de tarjeta (400 px) con respaldo a la imagen completa."""
+    try:
+        return url_imagen_producto_miniatura(producto) or PLACEHOLDER_PRODUCTO
+    except Exception:
+        logging.getLogger('localis.images').error(
+            'Filtro url_imagen_producto_miniatura fallo', exc_info=True
+        )
         return PLACEHOLDER_PRODUCTO
 
 

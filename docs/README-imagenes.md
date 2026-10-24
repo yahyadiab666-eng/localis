@@ -14,7 +14,9 @@ recurso, en `static/uploads/` (disco **efímero** de Render).
 | Al subir, siempre `cache-control` largo | Sin la cabecera Supabase devuelve `Cache-Control: no-cache` y el navegador re-pide cada foto en cada visita. Con `cache-control: max-age=31536000` devuelve `public, max-age=31536000`. Valor en `LOCALIS_STORAGE_CACHE_CONTROL`. |
 | Inspeccionar con `GET`, nunca con `HEAD` | A un `HEAD` Supabase responde `private, no-cache` y `cf-cache-status: DYNAMIC` **aunque** el `GET` del mismo objeto devuelva `max-age` largo y `HIT`. El `HEAD` engaña: no sirve para auditar caché. |
 | El CDN ya cachea en el borde | Los `GET` de las fotos devuelven `x-smart-cdn: true` y `cf-cache-status: HIT`. |
-| Miniaturas por el endpoint de transformación | `/storage/v1/render/image/public/<bucket>/<ruta>?width=200&height=180&resize=cover&quality=70` → **3,5 KB** frente a ~15 KB del original. |
+| Miniatura propia por foto (`thumb_<nombre>`) | La tarjeta muestra la foto en 180 px de alto con `object-fit: contain`, así que una miniatura de **400 px** se ve igual y baja **32 KB → 8 KB (3,9x)**. Se genera al subir (`crear_miniatura_producto`) y para lo ya subido con `generar_miniaturas.py`. La plantilla lleva `data-respaldo` a la foto completa por si la miniatura aún no existe. Tamaño en `LOCALIS_THUMB_LADO`. |
+| No usar el endpoint de transformación de Supabase | Funciona (`/storage/v1/render/image/public/…`, medido 400x180 WebP = 6,6 KB), pero Supabase cobra **$5/mes por cada 1000 imágenes origen** por encima de 100. Generar la miniatura nosotros cuesta **$0**. |
+| Las fotos de terceros se espejan a Storage | 83 productos enlazaban imágenes externas (105-310 KB, cabeceras irregulares y sin copia propia). `espejar_imagenes_externas.py` las reencoda a WebP 800 px y las sube; al pasar por el camino normal **también reciben miniatura**. |
 | Nunca cachear un 404 | El hook de `/static/` solo marca respuestas 200; antes un 404 quedaba cacheado 7 días en el navegador y en el CDN. |
 
 Mantenimiento (dry-run por defecto; `--apply` para aplicar):
@@ -23,6 +25,8 @@ Mantenimiento (dry-run por defecto; `--apply` para aplicar):
 python scripts/reparar_cache_imagenes.py     # reaplica cache-control (inspecciona con GET)
 python scripts/reparar_imagenes_locales.py   # recupera a Storage o marca pendiente lo de static/uploads
 python scripts/reparar_imagenes_rotas.py     # URLs de Storage que responden 400/404
+python scripts/generar_miniaturas.py         # miniatura de catalogo (400 px) de lo ya subido
+python scripts/espejar_imagenes_externas.py  # trae a Storage las fotos alojadas en terceros
 ```
 
 ## 1. Foto manual (prioridad, costo API = 0)
