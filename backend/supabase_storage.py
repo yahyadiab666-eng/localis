@@ -321,7 +321,38 @@ def _persistir_en_supabase(
         raise upload_error from error
 
     _registrar_exito_supabase(ruta_storage, url)
+    _subir_miniatura_producto(carpeta, filename, data, diferido=diferido)
     return url
+
+
+def _subir_miniatura_producto(carpeta, filename, data, *, diferido=False):
+    """Sube la miniatura de catálogo (``thumb_<nombre>``).
+
+    Mejor esfuerzo: si falla, la foto principal ya está subida y la vista usa la
+    imagen completa, así que nunca se rompe la subida por la miniatura.
+    """
+    if str(carpeta or '').strip().lower() != 'productos':
+        return
+    try:
+        from backend.images import crear_miniatura_producto, nombre_miniatura
+
+        miniatura = crear_miniatura_producto(data)
+        if not miniatura:
+            return
+        nombre = nombre_miniatura(filename)
+        if not nombre:
+            return
+        _subir_bytes_al_bucket(
+            None,
+            f'productos/{nombre}',
+            miniatura,
+            'image/webp',
+            diferido=diferido,
+        )
+    except Exception as error:
+        print(
+            f'{LOG_PREFIX} miniatura omitida ({type(error).__name__}: {error})'
+        )
 
 
 def _guardar_respaldo_local(data, filename, carpeta):

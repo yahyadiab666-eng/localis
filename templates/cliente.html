@@ -216,14 +216,16 @@
                  onclick="abrirModalProducto({{ producto.id }})"
                  onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();abrirModalProducto({{ producto.id }});}">
               {% set img_producto = producto|url_imagen_producto %}
+              {% set img_mini = producto|url_imagen_producto_miniatura %}
               {% set es_placeholder = (not img_producto) or (img_producto == placeholder_producto) %}
               <div class="localis-img-producto-wrap{% if es_placeholder %} localis-img-producto-wrap--vacio{% endif %}">
-                <img src="{{ img_producto or placeholder_producto }}"
+                <img src="{{ img_mini or img_producto or placeholder_producto }}"
+                     {% if img_mini and img_mini != img_producto %}data-respaldo="{{ img_producto }}"{% endif %}
                      alt="{{ producto.nombre }}" width="400" height="180"
                      loading="lazy" decoding="async" referrerpolicy="no-referrer"
                      data-producto-id="{{ producto.id }}"
                      class="localis-img-producto"
-                     onerror="window.rescatarImagenProducto(this)">
+                     onerror="if(this.dataset.respaldo){this.src=this.dataset.respaldo;delete this.dataset.respaldo;}else{window.rescatarImagenProducto(this)}">
               </div>
               <div class="p-3 flex-grow flex flex-col justify-between">
                 <div>
