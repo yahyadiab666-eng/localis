@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import re
 
+from config import fase_gratuita
+
 MODO_VENTA_CLIENTE = (
     'MODO VENTA (habla pensando en el COMPRADOR): responde de forma atractiva '
     'destacando que Localis es **gratis**, que ves **precios en dolares y '
@@ -33,13 +35,27 @@ MODO_VENTA_COMERCIANTE = (
     'MODO VENTA (habla pensando en el COMERCIANTE): responde de forma atractiva '
     'destacando que puede **publicar su catalogo**, que **los clientes lo '
     'contactan directo por WhatsApp**, el **enlace publico y el codigo QR**, el '
-    '**plan Gratis/Prueba (30 dias, hasta 50 productos)** y los planes para crecer '
-    '(Basico 10 USD/100, Pro 15 USD/300, Business 35 USD/ilimitados), ademas de '
-    '**premios** y **destacados**. Cierra con una invitacion a la accion (por '
-    'ejemplo: "crea tu tienda con tu cuenta de Google y publica tu catalogo" o '
-    '"sube al plan Pro para publicar hasta 300 productos"). NO mezcles beneficios '
-    'de comprador (como comparar precios). Tono cercano, positivo y vendedor; 3 a 5 '
-    'frases; cifras exactas.'
+    '**plan Gratis/Prueba** y los planes para crecer, ademas de **premios** y '
+    '**destacados**. Da los precios y limites EXACTOS usando los "DATOS CLAVE DE '
+    'LOCALIS" del contexto; nunca los inventes ni los redondees. Cierra con una '
+    'invitacion a la accion (por ejemplo: "crea tu tienda con tu cuenta de Google '
+    'y publica tu catalogo" o "sube de plan para publicar mas productos"). NO '
+    'mezcles beneficios de comprador (como comparar precios). Tono cercano, '
+    'positivo y vendedor; 3 a 5 frases; cifras exactas.'
+)
+
+# Variante de la fase gratuita (planes ocultos). El texto con planes de
+# ``MODO_VENTA_COMERCIANTE`` NO se borra: se reactiva con LOCALIS_PAGOS_HABILITADOS=1.
+MODO_VENTA_COMERCIANTE_GRATIS = (
+    'MODO VENTA (habla pensando en el COMERCIANTE): responde de forma atractiva '
+    'destacando que puede **publicar su catalogo gratis y sin limites**, que '
+    '**los clientes lo contactan directo por WhatsApp**, el **enlace publico y '
+    'el codigo QR**, y **premios y destacados** (el unico pago opcional, para '
+    'aparecer primero). NUNCA menciones planes de pago, suscripciones ni '
+    'precios mensuales: Localis es gratis. Cierra con una invitacion a la '
+    'accion (por ejemplo: "crea tu tienda con tu cuenta de Google y publica tu '
+    'catalogo"). NO mezcles beneficios de comprador (como comparar precios). '
+    'Tono cercano, positivo y vendedor; 3 a 5 frases.'
 )
 
 _MODO_POR_ROL = {
@@ -75,11 +91,14 @@ def modo_venta(rol, texto=None):
     (planes, vender, crear tienda...). Si no, comprador.
     """
     rol_norm = str(rol or 'invitado').lower()
-    if rol_norm in ('comerciante', 'admin'):
-        return MODO_VENTA_COMERCIANTE
-    if texto and _RE_COMERCIANTE.search(str(texto)):
-        return MODO_VENTA_COMERCIANTE
-    return MODO_VENTA_CLIENTE
+    es_comerciante = rol_norm in ('comerciante', 'admin') or bool(
+        texto and _RE_COMERCIANTE.search(str(texto))
+    )
+    if not es_comerciante:
+        return MODO_VENTA_CLIENTE
+    if fase_gratuita():
+        return MODO_VENTA_COMERCIANTE_GRATIS
+    return MODO_VENTA_COMERCIANTE
 
 
 # Intenciones comerciales (conservador: solo Localis como servicio).

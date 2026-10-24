@@ -26,6 +26,7 @@ la entrega se acuerdan con cada comercio.
   panel del comerciante. Cada comercio tiene un enlace público propio (su
   "tienda") que se puede compartir.
 
+<!-- PLANES_INICIO -->
 ## Planes y precios (concreto)
 
 En resumen: el plan Gratis/Prueba cuesta 0 USD (hasta 50 productos), el Básico
@@ -79,6 +80,7 @@ Después del pago:
 
 - Subir de plan (upgrade) se aplica de inmediato.
 - Bajar de plan (downgrade) se programa para el final del periodo actual.
+<!-- PLANES_FIN -->
 
 ## Destacados (boosts)
 
@@ -160,11 +162,36 @@ Se puede destacar un producto o la tienda para aparecer con prioridad:
 - Un producto sin precio o sin categoría: el precio es opcional al importar y se
   puede completar a mano; la categoría se puede ajustar.
 
+<!-- PLANES_INICIO -->
+## Revisar o revalidar un pago
+
+- Con sesión de comerciante, el asistente puede **volver a consultar Binance**
+  para un pago que quedó pendiente (por ejemplo, un fallo temporal de la API o un
+  comprobante que se leyó mal). El comerciante lo confirma desde el propio chat.
+- Si Binance confirma la orden y el pago **aún no estaba aplicado**, el asistente
+  **reactiva lo que se pagó**: el plan o el destacado del producto. Si ya estaba
+  aplicado, solo cierra la revisión (no duplica).
+- El asistente nunca cambia montos ni activa nada que Binance no confirme.
+<!-- PLANES_FIN -->
+
+<!-- GRATIS_INICIO -->
+## Revisar o revalidar el pago de un destacado
+
+- El asistente puede **volver a consultar Binance** para un pago de **destacado**
+  (Pago Móvil o Binance Pay) que quedó pendiente o sin verificar.
+- Si Binance confirma la orden y el destacado **aún no estaba aplicado**, el
+  asistente **reactiva el destacado** del producto. Si ya estaba aplicado, solo
+  cierra la revisión (no duplica nada).
+- El asistente nunca cambia montos ni activa nada que Binance no confirme.
+- En esta fase **no hay planes de suscripción**: Localis es gratis y el único
+  pago opcional es el destacado.
+<!-- GRATIS_FIN -->
+
 ## Cuándo pasar con una persona
 
-- El asistente es solo informativo: no puede revisar pagos, editar comercios ni
-  consultar datos de una cuenta.
-- Si la consulta necesita que alguien actúe (verificar un pago concreto, corregir
-  datos de un comercio, resolver un error de importación específico o un problema
-  de acceso), hay que escribir al soporte por WhatsApp desde el botón del
-  asistente. La atención puede tardar un poco.
+- El asistente da información y guía, y puede revalidar un pago concreto (ver
+  arriba). No edita el comercio, no cambia precios ni resuelve un fraude.
+- Si la consulta necesita que alguien actúe (corregir datos de un comercio,
+  resolver un error de importación específico, un pago rechazado o un problema de
+  acceso), hay que escribir al soporte por WhatsApp desde el botón del asistente.
+  La atención puede tardar un poco.

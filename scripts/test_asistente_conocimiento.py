@@ -38,6 +38,10 @@ def _probar_indice():
         'docs/asistente-faq.md' in fuentes,
         'la FAQ curada esta indexada',
     )
+    _ok(
+        'templates/privacidad.html' in fuentes,
+        'la pagina de privacidad esta indexada (preguntas de datos/cuenta)',
+    )
 
 
 def _probar_busqueda():

@@ -6,16 +6,20 @@ Lo que hace:
   - ``estado_pago(comercio_id)``: estado legible del ultimo pago y de las
     revisiones pendientes. **Solo lectura.**
   - ``hay_revision_reverificable(comercio_id)``: True si hay una revision
-    pendiente de un pago Binance que quedo **"sin verificar"** (fallo transitorio
-    de la API, no un rechazo).
+    pendiente de un pago con un concepto identificable (plan o destacado).
   - ``reverificar(usuario_id, comercio_id)``: vuelve a consultar Binance (solo
     lectura) para ESA revision del PROPIO comercio. Si ahora SI se confirma,
-    cierra el ticket en la bandeja (``estado='resuelto'``). Si no, informa.
+    **reactiva lo que se pago** (plan o destacado) cuando aun no estaba aplicado
+    (por ejemplo, un pago rechazado por un error del OCR) y cierra el ticket. Si
+    ya estaba aplicado, solo cierra el ticket. Si no se confirma, informa.
 
 Lo que NO hace (a proposito):
-  - NO cambia el plan, el vencimiento, el monto ni ninguna tabla de dinero.
-  - NO toca revisiones de otros comercios ni pagos rechazados (``no_encontrado``).
-  - NO inventa: si no hay revision elegible, no propone ni ejecuta nada.
+  - NO inventa dinero: la reactivacion reutiliza la logica ya probada del panel
+    admin (``confirmar_pago_suscripcion`` / ``destacar_producto_por_dias``) y
+    solo se ejecuta si Binance **confirma** la orden y el pago no estaba aplicado.
+  - NO toca revisiones de otros comercios ni pagos sin concepto reconocible.
+  - NO duplica: si el pago ya estaba aplicado (``solicitudes_pago`` aprobado) no
+    vuelve a activar nada; solo cierra la revision.
 
 Reutiliza la logica ya probada del proyecto (``verificar_orden_binance``,
 ``calcular_monto_pago_plan``) y queda bajo el interruptor
@@ -31,6 +35,7 @@ import threading
 import time
 
 from backend.asistente.acciones import habilitado
+from config import fase_gratuita
 
 _log = logging.getLogger('localis.asistente.pagos')
 
@@ -122,6 +127,21 @@ def _paso_sugerido(verificacion):
     )
 
 
+def _etiqueta_concepto(plan_tipo):
+    """Descripcion legible del concepto de un pago, segun la fase. Nunca lanza.
+
+    En la fase gratuita no se nombran planes: un ``boost_<n>d`` se describe como
+    destacado y cualquier otro concepto como "concepto del pago".
+    """
+    valor = str(plan_tipo or '').strip().lower()
+    if valor.startswith('boost_'):
+        dias = valor[len('boost_'):].rstrip('d') or '?'
+        return f'destacado {dias} dias'
+    if fase_gratuita():
+        return 'concepto del pago'
+    return f'plan {valor or "?"}'
+
+
 def estado_pago(comercio_id):
     """Texto legible con el estado del pago del comercio. Solo lectura."""
     if not comercio_id:
@@ -134,7 +154,8 @@ def estado_pago(comercio_id):
         verificacion = ultimo.get('verificacion')
         lineas.append(
             f'Ultimo pago reportado: referencia {ultimo.get("referencia") or "?"} '
-            f'(plan {ultimo.get("plan_tipo") or "?"}, estado {ultimo.get("estado") or "?"})'
+            f'({_etiqueta_concepto(ultimo.get("plan_tipo"))}, '
+            f'estado {ultimo.get("estado") or "?"})'
         )
         if verificacion:
             lineas.append(f'Verificacion: {verificacion}')
@@ -151,15 +172,35 @@ def estado_pago(comercio_id):
     return '\n'.join(lineas)
 
 
+def _concepto_de(revision):
+    """Concepto (plan/destacado) de una revision, o ``None``. Nunca lanza."""
+    try:
+        from backend.verificacion_pagos import parsear_concepto
+
+        return parsear_concepto((revision or {}).get('concepto'))
+    except Exception as error:
+        _log.warning('no se pudo interpretar el concepto: %s', error)
+        return None
+
+
 def _revision_reverificable(comercio_id):
-    """Primera revision pendiente de un pago Binance 'sin verificar'."""
+    """Primera revision pendiente cuyo pago se puede identificar (plan/destacado).
+
+    Cubre tanto los pagos "sin verificar" (fallo transitorio) como los rechazados
+    por un error de OCR: si Binance confirma la orden, el asistente reactiva lo
+    pagado (ver ``_reverificar_revision``).
+    """
     for revision in _revisiones_pendientes(comercio_id):
         referencia = str(revision.get('referencia_pago') or '').strip()
         if not referencia:
             continue
-        verificacion = _verificacion_de(comercio_id, referencia)
-        if verificacion == VERIF_BINANCE_NO_VERIFICADO:
-            return revision
+        concepto = _concepto_de(revision)
+        if not concepto:
+            continue
+        # Fase gratuita: los planes estan ocultos; solo se revalida el destacado.
+        if fase_gratuita() and concepto.get('tipo') == 'plan':
+            continue
+        return revision
     return None
 
 
@@ -169,6 +210,82 @@ def hay_revision_reverificable(comercio_id):
     except Exception as error:
         _log.warning('no se pudo comprobar la revision: %s', error)
         return False
+
+
+def _ya_aplicado(comercio_id, referencia):
+    """True si el pago de esa referencia ya se aplico (solicitud aprobada).
+
+    Ante un error de BD devuelve True (conservador): preferimos NO reactivar a
+    arriesgar una doble activacion.
+    """
+    try:
+        from backend.db import get_db_connection
+
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                "SELECT 1 FROM solicitudes_pago WHERE comercio_id = ? AND "
+                "referencia = ? AND estado = 'aprobado' LIMIT 1",
+                (int(comercio_id), str(referencia)),
+            )
+            return cursor.fetchone() is not None
+    except Exception as error:
+        _log.warning('no se pudo comprobar si el pago estaba aplicado: %s', error)
+        return True
+
+
+def _activar_concepto(comercio_id, concepto, actor_id=None):
+    """Activa el plan o el destacado que se pago. Devuelve ``(ok, mensaje)``.
+
+    Reutiliza la logica ya probada del panel admin y nunca lanza.
+    """
+    tipo = (concepto or {}).get('tipo')
+    try:
+        if tipo == 'plan':
+            plan_tipo = str(concepto.get('plan_tipo') or '').strip().lower()
+            if not plan_tipo or plan_tipo == 'gratis':
+                return False, 'El plan del pago no es activable automaticamente.'
+            from backend.admin import confirmar_pago_suscripcion
+
+            ok, mensaje = confirmar_pago_suscripcion(comercio_id, plan_tipo, 1)
+            return bool(ok), mensaje
+        if tipo == 'boost':
+            dias = concepto.get('dias')
+            producto_id = concepto.get('producto_id')
+            if not dias or not producto_id:
+                return False, 'El destacado del pago no es activable automaticamente.'
+            from backend.admin import destacar_producto_por_dias
+
+            ok, mensaje, _ = destacar_producto_por_dias(actor_id, producto_id, dias)
+            return bool(ok), mensaje
+    except Exception as error:
+        _log.warning('no se pudo reactivar lo pagado: %s', error)
+        return False, 'No pude reactivar lo pagado automaticamente.'
+    return False, 'No se sabe que se pagaba.'
+
+
+def _cerrar_revision(comercio_id, revision):
+    """Marca la revision como resuelta. Devuelve ``(ok, mensaje)``. Nunca lanza."""
+    try:
+        from backend.db import get_db_connection
+
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                "UPDATE soporte_y_reportes SET estado = 'resuelto', "
+                "mensaje = COALESCE(mensaje, '') || ' | Revalidado: orden confirmada "
+                "en Binance.' "
+                "WHERE id = ? AND tipo = ? AND estado = 'pendiente' AND referencia_id = ?",
+                (int(revision.get('id')), TIPO_REVISION, int(comercio_id)),
+            )
+            cambiadas = int(getattr(cursor, 'rowcount', 0) or 0)
+            conexion.commit()
+    except Exception as error:
+        _log.warning('no se pudo cerrar la revision: %s', error)
+        return False, 'Binance confirmo el pago, pero no pude cerrar la revision.'
+    if cambiadas <= 0:
+        return False, 'La revision ya estaba cerrada.'
+    return True, ''
 
 
 def _monto_esperado(comercio_id, revision):
@@ -195,6 +312,25 @@ def _monto_esperado(comercio_id, revision):
     return None
 
 
+def _mensaje_propuesta(referencia):
+    """Mensaje de la propuesta de revalidacion, segun la fase."""
+    if fase_gratuita():
+        return (
+            f'Puedo **volver a consultar Binance** para tu pago con ID '
+            f'«{referencia}». Si la orden aparece y el **destacado** aun no estaba '
+            f'aplicado (por ejemplo, si un error del comprobante lo dejo '
+            f'pendiente), **reactivo tu destacado**. Si no aparece, te digo que '
+            f'revisar. Confirma para intentarlo.'
+        )
+    return (
+        f'Puedo **volver a consultar Binance** para tu pago con ID '
+        f'«{referencia}». Si la orden aparece y el pago aun no estaba '
+        f'aplicado (por ejemplo, si un error del comprobante lo dejo '
+        f'pendiente), **reactivo lo que pagaste** (tu plan o el destacado). '
+        f'Si no aparece, te digo que revisar. Confirma para intentarlo.'
+    )
+
+
 def proponer(comercio_id, texto):
     """Propuesta de revalidacion de pago (no cambia nada) o None. Nunca lanza."""
     if not habilitado() or not comercio_id or not texto:
@@ -211,11 +347,7 @@ def proponer(comercio_id, texto):
             'id': secrets.token_urlsafe(16),
             'accion': 'pago_reverificar',
             'resumen': f'Revalidar en Binance el pago «{referencia}»',
-            'mensaje': (
-                f'Puedo **volver a consultar Binance** para tu pago con ID '
-                f'«{referencia}». Si la orden ya aparece, cierro la revision; si no, '
-                f'te digo que revisar. Confirma para intentarlo.'
-            ),
+            'mensaje': _mensaje_propuesta(referencia),
             'parametros': {},
         }
     except Exception as error:
@@ -223,11 +355,25 @@ def proponer(comercio_id, texto):
         return None
 
 
-def _reverificar_revision(comercio_id, revision, usuario_id=None):
-    """Revalida ESA revision en Binance y, si se confirma, cierra el ticket.
+def _auditar_revision(usuario_id, detalle):
+    """Registra la reverificacion en ``logs_auditoria``. Nunca lanza."""
+    if not usuario_id:
+        return
+    try:
+        from backend.asistente.acciones import _auditar
 
-    NO toca el plan, el vencimiento ni el monto: el pago ya se activo con el OCR.
-    Devuelve ``(ok, mensaje)``. Nunca lanza.
+        _auditar(usuario_id, 'pago_reverificar', detalle)
+    except Exception:
+        pass
+
+
+def _reverificar_revision(comercio_id, revision, usuario_id=None):
+    """Revalida ESA revision en Binance y, si se confirma, reactiva lo pagado.
+
+    Si Binance confirma la orden: cierra el ticket y, cuando el pago NO estaba
+    aplicado (p. ej. fue rechazado por un error del OCR), reactiva el plan o el
+    destacado que se estaba pagando. Si ya estaba aplicado, solo cierra el ticket
+    (nunca duplica). Devuelve ``(ok, mensaje)``. Nunca lanza.
     """
     referencia = str(revision.get('referencia_pago') or '').strip()
     if not referencia:
@@ -253,45 +399,53 @@ def _reverificar_revision(comercio_id, revision, usuario_id=None):
             'escribenos por WhatsApp con el boton "Escribir a soporte".'
         )
 
-    try:
-        from backend.db import get_db_connection
+    concepto = _concepto_de(revision)
+    ya_aplicado = _ya_aplicado(comercio_id, referencia)
 
-        with get_db_connection() as conexion:
-            cursor = conexion.cursor()
-            cursor.execute(
-                "UPDATE soporte_y_reportes SET estado = 'resuelto', "
-                "mensaje = COALESCE(mensaje, '') || ' | Revalidado: orden confirmada "
-                "en Binance.' "
-                "WHERE id = ? AND tipo = ? AND estado = 'pendiente' AND referencia_id = ?",
-                (int(revision.get('id')), TIPO_REVISION, int(comercio_id)),
-            )
-            cambiadas = int(getattr(cursor, 'rowcount', 0) or 0)
-            conexion.commit()
-    except Exception as error:
-        _log.warning('no se pudo cerrar la revision: %s', error)
-        return False, 'Binance confirmo el pago, pero no pude cerrar la revision. Escribenos.'
+    cerrado, error_cierre = _cerrar_revision(comercio_id, revision)
+    if not cerrado:
+        return False, (
+            f'{error_cierre} Escribenos por WhatsApp con el boton "Escribir a soporte".'
+        )
 
-    if cambiadas <= 0:
-        return False, 'La revision ya estaba cerrada.'
-    if usuario_id:
-        try:
-            from backend.asistente.acciones import _auditar
-
-            _auditar(
+    reactivado = False
+    if concepto and not ya_aplicado:
+        reactivado, mensaje_act = _activar_concepto(comercio_id, concepto, usuario_id)
+        if not reactivado:
+            _auditar_revision(
                 usuario_id,
-                'pago_reverificar',
-                f'revision={revision.get("id")} ref={referencia}',
+                f'revision={revision.get("id")} ref={referencia} '
+                f'reactivacion_fallida={mensaje_act}',
             )
-        except Exception:
-            pass
+            return True, (
+                f'Confirmado: Binance tiene la orden «{referencia}». Cerré la revisión, '
+                f'pero no pude reactivar lo pagado automaticamente. Escribenos por '
+                f'WhatsApp con el boton "Escribir a soporte".'
+            )
+
+    _auditar_revision(
+        usuario_id,
+        f'revision={revision.get("id")} ref={referencia} '
+        f'reactivado={reactivado} ya_aplicado={ya_aplicado}',
+    )
+
+    if reactivado:
+        return True, (
+            f'Confirmado: Binance tiene la orden «{referencia}». Cerré la revisión y '
+            f'reactivé lo que pagaste.'
+        )
     return True, (
-        f'Confirmado: Binance ya tiene la orden «{referencia}». Cerre la revision y '
-        f'tu pago quedo verificado.'
+        f'Confirmado: Binance ya tiene la orden «{referencia}». Cerré la revisión; '
+        f'el pago ya estaba aplicado.'
     )
 
 
 def reverificar(usuario_id, comercio_id):
-    """Revalidacion pedida por el comerciante. Nunca cambia el plan."""
+    """Revalidacion pedida por el comerciante.
+
+    Si Binance confirma y el pago no estaba aplicado, reactiva el plan o el
+    destacado (reutiliza la logica del panel admin). Nunca duplica.
+    """
     if not habilitado():
         return False, 'Las acciones no estan disponibles en este momento.'
     if not usuario_id or not comercio_id:
@@ -306,8 +460,9 @@ def reverificar(usuario_id, comercio_id):
 # Reintento automatico en segundo plano (sin humanos)
 # ==========================================================
 # Revalida SOLO las revisiones de Binance que quedaron "sin verificar" por un
-# fallo transitorio de la API. Cierra el ticket si ahora se confirma. Nunca toca
-# dinero. Acotado: N por ciclo y cada _REINTENTO_SEG segundos.
+# fallo transitorio de la API. Esos pagos YA se activaron con el OCR, asi que el
+# reintento de fondo solo cierra el ticket (la reactivacion automatica se reserva
+# a la accion confirmada del asistente). Acotado: N por ciclo y cada _REINTENTO_SEG.
 _REINTENTO_SEG = max(120, int(os.environ.get('LOCALIS_PAGOS_REINTENTO_SEG', '900') or 900))
 _REINTENTO_LOTE = max(1, min(5, int(os.environ.get('LOCALIS_PAGOS_REINTENTO_LOTE', '1') or 1)))
 _ultimo_reintento = 0.0

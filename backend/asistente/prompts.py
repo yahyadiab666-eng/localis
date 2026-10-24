@@ -7,6 +7,22 @@ revelar secretos y derivar a WhatsApp cuando haga falta una intervencion.
 
 from __future__ import annotations
 
+from config import fase_gratuita
+
+# Linea de estilo sobre planes. En la fase gratuita (planes ocultos) se sustituye
+# por una regla que PROHIBE mencionar planes/precios de suscripcion. El texto de
+# planes NO se borra: se reactiva solo con ``LOCALIS_PAGOS_HABILITADOS=1``.
+_PLANES_LINEA = (
+    '- Cuando hables de planes, precios o limites, da los datos EXACTOS '
+    '(nombre del plan, precio en USD y numero de productos).\n'
+)
+_PLANES_LINEA_GRATIS = (
+    '- Localis es GRATUITO y NO tiene planes de pago ni suscripciones: NUNCA '
+    'menciones planes, precios de suscripcion, limites de productos ni '
+    'renovaciones. Si preguntan cuanto cuesta, responde que es gratis y que el '
+    'unico pago opcional es el destaque de un producto.\n'
+)
+
 _BASE = (
     'Eres el asistente virtual de Localis, un marketplace y catalogo de '
     'comercios locales de Venezuela (Isla de Margarita). Ayudas a clientes a '
@@ -40,8 +56,7 @@ _BASE = (
     '- Responde SIEMPRE en espanol, cercano y directo.\n'
     '- Se concreto y breve: 2 a 4 frases, o una lista de pasos numerados cortos. '
     'Ve al grano, sin rodeos ni disculpas largas.\n'
-    '- Cuando hables de planes, precios o limites, da los datos EXACTOS '
-    '(nombre del plan, precio en USD y numero de productos).\n'
+    + _PLANES_LINEA +
     '- Si el contexto incluye "PRECIOS DEL CATALOGO" o "TIENDAS EN LOCALIS", '
     'lístalos con sus nombres (y precios) en vez de dar pasos genericos.\n'
     '- Si explicas un procedimiento, usa pasos numerados cortos.\n'
@@ -90,10 +105,30 @@ _ROLES = {
     ),
 }
 
+# Overrides de rol en la fase gratuita (planes ocultos): el rol de comerciante
+# NO debe guiar hacia planes/pagos de suscripcion. El texto de planes de ``_ROLES``
+# no se borra: se reactiva con ``LOCALIS_PAGOS_HABILITADOS=1``.
+_ROLES_GRATIS = {
+    'comerciante': (
+        'Perfil: COMERCIANTE con tienda. Explica paso a paso como usar el panel: '
+        'importar inventario (CSV/Excel), subir y entender las imagenes, '
+        'sedes/ubicaciones, premios, destacados y el enlace/QR de su tienda. '
+        'Localis es GRATUITO: NO menciones planes, precios de suscripcion ni '
+        'limites de productos. Para cualquier accion sobre su cuenta o un pago '
+        'concreto, derivalo a WhatsApp.'
+    ),
+}
+
 
 def system_prompt(rol):
-    extra = _ROLES.get(rol or 'invitado', _ROLES['invitado'])
-    return f'{_BASE}\n\n{extra}'
+    rol = rol or 'invitado'
+    base = _BASE
+    roles = _ROLES
+    if fase_gratuita():
+        base = _BASE.replace(_PLANES_LINEA, _PLANES_LINEA_GRATIS)
+        roles = {**_ROLES, **_ROLES_GRATIS}
+    extra = roles.get(rol, roles['invitado'])
+    return f'{base}\n\n{extra}'
 
 
 def mensajes_para(rol, texto, contexto, historial, instruccion_extra=None):

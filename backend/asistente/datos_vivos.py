@@ -19,6 +19,8 @@ import logging
 import re
 import unicodedata
 
+from config import fase_gratuita
+
 _log = logging.getLogger('localis.asistente.datos')
 
 _STOPWORDS = frozenset(
@@ -47,6 +49,9 @@ _CLAVES_CATEGORIA = ('categoria', 'categorias')
 
 # Hechos canonicos que se inyectan SIEMPRE: son pequenos y evitan que el modelo
 # invente precios de planes, destacados o puntos cuando el RAG no los recupera.
+# Este texto es el RESPALDO (sin BD). En cada peticion se prefiere ``hechos_clave()``,
+# que deriva las cifras de su fuente real (planes, boosts y referidos) para que el
+# asistente nunca diga un precio viejo.
 HECHOS_CLAVE = (
     'DATOS CLAVE DE LOCALIS (cifras oficiales; usalas tal cual):\n'
     '- Planes (renovacion cada 30 dias): Gratis/Prueba 0 USD (hasta 50 '
@@ -58,6 +63,123 @@ HECHOS_CLAVE = (
     '- Puntos: 1 punto por comercio referido; canjes: 3 puntos = 3 dias, '
     '4 puntos = 5 dias, 5 puntos = 7 dias de destacado.'
 )
+
+# Respaldo SIN planes para la fase gratuita (planes ocultos). El respaldo con
+# planes (``HECHOS_CLAVE``) NO se borra: se usa cuando ``LOCALIS_PAGOS_HABILITADOS=1``.
+HECHOS_CLAVE_GRATIS = (
+    'DATOS CLAVE DE LOCALIS (cifras oficiales; usalas tal cual):\n'
+    '- Localis es GRATUITO y sin limites: no hay planes de pago ni '
+    'suscripciones ni limites de productos.\n'
+    '- Destacados: 3 dias 2 USD; 5 dias 3 USD; 7 dias 4 USD.\n'
+    '- Puntos: 1 punto por comercio referido; canjes: 3 puntos = 3 dias, '
+    '4 puntos = 5 dias, 5 puntos = 7 dias de destacado.'
+)
+
+
+def _resumen_planes():
+    """Linea con planes, precios y limites REALES (planes -> BD, o constantes)."""
+    try:
+        from backend.plans import (
+            ORDEN_PLANES,
+            es_limite_ilimitado,
+            obtener_plan_por_codigo,
+        )
+
+        partes = []
+        for codigo in ORDEN_PLANES:
+            plan = obtener_plan_por_codigo(codigo) or {}
+            nombre = plan.get('nombre') or codigo
+            try:
+                precio = float(
+                    plan.get('precio')
+                    if plan.get('precio') is not None
+                    else plan.get('precio_usd') or 0
+                )
+            except (TypeError, ValueError):
+                precio = 0.0
+            limite = plan.get('limite_productos')
+            capacidad = (
+                'productos ilimitados'
+                if es_limite_ilimitado(limite)
+                else f'hasta {limite} productos'
+            )
+            partes.append(f'{nombre} {precio:.0f} USD/mes ({capacidad})')
+        if not partes:
+            return ''
+        return (
+            'Planes (renovacion cada 30 dias): ' + '; '.join(partes) + '.'
+        )
+    except Exception:
+        return ''
+
+
+def _resumen_destacados():
+    """Linea con los precios REALES de destacados por duracion."""
+    try:
+        from backend.boosts import PRECIOS_BOOST_USD
+
+        if not PRECIOS_BOOST_USD:
+            return ''
+        partes = '; '.join(
+            f'{dias} dias {precio:.0f} USD'
+            for dias, precio in sorted(PRECIOS_BOOST_USD.items())
+        )
+        return f'Destacados: {partes}.'
+    except Exception:
+        return ''
+
+
+def _resumen_puntos():
+    """Linea con el programa de puntos REAL (referidos/canjes)."""
+    try:
+        from backend.referidos import CANJES_PUNTOS, PUNTOS_POR_REFERIDO
+
+        canjes = ', '.join(
+            f'{tier["puntos"]} puntos = {tier["dias"]} dias'
+            for tier in sorted(CANJES_PUNTOS, key=lambda t: t['puntos'])
+        )
+        sufijo = f'; canjes: {canjes} de destacado.' if canjes else '.'
+        return (
+            f'Puntos: {PUNTOS_POR_REFERIDO} punto por comercio referido{sufijo}'
+        )
+    except Exception:
+        return ''
+
+
+def hechos_clave():
+    """DATOS CLAVE con las cifras derivadas de su fuente real. Nunca lanza.
+
+    Si alguna fuente no esta disponible, cae al texto de respaldo ``HECHOS_CLAVE``
+    para no dejar la respuesta sin datos oficiales.
+    """
+    try:
+        bloques = ['DATOS CLAVE DE LOCALIS (cifras oficiales; usalas tal cual):']
+        planes = None
+        if not fase_gratuita():
+            planes = _resumen_planes()
+            if planes:
+                bloques.append(f'- {planes}')
+            bloques.append(
+                '- Pago de planes: Pago Movil o Binance Pay (USDT). Se sube una '
+                'captura del comprobante; se verifica con OCR o pasa a revision manual.'
+            )
+        destacados = _resumen_destacados()
+        if destacados:
+            bloques.append(f'- {destacados}')
+        puntos = _resumen_puntos()
+        if puntos:
+            bloques.append(f'- {puntos}')
+        if fase_gratuita():
+            bloques.append(
+                '- Localis es GRATUITO: no hay planes ni suscripciones.'
+            )
+            return '\n'.join(bloques)
+        if not planes:
+            # Sin la fuente principal no arriesgamos cifras parciales.
+            return HECHOS_CLAVE
+        return '\n'.join(bloques)
+    except Exception:
+        return HECHOS_CLAVE_GRATIS if fase_gratuita() else HECHOS_CLAVE
 
 # Si el mensaje trata de estos temas, NO se busca en el catalogo (lo cubre la
 # documentacion) para no inyectar productos irrelevantes.
@@ -233,6 +355,17 @@ def resumen_comercio(usuario_id, comercio_id, incluir_imagenes=False):
         comercio = obtener_comercio_por_usuario(usuario_id, comercio_id)
         if not comercio:
             return ''
+        usados = contar_productos_comercio(comercio.get('id'))
+
+        if fase_gratuita():
+            # Planes ocultos: solo se informan los productos (sin plan ni pago).
+            lineas = [f'Productos publicados: {usados}']
+            if incluir_imagenes:
+                sin_foto = _contar_sin_foto(comercio.get('id'))
+                if sin_foto is not None:
+                    lineas.append(f'Productos sin foto real: {sin_foto}')
+            return '\n'.join(lineas)
+
         plan_codigo = (comercio.get('plan_tipo') or 'gratis').lower()
         plan = obtener_plan_por_codigo(plan_codigo) or {}
         nombre_plan = plan.get('nombre') or plan_codigo
@@ -240,7 +373,6 @@ def resumen_comercio(usuario_id, comercio_id, incluir_imagenes=False):
         limite_txt = (
             'ilimitado' if es_limite_ilimitado(limite) else str(limite)
         )
-        usados = contar_productos_comercio(comercio.get('id'))
 
         lineas = [
             f'Plan actual: {nombre_plan}',

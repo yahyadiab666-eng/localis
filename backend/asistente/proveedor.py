@@ -9,6 +9,8 @@ propague un 500.
 from __future__ import annotations
 
 import logging
+import threading
+import time
 
 import httpx
 
@@ -26,6 +28,21 @@ from config import (
 )
 
 _log = logging.getLogger('localis.asistente.proveedor')
+
+# Cliente HTTP por hilo (los workers de Gunicorn son hilos): reutiliza el pool de
+# conexiones y evita un handshake TLS nuevo en cada consulta. El timeout se ajusta
+# por peticion, asi que el valor por defecto aqui es solo un tope de seguridad.
+_local = threading.local()
+_REINTENTOS = 2
+_ESPERA_REINTENTO = 0.3
+
+
+def _cliente():
+    cliente = getattr(_local, 'cliente', None)
+    if cliente is None:
+        cliente = httpx.Client(timeout=ASISTENTE_TIMEOUT_SEG)
+        _local.cliente = cliente
+    return cliente
 
 
 class ProveedorNoDisponible(Exception):
@@ -82,15 +99,35 @@ def _llamar(modelo, mensajes, herramientas=None, timeout=None):
         'X-Title': ASISTENTE_TITULO,
     }
 
-    try:
-        with httpx.Client(timeout=timeout or ASISTENTE_TIMEOUT_SEG) as cliente:
-            respuesta = cliente.post(
-                f'{ASISTENTE_BASE_URL}/chat/completions',
-                json=payload,
-                headers=cabeceras,
+    url = f'{ASISTENTE_BASE_URL}/chat/completions'
+    tiempo = timeout or ASISTENTE_TIMEOUT_SEG
+    respuesta = None
+    ultimo_error = None
+    for intento in range(_REINTENTOS):
+        try:
+            respuesta = _cliente().post(
+                url, json=payload, headers=cabeceras, timeout=tiempo
             )
-    except Exception as error:
-        raise ProveedorNoDisponible(f'error de red: {type(error).__name__}') from error
+        except Exception as error:
+            # Error de red/transporte: un reintento corto antes de rendirse.
+            ultimo_error = error
+            if intento < _REINTENTOS - 1:
+                time.sleep(_ESPERA_REINTENTO)
+                continue
+            raise ProveedorNoDisponible(
+                f'error de red: {type(error).__name__}'
+            ) from error
+        # 5xx y 429 suelen ser transitorios (proveedor saturado): reintenta una vez.
+        if respuesta.status_code >= 500 or respuesta.status_code == 429:
+            if intento < _REINTENTOS - 1:
+                time.sleep(_ESPERA_REINTENTO)
+                continue
+        break
+
+    if respuesta is None:
+        raise ProveedorNoDisponible(
+            f'error de red: {type(ultimo_error).__name__}'
+        ) from ultimo_error
 
     if respuesta.status_code >= 400:
         # No se registra el cuerpo: puede contener datos de la peticion.

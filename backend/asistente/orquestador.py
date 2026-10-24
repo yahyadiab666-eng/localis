@@ -17,6 +17,7 @@ from config import (
     ASISTENTE_MAX_CONTEXTO,
     ASISTENTE_MAX_HISTORIAL,
     asistente_habilitado,
+    fase_gratuita,
 )
 
 from backend.asistente import acciones, datos_vivos, pagos, presupuesto, proveedor, venta
@@ -66,8 +67,19 @@ _SUGERENCIAS = {
 }
 
 
+# Sugerencias de la fase gratuita (planes ocultos): sin mencion de planes.
+_SUGERENCIAS_GRATIS_COMERCIANTE = [
+    '¿Como importo mi inventario (CSV/Excel)?',
+    '¿Por que mi producto no tiene foto?',
+    '¿Como destaco un producto?',
+]
+
+
 def sugerencias(rol):
-    return _SUGERENCIAS.get(rol or 'invitado', _SUGERENCIAS['invitado'])
+    rol = rol or 'invitado'
+    if fase_gratuita() and rol == 'comerciante':
+        return _SUGERENCIAS_GRATIS_COMERCIANTE
+    return _SUGERENCIAS.get(rol, _SUGERENCIAS['invitado'])
 
 
 def _limpiar_historial(historial):
@@ -90,7 +102,7 @@ def _limpiar_historial(historial):
 
 def _construir_contexto(usuario, rol, texto):
     """Une documentacion (RAG) + datos en vivo (precios, tasa, mi comercio)."""
-    partes = [datos_vivos.HECHOS_CLAVE]
+    partes = [datos_vivos.hechos_clave()]
     documentacion = contexto_para(texto, max_chars=ASISTENTE_MAX_CONTEXTO)
     if documentacion:
         partes.append(documentacion)

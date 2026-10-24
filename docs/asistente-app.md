@@ -28,7 +28,7 @@ En la barra superior también aparece **"Cómo funciona"**.
 
 ## Panel del comerciante (menú superior)
 
-Los enlaces del panel son: **Inicio · Panel · Premios · Planes · Editar · Guía ·
+Los enlaces del panel son: **Inicio · Panel · Premios · <!-- PLANES_INICIO -->Planes · <!-- PLANES_FIN -->Editar · Guía ·
 Ver tienda · Mi perfil · Salir**. En el teléfono, el menú lateral añade
 **"Editar tienda"**, **"Guía de uso"** y **"Soporte técnico"**.
 
@@ -38,6 +38,7 @@ Ver tienda · Mi perfil · Salir**. En el teléfono, el menú lateral añade
 - Se sube un archivo CSV o Excel (la app reconoce la cabecera sola), y la
   importación se procesa en segundo plano con un indicador de avance.
 
+<!-- PLANES_INICIO -->
 ## Planes y pago
 
 - En **Planes** se ven los planes y se elige uno con el botón **"Elegir <plan>"**
@@ -46,6 +47,7 @@ Ver tienda · Mi perfil · Salir**. En el teléfono, el menú lateral añade
   modal de pago).
 - Tras pagar se sube la **captura del comprobante** y se pulsa
   **"Verificar comprobante y activar plan"**.
+<!-- PLANES_FIN -->
 
 ## Ver la tienda pública y compartirla
 
@@ -73,8 +75,10 @@ Ver tienda · Mi perfil · Salir**. En el teléfono, el menú lateral añade
 - **Publicas tu catálogo** y apareces en el buscador y en el catálogo público.
 - **Los clientes te contactan directo por WhatsApp** (sin comisiones de venta en
   la app).
+<!-- PLANES_INICIO -->
 - **Plan Gratis/Prueba**: 30 días gratis con hasta 50 productos; luego planes
   Básico (10 USD/100), Pro (15 USD/300) y Business (35 USD/ilimitados).
+<!-- PLANES_FIN -->
 - **Enlace público y código QR** para compartir tu tienda en redes, vitrina o
   volantes.
 - **Premios y puntos** por referir otros comercios (canjeables por destacados).
