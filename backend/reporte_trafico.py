@@ -324,6 +324,33 @@ def _tomar_candado_envio(cursor):
         return True
 
 
+def _con_candado_envio(accion):
+    """Ejecuta ``accion`` con el candado de BD; si no hay BD, la ejecuta igual.
+
+    El candado evita que, con **varias instancias**, dos manden el mismo correo.
+    Sin base de datos (pruebas sin red, o BD caída) no hay riesgo de duplicado
+    entre instancias, así que el correo debe intentarse igual: el candado es
+    opcional y **nunca** puede impedir el envío.
+    """
+    candado = False
+    try:
+        from backend.db import get_db_connection
+
+        with get_db_connection() as conexion:
+            curso = conexion.cursor()
+            if not _tomar_candado_envio(curso):
+                return None  # otra instancia lo está enviando ahora mismo
+            candado = True
+            return accion()
+    except Exception as error:
+        if candado:
+            raise
+        logger.warning(
+            f'{_LOG} candado de envío no disponible ({type(error).__name__}); se continúa sin él'
+        )
+        return accion()
+
+
 def quizas_enviar_reporte_diario():
     """Envía el reporte si ya pasó la hora diaria y no se envió hoy. Nunca lanza.
 
@@ -338,17 +365,15 @@ def quizas_enviar_reporte_diario():
             return
         if _leer_marca() == ahora.date().isoformat():
             return
-        from backend.db import get_db_connection
 
-        with get_db_connection() as conexion:
-            curso = conexion.cursor()
-            if not _tomar_candado_envio(curso):
-                return
+        def _enviar():
             # Re-chequeo ya con el candado: otra instancia pudo enviarlo entre
             # la comprobación de arriba y la toma del candado.
             if _leer_marca() == ahora.date().isoformat():
                 return
             enviar_reporte_admin(forzar=False)
+
+        _con_candado_envio(_enviar)
     except Exception as error:
         logger.error(f'{_LOG} envío diario falló: {type(error).__name__}: {error}')
 

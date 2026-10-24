@@ -162,6 +162,33 @@ def _tomar_candado_envios(cursor):
         return True
 
 
+def _con_candado_envios(accion):
+    """Ejecuta ``accion`` con el candado de BD; si no hay BD, la ejecuta igual.
+
+    El candado evita que, con varias instancias, dos manden los mismos
+    recordatorios. Sin base de datos no hay riesgo de duplicado entre instancias
+    (y sin BD tampoco hay tiendas que listar), así que nunca puede impedir el
+    intento de envío.
+    """
+    candado = False
+    try:
+        from backend.db import get_db_connection
+
+        with get_db_connection() as conexion:
+            curso = conexion.cursor()
+            if not _tomar_candado_envios(curso):
+                return 0
+            candado = True
+            return accion()
+    except Exception as error:
+        if candado:
+            raise
+        logger.warning(
+            f'{_LOG} candado de envíos no disponible ({type(error).__name__}); se continúa sin él'
+        )
+        return accion()
+
+
 def enviar_recordatorios_vencimiento():
     """Envía los recordatorios correspondientes. Devuelve cuántos envió. Nunca lanza."""
     try:
@@ -169,15 +196,7 @@ def enviar_recordatorios_vencimiento():
             return 0
         if _ahora_utc().hour < _HORA_UTC:
             return 0
-        from backend.db import get_db_connection
-
-        # El candado se mantiene mientras dura el envío: otra instancia que
-        # llegue a la vez sale por aquí sin enviar nada.
-        with get_db_connection() as conexion:
-            curso = conexion.cursor()
-            if not _tomar_candado_envios(curso):
-                return 0
-            return _enviar_recordatorios()
+        return _con_candado_envios(_enviar_recordatorios)
     except Exception as error:
         logger.error(f'{_LOG} fallo inesperado: {type(error).__name__}: {error}')
         return 0
