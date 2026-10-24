@@ -112,3 +112,16 @@ def leer_bytes_upload(url_publica):
 def archivo_upload_existe(url_publica):
     ruta = _ruta_disco(url_publica)
     return bool(ruta and ruta.is_file() and ruta.stat().st_size > 0)
+
+
+def url_upload_local_utilizable(valor):
+    """Como ``url_upload_local_valida`` pero exige que el archivo exista.
+
+    En producción ``static/uploads`` es disco efímero (cada deploy lo borra) y
+    no se comparte entre instancias. Si una URL persistida apunta a un archivo
+    ausente, la vista debe caer al placeholder en vez de servir un 404.
+    """
+    valido = url_upload_local_valida(valor)
+    if not valido:
+        return None
+    return valido if archivo_upload_existe(valido) else None

@@ -6,6 +6,7 @@ Subida de archivos a Supabase Storage (modo hibrido).
 - En segundo plano intenta copiar la foto local al bucket cuando hay service_role.
 """
 import logging
+import os
 logger = logging.getLogger('localis.supabase_storage')
 
 from urllib.parse import quote
@@ -39,6 +40,15 @@ LOG_PREFIX = '[Localis Storage]'
 AVISO_HIBRIDO_USUARIO = (
     'La foto no se pudo guardar en Storage. El catalogo seguira con la imagen '
     'oficial o la que ya tenia el producto. Revisa SUPABASE_SERVICE_ROLE_KEY.'
+)
+# Cache del CDN de Storage (medido: sin esto el objeto sale con
+# ``Cache-Control: private, no-cache`` y Cloudflare responde ``DYNAMIC``, así
+# que *cada* visita golpea Supabase: egreso y latencia). Los nombres de archivo
+# llevan hash de contenido (``auto_<slug>_<sha1>.webp``), así que un TTL largo
+# es seguro: si el contenido cambia, cambia el nombre.
+CACHE_CONTROL_IMAGENES = (
+    os.environ.get('LOCALIS_STORAGE_CACHE_CONTROL', 'max-age=31536000').strip()
+    or 'max-age=31536000'
 )
 
 
@@ -239,6 +249,7 @@ def _subir_bytes_al_bucket(cliente, ruta_storage, data, content_type, *, diferid
             {
                 'Content-Type': content_type or 'application/octet-stream',
                 'x-upsert': 'true',
+                'cache-control': CACHE_CONTROL_IMAGENES,
             }
         )
     except RuntimeError as error:
@@ -319,6 +330,25 @@ def _guardar_respaldo_local(data, filename, carpeta):
     return guardar_bytes_upload(data, filename, carpeta=carpeta)
 
 
+def _permitir_imagen_local():
+    """True si se puede persistir una URL ``/static/uploads/...``.
+
+    En producción **no**: el disco de Render es efímero (cada deploy lo borra)
+    y no se comparte entre instancias, así que la foto acaba en 404 para los
+    usuarios (medido: 3 productos rotos por un deploy). Se puede forzar con
+    ``LOCALIS_SUBIDA_LOCAL_PRIMERO=1``. En desarrollo se mantiene, que es cómodo.
+    """
+    explicito = os.environ.get('LOCALIS_SUBIDA_LOCAL_PRIMERO')
+    if explicito is not None and str(explicito).strip() != '':
+        return str(explicito).strip().lower() not in ('0', 'false', 'no')
+    try:
+        from config import es_entorno_produccion
+
+        return not es_entorno_produccion()
+    except Exception:
+        return True
+
+
 def intentar_subir_imagen(
     file_storage,
     supabase_client=None,
@@ -327,8 +357,12 @@ def intentar_subir_imagen(
     max_dimension=800,
 ):
     """
-    Comprime el archivo, intenta Storage y si falla deja la foto en
-    static/uploads/. Retorna (url, aviso). Nunca lanza hacia la ruta HTTP.
+    Comprime el archivo e intenta Storage. Retorna (url, aviso). Nunca lanza
+    hacia la ruta HTTP.
+
+    En producción Storage es la única fuente de verdad: si la subida falla no
+    se persiste una URL de ``static/uploads`` (moriría en el próximo deploy y
+    dejaría un 404). En desarrollo se conserva el respaldo local.
     """
     if not file_storage or not getattr(file_storage, 'filename', ''):
         return None, None
@@ -353,8 +387,9 @@ def intentar_subir_imagen(
         return None, AVISO_HIBRIDO_USUARIO
 
     data, content_type, filename = comprimido
+    permitir_local = _permitir_imagen_local()
     url_local = None
-    if carpeta == 'productos':
+    if permitir_local and carpeta == 'productos':
         url_local = _guardar_respaldo_local(data, filename, carpeta)
         if url_local:
             # El producto nace con foto visible. Storage se sincroniza
@@ -373,9 +408,10 @@ def intentar_subir_imagen(
         logger.error(f'{LOG_PREFIX} modo hibrido, subida omitida: {error}')
         if url_local:
             return url_local, None
-        url_local = _guardar_respaldo_local(data, filename, carpeta)
-        if url_local:
-            return url_local, None
+        if permitir_local:
+            url_local = _guardar_respaldo_local(data, filename, carpeta)
+            if url_local:
+                return url_local, None
         return None, AVISO_HIBRIDO_USUARIO
     except Exception as error:
         print(
@@ -384,9 +420,10 @@ def intentar_subir_imagen(
         )
         if url_local:
             return url_local, None
-        url_local = _guardar_respaldo_local(data, filename, carpeta)
-        if url_local:
-            return url_local, None
+        if permitir_local:
+            url_local = _guardar_respaldo_local(data, filename, carpeta)
+            if url_local:
+                return url_local, None
         return None, AVISO_HIBRIDO_USUARIO
 
 

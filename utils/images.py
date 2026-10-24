@@ -143,7 +143,7 @@ def url_publica_producto_desde_bd(valor):
             return local or texto
         from backend.utils import (
             url_imagen_api_oficial_valida,
-            url_imagen_local_valida,
+            url_imagen_local_utilizable,
             url_imagen_subida_storage_valida,
         )
 
@@ -151,7 +151,7 @@ def url_publica_producto_desde_bd(valor):
         if storage:
             local = _espejo_local_de_storage(storage)
             return local or storage
-        local = url_imagen_local_valida(texto)
+        local = url_imagen_local_utilizable(texto)
         if local:
             return local
         api = url_imagen_api_oficial_valida(texto)
@@ -201,12 +201,12 @@ def url_mostrable(valor, permitir_estatico=False, permitir_hero=False):
         texto = texto.replace('/subase/', '/storage/').replace('/Subase/', '/storage/')
         if es_url_storage_publica(texto):
             return texto
-        from backend.utils import url_imagen_local_valida, url_imagen_subida_storage_valida
+        from backend.utils import url_imagen_local_utilizable, url_imagen_subida_storage_valida
 
         storage = url_imagen_subida_storage_valida(texto)
         if storage:
             return storage
-        local = url_imagen_local_valida(texto)
+        local = url_imagen_local_utilizable(texto)
         if local:
             return local
         from backend.utils import url_imagen_api_oficial_valida

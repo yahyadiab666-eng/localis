@@ -682,8 +682,14 @@ def sincronizar_vencimientos_suscripcion():
 
 @app.after_request
 def agregar_cache_estaticos(response):
-    """Encabezados de caché para imágenes y assets estáticos."""
-    if request.path.startswith('/static/'):
+    """Encabezados de caché para imágenes y assets estáticos.
+
+    Solo se marcan respuestas 200. Un 404 (p. ej. una foto de
+    ``static/uploads`` que un deploy borró) no debe quedar cacheado una semana
+    en el navegador del visitante ni en el CDN: eso hacía permanente un error
+    temporal.
+    """
+    if response.status_code == 200 and request.path.startswith('/static/'):
         extensiones_cache = (
             '.webp', '.jpg', '.jpeg', '.png', '.gif', '.svg', '.css', '.js', '.woff2'
         )
