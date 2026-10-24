@@ -376,20 +376,42 @@ def _html_publico_cacheado(clave, render, *, permitir=True):
     Guardar el HTML anónimo —idéntico para todos, porque desde el arreglo de
     caché no lleva sesión ni token CSRF— quita ese coste.
 
+    ⚠️ El envoltorio debe cubrir **todo** lo que cuesta por petición (incluidas
+    las consultas del contexto), no solo el ``render_template``: si el contexto
+    se arma fuera, la caché no ahorra nada.
+
+    ``render`` debe devolver el **HTML como cadena** (no una ``Response``).
+
     Solo aplica si la petición **no** trae cookie de sesión, si ``permitir`` y si
     el interruptor ``LOCALIS_CACHE_HTML_SEG`` está activo (>0). Ante cualquier
     duda renderiza normal: nunca puede dejar la página en blanco.
+
+    Añade ``X-Localis-HTML: hit|miss|off|error`` para auditar la caché en
+    producción.
     """
     ttl = _ttl_html_publico()
     if not permitir or ttl <= 0 or _peticion_con_sesion():
+        respuesta = make_response(render())
+        respuesta.headers['X-Localis-HTML'] = 'off'
+        return respuesta
+
+    marca = {'cargado': False}
+
+    def _render_contando():
+        marca['cargado'] = True
         return render()
+
     try:
         from backend.runtime_cache import get_or_load
 
-        html = get_or_load(clave, render, ttl)
-        return Response(html, mimetype='text/html')
+        html = get_or_load(clave, _render_contando, ttl)
+        respuesta = Response(str(html or ''), mimetype='text/html')
+        respuesta.headers['X-Localis-HTML'] = 'miss' if marca['cargado'] else 'hit'
+        return respuesta
     except Exception:
-        return render()
+        respuesta = make_response(render())
+        respuesta.headers['X-Localis-HTML'] = 'error'
+        return respuesta
 
 
 @app.context_processor
@@ -1325,7 +1347,7 @@ def index():
             )
 
         respuesta = _html_publico_cacheado(
-            f'html:portada:{request.full_path}',
+            f'html:portada:{request.host}:{request.full_path}',
             _render_portada,
             permitir=not catalogo_degradado,
         )
@@ -1513,10 +1535,18 @@ def tienda_publica(comercio_id=None, slug=None):
 
     palabra_clave = request.args.get('q', '').strip()
     origen = (request.args.get('origen') or 'web').strip().lower()[:20]
-    contexto = _contexto_tienda(comercio, palabra_clave, origen)
+
+    def _render_tienda():
+        # El contexto se arma DENTRO del render para que, con la caché de HTML
+        # activa, un acierto no vuelva a tocar la base de datos (es la página
+        # pública con más consultas y la más pesada: 122 productos en la tienda
+        # real).
+        contexto = _contexto_tienda(comercio, palabra_clave, origen)
+        return render_template('tienda_publica.html', **contexto)
+
     return _html_publico_cacheado(
-        f'html:tienda:{slug or comercio_id}:{request.full_path}',
-        lambda: render_template('tienda_publica.html', **contexto),
+        f'html:tienda:{request.host}:{slug or comercio_id}:{request.full_path}',
+        _render_tienda,
     )
 
 
