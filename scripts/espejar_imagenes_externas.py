@@ -176,6 +176,45 @@ def _actualizar_urls(conexion, espejadas, no_imagenes):
     return aplicadas
 
 
+def _revisar_restantes(conexion, restantes):
+    """Devuelve al pipeline las externas que la propia app no puede mostrar.
+
+    Medido: hay URLs externas (clipart, dominios no persistibles) que
+    ``url_imagen_catalogo_valida`` rechaza, así que la vista ya mostraba el
+    placeholder mientras la fila decía ``estado='real'`` — y por eso el pipeline
+    nunca las reintentaba. Se dejan nulas y en ``pendiente``, y se borra la
+    entrada de las cachés globales para que no se reasigne la misma URL basura.
+    """
+    from backend.utils import url_imagen_catalogo_valida
+    from utils.images import url_publica_producto_desde_bd
+
+    devueltas = []
+    cursor = conexion.cursor()
+    for pid, original in restantes:
+        crudo = str(original or '').strip()
+        if not crudo:
+            continue
+        if url_publica_producto_desde_bd(crudo) or url_imagen_catalogo_valida(crudo):
+            continue  # la app sí la muestra: se queda como hotlink
+        cursor.execute(
+            """
+            UPDATE productos
+            SET imagen_url = NULL, imagen_fuente = NULL, imagen_estado = 'pendiente'
+            WHERE id = ? AND imagen_url = ?
+            """,
+            (pid, original),
+        )
+        if int(cursor.rowcount or 0):
+            devueltas.append(pid)
+        for tabla in ('catalogo_maestro_imagenes', 'imagenes_automaticas'):
+            try:
+                cursor.execute(f'DELETE FROM {tabla} WHERE url_imagen = ?', (crudo,))
+            except Exception:
+                pass
+    conexion.commit()
+    return devueltas
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--apply', action='store_true')
@@ -230,7 +269,14 @@ def main() -> int:
         print(f'Sin espejar: {len(sin_espejar)}')
         for pid, _url, aviso, _t, original in sin_espejar[:15]:
             print(f'  id={pid} {aviso} :: {original[:80]}')
-        print('  (hosts que bloquean al datacenter; en el navegador siguen viendose)')
+
+    # Las que no se pudieron traer: si la propia app no las puede mostrar, se
+    # devuelven al pipeline (quedaban en 'real' sin foto visible).
+    restantes = [(pid, original) for pid, _u, _a, _t, original in sin_espejar]
+    if restantes:
+        with get_db_connection() as conexion:
+            devueltas = _revisar_restantes(conexion, restantes)
+        print(f'  Devueltas al pipeline (la app no podia mostrarlas): {devueltas}')
 
     if no_imagenes:
         print(f'\nDevueltas al pipeline (no eran imagenes): {[p for p, _u in no_imagenes]}')
