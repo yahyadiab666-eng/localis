@@ -26,13 +26,19 @@ disponibilidad en NIC.ve, el trámite (cédula/RIF, pago en **bolívares**) y qu
 **renovación no es automática** — apuntar el vencimiento en el calendario, porque
 perder el dominio tumbaría la app y el APK.
 
-### Estado de los candidatos (medido por DNS: "libre" = no resuelve, hay que confirmarlo en el registrador)
+### Estado de los candidatos (comprobado de forma autoritativa)
 
-| Dominio | Estado |
-|---|---|
-| `localis.com`, `localis.net`, `localis.app`, `localis.store`, `localis.shop`, `localis.xyz` | **ocupados** |
-| `localisve.com`, `uselocalis.com`, `getlocalis.com`, `localisven.com`, `localis.market`, `localis.com.co`, `localis.com.ar` | probablemente libres |
-| `localis.com.ve`, `localis.ve`, `localis.shop.ve` | probablemente libres (NIC.ve) |
+| Dominio | Estado | Fuente |
+|---|---|---|
+| `localis.com`, `localis.net`, **`localis.app`**, `localis.one`, `localis.online` | **ocupados** | RDAP (p. ej. `.app` expira 2027-05-21) |
+| `localis.co`, `localis.io` | **ocupados** | DNS+HTTP (`.co` tiene web activa) — RDAP falla en esos dos TLD, así que ahí no me fío del RDAP |
+| `localis.market`, `localisapp.com`, `getlocalis.com`, `uselocalis.com`, `localishq.com`, `localisve.com` | **libres** | RDAP autoritativo |
+| **`localis.com.ve`** (~$18) y `localis.ve` (~$36) | **libres** | WHOIS autoritativo de NIC.ve (protocolo, puerto 43) |
+
+> El caché **no depende del TLD**: depende de que el dominio esté en **Cloudflare**
+> (verificado: `traki.com.ve` está en Cloudflare). Cualquier extensión sirve igual.
+> Nota de `.app`: está en la lista **HSTS preload**, así que **obliga HTTPS** en todos
+> los navegadores (nosotros ya lo cumplimos) y prohíbe cualquier `http://` intermedio.
 
 Confirmar siempre en el registrador (el DNS no prueba que esté libre).
 
