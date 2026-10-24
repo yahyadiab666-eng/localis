@@ -131,11 +131,20 @@ def _generar(item):
         datos = respuesta.content
         miniatura = crear_miniatura_producto(datos)
         if not miniatura:
-            return url, 'sin ganancia (ya es pequena o no se pudo comprimir)'
+            # Foto ya pequeña: se guarda una copia como miniatura para que la URL
+            # de la tarjeta exista siempre (evita un 400 por visita antes del
+            # respaldo a la imagen completa).
+            tipo = (respuesta.headers.get('content-type') or '').lower()
+            if tipo != 'image/webp':
+                return url, 'sin ganancia (y no es webp)'
+            miniatura = datos
+            copia = True
+        else:
+            copia = False
         _subir_bytes_al_bucket(
             None, ruta_mini, miniatura, 'image/webp', diferido=True
         )
-        return url, f'OK ({len(datos)} -> {len(miniatura)} bytes)'
+        return url, f'OK ({len(datos)} -> {len(miniatura)} bytes{copia and " (copia)" or ""})'
     except Exception as error:
         return url, f'{type(error).__name__}: {error}'
 

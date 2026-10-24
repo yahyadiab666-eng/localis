@@ -321,15 +321,19 @@ def _persistir_en_supabase(
         raise upload_error from error
 
     _registrar_exito_supabase(ruta_storage, url)
-    _subir_miniatura_producto(carpeta, filename, data, diferido=diferido)
+    _subir_miniatura_producto(carpeta, filename, data, content_type, diferido=diferido)
     return url
 
 
-def _subir_miniatura_producto(carpeta, filename, data, *, diferido=False):
+def _subir_miniatura_producto(carpeta, filename, data, content_type, *, diferido=False):
     """Sube la miniatura de catálogo (``thumb_<nombre>``).
 
     Mejor esfuerzo: si falla, la foto principal ya está subida y la vista usa la
     imagen completa, así que nunca se rompe la subida por la miniatura.
+
+    Si la foto ya es pequeña (no compensa reducirla) se guarda **una copia**
+    como miniatura: así la URL de la tarjeta existe siempre y el navegador no
+    pide una que no está (un 400 por visita) antes de caer al respaldo.
     """
     if str(carpeta or '').strip().lower() != 'productos':
         return
@@ -338,7 +342,9 @@ def _subir_miniatura_producto(carpeta, filename, data, *, diferido=False):
 
         miniatura = crear_miniatura_producto(data)
         if not miniatura:
-            return
+            if str(content_type or '').lower() != 'image/webp' or not data:
+                return
+            miniatura = data
         nombre = nombre_miniatura(filename)
         if not nombre:
             return

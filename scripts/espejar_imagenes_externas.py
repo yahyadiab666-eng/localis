@@ -125,6 +125,45 @@ def _espejar(fila):
     return pid, url, 'OK', len(comprimido)
 
 
+def _actualizar_urls(conexion, espejadas, no_imagenes):
+    """Aplica las URLs espejadas y devuelve al pipeline las que no eran imagen.
+
+    La guarda no compara la URL exacta sino que la fila **siga apuntando a un
+    tercero**: el backfill de imágenes reasigna URLs del catálogo maestro en
+    paralelo, y aquí sí queremos sustituir esa reasignación.
+
+    Además marca ``imagen_estado='real'``: sin eso, el backfill vuelve a resolver
+    el producto desde el catálogo maestro (URL externa) y pisa el espejo.
+    """
+    aplicadas = 0
+    cursor = conexion.cursor()
+    for pid, url in espejadas:
+        cursor.execute(
+            """
+            UPDATE productos
+            SET imagen_url = ?, imagen_estado = 'real'
+            WHERE id = ?
+              AND POSITION('http' IN COALESCE(imagen_url, '')) = 1
+              AND POSITION(? IN COALESCE(imagen_url, '')) = 0
+            """,
+            (url, pid, MARCA_STORAGE),
+        )
+        aplicadas += int(cursor.rowcount or 0)
+    for pid in no_imagenes:
+        cursor.execute(
+            """
+            UPDATE productos
+            SET imagen_url = NULL, imagen_fuente = NULL, imagen_estado = 'pendiente'
+            WHERE id = ?
+              AND POSITION('http' IN COALESCE(imagen_url, '')) = 1
+              AND POSITION(? IN COALESCE(imagen_url, '')) = 0
+            """,
+            (pid, MARCA_STORAGE),
+        )
+    conexion.commit()
+    return aplicadas
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--apply', action='store_true')
@@ -155,56 +194,32 @@ def main() -> int:
         resultados.append((pid, url, aviso, tamano, str(fila['imagen_url'])))
         print(f"  id={pid} {aviso} {f'({tamano} bytes)' if tamano else ''}")
 
-    espejadas = [(pid, url, original) for pid, url, aviso, _t, original in resultados if url]
-    if espejadas:
-        aplicadas = 0
-        with get_db_connection() as conexion:
-            cursor = conexion.cursor()
-            for pid, url, original in espejadas:
-                cursor.execute(
-                    """
-                    UPDATE productos SET imagen_url = ?
-                    WHERE id = ? AND imagen_url = ?
-                    """,
-                    (url, pid, original),
-                )
-                aplicadas += int(cursor.rowcount or 0)
-            conexion.commit()
-        saltadas = len(espejadas) - aplicadas
-        print(f'\nActualizadas en la base: {aplicadas} de {len(espejadas)} espejadas')
-        if saltadas:
-            print(
-                f'  {saltadas} se saltaron: la fila cambio mientras tanto '
-                '(el pipeline de imagenes tambien trabaja en paralelo)'
-            )
+    espejadas = [(pid, url) for pid, url, aviso, _t, _original in resultados if url]
+    no_imagenes = [
+        pid for pid, _u, aviso, _t, _original in resultados if aviso == NO_ES_IMAGEN
+    ]
 
-    sin_espejar = [r for r in resultados if not r[1]]
+    aplicadas = 0
+    if espejadas or no_imagenes:
+        with get_db_connection() as conexion:
+            aplicadas = _actualizar_urls(conexion, espejadas, no_imagenes)
+    print(f'\nActualizadas en la base: {aplicadas} de {len(espejadas)} espejadas')
+    saltadas = len(espejadas) - aplicadas
+    if saltadas:
+        print(
+            f'  {saltadas} ya no apuntaban a un tercero: el pipeline de imagenes '
+            'las resolvio antes (no se pisa un cambio ajeno)'
+        )
+
+    sin_espejar = [r for r in resultados if not r[1] and r[2] != NO_ES_IMAGEN]
     if sin_espejar:
         print(f'Sin espejar: {len(sin_espejar)}')
         for pid, _url, aviso, _t, original in sin_espejar[:15]:
             print(f'  id={pid} {aviso} :: {original[:80]}')
-        print('  (las rotas se pueden limpiar con scripts/reparar_imagenes_rotas.py)')
+        print('  (hosts que bloquean al datacenter; en el navegador siguen viendose)')
 
-    # Una URL que devuelve HTML no es una foto: nunca se podrá renderizar. Se
-    # devuelve al pipeline (queda 'pendiente') en vez de dejarla rota para siempre.
-    no_imagenes = [(pid, original) for pid, _u, aviso, _t, original in resultados
-                   if aviso == NO_ES_IMAGEN]
     if no_imagenes:
-        with get_db_connection() as conexion:
-            cursor = conexion.cursor()
-            for pid, original in no_imagenes:
-                cursor.execute(
-                    """
-                    UPDATE productos
-                    SET imagen_url = NULL, imagen_fuente = NULL, imagen_estado = 'pendiente'
-                    WHERE id = ? AND imagen_url = ?
-                    """,
-                    (pid, original),
-                )
-            conexion.commit()
-        print(f'\nDevueltas al pipeline (no eran imagenes): {len(no_imagenes)}')
-        for pid, original in no_imagenes:
-            print(f'  id={pid} :: {original[:80]}')
+        print(f'\nDevueltas al pipeline (no eran imagenes): {no_imagenes}')
     return 0
 
 
