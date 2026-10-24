@@ -83,6 +83,13 @@ muestra los registros de validación si hacen falta. **No** actives el
 
 ## 6. Verificación (obligatoria tras activar)
 
+> Nota medida en producción: las respuestas del origen llevan `Vary: Cookie`
+> incluso en `/robots.txt`, `/health/live` y los estáticos **que no tocan la
+> sesión** — o sea, lo añade el borde de Render, no la app. No es bloqueante: las
+> reglas de arriba (bypass con cookie + caché de anónimos) son correctas tanto si
+> Cloudflare respeta `Vary` como si no. Lo que sí importa, y ya está medido, es
+> que una visita anónima **no manda `Set-Cookie`**.
+
 ```bash
 # 1) el HTML anónimo lo sirve el borde en la segunda visita
 curl -sI https://localis.com.ve/ | findstr /i "cf-cache-status cache-control"
