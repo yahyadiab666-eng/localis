@@ -360,6 +360,38 @@ def url_vista_previa(comercio_id):
         return ''
 
 
+def _ttl_html_publico():
+    """Segundos de caché del HTML anónimo (0 = apagado). ``LOCALIS_CACHE_HTML_SEG``."""
+    try:
+        return max(0, int(os.environ.get('LOCALIS_CACHE_HTML_SEG', '0') or '0'))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _html_publico_cacheado(clave, render, *, permitir=True):
+    """Sirve una página pública cacheando el **HTML ya renderizado**.
+
+    Motivo (medido): la caché de datos no evita re-renderizar ~700 KB de
+    plantillas en cada visita, y ese render es el coste de CPU por petición.
+    Guardar el HTML anónimo —idéntico para todos, porque desde el arreglo de
+    caché no lleva sesión ni token CSRF— quita ese coste.
+
+    Solo aplica si la petición **no** trae cookie de sesión, si ``permitir`` y si
+    el interruptor ``LOCALIS_CACHE_HTML_SEG`` está activo (>0). Ante cualquier
+    duda renderiza normal: nunca puede dejar la página en blanco.
+    """
+    ttl = _ttl_html_publico()
+    if not permitir or ttl <= 0 or _peticion_con_sesion():
+        return render()
+    try:
+        from backend.runtime_cache import get_or_load
+
+        html = get_or_load(clave, render, ttl)
+        return Response(html, mimetype='text/html')
+    except Exception:
+        return render()
+
+
 @app.context_processor
 def _injectar_placeholders_imagen():
     return {
@@ -1273,21 +1305,47 @@ def index():
     _debug_imagenes_antes_de_render(productos, 'index')
     from backend.seo import json_ld_website
 
-    respuesta = render_template(
-        'cliente.html',
-        productos=productos,
-        categorias=categorias,
-        tasa=tasa_actual,
-        q=palabra_clave,
-        categoria_actual=categoria,
-        banner_url=banner_url or DEFAULT_BANNER_URL,
-        default_banner=DEFAULT_BANNER_URL,
-        whatsapp=whatsapp,
-        whatsapp_url=WHATSAPP_SOPORTE_URL,
-        pagina=pagina,
-        hay_mas=hay_mas,
-        seo_json_ld=json_ld_website(request.url_root),
-    )
+    respuesta = None
+    try:
+        def _render_portada():
+            return render_template(
+                'cliente.html',
+                productos=productos,
+                categorias=categorias,
+                tasa=tasa_actual,
+                q=palabra_clave,
+                categoria_actual=categoria,
+                banner_url=banner_url or DEFAULT_BANNER_URL,
+                default_banner=DEFAULT_BANNER_URL,
+                whatsapp=whatsapp,
+                whatsapp_url=WHATSAPP_SOPORTE_URL,
+                pagina=pagina,
+                hay_mas=hay_mas,
+                seo_json_ld=json_ld_website(request.url_root),
+            )
+
+        respuesta = _html_publico_cacheado(
+            f'html:portada:{request.full_path}',
+            _render_portada,
+            permitir=not catalogo_degradado,
+        )
+    except Exception as error:
+        logger.error(f'[Localis] render de portada fallo: {type(error).__name__}: {error}')
+        respuesta = render_template(
+            'cliente.html',
+            productos=productos,
+            categorias=categorias,
+            tasa=tasa_actual,
+            q=palabra_clave,
+            categoria_actual=categoria,
+            banner_url=banner_url or DEFAULT_BANNER_URL,
+            default_banner=DEFAULT_BANNER_URL,
+            whatsapp=whatsapp,
+            whatsapp_url=WHATSAPP_SOPORTE_URL,
+            pagina=pagina,
+            hay_mas=hay_mas,
+            seo_json_ld=json_ld_website(request.url_root),
+        )
     if catalogo_degradado:
         # Señal para el Service Worker: no cachear esta respuesta degradada.
         respuesta.headers['X-Localis-No-Cache'] = '1'
@@ -1456,7 +1514,10 @@ def tienda_publica(comercio_id=None, slug=None):
     palabra_clave = request.args.get('q', '').strip()
     origen = (request.args.get('origen') or 'web').strip().lower()[:20]
     contexto = _contexto_tienda(comercio, palabra_clave, origen)
-    return render_template('tienda_publica.html', **contexto)
+    return _html_publico_cacheado(
+        f'html:tienda:{slug or comercio_id}:{request.full_path}',
+        lambda: render_template('tienda_publica.html', **contexto),
+    )
 
 
 @app.route('/vista-previa/<int:comercio_id>/<token>')
