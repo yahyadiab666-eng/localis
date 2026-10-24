@@ -5,6 +5,27 @@
 
 ## 1. Contratar el dominio
 
+### ¿Sirve un `.ve` para el plan de CDN? **Sí (verificado)**
+
+Lo que hacía falta comprobar es si NIC.ve deja **delegar los nameservers** a
+Cloudflare (sin eso no hay caché ni WAF). Medido con dominios `.ve`/`.com.ve`
+reales:
+
+| Dominio | Nameservers | Veredicto |
+|---|---|---|
+| `traki.com.ve` | `quincy.ns.cloudflare.com`, `katelyn.ns.cloudflare.com` | **Cloudflare** ✅ |
+| `venelogia.com` | `lloyd.ns.cloudflare.com`, `laura.ns.cloudflare.com` | **Cloudflare** ✅ |
+| `farmatodo.com.ve` | GoDaddy DNS | delegación externa ✅ |
+| `centralmadeirense.com.ve` | Cirion | delegación externa ✅ |
+| `mercadolibre.com.ve` | AWS Route53 | delegación externa ✅ |
+
+**Conclusión:** un `.ve` (o `.com.ve`) funciona con todo lo de `docs/cloudflare.md`.
+
+**Lo que hay que confirmar antes de pagar** (el DNS no prueba disponibilidad):
+disponibilidad en NIC.ve, el trámite (cédula/RIF, pago en **bolívares**) y que la
+**renovación no es automática** — apuntar el vencimiento en el calendario, porque
+perder el dominio tumbaría la app y el APK.
+
 ### Estado de los candidatos (medido por DNS: "libre" = no resuelve, hay que confirmarlo en el registrador)
 
 | Dominio | Estado |
@@ -25,8 +46,17 @@ Confirmar siempre en el registrador (el DNS no prueba que esté libre).
 | GoDaddy / Hostinger | $15-25+ | varios | más caro y con extras que no hacen falta |
 | **NIC.ve** (`.ve`, `.com.ve`) | variable, en bolívares | pago local (RIF/cédula) | trámite local más lento; DNS más básico |
 
-**Recomendación:** un **`.com`** (el TWA/Play y los buscadores lo tratan mejor y
-es el más simple) en Porkbun o Namecheap y luego los nameservers a Cloudflare.
+**Recomendación (revisada con la evidencia de arriba):**
+- **Primera opción: `localis.ve`** — marca limpia (mejor que `localisve.com`),
+  señal geográfica para Venezuela y **el plan de CDN funciona** (verificado).
+  Contra: trámite local en NIC.ve (cédula/RIF), pago en **bolívares** y
+  renovación **no automática**.
+- **Plan B para no bloquearse: `localisve.com`** en Porkbun/Namecheap (10 min con
+  tarjeta). Si el trámite de NIC.ve se tarda, se arranca con el `.com` y luego se
+  añade el `.ve` redirigiendo.
+- Si el presupuesto lo permite, **registrar además `localis.com.ve`**: es el
+  formato "corporativo" que muchos comercios esperan, y evita que otro lo registre
+  y confunda a tus usuarios.
 
 ### Pasos
 
