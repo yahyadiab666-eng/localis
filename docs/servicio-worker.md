@@ -149,6 +149,35 @@ Métricas del **servidor** durante la prueba: **p50 = 7–22 ms · p95 = 78–17
 (una página cada 10–15 s). El objetivo de 200–300 queda **cubierto**. Si quieres
 margen para un pico viral, subir el web a **1c-2g** (~2×) da ~60 páginas/s.
 
+### Escalado del web: el GIL y `WEB_CONCURRENCY` (medido)
+
+| Config | Portada | Errores |
+|---|---|---|
+| 0.5 vCPU, 1 proceso | 26–38 req/s | **502 masivos al forzar** (~25 %) |
+| 1 vCPU, 1 proceso | 33,8 req/s | 0 |
+| 2 vCPU, 1 proceso | 38,1 req/s | 0 |
+| **2 vCPU, 2 procesos** | **106,1 req/s** | **0** |
+
+Con `WEB_CONCURRENCY=1` Python queda topado por el **GIL a ~1 núcleo**: los vCPU
+extra del plan **se desperdician** (por eso 0,5→2 vCPU dio solo +46 %). Con **2
+procesos** y 2 vCPU el techo se multiplica (**~3–4×**) y **los 502 desaparecen**
+(handler p95 de 173 ms → 25 ms).
+
+**Reglas:**
+- `1c-2g` → con **1 proceso** (ya usa el núcleo entero).
+- `2c-4g` → con **`WEB_CONCURRENCY=2`** (~2× por proceso; con 1 proceso no sirve).
+- Con **0.5 vCPU** más concurrencia no ayuda (medio núcleo ya se llena); ahí el
+  orden es **CDN → menos CPU por página → plan/workers**.
+
+**Ojo (estado por proceso, ×N):** cachés, rate limit (el límite efectivo se
+multiplica), métricas, semáforo de OCR y contadores del asistente. Las
+**importaciones ya son compartidas** (`import_jobs`), que es lo que habilita >1
+worker.
+
+**Hallazgo operativo importante:** por encima del techo, la cola crece y el proxy
+empieza a devolver **502** (no lentitud: **páginas de error**). Ante un pico real, la
+mitigación es CDN delante + más workers.
+
 ### Revisión de la base de datos
 
 Lo que se encontró y arregló:
