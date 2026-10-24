@@ -44,13 +44,7 @@ except Exception:
 
 MARCA_STORAGE = '/storage/v1/object/public/'
 MAX_BYTES_DESCARGA = 8 * 1024 * 1024
-CABECERAS = {
-    'User-Agent': (
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-        '(KHTML, like Gecko) Chrome/124.0 Safari/537.36'
-    ),
-    'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-}
+NO_ES_IMAGEN = 'no es una imagen valida'
 
 
 def _productos_externos(cursor, maximo):
@@ -69,16 +63,22 @@ def _productos_externos(cursor, maximo):
 
 
 def _descargar(url):
-    """(bytes, content_type) o (None, motivo)."""
-    import httpx
+    """(bytes, content_type) o (None, motivo).
 
+    Usa el cliente HTTP robusto del repositorio (rotación de User-Agent,
+    backoff exponencial, proxies opcionales): muchos hosts bloquean al
+    datacenter y un GET simple falla con 403 o corta la conexión.
+    """
+    from urllib.parse import urlparse
+
+    from backend.http_client import get as http_get
+
+    partes = urlparse(url)
+    referer = f'{partes.scheme}://{partes.netloc}/' if partes.netloc else None
     try:
-        with httpx.Client(
-            timeout=httpx.Timeout(30.0, connect=8.0),
-            follow_redirects=True,
-            headers=CABECERAS,
-        ) as http:
-            respuesta = http.get(url)
+        respuesta = http_get(url, tipo='img', referer=referer, timeout=25.0, reintentos=3)
+        if respuesta is None:
+            return None, 'sin respuesta'
         if respuesta.status_code != 200:
             return None, f'HTTP {respuesta.status_code}'
         datos = respuesta.content
@@ -107,7 +107,7 @@ def _espejar(fila):
         imagen = Image.open(io.BytesIO(datos))
         imagen.load()
     except Exception:
-        return pid, None, 'no es una imagen valida', 0
+        return pid, None, NO_ES_IMAGEN, 0
     del imagen, tipo
     try:
         comprimido, _tipo, _nombre = comprimir_bytes_a_bytes(
@@ -157,6 +157,7 @@ def main() -> int:
 
     espejadas = [(pid, url, original) for pid, url, aviso, _t, original in resultados if url]
     if espejadas:
+        aplicadas = 0
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
             for pid, url, original in espejadas:
@@ -167,8 +168,15 @@ def main() -> int:
                     """,
                     (url, pid, original),
                 )
+                aplicadas += int(cursor.rowcount or 0)
             conexion.commit()
-        print(f'\nActualizadas en la base: {len(espejadas)}')
+        saltadas = len(espejadas) - aplicadas
+        print(f'\nActualizadas en la base: {aplicadas} de {len(espejadas)} espejadas')
+        if saltadas:
+            print(
+                f'  {saltadas} se saltaron: la fila cambio mientras tanto '
+                '(el pipeline de imagenes tambien trabaja en paralelo)'
+            )
 
     sin_espejar = [r for r in resultados if not r[1]]
     if sin_espejar:
@@ -176,6 +184,27 @@ def main() -> int:
         for pid, _url, aviso, _t, original in sin_espejar[:15]:
             print(f'  id={pid} {aviso} :: {original[:80]}')
         print('  (las rotas se pueden limpiar con scripts/reparar_imagenes_rotas.py)')
+
+    # Una URL que devuelve HTML no es una foto: nunca se podrá renderizar. Se
+    # devuelve al pipeline (queda 'pendiente') en vez de dejarla rota para siempre.
+    no_imagenes = [(pid, original) for pid, _u, aviso, _t, original in resultados
+                   if aviso == NO_ES_IMAGEN]
+    if no_imagenes:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            for pid, original in no_imagenes:
+                cursor.execute(
+                    """
+                    UPDATE productos
+                    SET imagen_url = NULL, imagen_fuente = NULL, imagen_estado = 'pendiente'
+                    WHERE id = ? AND imagen_url = ?
+                    """,
+                    (pid, original),
+                )
+            conexion.commit()
+        print(f'\nDevueltas al pipeline (no eran imagenes): {len(no_imagenes)}')
+        for pid, original in no_imagenes:
+            print(f'  id={pid} :: {original[:80]}')
     return 0
 
 
