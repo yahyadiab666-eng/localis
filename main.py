@@ -1354,6 +1354,31 @@ def index():
         banner_url = DEFAULT_BANNER_URL
         whatsapp = WHATSAPP_SOPORTE
 
+    # Banners B2B de la portada: se cuentan y rotan en el carrusel. Si no hay
+    # ninguno se muestra el banner principal (nunca queda un hueco vacío).
+    rotacion_defecto = 60
+    try:
+        from backend.banners_b2b import (
+            ROTACION_SEGUNDOS,
+            listar_banners_activos,
+        )
+
+        rotacion_defecto = ROTACION_SEGUNDOS
+        banners_portada = listar_banners_activos()
+    except Exception as error:
+        logger.error(
+            f'[Localis] banners B2B no disponibles: {type(error).__name__}: {error}'
+        )
+        banners_portada = []
+
+    try:
+        crudo_rotacion = os.getenv('LOCALIS_BANNER_ROTACION_SEG') or ''
+        rotacion_banner = max(
+            10, int(crudo_rotacion) if crudo_rotacion else rotacion_defecto
+        )
+    except (TypeError, ValueError):
+        rotacion_banner = rotacion_defecto
+
     # Fase 1: chips de categorías dinámicos (obtenidos de la BD) + emoji.
     # OJO: usar una variable distinta a ``categoria`` para no sobrescribir el
     # filtro de la URL (string) con el dict de cada categoría.
@@ -1381,6 +1406,8 @@ def index():
                 categoria_actual=categoria,
                 banner_url=banner_url or DEFAULT_BANNER_URL,
                 default_banner=DEFAULT_BANNER_URL,
+                banners_portada=banners_portada,
+                banner_rotacion_seg=rotacion_banner,
                 whatsapp=whatsapp,
                 whatsapp_url=WHATSAPP_SOPORTE_URL,
                 pagina=pagina,
@@ -1404,6 +1431,8 @@ def index():
             categoria_actual=categoria,
             banner_url=banner_url or DEFAULT_BANNER_URL,
             default_banner=DEFAULT_BANNER_URL,
+            banners_portada=banners_portada,
+            banner_rotacion_seg=rotacion_banner,
             whatsapp=whatsapp,
             whatsapp_url=WHATSAPP_SOPORTE_URL,
             pagina=pagina,

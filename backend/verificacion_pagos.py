@@ -113,12 +113,18 @@ def concepto_boost(dias, producto_id):
     return f'boost:{int(dias)}:prod:{int(producto_id)}'
 
 
+def concepto_banner(dias):
+    """Concepto para un alquiler de banner B2B: ``banner:30``."""
+    return f'banner:{int(dias)}'
+
+
 def parsear_concepto(concepto):
     """Interpreta el concepto guardado en la alerta.
 
-    Devuelve ``{'tipo': 'plan', 'plan_tipo': ...}`` o
-    ``{'tipo': 'boost', 'dias': n, 'producto_id': n}``, o ``None`` si el formato
-    no es reconocible. Función pura: no toca la BD.
+    Devuelve ``{'tipo': 'plan', 'plan_tipo': ...}``,
+    ``{'tipo': 'boost', 'dias': n, 'producto_id': n}`` o
+    ``{'tipo': 'banner', 'dias': n}``, o ``None`` si el formato no es
+    reconocible. Función pura: no toca la BD.
     """
     texto = str(concepto or '').strip().lower()
     if not texto:
@@ -133,6 +139,11 @@ def parsear_concepto(concepto):
                 'dias': int(partes[1]),
                 'producto_id': int(partes[3]),
             }
+        except (TypeError, ValueError):
+            return None
+    if partes[0] == 'banner' and len(partes) == 2:
+        try:
+            return {'tipo': 'banner', 'dias': int(partes[1])}
         except (TypeError, ValueError):
             return None
     return None

@@ -59,7 +59,10 @@ HECHOS_CLAVE = (
     'Business 35 USD/mes (productos ilimitados).\n'
     '- Pago de planes: Pago Movil o Binance Pay (USDT). Se sube una captura del '
     'comprobante; se verifica con OCR o pasa a revision manual.\n'
-    '- Destacados: 3 dias 2 USD; 5 dias 3 USD; 7 dias 4 USD.\n'
+    '- Destacados: 3 dias 2 USD; 5 dias 3 USD; 7 dias 4 USD (con Binance '
+    'Pay, 1 USD menos: 1, 2 y 3 USD).\n'
+    '- Banner en la portada: 60 USD con Pago Movil o 50 USD con Binance Pay, '
+    '30 dias, medida 1200x400 px; maximo 5 banners simultaneos.\n'
     '- Puntos: 1 punto por comercio referido; canjes: 3 puntos = 3 dias, '
     '4 puntos = 5 dias, 5 puntos = 7 dias de destacado.'
 )
@@ -70,7 +73,10 @@ HECHOS_CLAVE_GRATIS = (
     'DATOS CLAVE DE LOCALIS (cifras oficiales; usalas tal cual):\n'
     '- Localis es GRATUITO y sin limites: no hay planes de pago ni '
     'suscripciones ni limites de productos.\n'
-    '- Destacados: 3 dias 2 USD; 5 dias 3 USD; 7 dias 4 USD.\n'
+    '- Destacados: 3 dias 2 USD; 5 dias 3 USD; 7 dias 4 USD (con Binance '
+    'Pay, 1 USD menos: 1, 2 y 3 USD).\n'
+    '- Banner en la portada: 60 USD con Pago Movil o 50 USD con Binance Pay, '
+    '30 dias, medida 1200x400 px; maximo 5 banners simultaneos.\n'
     '- Puntos: 1 punto por comercio referido; canjes: 3 puntos = 3 dias, '
     '4 puntos = 5 dias, 5 puntos = 7 dias de destacado.'
 )
@@ -116,7 +122,11 @@ def _resumen_planes():
 def _resumen_destacados():
     """Linea con los precios REALES de destacados por duracion."""
     try:
-        from backend.boosts import PRECIOS_BOOST_USD
+        from backend.boosts import (
+            DESCUENTO_BINANCE_USD,
+            PRECIOS_BOOST_USD,
+            precio_con_descuento_binance,
+        )
 
         if not PRECIOS_BOOST_USD:
             return ''
@@ -124,7 +134,14 @@ def _resumen_destacados():
             f'{dias} dias {precio:.0f} USD'
             for dias, precio in sorted(PRECIOS_BOOST_USD.items())
         )
-        return f'Destacados: {partes}.'
+        binance = '; '.join(
+            f'{dias} dias {precio_con_descuento_binance(precio, "binance"):.0f} USD'
+            for dias, precio in sorted(PRECIOS_BOOST_USD.items())
+        )
+        return (
+            f'Destacados: {partes}. Con Binance Pay '
+            f'{DESCUENTO_BINANCE_USD:.0f} USD menos: {binance}.'
+        )
     except Exception:
         return ''
 

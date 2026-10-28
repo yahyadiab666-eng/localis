@@ -53,6 +53,7 @@ SIN_RED = [
     'test_tasa_automatica.py',
     'test_cache_rendimiento.py',
     'test_boost_referencias.py',
+    'test_banners_b2b.py',
     'test_verificacion_pagos.py',
     'test_compresion.py',
     'test_xlsx_reconocimiento.py',

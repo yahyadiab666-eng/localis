@@ -137,6 +137,9 @@ def _etiqueta_concepto(plan_tipo):
     if valor.startswith('boost_'):
         dias = valor[len('boost_'):].rstrip('d') or '?'
         return f'destacado {dias} dias'
+    if valor.startswith('banner_'):
+        dias = valor[len('banner_'):].rstrip('d') or '?'
+        return f'banner en portada {dias} dias'
     if fase_gratuita():
         return 'concepto del pago'
     return f'plan {valor or "?"}'
@@ -258,6 +261,13 @@ def _activar_concepto(comercio_id, concepto, actor_id=None):
 
             ok, mensaje, _ = destacar_producto_por_dias(actor_id, producto_id, dias)
             return bool(ok), mensaje
+        if tipo == 'banner':
+            dias = concepto.get('dias')
+            if not dias:
+                return False, 'El banner del pago no es activable automaticamente.'
+            from backend.banners_b2b import extender_banner_b2b
+
+            return extender_banner_b2b(comercio_id, dias)
     except Exception as error:
         _log.warning('no se pudo reactivar lo pagado: %s', error)
         return False, 'No pude reactivar lo pagado automaticamente.'

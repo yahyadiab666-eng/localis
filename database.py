@@ -149,6 +149,7 @@ TABLAS_PERMITIDAS = frozenset({
     'metricas_diarias',
     'imagenes_automaticas',
     'boosts',
+    'banners_b2b',
     'referidos',
     'canjes_puntos',
     'import_jobs',
@@ -281,6 +282,22 @@ COLUMNAS_ESQUEMA = {
         ('estado', "TEXT DEFAULT 'activo'"),
         ('fecha_inicio', 'TIMESTAMPTZ'),
         ('fecha_fin', 'TIMESTAMPTZ'),
+        ('fecha_registro', 'TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP'),
+    ],
+    'banners_b2b': [
+        ('comercio_id', 'INTEGER'),
+        ('titulo', 'TEXT'),
+        ('imagen_url', 'TEXT'),
+        ('enlace_url', 'TEXT'),
+        ('precio_usd', 'DOUBLE PRECISION DEFAULT 0'),
+        ('dias_duracion', 'INTEGER DEFAULT 30'),
+        ('referencia_pago', 'TEXT'),
+        ('metodo', "TEXT DEFAULT 'pago_movil'"),
+        ('estado', "TEXT DEFAULT 'activo'"),
+        ('fecha_inicio', 'TIMESTAMPTZ'),
+        ('fecha_fin', 'TIMESTAMPTZ'),
+        # Veces que el carrusel mostró este banner (rotación de la portada).
+        ('impresiones', 'INTEGER DEFAULT 0'),
         ('fecha_registro', 'TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP'),
     ],
     'referidos': [
@@ -1936,6 +1953,30 @@ def _crear_tabla_boosts(cursor):
     )
 
 
+def _crear_tabla_banners_b2b(cursor):
+    """Banners B2B alquilados que rotan en la portada (ver backend/banners_b2b.py)."""
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS banners_b2b (
+            id SERIAL PRIMARY KEY,
+            comercio_id INTEGER REFERENCES comercios(id) ON DELETE CASCADE,
+            titulo TEXT,
+            imagen_url TEXT,
+            enlace_url TEXT,
+            precio_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+            dias_duracion INTEGER DEFAULT 30,
+            referencia_pago TEXT,
+            metodo TEXT DEFAULT 'pago_movil',
+            estado TEXT DEFAULT 'activo',
+            fecha_inicio TIMESTAMPTZ,
+            fecha_fin TIMESTAMPTZ,
+            impresiones INTEGER DEFAULT 0,
+            fecha_registro TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
 def _crear_tabla_referidos(cursor):
     cursor.execute(
         """
@@ -2028,6 +2069,7 @@ def _crear_tablas(cursor):
         ('metricas_diarias', _crear_tabla_metricas_diarias),
         ('imagenes_automaticas', _crear_tabla_imagenes_automaticas),
         ('boosts', _crear_tabla_boosts),
+        ('banners_b2b', _crear_tabla_banners_b2b),
         ('import_jobs', _crear_tabla_import_jobs),
         ('referidos', _crear_tabla_referidos),
         ('canjes_puntos', _crear_tabla_canjes_puntos),
@@ -2462,6 +2504,10 @@ def _crear_indices(cursor):
         'CREATE INDEX IF NOT EXISTS idx_boosts_comercio ON boosts(comercio_id)',
         # Anti doble-gasto: la referencia de pago móvil es única en boosts.
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_boosts_referencia ON boosts(referencia_pago) WHERE referencia_pago IS NOT NULL',
+        # Banners B2B de la portada: vigencia, comercio y anti doble-gasto.
+        'CREATE INDEX IF NOT EXISTS idx_banners_b2b_vigencia ON banners_b2b(estado, fecha_fin)',
+        'CREATE INDEX IF NOT EXISTS idx_banners_b2b_comercio ON banners_b2b(comercio_id)',
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_banners_b2b_referencia ON banners_b2b(referencia_pago) WHERE referencia_pago IS NOT NULL',
         # Recompensas y referidos B2B por puntos.
         'CREATE INDEX IF NOT EXISTS idx_referidos_referente ON referidos(referente_comercio_id)',
         'CREATE INDEX IF NOT EXISTS idx_canjes_comercio ON canjes_puntos(comercio_id)',

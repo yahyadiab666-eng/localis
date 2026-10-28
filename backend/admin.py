@@ -198,6 +198,10 @@ def aplicar_accion_revision(ticket_id, accion, admin_id):
         exito, mensaje = confirmar_pago_suscripcion(
             comercio_id, concepto['plan_tipo'], 1
         )
+    elif concepto['tipo'] == 'banner':
+        from backend.banners_b2b import extender_banner_b2b
+
+        exito, mensaje = extender_banner_b2b(comercio_id, concepto['dias'])
     else:
         exito, mensaje, _ = destacar_producto_por_dias(
             admin_id, concepto['producto_id'], concepto['dias']

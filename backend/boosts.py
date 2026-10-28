@@ -10,10 +10,15 @@ Reutiliza EXACTAMENTE el sistema de pagos existente en ``Localis``:
   - Formato de referencia: 6 dígitos para pago móvil; 6-24 dígitos para el ID de
     orden de Binance Pay (idéntico a ``activar_suscripcion_por_comprobante``).
 
-Precios fijos por duración (USD):
+Precios fijos por duración (USD), pagando con Pago Móvil:
   - 3 días -> $2.00
   - 5 días -> $3.00
   - 7 días -> $4.00
+
+Con **Binance Pay (USDT)** el destaque tiene un descuento fijo de 1 USD sobre el
+precio original (``DESCUENTO_BINANCE_USD``), así que queda en $1.00 / $2.00 / $3.00.
+El precio que se cobra y el que valida el OCR salen SIEMPRE de
+:func:`precio_boost` según el método de pago.
 
 Blindaje (fail-safe):
   - Verifica que el ``producto_id`` pertenezca al ``comercio_id`` de la sesión.
@@ -35,13 +40,37 @@ import psycopg2
 from backend.db import get_db_connection
 from backend.subscriptions import _referencia_ya_usada
 
-# Duración (días) -> precio fijo en USD.
+# Duración (días) -> precio fijo en USD (pagando con Pago Móvil).
 PRECIOS_BOOST_USD = {3: 2.0, 5: 3.0, 7: 4.0}
 DIAS_BOOST_VALIDOS = tuple(sorted(PRECIOS_BOOST_USD))
+
+# Descuento fijo (USD) al pagar el destaque con Binance Pay (USDT).
+DESCUENTO_BINANCE_USD = 1.0
+# Suelo de seguridad: nunca se cobra menos que esto, aunque cambien los precios.
+PRECIO_BOOST_MINIMO_USD = 0.5
 
 # Compatibilidad con el contrato anterior del módulo.
 DURACION_BOOST_DIAS = 7
 PRECIO_BOOST_USD = PRECIOS_BOOST_USD[DURACION_BOOST_DIAS]
+
+
+def es_metodo_binance(metodo):
+    """True si el método de pago es Binance Pay (acepta ``binance*``)."""
+    return str(metodo or '').strip().lower().startswith('binance')
+
+
+def precio_con_descuento_binance(precio_usd, metodo='pago_movil'):
+    """Aplica (o no) el descuento de Binance Pay a un precio base en USD.
+
+    Función pura: nunca lanza; ante un precio no numérico devuelve 0.0.
+    """
+    try:
+        base = float(precio_usd or 0)
+    except (TypeError, ValueError):
+        base = 0.0
+    if not es_metodo_binance(metodo):
+        return round(base, 2)
+    return round(max(PRECIO_BOOST_MINIMO_USD, base - DESCUENTO_BINANCE_USD), 2)
 
 
 # ==========================================
@@ -83,19 +112,40 @@ def _ahora_utc():
 
 
 def opciones_boost():
-    """Opciones de duración/precio para la interfaz del comerciante."""
-    return [
-        {'dias': dias, 'precio_usd': PRECIOS_BOOST_USD[dias]}
-        for dias in DIAS_BOOST_VALIDOS
-    ]
+    """Opciones de duración/precio para la interfaz del comerciante.
+
+    Cada opción trae el precio de Pago Móvil (``precio_usd``) y el de Binance
+    Pay con el descuento ya aplicado (``precio_binance_usd``), para que la
+    plantilla muestre ambos sin recalcular nada en JS.
+    """
+    opciones = []
+    for dias in DIAS_BOOST_VALIDOS:
+        base = PRECIOS_BOOST_USD[dias]
+        binance = precio_con_descuento_binance(base, 'binance')
+        opciones.append(
+            {
+                'dias': dias,
+                'precio_usd': base,
+                'precio_binance_usd': binance,
+                'descuento_binance_usd': round(base - binance, 2),
+            }
+        )
+    return opciones
 
 
-def precio_boost(dias):
-    """Precio USD de una duración válida, o ``None``."""
+def precio_boost(dias, metodo='pago_movil'):
+    """Precio USD de una duración válida según el método, o ``None``.
+
+    Con Binance Pay se descuenta ``DESCUENTO_BINANCE_USD`` del precio original.
+    Sin ``metodo`` devuelve el precio de Pago Móvil (contrato anterior).
+    """
     try:
-        return PRECIOS_BOOST_USD.get(_a_int(dias, 'dias'))
+        base = PRECIOS_BOOST_USD.get(_a_int(dias, 'dias'))
     except ValueError:
         return None
+    if base is None:
+        return None
+    return precio_con_descuento_binance(base, metodo)
 
 
 def boost_activo(fecha_fin):
@@ -203,7 +253,7 @@ def activar_boost_producto(
     if dias not in PRECIOS_BOOST_USD:
         return False, 'Duración no válida. Elige 3, 5 o 7 días.'
 
-    es_binance = str(metodo or '').startswith('binance')
+    es_binance = es_metodo_binance(metodo)
     metodo = 'binance' if es_binance else 'pago_movil_ocr'
     referencia = sanitizar_referencia(referencia)
     if not referencia_valida(referencia, metodo):
@@ -230,7 +280,8 @@ def activar_boost_producto(
         logger.error(f'[Localis Boost] no se pudo validar la referencia: {error}')
         return False, 'No se pudo validar la referencia de pago. Intenta de nuevo.'
 
-    precio_usd = PRECIOS_BOOST_USD[dias]
+    # Precio real del método elegido (Binance Pay aplica el descuento fijo).
+    precio_usd = precio_boost(dias, metodo)
     inicio = _ahora_utc()
     fin = inicio + timedelta(days=dias)
     plan_tipo_boost = f'boost_{dias}d'
@@ -309,7 +360,11 @@ def activar_boost_producto(
 
             conexion.commit()
 
-        return True, f'¡Producto destacado por {dias} días! (${precio_usd:.2f} USD)'
+        sufijo = ' · Binance Pay' if es_binance else ''
+        return (
+            True,
+            f'¡Producto destacado por {dias} días! (${precio_usd:.2f} USD{sufijo})',
+        )
     except Exception as error:
         # El context manager ya ejecutó rollback al propagarse la excepción.
         if _es_referencia_duplicada(error):
