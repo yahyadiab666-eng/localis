@@ -4,6 +4,17 @@ Marketplace venezolano. Monolito **Flask (Python 3)** + Jinja2 server-rendered.
 No hay bundler para la web: `templates/` y `static/` se sirven directamente.
 `android/` es una **TWA de Capacitor** aparte (no forma parte del loop de Python).
 
+## Git
+
+- **Todos los commits se hacen en `main_limpia`** (rama de referencia y de despliegue).
+  Trabaja, comitea y haz `push` directamente a `origin/main_limpia`; **no** abras
+  ramas nuevas para features/fixes salvo petición explícita. Las ramas antiguas
+  (`main`, `mejora/noche-autonoma`) ya están fusionadas y no se usan.
+- Antes de commitear: `ruff check .` (el CI lo corre primero) y
+  `python scripts/run_tests.py --solo-sin-red`.
+- Mensajes de commit en **español** y estilo Conventional Commits
+  (`feat(...)`, `fix(...)`, `docs(...)`, `perf(...)`), como el resto del historial.
+
 ## Comandos
 
 ```bash
