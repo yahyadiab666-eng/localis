@@ -243,7 +243,8 @@ def listar_banners_activos(limite=MAX_BANNERS_PORTADA):
             cursor.execute(
                 """
                 SELECT b.id, b.titulo, b.imagen_url, b.enlace_url,
-                       b.comercio_id, c.nombre AS comercio_nombre
+                       b.comercio_id, b.usuario_id, b.anunciante,
+                       c.nombre AS comercio_nombre
                 FROM banners_b2b b
                 LEFT JOIN comercios c ON c.id = b.comercio_id
                 WHERE COALESCE(b.estado, 'activo') = 'activo'
@@ -263,6 +264,12 @@ def listar_banners_activos(limite=MAX_BANNERS_PORTADA):
     for fila in filas:
         datos = dict(fila) if not isinstance(fila, dict) else fila
         try:
+            # El anunciante es el comercio o, si no tiene tienda, el nombre que
+            # dejó en su cuenta (``anunciante``).
+            nombre = (
+                (datos.get('comercio_nombre') or datos.get('anunciante') or '')
+                .strip()
+            )
             banners.append(
                 {
                     'id': int(datos.get('id')),
@@ -270,7 +277,9 @@ def listar_banners_activos(limite=MAX_BANNERS_PORTADA):
                     'imagen_url': datos.get('imagen_url'),
                     'enlace_url': sanitizar_enlace_banner(datos.get('enlace_url')),
                     'comercio_id': datos.get('comercio_id'),
-                    'comercio_nombre': (datos.get('comercio_nombre') or '').strip(),
+                    'usuario_id': datos.get('usuario_id'),
+                    'comercio_nombre': nombre,
+                    'anunciante': (datos.get('anunciante') or '').strip(),
                 }
             )
         except (TypeError, ValueError):
@@ -342,24 +351,33 @@ def registrar_impresion(banner_id):
         return False
 
 
-def estado_banners_comercio(comercio_id):
-    """Banners de un comercio con su vigencia (para el panel). Nunca lanza."""
+def estado_banners_anunciante(comercio_id=None, usuario_id=None):
+    """Banners de un anunciante (comercio o usuario sin tienda). Nunca lanza.
+
+    Devuelve sus últimos 12 banners con vigencia, fecha de registro, vencimiento
+    e impresiones: es lo que se lista en la página del banner y en el perfil.
+    """
     resultado = []
     try:
-        comercio_id = _a_int(comercio_id, 'comercio_id')
+        if comercio_id:
+            filtro, valor = 'comercio_id = ?', _a_int(comercio_id, 'comercio_id')
+        elif usuario_id:
+            filtro, valor = 'usuario_id = ?', _a_int(usuario_id, 'usuario_id')
+        else:
+            return resultado
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
             cursor.execute(
-                """
+                f"""
                 SELECT id, titulo, imagen_url, enlace_url, estado,
                        fecha_inicio, fecha_fin, fecha_registro, impresiones,
                        metodo
                 FROM banners_b2b
-                WHERE comercio_id = ?
+                WHERE {filtro}
                 ORDER BY id DESC
                 LIMIT 12
                 """,
-                (comercio_id,),
+                (valor,),
             )
             filas = cursor.fetchall() or []
     except Exception as error:
@@ -392,6 +410,11 @@ def estado_banners_comercio(comercio_id):
             }
         )
     return resultado
+
+
+def estado_banners_comercio(comercio_id):
+    """Compatibilidad: banners de un comercio (ver ``estado_banners_anunciante``)."""
+    return estado_banners_anunciante(comercio_id=comercio_id)
 
 
 # ==========================================
@@ -444,28 +467,37 @@ def _registrar_intento_rechazado(comercio_id, referencia, motivo):
 
 
 def activar_banner_b2b(
-    comercio_id,
-    referencia,
-    titulo,
-    imagen_url,
+    comercio_id=None,
+    referencia=None,
+    titulo=None,
+    imagen_url=None,
     enlace_url=None,
     metodo='pago_movil_ocr',
     comprobante_url=None,
     comprobante_hash=None,
     dias=None,
+    usuario_id=None,
+    anunciante=None,
 ):
     """Activa un banner B2B tras validar el pago. Retorna ``(exito, mensaje)``.
 
-    ``metodo`` es ``pago_movil_ocr`` (por defecto) o ``binance``; cada uno tiene
-    su precio (con descuento en Binance) y su formato de referencia. Pago +
-    auditoría + banner se escriben en una única transacción: ante cualquier
-    fallo no queda estado inconsistente.
+    El anunciante es un comercio (``comercio_id``) **o** cualquier usuario sin
+    tienda (``usuario_id`` + ``anunciante``). ``metodo`` es ``pago_movil_ocr``
+    (por defecto) o ``binance``; cada uno tiene su precio (con descuento en
+    Binance) y su formato de referencia. Pago + auditoría + banner se escriben
+    en una única transacción: ante cualquier fallo no queda estado inconsistente.
     """
     try:
-        comercio_id = _a_int(comercio_id, 'comercio_id')
+        comercio_id = _a_int(comercio_id, 'comercio_id') if comercio_id else None
+        usuario_id = _a_int(usuario_id, 'usuario_id') if usuario_id else None
         dias = _a_int(dias, 'dias') if dias is not None else DIAS_BANNER
     except ValueError as error:
         return False, str(error)
+
+    if comercio_id is None and usuario_id is None:
+        return False, 'No se pudo identificar al anunciante del banner.'
+
+    anunciante = ' '.join(str(anunciante or '').split()).strip()[:120] or None
 
     if dias <= 0 or dias > 365:
         dias = DIAS_BANNER
@@ -536,12 +568,25 @@ def activar_banner_b2b(
                         'cuando venza alguno.',
                     )
 
-            # Propiedad inequívoca: el comercio de la sesión debe existir.
-            cursor.execute('SELECT id FROM comercios WHERE id = ?', (comercio_id,))
-            if not cursor.fetchone():
-                conexion.rollback()
-                _registrar_intento_rechazado(comercio_id, referencia, 'comercio_inexistente')
-                return False, 'El comercio no existe.'
+            # Propiedad inequívoca: el anunciante de la sesión debe existir.
+            if comercio_id is not None:
+                cursor.execute(
+                    'SELECT id FROM comercios WHERE id = ?', (comercio_id,)
+                )
+                if not cursor.fetchone():
+                    conexion.rollback()
+                    _registrar_intento_rechazado(
+                        comercio_id, referencia, 'comercio_inexistente'
+                    )
+                    return False, 'El comercio no existe.'
+            else:
+                cursor.execute('SELECT id FROM usuarios WHERE id = ?', (usuario_id,))
+                if not cursor.fetchone():
+                    conexion.rollback()
+                    _registrar_intento_rechazado(
+                        usuario_id, referencia, 'usuario_inexistente'
+                    )
+                    return False, 'La cuenta del anunciante no existe.'
 
             cursor.execute(
                 """
@@ -563,13 +608,15 @@ def activar_banner_b2b(
             cursor.execute(
                 """
                 INSERT INTO banners_b2b
-                    (comercio_id, titulo, imagen_url, enlace_url, precio_usd,
-                     dias_duracion, referencia_pago, metodo, estado,
-                     fecha_inicio, fecha_fin, impresiones)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, 0)
+                    (comercio_id, usuario_id, anunciante, titulo, imagen_url,
+                     enlace_url, precio_usd, dias_duracion, referencia_pago,
+                     metodo, estado, fecha_inicio, fecha_fin, impresiones)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, 0)
                 """,
                 (
                     comercio_id,
+                    usuario_id,
+                    anunciante,
                     titulo,
                     imagen_url,
                     enlace,
@@ -601,29 +648,42 @@ def activar_banner_b2b(
     )
 
 
-def extender_banner_b2b(comercio_id, dias=DIAS_BANNER):
-    """Extiende el alquiler del último banner del comercio (confirmación admin).
+def extender_banner_b2b(comercio_id=None, dias=DIAS_BANNER, referencia=None):
+    """Extiende el alquiler de un banner (confirmación manual del admin).
 
+    Identifica el banner por su ``referencia`` de pago (sirve también para
+    anunciantes sin tienda) o, si no se indica, por el último del comercio.
     Se usa cuando el administrador confirma a mano un pago que no se pudo
     verificar automáticamente. Retorna ``(exito, mensaje)``. Nunca lanza.
     """
     try:
-        comercio_id = _a_int(comercio_id, 'comercio_id')
+        comercio_id = _a_int(comercio_id, 'comercio_id') if comercio_id else None
         dias = max(1, _a_int(dias, 'dias'))
     except ValueError as error:
         return False, str(error)
 
+    ref = sanitizar_referencia(referencia)
+    if not ref and comercio_id is None:
+        return False, 'No se sabe qué banner extender.'
+
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
-            cursor.execute(
-                'SELECT id, fecha_fin FROM banners_b2b WHERE comercio_id = ? '
-                'ORDER BY id DESC LIMIT 1',
-                (comercio_id,),
-            )
+            if ref:
+                cursor.execute(
+                    'SELECT id, fecha_fin FROM banners_b2b WHERE referencia_pago = ? '
+                    'ORDER BY id DESC LIMIT 1',
+                    (ref,),
+                )
+            else:
+                cursor.execute(
+                    'SELECT id, fecha_fin FROM banners_b2b WHERE comercio_id = ? '
+                    'ORDER BY id DESC LIMIT 1',
+                    (comercio_id,),
+                )
             fila = cursor.fetchone()
             if not fila:
-                return False, 'Ese comercio no tiene banners registrados.'
+                return False, 'No hay banners registrados para ese pago.'
             datos = dict(fila) if not isinstance(fila, dict) else fila
             fin = datos.get('fecha_fin')
             ahora = _ahora_utc()

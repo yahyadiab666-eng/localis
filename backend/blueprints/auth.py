@@ -257,10 +257,20 @@ def perfil():
         traceback.print_exc()
         comercios = []
 
+    # Oferta del banner B2B (precios/medidas): la puede alquilar cualquier
+    # usuario, tenga o no una tienda. Solo constantes: no toca la BD.
+    try:
+        from backend.banners_b2b import opciones_banner
+
+        banner_oferta = opciones_banner()
+    except Exception:
+        banner_oferta = {}
+
     return render_template(
         'perfil.html',
         usuario=usuario,
         comercios=comercios,
+        banner_oferta=banner_oferta,
         es_admin=bool(session.get('es_admin')),
         es_comerciante=soy_comerciante,
         has_store=bool(soy_comerciante),

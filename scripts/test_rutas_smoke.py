@@ -74,7 +74,16 @@ def main() -> int:
 
     _revisar(
         cliente,
-        ('/', '/login', '/registro', '/ayuda', '/health', '/health/live', '/health/ready'),
+        (
+            '/',
+            '/login',
+            '/registro',
+            '/ayuda',
+            '/comercio/banner',
+            '/health',
+            '/health/live',
+            '/health/ready',
+        ),
         'Rutas publicas',
     )
 
@@ -95,6 +104,7 @@ def main() -> int:
                 '/comercio/planes',
                 '/comercio/editar',
                 '/comercio/producto/nuevo',
+                '/comercio/banner',
                 '/perfil',
             ),
             'Panel de comercio (sesion valida)',

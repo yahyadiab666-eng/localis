@@ -161,10 +161,13 @@ def aplicar_accion_revision(ticket_id, accion, admin_id):
         return False, 'Esa alerta no es de revisión de pagos.'
 
     comercio_id = ticket.get('referencia_id')
-    if not comercio_id:
-        return False, 'La alerta no tiene comercio asociado.'
-    comercio_id = int(comercio_id)
     concepto = parsear_concepto(ticket.get('concepto'))
+    # Un banner puede ser de un anunciante SIN tienda: se identifica por la
+    # referencia del pago, así que no exige comercio asociado.
+    es_banner = bool(concepto and concepto.get('tipo') == 'banner')
+    if not comercio_id and not es_banner:
+        return False, 'La alerta no tiene comercio asociado.'
+    comercio_id = int(comercio_id) if comercio_id else None
 
     if accion == 'resolver':
         exito, mensaje = resolver_ticket_soporte(ticket_id)
@@ -176,6 +179,8 @@ def aplicar_accion_revision(ticket_id, accion, admin_id):
         return exito, mensaje
 
     if accion == 'suspender':
+        if not comercio_id:
+            return False, 'Esa alerta no tiene comercio que suspender.'
         exito, mensaje = suspender_comercio_temporal(admin_id, comercio_id)
         if exito:
             resolver_ticket_soporte(ticket_id)
@@ -201,7 +206,11 @@ def aplicar_accion_revision(ticket_id, accion, admin_id):
     elif concepto['tipo'] == 'banner':
         from backend.banners_b2b import extender_banner_b2b
 
-        exito, mensaje = extender_banner_b2b(comercio_id, concepto['dias'])
+        exito, mensaje = extender_banner_b2b(
+            comercio_id,
+            concepto['dias'],
+            referencia=ticket.get('referencia_pago'),
+        )
     else:
         exito, mensaje, _ = destacar_producto_por_dias(
             admin_id, concepto['producto_id'], concepto['dias']

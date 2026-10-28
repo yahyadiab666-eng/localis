@@ -129,9 +129,20 @@ def main() -> int:
     _ok(parsear_concepto('banner:x') is None, 'días no numéricos -> None')
     _ok(parsear_concepto('banner') is None, 'sin días -> None')
 
+    print('\n=== Anunciante: comercio o usuario sin tienda ===')
+    _ok(
+        banners_b2b.estado_banners_anunciante() == [],
+        'sin anunciante devuelve lista vacía',
+    )
+    _ok(
+        banners_b2b.estado_banners_comercio(1) == [],
+        'estado del panel degrada a lista vacía',
+    )
+    ok_ext, _ = banners_b2b.extender_banner_b2b()
+    _ok(ok_ext is False, 'extender sin comercio ni referencia no rompe')
+
     print('\n=== Sin BD no rompe la portada ===')
     _ok(banners_b2b.listar_banners_activos() == [], 'sin BD devuelve lista vacía')
-    _ok(banners_b2b.estado_banners_comercio(1) == [], 'estado del panel degrada a lista vacía')
 
     print('\n=== RESULTADO ===')
     if FALLOS:

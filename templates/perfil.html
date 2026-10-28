@@ -87,6 +87,32 @@
       </div>
     </section>
 
+    <!-- Publicidad B2B: banner en la portada (para cualquier usuario) -->
+    {% set oferta = banner_oferta | default({}, true) %}
+    <section class="bg-stone-900 text-white rounded-2xl shadow-sm p-6 sm:p-8">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div class="space-y-1">
+          <h2 class="font-display text-xl font-bold flex items-center gap-2">
+            <i data-lucide="megaphone" class="text-amber-400" style="width:20px;height:20px;"></i>
+            Banner en la portada
+          </h2>
+          <p class="text-sm text-stone-300 leading-relaxed">
+            Publicita tu marca <strong>{{ oferta.dias | default(30) }} días</strong> en el carrusel de la
+            página principal. <strong>No necesitas tener un comercio</strong>.
+          </p>
+          <p class="text-xs text-stone-400">
+            ${{ "%.0f"|format(oferta.precio_usd | default(60)) }} pago móvil ·
+            <span class="text-emerald-300 font-bold">${{ "%.0f"|format(oferta.precio_binance_usd | default(50)) }} Binance Pay</span>
+            · {{ oferta.ancho | default(1200) }} × {{ oferta.alto | default(400) }} px
+          </p>
+        </div>
+        <a href="{{ url_for('comercio.banner_b2b') }}"
+           class="btn-touch inline-flex items-center justify-center gap-2 bg-amber-500 text-stone-900 font-bold px-5 py-2.5 rounded-full text-sm hover:bg-amber-400 transition shrink-0">
+          <i data-lucide="shopping-bag" style="width:16px;height:16px;"></i> Ver y alquilar
+        </a>
+      </div>
+    </section>
+
     <!-- Comercios del usuario -->
     {% if es_comerciante %}
     <section class="bg-white rounded-2xl border border-stone-200 shadow-sm p-6 sm:p-8 space-y-4">

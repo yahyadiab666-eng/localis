@@ -285,7 +285,11 @@ COLUMNAS_ESQUEMA = {
         ('fecha_registro', 'TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP'),
     ],
     'banners_b2b': [
+        # El anunciante puede ser un comercio (``comercio_id``) o cualquier
+        # usuario sin tienda (``usuario_id`` + ``anunciante``).
         ('comercio_id', 'INTEGER'),
+        ('usuario_id', 'INTEGER'),
+        ('anunciante', 'TEXT'),
         ('titulo', 'TEXT'),
         ('imagen_url', 'TEXT'),
         ('enlace_url', 'TEXT'),
@@ -1960,6 +1964,8 @@ def _crear_tabla_banners_b2b(cursor):
         CREATE TABLE IF NOT EXISTS banners_b2b (
             id SERIAL PRIMARY KEY,
             comercio_id INTEGER REFERENCES comercios(id) ON DELETE CASCADE,
+            usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+            anunciante TEXT,
             titulo TEXT,
             imagen_url TEXT,
             enlace_url TEXT,
@@ -2507,6 +2513,7 @@ def _crear_indices(cursor):
         # Banners B2B de la portada: vigencia, comercio y anti doble-gasto.
         'CREATE INDEX IF NOT EXISTS idx_banners_b2b_vigencia ON banners_b2b(estado, fecha_fin)',
         'CREATE INDEX IF NOT EXISTS idx_banners_b2b_comercio ON banners_b2b(comercio_id)',
+        'CREATE INDEX IF NOT EXISTS idx_banners_b2b_usuario ON banners_b2b(usuario_id)',
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_banners_b2b_referencia ON banners_b2b(referencia_pago) WHERE referencia_pago IS NOT NULL',
         # Recompensas y referidos B2B por puntos.
         'CREATE INDEX IF NOT EXISTS idx_referidos_referente ON referidos(referente_comercio_id)',

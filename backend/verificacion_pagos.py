@@ -193,8 +193,11 @@ def describir_revision_pago(
         )
 
     if nombre_comercio:
-        etiqueta = f'{nombre_comercio} (ID {comercio_id})' if comercio_id else nombre_comercio
-        partes.append(f'Comercio: {etiqueta}')
+        etiqueta = (
+            f'{nombre_comercio} (ID {comercio_id})' if comercio_id else nombre_comercio
+        )
+        # Un anunciante sin tienda (banner B2B) no es un comercio.
+        partes.append(f'{"Comercio" if comercio_id else "Anunciante"}: {etiqueta}')
     if referencia:
         partes.append(f'ID de orden: {referencia}')
     if monto is not None:
@@ -241,21 +244,27 @@ def registrar_revision_pago(
             if cursor.fetchone():
                 return False
 
-            cursor.execute(
-                """
-                SELECT COUNT(*) FROM soporte_y_reportes
-                WHERE tipo = ? AND referencia_id = ? AND estado = 'pendiente'
-                """,
-                (TIPO_REVISION_PAGO, int(comercio_id)),
-            )
-            fila = cursor.fetchone()
-            pendientes = fila[0] if fila else 0
-            if pendientes is not None and int(pendientes) >= MAX_REVISIONES_PENDIENTES:
-                logger.warning(
-                    f'[Localis Verificación] bandeja llena para el comercio '
-                    f'{comercio_id} ({pendientes} pendientes); no se crea revisión.'
+            # Sin comercio (anunciante sin tienda) no hay tope por comercio:
+            # la alerta se registra igual para que el admin pueda revisarla.
+            if comercio_id is not None:
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) FROM soporte_y_reportes
+                    WHERE tipo = ? AND referencia_id = ? AND estado = 'pendiente'
+                    """,
+                    (TIPO_REVISION_PAGO, int(comercio_id)),
                 )
-                return False
+                fila = cursor.fetchone()
+                pendientes = fila[0] if fila else 0
+                if (
+                    pendientes is not None
+                    and int(pendientes) >= MAX_REVISIONES_PENDIENTES
+                ):
+                    logger.warning(
+                        f'[Localis Verificación] bandeja llena para el comercio '
+                        f'{comercio_id} ({pendientes} pendientes); no se crea revisión.'
+                    )
+                    return False
 
             cursor.execute(
                 """
@@ -269,7 +278,7 @@ def registrar_revision_pago(
                     TIPO_REVISION_PAGO,
                     correo or 'sistema@localis.app',
                     mensaje,
-                    int(comercio_id),
+                    int(comercio_id) if comercio_id is not None else None,
                     comprobante_url,
                     referencia,
                     concepto,

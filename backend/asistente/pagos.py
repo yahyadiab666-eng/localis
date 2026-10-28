@@ -237,7 +237,7 @@ def _ya_aplicado(comercio_id, referencia):
         return True
 
 
-def _activar_concepto(comercio_id, concepto, actor_id=None):
+def _activar_concepto(comercio_id, concepto, actor_id=None, referencia=None):
     """Activa el plan o el destacado que se pago. Devuelve ``(ok, mensaje)``.
 
     Reutiliza la logica ya probada del panel admin y nunca lanza.
@@ -267,7 +267,7 @@ def _activar_concepto(comercio_id, concepto, actor_id=None):
                 return False, 'El banner del pago no es activable automaticamente.'
             from backend.banners_b2b import extender_banner_b2b
 
-            return extender_banner_b2b(comercio_id, dias)
+            return extender_banner_b2b(comercio_id, dias, referencia=referencia)
     except Exception as error:
         _log.warning('no se pudo reactivar lo pagado: %s', error)
         return False, 'No pude reactivar lo pagado automaticamente.'
@@ -420,7 +420,9 @@ def _reverificar_revision(comercio_id, revision, usuario_id=None):
 
     reactivado = False
     if concepto and not ya_aplicado:
-        reactivado, mensaje_act = _activar_concepto(comercio_id, concepto, usuario_id)
+        reactivado, mensaje_act = _activar_concepto(
+            comercio_id, concepto, usuario_id, referencia=referencia
+        )
         if not reactivado:
             _auditar_revision(
                 usuario_id,

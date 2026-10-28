@@ -713,9 +713,30 @@ def api_verificar_banner():
     """
     from backend import banners_b2b
 
+    # El banner lo puede alquilar un comercio O cualquier usuario sin tienda:
+    # en ese caso el anunciante es la propia cuenta (``usuario_id``).
+    usuario_id = session.get('usuario_id')
+    if not usuario_id:
+        return jsonify({'error': 'Inicia sesión para publicar un banner.'}), 403
+
     comercio = comercio_sesion_validado()
-    if not comercio:
-        return jsonify({'error': 'Selecciona un comercio válido en tu cuenta.'}), 403
+    comercio_id = comercio.get('id') if comercio else None
+    anunciante = None
+    if not comercio_id:
+        from backend.auth import obtener_usuario_por_id
+
+        try:
+            usuario = obtener_usuario_por_id(usuario_id) or {}
+        except Exception:
+            usuario = {}
+        anunciante = (
+            usuario.get('nombre')
+            or session.get('username')
+            or usuario.get('correo')
+            or ''
+        ).strip()
+        if not anunciante:
+            return jsonify({'error': 'Completa tu perfil para publicar el banner.'}), 400
 
     metodo_pago = (
         'binance'
@@ -879,7 +900,7 @@ def api_verificar_banner():
     try:
         comprimido = comprimir_bytes_a_bytes(
             data_bytes,
-            prefijo=f'banner_{comercio["id"]}',
+            prefijo=f'banner_{comercio_id or usuario_id}',
             max_dimension=1920,
         )
         payload, content_type, filename = comprimido
@@ -897,7 +918,7 @@ def api_verificar_banner():
         logger.error(f'[Localis Banner] no se pudo subir el comprobante: {error}')
 
     exito, mensaje = banners_b2b.activar_banner_b2b(
-        comercio['id'],
+        comercio_id,
         referencia,
         titulo,
         imagen_url,
@@ -905,26 +926,32 @@ def api_verificar_banner():
         metodo=('binance' if es_binance else 'pago_movil_ocr'),
         comprobante_url=comprobante_url,
         comprobante_hash=hash_comprobante,
+        usuario_id=usuario_id,
+        anunciante=anunciante,
     )
     if not exito:
         return jsonify({'error': mensaje, 'ocr_ms': round(ocr.get('ms', 0), 1)}), 400
 
-    try:
-        from backend.verificacion_pagos import guardar_verificacion
+    if comercio_id:
+        try:
+            from backend.verificacion_pagos import guardar_verificacion
 
-        guardar_verificacion(
-            comercio['id'],
-            referencia,
-            'binance' if es_binance else 'pago_movil_ocr',
-            confirmado=confirmado,
-            estado_monto=ocr.get('estado_monto'),
-            monto=float(precio_usd) if es_binance else ocr.get('monto_bs'),
-        )
-    except Exception as error:
-        logger.warning(f'[Localis Banner] auditoría de verificación omitida: {error}')
+            guardar_verificacion(
+                comercio_id,
+                referencia,
+                'binance' if es_binance else 'pago_movil_ocr',
+                confirmado=confirmado,
+                estado_monto=ocr.get('estado_monto'),
+                monto=float(precio_usd) if es_binance else ocr.get('monto_bs'),
+            )
+        except Exception as error:
+            logger.warning(
+                f'[Localis Banner] auditoría de verificación omitida: {error}'
+            )
 
+    # Sin tienda, la alerta muestra el nombre del anunciante (no un comercio).
     _registrar_revision_pago(
-        comercio,
+        comercio or {'id': None, 'nombre': anunciante},
         referencia,
         es_binance,
         confirmado,

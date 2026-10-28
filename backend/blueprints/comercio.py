@@ -155,33 +155,6 @@ def panel_comercio():
         logger.error(f'[Localis] panel_comercio pago movil fallo: {type(error).__name__}: {error}')
         pago_movil = {}
 
-    # Banners B2B de la portada (alquiler con pago móvil o Binance Pay).
-    maximo_banners = 5
-    try:
-        from backend.banners_b2b import (
-            MAX_BANNERS_ACTIVOS,
-            cupos_banners,
-            estado_banners_comercio,
-            opciones_banner,
-        )
-
-        maximo_banners = MAX_BANNERS_ACTIVOS
-        banners_b2b = (
-            estado_banners_comercio(comercio.get('id')) if comercio.get('id') else []
-        )
-        banner_opciones = opciones_banner()
-        banner_cupos = cupos_banners()
-    except Exception as error:
-        logger.error(
-            f'[Localis] panel_comercio banners B2B fallo: {type(error).__name__}: {error}'
-        )
-        banners_b2b, banner_opciones = [], {}
-        banner_cupos = {
-            'maximo': maximo_banners,
-            'ocupados': 0,
-            'disponibles': maximo_banners,
-        }
-
     # Premios y puntos (canje de destacados gratuitos).
     try:
         premios = resumen_premios(comercio.get('id')) if comercio.get('id') else {}
@@ -204,10 +177,6 @@ def panel_comercio():
             metricas=metricas,
             boosts=boosts,
             opciones_boost=opciones_boost(),
-            banners_b2b=banners_b2b,
-            banner_opciones=banner_opciones,
-            banner_cupos=banner_cupos,
-            banners_portada_total=banner_cupos.get('ocupados', 0),
             pago_movil=pago_movil,
             premios=premios,
             nav_activo='panel',
@@ -865,4 +834,96 @@ def comercio_premios():
         productos=productos,
         premios=premios,
         nav_activo='premios',
+    )
+
+
+@bp.route('/banner')
+def banner_b2b():
+    """Página propia del banner B2B de la portada (``/comercio/banner``).
+
+    La puede **ver cualquiera** (con o sin sesión y sin necesidad de tener una
+    tienda); publicar exige iniciar sesión. Un comercio publica a nombre de su
+    tienda y un usuario sin tienda a su propio nombre. Los precios, cupos y
+    medidas vienen de ``backend.banners_b2b`` (única fuente de verdad).
+    """
+    from backend.auth import obtener_usuario_por_id
+    from backend.banners_b2b import (
+        cupos_banners,
+        estado_banners_anunciante,
+        opciones_banner,
+    )
+
+    usuario_id = session.get('usuario_id')
+    usuario = None
+    comercio = None
+    banners_mios = []
+
+    if usuario_id:
+        try:
+            usuario = obtener_usuario_por_id(usuario_id)
+        except Exception as error:
+            logger.error(
+                f'[Localis] banner_b2b usuario fallo: {type(error).__name__}: {error}'
+            )
+            usuario = None
+        try:
+            comercio = comercio_sesion_validado()
+        except Exception as error:
+            logger.error(
+                f'[Localis] banner_b2b comercio fallo: {type(error).__name__}: {error}'
+            )
+            comercio = None
+        try:
+            banners_mios = estado_banners_anunciante(
+                comercio_id=(comercio or {}).get('id'),
+                usuario_id=usuario_id,
+            )
+        except Exception as error:
+            logger.error(
+                f'[Localis] banner_b2b listado fallo: {type(error).__name__}: {error}'
+            )
+            banners_mios = []
+
+    try:
+        oferta = opciones_banner()
+    except Exception:
+        oferta = {}
+    try:
+        cupos = cupos_banners()
+    except Exception:
+        cupos = {'maximo': 5, 'ocupados': 0, 'disponibles': 5}
+    try:
+        pago_movil = obtener_datos_pago_movil() or {}
+    except Exception as error:
+        logger.error(
+            f'[Localis] banner_b2b pago movil fallo: {type(error).__name__}: {error}'
+        )
+        pago_movil = {}
+    try:
+        from backend.stores import obtener_tasa_dolar
+
+        tasa = float(obtener_tasa_dolar() or 1.0)
+    except Exception:
+        tasa = 1.0
+
+    anunciante = (
+        (usuario or {}).get('nombre')
+        or session.get('username')
+        or (usuario or {}).get('correo')
+        or session.get('correo')
+        or ''
+    ).strip()
+
+    return render_template(
+        'banner_b2b.html',
+        oferta=oferta,
+        cupos=cupos,
+        pago_movil=pago_movil,
+        tasa=tasa or 1.0,
+        comercio=comercio,
+        usuario=usuario,
+        anunciante=anunciante,
+        banners_mios=banners_mios,
+        nav_activo='banner',
+        whatsapp_url=WHATSAPP_SOPORTE_URL,
     )
