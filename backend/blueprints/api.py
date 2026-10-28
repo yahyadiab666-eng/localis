@@ -101,6 +101,7 @@ def _registrar_revision_pago(
     plan_tipo=None,
     boost_dias=None,
     boost_producto_id=None,
+    banner_dias=None,
 ):
     """Manda a la bandeja administrativa un pago Binance no confirmado.
 
@@ -108,13 +109,14 @@ def _registrar_revision_pago(
     (no encontrada o monto que no cuadra) o ``None`` (no verificable). Los pagos
     confirmados y los de pago móvil no generan ticket. Nunca lanza.
 
-    ``plan_tipo`` / ``boost_*`` describen qué se estaba pagando, para que el
-    admin pueda confirmarlo o suspenderlo desde la propia alerta.
+    ``plan_tipo`` / ``boost_*`` / ``banner_dias`` describen qué se estaba
+    pagando, para que el admin pueda confirmarlo o suspenderlo desde la alerta.
     """
     if not es_binance or confirmado is True:
         return
     try:
         from backend.verificacion_pagos import (
+            concepto_banner,
             concepto_boost,
             concepto_plan,
             describir_revision_pago,
@@ -126,6 +128,8 @@ def _registrar_revision_pago(
             concepto = concepto_plan(plan_tipo)
         elif boost_dias and boost_producto_id:
             concepto = concepto_boost(boost_dias, boost_producto_id)
+        elif banner_dias:
+            concepto = concepto_banner(banner_dias)
 
         motivo, mensaje = describir_revision_pago(
             'binance',
@@ -508,16 +512,18 @@ def api_verificar_boost():
     except (TypeError, ValueError):
         return jsonify({'error': 'Duración no válida. Elige 3, 5 o 7 días.'}), 400
 
-    precio_usd = precio_boost(dias)
-    if not precio_usd:
-        return jsonify({'error': 'Duración no válida. Elige 3, 5 o 7 días.'}), 400
-
+    # El método se resuelve ANTES del precio: Binance Pay tiene descuento fijo y
+    # el OCR debe validar el monto exacto que corresponde a ese método.
     metodo_pago = (
         'binance'
         if (request.form.get('metodo_boost') or '').strip().lower() == 'binance'
         else 'pago_movil'
     )
     es_binance = metodo_pago == 'binance'
+
+    precio_usd = precio_boost(dias, metodo_pago)
+    if not precio_usd:
+        return jsonify({'error': 'Duración no válida. Elige 3, 5 o 7 días.'}), 400
 
     # a) Propiedad inequívoca: el producto debe ser del comercio de la sesión.
     if not producto_pertenece_a_comercio(producto_id, comercio['id']):
@@ -691,6 +697,283 @@ def api_verificar_boost():
         ),
         200,
     )
+
+
+@bp.route('/banner/verificar', methods=['POST'])
+@limite('6 per minute')
+@login_requerido_api
+def api_verificar_banner():
+    """Valida el pago (móvil o Binance Pay) y alquila un banner B2B.
+
+    Mismo sistema que los destacados: comprobante + OCR antifraude +
+    anti-reutilización de referencia/comprobante, y confirmación de la orden
+    contra la API de Binance cuando está configurada. El monto esperado depende
+    del método (Pago Móvil $60 / Binance Pay $50) y la imagen se reencuadra a
+    las medidas oficiales antes de subirla a Storage.
+    """
+    from backend import banners_b2b
+
+    comercio = comercio_sesion_validado()
+    if not comercio:
+        return jsonify({'error': 'Selecciona un comercio válido en tu cuenta.'}), 403
+
+    metodo_pago = (
+        'binance'
+        if (request.form.get('metodo_banner') or '').strip().lower() == 'binance'
+        else 'pago_movil'
+    )
+    es_binance = metodo_pago == 'binance'
+    precio_usd = banners_b2b.precio_banner(metodo_pago)
+
+    # Cupos de la portada: máximo 5 banners a la vez. Se comprueba antes de
+    # gastar OCR/Storage; el alta lo vuelve a verificar de forma atómica.
+    cupos = banners_b2b.cupos_banners()
+    if cupos['disponibles'] <= 0:
+        return (
+            jsonify(
+                {
+                    'error': f'No hay banners disponibles: los {cupos["maximo"]} '
+                    'espacios de la portada están ocupados. Intenta de nuevo '
+                    'cuando venza alguno.',
+                    'cupos': cupos,
+                }
+            ),
+            409,
+        )
+
+    titulo = ' '.join((request.form.get('titulo') or '').split()).strip()
+    if not titulo:
+        return jsonify({'error': 'Escribe un título para el banner.'}), 400
+    if len(titulo) > 120:
+        return jsonify({'error': 'El título no puede superar 120 caracteres.'}), 400
+
+    enlace_raw = (request.form.get('enlace_url') or '').strip()
+    if enlace_raw and not banners_b2b.sanitizar_enlace_banner(enlace_raw):
+        return (
+            jsonify(
+                {
+                    'error': 'El enlace debe empezar por https:// o http:// '
+                    '(o ser una ruta interna que empiece por /).'
+                }
+            ),
+            400,
+        )
+
+    imagen = request.files.get('imagen_banner')
+    if not imagen or not imagen.filename:
+        return jsonify({'error': 'Adjunta la imagen del banner.'}), 400
+    comprobante = request.files.get('comprobante')
+    if not comprobante or not comprobante.filename:
+        return (
+            jsonify({'error': 'Debes adjuntar la captura del comprobante de pago.'}),
+            400,
+        )
+
+    from backend.images import (
+        ImageProcessingError,
+        comprimir_bytes_a_bytes,
+        leer_bytes_limitados,
+    )
+
+    data_imagen, error_lectura = leer_bytes_limitados(imagen)
+    if error_lectura:
+        return jsonify({'error': error_lectura}), 400
+    try:
+        imagen_payload, imagen_tipo, imagen_nombre = (
+            banners_b2b.normalizar_imagen_banner(data_imagen)
+        )
+    except banners_b2b.BannerInvalido as error:
+        return jsonify({'error': str(error)}), 400
+
+    data_bytes, error_lectura = leer_bytes_limitados(comprobante)
+    if error_lectura:
+        return jsonify({'error': error_lectura}), 400
+
+    hash_comprobante = calcular_hash_comprobante(data_bytes)
+    if comprobante_ya_usado(hash_comprobante):
+        return jsonify({'error': 'Este comprobante ya fue registrado en el sistema.'}), 400
+
+    try:
+        tasa = float(obtener_tasa_dolar() or 1.0)
+    except (TypeError, ValueError):
+        tasa = 1.0
+    monto_bs = round(float(precio_usd) * tasa, 2)
+
+    # OCR estricto (idéntico a destacados y mensualidades).
+    if es_binance:
+        ocr = ocr_remoto.validar_comprobante_binance(data_bytes, float(precio_usd))
+    else:
+        destino = _destino_pago_movil()
+        ocr = ocr_remoto.validar_comprobante_pago_movil(
+            data_bytes,
+            monto_bs,
+            banco=destino.get('banco'),
+            rif=destino.get('cedula_rif'),
+            telefono=destino.get('telefono'),
+        )
+    if not ocr.get('ok'):
+        return (
+            jsonify(
+                {
+                    'error': ' '.join(ocr.get('errores') or ['Comprobante no válido.']),
+                    'ocr_ms': round(ocr.get('ms', 0), 1),
+                    'estado_monto': ocr.get('estado_monto'),
+                }
+            ),
+            400,
+        )
+
+    referencia = ocr['referencia']
+
+    confirmado = None
+    if es_binance:
+        from backend.binance_api import verificar_orden_binance
+
+        confirmado = verificar_orden_binance(referencia, float(precio_usd))
+        if confirmado is False:
+            _registrar_revision_pago(
+                comercio,
+                referencia,
+                es_binance,
+                confirmado,
+                float(precio_usd),
+                ocr=ocr,
+                banner_dias=banners_b2b.DIAS_BANNER,
+            )
+            return (
+                jsonify(
+                    {
+                        'error': (
+                            'No encontramos ese pago en USDT en Binance. Verifica '
+                            'que el ID de la orden sea correcto y que el monto sea '
+                            'el exacto.'
+                        ),
+                        'ocr_ms': round(ocr.get('ms', 0), 1),
+                    }
+                ),
+                400,
+            )
+
+    # Imagen del banner y comprobante a Storage (modo híbrido: nunca lanza).
+    imagen_url, aviso_imagen = intentar_subir_bytes(
+        imagen_payload,
+        filename=imagen_nombre,
+        content_type=imagen_tipo,
+        carpeta='banners',
+    )
+    if not imagen_url:
+        return (
+            jsonify(
+                {
+                    'error': 'No se pudo guardar la imagen del banner. '
+                    'Intenta de nuevo en unos segundos.'
+                }
+            ),
+            503,
+        )
+    if aviso_imagen:
+        logger.info(f'[Localis Banner] aviso de Storage (imagen): {aviso_imagen}')
+
+    comprobante_url = None
+    aviso_pago = None
+    try:
+        comprimido = comprimir_bytes_a_bytes(
+            data_bytes,
+            prefijo=f'banner_{comercio["id"]}',
+            max_dimension=1920,
+        )
+        payload, content_type, filename = comprimido
+        comprobante_url, aviso_pago = intentar_subir_bytes(
+            payload,
+            filename=filename,
+            content_type=content_type,
+            carpeta='pagos',
+        )
+        if aviso_pago:
+            logger.info(f'[Localis Storage] comprobante banner en modo híbrido: {aviso_pago}')
+    except ImageProcessingError as error:
+        return jsonify({'error': str(error)}), 400
+    except Exception as error:
+        logger.error(f'[Localis Banner] no se pudo subir el comprobante: {error}')
+
+    exito, mensaje = banners_b2b.activar_banner_b2b(
+        comercio['id'],
+        referencia,
+        titulo,
+        imagen_url,
+        enlace_url=enlace_raw or None,
+        metodo=('binance' if es_binance else 'pago_movil_ocr'),
+        comprobante_url=comprobante_url,
+        comprobante_hash=hash_comprobante,
+    )
+    if not exito:
+        return jsonify({'error': mensaje, 'ocr_ms': round(ocr.get('ms', 0), 1)}), 400
+
+    try:
+        from backend.verificacion_pagos import guardar_verificacion
+
+        guardar_verificacion(
+            comercio['id'],
+            referencia,
+            'binance' if es_binance else 'pago_movil_ocr',
+            confirmado=confirmado,
+            estado_monto=ocr.get('estado_monto'),
+            monto=float(precio_usd) if es_binance else ocr.get('monto_bs'),
+        )
+    except Exception as error:
+        logger.warning(f'[Localis Banner] auditoría de verificación omitida: {error}')
+
+    _registrar_revision_pago(
+        comercio,
+        referencia,
+        es_binance,
+        confirmado,
+        float(precio_usd),
+        ocr=ocr,
+        comprobante_url=comprobante_url,
+        banner_dias=banners_b2b.DIAS_BANNER,
+    )
+
+    return (
+        jsonify(
+            {
+                'ok': True,
+                'mensaje': mensaje,
+                'imagen_url': imagen_url,
+                'titulo': titulo,
+                'dias': banners_b2b.DIAS_BANNER,
+                'cupos': banners_b2b.cupos_banners(),
+                'referencia': referencia,
+                'metodo': metodo_pago,
+                'monto_usd': float(precio_usd),
+                'monto_bs': monto_bs,
+                'tasa': tasa,
+                'fecha_comprobante': ocr.get('fecha_comprobante'),
+                'ocr_ms': round(ocr.get('ms', 0), 1),
+                **({'aviso': aviso_pago} if aviso_pago else {}),
+            }
+        ),
+        200,
+    )
+
+
+@bp.route('/banner/impresion', methods=['POST'])
+@limite('120 per minute')
+@exento_csrf
+def api_impresion_banner():
+    """Suma una impresión al banner que el carrusel acaba de mostrar.
+
+    Lo llama la portada cada rotación (60 s). Es público y best-effort: sin
+    sesión, sin datos sensibles y nunca revela si el banner existe.
+    """
+    from backend import banners_b2b
+
+    datos = request.get_json(silent=True) or {}
+    banner_id = datos.get('banner_id')
+    if banner_id is None:
+        banner_id = request.form.get('banner_id')
+    banners_b2b.registrar_impresion(banner_id)
+    return jsonify({'ok': True}), 200
 
 
 @bp.route('/pagos/verificar', methods=['POST'])

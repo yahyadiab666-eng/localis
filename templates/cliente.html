@@ -166,14 +166,63 @@
     </p>
   </div>
 
-  <section class="max-w-6xl mx-auto px-6 my-8">
-    <div class="banner-destacado banner-destacado-bg rounded-2xl overflow-hidden shadow-lg relative flex flex-col md:flex-row items-center p-8 text-white gap-6 min-h-[160px]"
-         style="background-image: linear-gradient(135deg, rgba(217, 119, 6, 0.88), rgba(245, 158, 11, 0.82)), url('{{ banner_url }}');">
-      <div class="flex-1 space-y-3 text-center md:text-left relative z-10">
-        <span class="bg-white/20 text-white text-[11px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">Destacado</span>
-        <h4 class="font-display text-2xl md:text-3xl font-bold">Apoya lo local, vive mejor</h4>
-        <p class="text-amber-100 text-sm max-w-xl">Descubre ofertas exclusivas en tus comercios de cercanía. Ref Tasa: <strong>{{ tasa }} Bs/USD</strong></p>
-      </div>
+  {# Banner B2B: carrusel con los banners alquilados por los comercios. Se
+     rotan cada ``banner_rotacion_seg`` segundos (60 por defecto) y cada
+     rotación registra una impresión. Sin banners activos se muestra el banner
+     principal configurado, así la portada nunca queda vacía. #}
+  {% set banners_home = banners_portada | default([], true) %}
+  <section class="max-w-6xl mx-auto px-6 my-8"
+           data-banner-carrusel
+           data-banner-rotacion="{{ banner_rotacion_seg | default(60) }}">
+    <div class="banner-destacado-bg rounded-2xl overflow-hidden shadow-lg relative w-full"
+         style="aspect-ratio: 3 / 1; min-height: 168px;">
+      {% if banners_home %}
+        {% for banner in banners_home %}
+        <article class="banner-slide absolute inset-0 transition-opacity duration-500{% if not loop.first %} opacity-0 pointer-events-none{% endif %}"
+                 data-banner-slide="{{ loop.index0 }}"
+                 data-banner-id="{{ banner.id }}"
+                 aria-hidden="{{ 'false' if loop.first else 'true' }}">
+          <a href="{{ banner.enlace_url or '#' }}"
+             {% if banner.enlace_url %}target="_blank" rel="noopener sponsored"{% else %}aria-disabled="true" onclick="return false;"{% endif %}
+             class="block w-full h-full text-white">
+            <img src="{{ banner.imagen_url }}" alt="{{ banner.titulo or ('Banner de ' ~ (banner.comercio_nombre or 'un comercio')) }}"
+                 class="absolute inset-0 w-full h-full object-cover" loading="lazy" decoding="async"
+                 onerror="this.style.display='none'">
+            <span class="absolute inset-0" style="background: linear-gradient(90deg, rgba(17,17,17,.72), rgba(17,17,17,.15));"></span>
+            <span class="relative z-10 flex h-full flex-col justify-center items-start gap-1.5 p-5 sm:p-8 max-w-[85%] sm:max-w-[60%]">
+              <span class="bg-white/20 text-white text-[9px] sm:text-[11px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">Publicidad</span>
+              <span class="font-display text-base sm:text-2xl font-bold leading-tight line-clamp-2">{{ banner.titulo }}</span>
+              {% if banner.comercio_nombre %}
+              <span class="text-white/80 text-[11px] sm:text-sm line-clamp-1">{{ banner.comercio_nombre }}</span>
+              {% endif %}
+              {% if banner.enlace_url %}
+              <span class="mt-1 inline-flex items-center gap-1 text-[11px] font-bold text-amber-300">
+                Ver más <i data-lucide="arrow-right" style="width:12px;height:12px;"></i>
+              </span>
+              {% endif %}
+            </span>
+          </a>
+        </article>
+        {% endfor %}
+
+        {% if banners_home | length > 1 %}
+        <div class="absolute bottom-2.5 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5" role="tablist" aria-label="Banners">
+          {% for banner in banners_home %}
+          <button type="button" class="banner-punto h-1.5 rounded-full transition-all {% if loop.first %}w-5 bg-white{% else %}w-1.5 bg-white/50{% endif %}"
+                  data-banner-punto="{{ loop.index0 }}" aria-label="Banner {{ loop.index }}"></button>
+          {% endfor %}
+        </div>
+        {% endif %}
+      {% else %}
+        <div class="absolute inset-0 flex items-center p-8 text-white"
+             style="background-image: linear-gradient(135deg, rgba(217, 119, 6, 0.88), rgba(245, 158, 11, 0.82)), url('{{ banner_url }}'); background-size: cover; background-position: center;">
+          <div class="flex-1 space-y-3 text-center md:text-left">
+            <span class="bg-white/20 text-white text-[11px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">Destacado</span>
+            <h4 class="font-display text-2xl md:text-3xl font-bold">Apoya lo local, vive mejor</h4>
+            <p class="text-amber-100 text-sm max-w-xl">Descubre ofertas exclusivas en tus comercios de cercanía. Ref Tasa: <strong>{{ tasa }} Bs/USD</strong></p>
+          </div>
+        </div>
+      {% endif %}
     </div>
   </section>
 
@@ -513,6 +562,73 @@
         var tip = document.getElementById('pwa-ios-tip');
         if (tip) tip.classList.remove('hidden');
       }
+    })();
+  </script>
+  <script>
+    // Carrusel de banners B2B: rota cada ``data-banner-rotacion`` segundos y
+    // registra una impresión por banner mostrado (una vez por carga de página).
+    (function () {
+      var contenedor = document.querySelector('[data-banner-carrusel]');
+      if (!contenedor) return;
+      var slides = Array.prototype.slice.call(
+        contenedor.querySelectorAll('[data-banner-slide]')
+      );
+      if (!slides.length) return;
+      var puntos = Array.prototype.slice.call(
+        contenedor.querySelectorAll('[data-banner-punto]')
+      );
+      var segundos = parseInt(contenedor.getAttribute('data-banner-rotacion') || '60', 10);
+      if (!segundos || segundos < 5) segundos = 60;
+      var actual = 0;
+      var yaContadas = {};
+
+      function contar(slide) {
+        var id = slide && slide.getAttribute('data-banner-id');
+        if (!id || yaContadas[id]) return;
+        yaContadas[id] = true;
+        try {
+          fetch('/api/banner/impresion', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
+            body: JSON.stringify({ banner_id: id }),
+            credentials: 'same-origin',
+            keepalive: true,
+          }).catch(function () {});
+        } catch (e) {}
+      }
+
+      function mostrar(indice) {
+        if (!slides.length) return;
+        actual = ((indice % slides.length) + slides.length) % slides.length;
+        slides.forEach(function (slide, i) {
+          var activo = i === actual;
+          slide.classList.toggle('opacity-0', !activo);
+          slide.classList.toggle('pointer-events-none', !activo);
+          slide.setAttribute('aria-hidden', activo ? 'false' : 'true');
+        });
+        puntos.forEach(function (punto, i) {
+          var activo = i === actual;
+          punto.classList.toggle('w-5', activo);
+          punto.classList.toggle('bg-white', activo);
+          punto.classList.toggle('w-1.5', !activo);
+          punto.classList.toggle('bg-white/50', !activo);
+        });
+        contar(slides[actual]);
+      }
+
+      puntos.forEach(function (punto) {
+        punto.addEventListener('click', function () {
+          mostrar(parseInt(punto.getAttribute('data-banner-punto') || '0', 10));
+        });
+      });
+
+      if (slides.length > 1) {
+        setInterval(function () {
+          if (document.hidden) return;
+          mostrar(actual + 1);
+        }, segundos * 1000);
+      }
+      contar(slides[0]);
     })();
   </script>
 {% include 'partials/asistente_widget.html' %}

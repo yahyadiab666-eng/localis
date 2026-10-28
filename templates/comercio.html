@@ -24,6 +24,14 @@
 
   {# Defensivo: el panel siempre pasa 'premios', pero nunca debe romper si falta. #}
   {% set premios = premios | default({}, true) %}
+  {% set pago_movil = pago_movil | default({}, true) %}
+  {# Oferta B2B del banner de portada (el backend es la fuente de precio/medidas).
+     El respaldo mantiene la plantilla renderizable con datos simulados. #}
+  {% set banner_oferta = banner_opciones | default({}, true) %}
+  {% set oferta = banner_oferta if banner_oferta else {
+    'dias': 30, 'precio_usd': 60, 'precio_binance_usd': 50,
+    'descuento_binance_usd': 10, 'ancho': 1200, 'alto': 400,
+    'rotacion_segundos': 60} %}
 
   {% include 'partials/nav_comercio.html' %}
 
@@ -170,6 +178,90 @@
         </div>
       </div>
     </section>
+
+    {% if comercio.id %}
+    {# Banner B2B: el comercio alquila un espacio en el carrusel de la portada.
+       Los datos vienen del backend (única fuente de precios y medidas). #}
+    {% set banners_mios = banners_b2b | default([], true) %}
+    <section id="banner-b2b" class="rounded-2xl p-5 sm:p-7 shadow-sm border border-stone-800 relative overflow-hidden"
+             style="background: linear-gradient(135deg, #1c1917 0%, #292524 60%, #3f3a34 100%);">
+      <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-5">
+        <div class="space-y-2 max-w-2xl">
+          <span class="inline-flex items-center gap-1.5 bg-amber-500/15 text-amber-300 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full">
+            <i data-lucide="megaphone" style="width:12px;height:12px;"></i> Publicidad B2B
+          </span>
+          <h4 class="font-display text-lg sm:text-2xl font-bold text-white flex items-center gap-2">
+            <i data-lucide="image" class="text-amber-400" style="width:20px;height:20px;"></i>
+            Alquila un banner en la portada
+          </h4>
+          <p class="text-stone-300 text-xs sm:text-sm leading-relaxed">
+            Tu banner aparece antes del catálogo, en el carrusel de la página principal,
+            y rota automáticamente cada {{ oferta.rotacion_segundos }} segundos.
+          </p>
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-bold">
+            <span class="text-white">${{ "%.2f"|format(oferta.precio_usd) }} USD <span class="font-medium text-stone-400">· Pago móvil</span></span>
+            <span class="text-emerald-300">${{ "%.2f"|format(oferta.precio_binance_usd) }} USD <span class="font-medium text-stone-400">· Binance Pay</span></span>
+            <span class="inline-flex items-center rounded-full bg-emerald-500/15 text-emerald-300 px-2 py-0.5 text-[10px] font-black">
+              −${{ "%.0f"|format(oferta.descuento_binance_usd) }} con Binance
+            </span>
+          </div>
+          <p class="text-[11px] text-stone-400">
+            {{ oferta.dias }} días por banner · Medidas: {{ oferta.ancho }} × {{ oferta.alto }} px (3:1), JPG/PNG/WebP.
+          </p>
+          {# Disponibilidad de la portada: máximo 5 banners simultáneos. #}
+          {% set cupos = banner_cupos if banner_cupos else {'maximo': 5, 'ocupados': 0, 'disponibles': 5} %}
+          <div class="flex flex-wrap items-center gap-2 text-[11px] pt-1">
+            <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-bold {% if cupos.disponibles > 0 %}bg-emerald-500/15 text-emerald-300{% else %}bg-rose-500/15 text-rose-300{% endif %}">
+              <i data-lucide="layout-grid" style="width:12px;height:12px;"></i>
+              Tenemos disponible{% if cupos.disponibles != 1 %}s{% endif %}
+              {{ cupos.disponibles }}
+              de {{ cupos.maximo }} banners
+            </span>
+            <span class="text-stone-400">
+              {{ cupos.ocupados }} ocupado{% if cupos.ocupados != 1 %}s{% endif %}
+              · rotación cada {{ oferta.rotacion_segundos }} s
+            </span>
+          </div>
+        </div>
+        {% if cupos.disponibles > 0 %}
+        <button type="button" onclick="abrirModalBanner()"
+                class="btn-touch w-full lg:w-auto shrink-0 inline-flex items-center justify-center gap-2 bg-amber-500 text-stone-900 font-bold px-6 py-3 rounded-full text-sm hover:bg-amber-400 transition shadow-lg">
+          <i data-lucide="shopping-bag" style="width:16px;height:16px;"></i> Alquilar banner
+        </button>
+        {% else %}
+        <button type="button" disabled aria-disabled="true"
+                class="btn-touch w-full lg:w-auto shrink-0 inline-flex items-center justify-center gap-2 bg-stone-700 text-stone-300 font-bold px-6 py-3 rounded-full text-sm cursor-not-allowed opacity-70"
+                title="Los {{ cupos.maximo }} espacios de la portada están ocupados">
+          <i data-lucide="clock" style="width:16px;height:16px;"></i> Sin cupos disponibles
+        </button>
+        {% endif %}
+      </div>
+
+      {% if banners_mios %}
+      <div class="mt-5 pt-4 border-t border-white/10 space-y-2">
+        <p class="text-[11px] font-bold uppercase tracking-wider text-stone-400">Tus banners</p>
+        {% for banner in banners_mios %}
+        <div class="flex items-center gap-3 bg-white/5 rounded-xl p-2.5">
+          {% if banner.imagen_url %}
+          <img src="{{ banner.imagen_url }}" alt="" class="w-24 h-8 object-cover rounded-md border border-white/10 shrink-0" loading="lazy">
+          {% endif %}
+          <div class="min-w-0 flex-1">
+            <p class="text-xs font-bold text-white truncate">{{ banner.titulo or 'Banner sin título' }}</p>
+            <p class="text-[10px] text-stone-400">
+              Registrado: {{ banner.fecha_registro|fecha_corta }}
+              · Vence: {{ banner.fecha_fin|fecha_corta }}
+              · {{ banner.impresiones }} impresiones
+            </p>
+          </div>
+          <span class="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full {% if banner.activo %}bg-emerald-500/15 text-emerald-300{% else %}bg-stone-500/20 text-stone-300{% endif %}">
+            {{ 'En portada' if banner.activo else 'Vencido' }}
+          </span>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </section>
+    {% endif %}
 
     {% if metricas is defined %}
     <!-- Interacciones: interés real de los clientes -->
@@ -534,6 +626,7 @@
         <input type="hidden" name="producto_id" id="boost-producto-id" value="">
 
         <!-- Método de pago del destacado -->
+        {% set descuento_boost_binance = (opciones_boost[0].descuento_binance_usd if opciones_boost else 1) %}
         <div class="grid grid-cols-3 gap-2 text-xs font-bold">
           <label class="cursor-pointer">
             <input type="radio" name="metodo_boost" value="pago_movil" class="peer sr-only" checked
@@ -545,8 +638,10 @@
           <label class="cursor-pointer">
             <input type="radio" name="metodo_boost" value="binance" class="peer sr-only"
                    onchange="cambiarMetodoBoost()">
-            <span class="block text-center rounded-xl border border-stone-200 px-2 py-2.5 transition peer-checked:border-amber-500 peer-checked:ring-2 peer-checked:ring-amber-500/30">
+            <span class="block text-center rounded-xl border border-stone-200 px-2 py-2 transition peer-checked:border-amber-500 peer-checked:ring-2 peer-checked:ring-amber-500/30">
               Binance Pay
+              {# Etiqueta discreta: no ocupa espacio extra ni desplaza el layout. #}
+              <span class="ml-0.5 align-top text-[9px] font-black text-emerald-600" title="Descuento de ${{ '%.0f'|format(descuento_boost_binance) }} al pagar con Binance Pay">−${{ '%.0f'|format(descuento_boost_binance) }}</span>
             </span>
           </label>
           <label class="cursor-pointer">
@@ -564,11 +659,19 @@
             <div class="grid grid-cols-3 gap-2">
               {% for opcion in opciones_boost %}
               <label class="cursor-pointer">
-                <input type="radio" name="dias" value="{{ opcion.dias }}" data-precio="{{ opcion.precio_usd }}"
+                <input type="radio" name="dias" value="{{ opcion.dias }}"
+                       data-precio="{{ opcion.precio_usd }}"
+                       data-precio-binance="{{ opcion.precio_binance_usd }}"
                        class="peer sr-only" {% if loop.first %}checked{% endif %}>
                 <span class="block text-center rounded-xl border border-stone-200 px-2 py-3 transition peer-checked:border-amber-500 peer-checked:ring-2 peer-checked:ring-amber-500/30">
                   <span class="block text-lg font-black text-gray-900">{{ opcion.dias }}d</span>
-                  <span class="block text-[11px] font-bold text-amber-700">${{ "%.2f"|format(opcion.precio_usd) }}</span>
+                  <span class="js-boost-precio-pago block text-[11px] font-bold text-amber-700">${{ "%.2f"|format(opcion.precio_usd) }}</span>
+                  <span class="js-boost-precio-binance hidden text-[11px] font-bold text-amber-700">
+                    <span class="text-stone-400 line-through font-semibold">${{ "%.2f"|format(opcion.precio_usd) }}</span>
+                    ${{ "%.2f"|format(opcion.precio_binance_usd) }}
+                  </span>
+                  <span class="js-boost-badge-binance hidden mt-1 inline-block rounded-full bg-emerald-100 px-1.5 text-[9px] font-black text-emerald-700"
+                        title="Descuento por pagar con Binance Pay">−${{ "%.2f"|format(opcion.descuento_binance_usd) }}</span>
                 </span>
               </label>
               {% endfor %}
@@ -653,6 +756,127 @@
       </form>
     </div>
   </div>
+
+  {% if comercio.id %}
+  <!-- Modal: Alquilar banner B2B de la portada (pago móvil o Binance Pay) -->
+  <div id="modal-banner" class="modal-push" onclick="if(event.target===this)cerrarModalBanner()">
+    <div class="panel p-5 sm:p-6 space-y-4">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <h3 class="font-display text-xl font-bold text-gray-900">Alquilar banner</h3>
+          <p class="text-stone-500 text-xs mt-1">
+            {{ oferta.ancho }} × {{ oferta.alto }} px · {{ oferta.dias }} días en la portada ·
+            {{ banner_cupos.disponibles if banner_cupos else oferta.maximo }} de
+            {{ oferta.maximo }} cupos libres
+          </p>
+        </div>
+        <button type="button" onclick="cerrarModalBanner()" aria-label="Cerrar"
+                class="btn-touch text-stone-400 hover:text-stone-700 text-2xl leading-none">&times;</button>
+      </div>
+
+      <form id="form-banner" method="POST" enctype="multipart/form-data" class="space-y-4">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <div>
+          <label for="banner-titulo" class="block text-xs font-bold uppercase text-stone-600 mb-1">Título del banner</label>
+          <input type="text" id="banner-titulo" name="titulo" required maxlength="120"
+                 placeholder="Ej: 2x1 en toda la tienda"
+                 class="w-full px-3 py-2.5 bg-white border border-stone-200 rounded-xl text-sm focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20">
+        </div>
+
+        <div>
+          <label for="banner-enlace" class="block text-xs font-bold uppercase text-stone-600 mb-1">Enlace al hacer clic (opcional)</label>
+          <input type="text" id="banner-enlace" name="enlace_url" maxlength="500" inputmode="url"
+                 placeholder="https://tutienda.com/promocion"
+                 class="w-full px-3 py-2.5 bg-white border border-stone-200 rounded-xl text-sm focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20">
+          <p class="text-[11px] text-stone-500 mt-1">Debe empezar por <strong>https://</strong> o ser una ruta interna (<strong>/tienda/…</strong>).</p>
+        </div>
+
+        <div>
+          <label for="banner-imagen" class="block text-xs font-bold uppercase text-stone-600 mb-1">Imagen del banner</label>
+          <input type="file" id="banner-imagen" name="imagen_banner"
+                 accept="image/png, image/jpeg, image/webp" required
+                 class="w-full text-xs text-stone-600 file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-amber-500 file:text-stone-900 hover:file:bg-amber-400 bg-white rounded-xl border border-stone-200 cursor-pointer">
+          <p class="text-[11px] text-stone-500 mt-1">
+            Medidas indicadas: <strong>{{ oferta.ancho }} × {{ oferta.alto }} px</strong> (proporción 3:1).
+            Si tu imagen tiene otra proporción la recortamos por el centro para encajarla, sin deformarla.
+          </p>
+          <div id="banner-preview-imagen"
+               class="mt-2 rounded-xl border border-dashed border-stone-200 bg-stone-50 flex items-center justify-center text-[11px] text-stone-400 overflow-hidden"
+               style="aspect-ratio: 3 / 1;">
+            Vista previa del banner
+          </div>
+        </div>
+
+        <!-- Método de pago del alquiler -->
+        <div>
+          <p class="text-xs font-bold uppercase text-stone-600 mb-1">Método de pago</p>
+          <div class="grid grid-cols-2 gap-2 text-xs font-bold">
+            <label class="cursor-pointer">
+              <input type="radio" name="metodo_banner" value="pago_movil" class="peer sr-only" checked
+                     onchange="cambiarMetodoBanner()">
+              <span class="block text-center rounded-xl border border-stone-200 px-2 py-2.5 transition peer-checked:border-amber-500 peer-checked:ring-2 peer-checked:ring-amber-500/30">
+                Pago móvil
+                <span class="block text-[10px] font-black text-stone-500">${{ "%.2f"|format(oferta.precio_usd) }}</span>
+              </span>
+            </label>
+            <label class="cursor-pointer">
+              <input type="radio" name="metodo_banner" value="binance" class="peer sr-only"
+                     onchange="cambiarMetodoBanner()">
+              <span class="block text-center rounded-xl border border-stone-200 px-2 py-2 transition peer-checked:border-amber-500 peer-checked:ring-2 peer-checked:ring-amber-500/30">
+                Binance Pay
+                <span class="ml-0.5 align-top text-[9px] font-black text-emerald-600"
+                      title="Descuento de ${{ '%.0f'|format(oferta.descuento_binance_usd) }} al pagar con Binance Pay">−${{ '%.0f'|format(oferta.descuento_binance_usd) }}</span>
+                <span class="block text-[10px] font-black text-stone-500">
+                  <span class="text-stone-400 line-through">${{ "%.2f"|format(oferta.precio_usd) }}</span>
+                  ${{ "%.2f"|format(oferta.precio_binance_usd) }}
+                </span>
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div id="banner-info-pago-movil" class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm space-y-1">
+          <p class="font-bold text-amber-900">Datos para Pago Móvil</p>
+          <p><span class="text-stone-500">Banco:</span> {{ pago_movil.banco or '—' }}</p>
+          <p><span class="text-stone-500">Cédula/RIF:</span> {{ pago_movil.cedula_rif or '—' }}</p>
+          <p><span class="text-stone-500">Teléfono:</span> {{ pago_movil.telefono or '—' }}</p>
+          <p><span class="text-stone-500">Tasa:</span> <strong>{{ "%.2f"|format(tasa or 1) }} Bs/USD</strong></p>
+          <p id="banner-monto-bs" class="pt-2 border-t border-amber-200 mt-2 font-bold text-amber-900"></p>
+        </div>
+
+        <div id="banner-info-binance" class="hidden bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm space-y-1">
+          <p class="font-bold text-amber-900">Datos para Binance Pay</p>
+          <p><span class="text-stone-500">Binance Pay ID:</span> <strong>{{ pago_movil.binance_id or '—' }}</strong></p>
+          <p><span class="text-stone-500">Moneda:</span> {{ pago_movil.binance_moneda or 'USDT' }}</p>
+          <p class="text-xs text-stone-600 pt-2 border-t border-amber-200 mt-2">
+            En tu app de Binance: <strong>Pay → Enviar → ID</strong>, pega este ID y envía el monto exacto en USDT.
+          </p>
+          <p id="banner-monto-usdt" class="pt-2 border-t border-amber-200 mt-2 font-bold text-amber-900"></p>
+        </div>
+
+        <div>
+          <label for="banner-comprobante" class="block text-xs font-bold uppercase text-stone-600 mb-1">Captura del comprobante</label>
+          <input type="file" id="banner-comprobante" name="comprobante"
+                 accept="image/png, image/jpeg, image/webp" required
+                 class="w-full text-xs text-stone-600 file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-amber-500 file:text-stone-900 hover:file:bg-amber-400 bg-white rounded-xl border border-stone-200 cursor-pointer">
+          <p id="banner-ayuda-comprobante" class="text-[11px] text-stone-500 mt-1">
+            Validamos con OCR el banco, la cédula/RIF, el teléfono destino, la referencia,
+            el monto y la fecha del pago.
+          </p>
+          <div id="banner-preview-comprobante" class="mt-2 rounded-xl border border-dashed border-stone-200 bg-stone-50 p-3 min-h-[80px] flex items-center justify-center text-[11px] text-stone-400">
+            Vista previa del comprobante
+          </div>
+        </div>
+
+        <button type="submit" id="banner-btn-submit"
+                class="btn-touch w-full py-3 rounded-full font-bold text-sm bg-stone-900 text-white flex items-center justify-center gap-2 disabled:opacity-60">
+          <i data-lucide="megaphone" style="width:16px;height:16px;"></i> Verificar pago y publicar banner
+        </button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
 
   <script>
     // --- RESTAURAR_PAGOS_INICIO ---
@@ -776,22 +1000,49 @@
       return meta ? meta.getAttribute('content') : '';
     }
 
+    // Precio del destaque según el método elegido: Binance Pay tiene descuento
+    // fijo y su monto se lee de ``data-precio-binance`` (lo calcula el backend).
+    function precioBoostSeleccionado() {
+      const form = document.getElementById('form-boost');
+      if (!form) return { precio: 0, esBinance: false, base: 0 };
+      const metodoSel = form.querySelector('input[name="metodo_boost"]:checked');
+      const esBinance = !!metodoSel && metodoSel.value === 'binance';
+      const sel = form.querySelector('input[name="dias"]:checked');
+      if (!sel) return { precio: 0, esBinance: false, base: 0 };
+      const base = parseFloat(sel.getAttribute('data-precio') || '0');
+      const binance = parseFloat(sel.getAttribute('data-precio-binance') || String(base));
+      return { precio: esBinance ? binance : base, esBinance: esBinance, base: base };
+    }
+
     function actualizarMontoBoost() {
       const form = document.getElementById('form-boost');
       if (!form) return;
-      const sel = form.querySelector('input[name="dias"]:checked');
-      if (!sel) return;
-      const precio = parseFloat(sel.getAttribute('data-precio') || '0');
+      const datos = precioBoostSeleccionado();
+      const precio = datos.precio;
+
+      // Tarjetas de duración: precio tachado + descuento solo con Binance.
+      form.querySelectorAll('.js-boost-precio-pago').forEach(function (el) {
+        el.classList.toggle('hidden', datos.esBinance);
+      });
+      form.querySelectorAll('.js-boost-precio-binance').forEach(function (el) {
+        el.classList.toggle('hidden', !datos.esBinance);
+      });
+      form.querySelectorAll('.js-boost-badge-binance').forEach(function (el) {
+        el.classList.toggle('hidden', !datos.esBinance);
+      });
+
       const montoBs = document.getElementById('boost-monto-bs');
       if (montoBs) {
         montoBs.textContent =
-          'Monto a pagar: ' + (precio * TASA_BOOST).toFixed(2) +
-          ' Bs ($' + precio.toFixed(2) + ' USD)';
+          'Monto a pagar: ' + (datos.base * TASA_BOOST).toFixed(2) +
+          ' Bs ($' + datos.base.toFixed(2) + ' USD)';
       }
       const montoUsdt = document.getElementById('boost-monto-usdt');
       if (montoUsdt) {
+        const ahorro = Math.max(0, datos.base - precio);
         montoUsdt.textContent =
-          'Monto a pagar: ' + precio.toFixed(2) + ' USDT (Binance Pay)';
+          'Monto a pagar: ' + precio.toFixed(2) + ' USDT (Binance Pay)' +
+          (ahorro > 0 ? ' · ahorras $' + ahorro.toFixed(2) : '');
       }
     }
 
@@ -911,6 +1162,142 @@
             const datos = res.datos || {};
             if (res.ok && datos.ok) {
               window.mostrarAlertaLocalis?.(datos.mensaje || '¡Producto destacado!', 'exito');
+              setTimeout(function () { window.location.reload(); }, 1500);
+              return;
+            }
+            window.mostrarAlertaLocalis?.(datos.error || 'No se pudo validar el pago.', 'error');
+            if (boton) boton.disabled = false;
+          })
+          .catch(function () {
+            window.mostrarAlertaLocalis?.('Error de conexión al validar el pago.', 'error');
+            if (boton) boton.disabled = false;
+          });
+      });
+    })();
+
+    // --- Alquilar banner B2B de la portada (pago móvil o Binance Pay) ---
+    const PRECIOS_BANNER = {
+      pago_movil: {{ oferta.precio_usd | tojson }},
+      binance: {{ oferta.precio_binance_usd | tojson }}
+    };
+
+    function abrirModalBanner() {
+      const modal = document.getElementById('modal-banner');
+      const form = document.getElementById('form-banner');
+      if (!modal || !form) return;
+      form.reset();
+      const previewImg = document.getElementById('banner-preview-imagen');
+      if (previewImg) previewImg.textContent = 'Vista previa del banner';
+      const previewComp = document.getElementById('banner-preview-comprobante');
+      if (previewComp) previewComp.textContent = 'Vista previa del comprobante';
+      cambiarMetodoBanner();
+      modal.classList.add('activo');
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    function cerrarModalBanner() {
+      const modal = document.getElementById('modal-banner');
+      if (modal) modal.classList.remove('activo');
+    }
+
+    function cambiarMetodoBanner() {
+      const form = document.getElementById('form-banner');
+      if (!form) return;
+      const sel = form.querySelector('input[name="metodo_banner"]:checked');
+      const metodo = sel ? sel.value : 'pago_movil';
+      const esBinance = metodo === 'binance';
+      const infoPago = document.getElementById('banner-info-pago-movil');
+      const infoBinance = document.getElementById('banner-info-binance');
+      const ayuda = document.getElementById('banner-ayuda-comprobante');
+      if (infoPago) infoPago.classList.toggle('hidden', esBinance);
+      if (infoBinance) infoBinance.classList.toggle('hidden', !esBinance);
+      if (ayuda) {
+        ayuda.textContent = esBinance
+          ? 'Sube la captura del pago por Binance (USDT). Validamos el monto en USDT y el ID de la orden.'
+          : 'Sube la captura de tu pago móvil. Validamos con OCR el banco, el RIF/cédula, el teléfono, la referencia, el monto y la fecha.';
+      }
+
+      const precio = parseFloat(PRECIOS_BANNER[metodo] || PRECIOS_BANNER.pago_movil || 0);
+      const montoBs = document.getElementById('banner-monto-bs');
+      if (montoBs) {
+        montoBs.textContent =
+          'Monto a pagar: ' + (precio * TASA_BOOST).toFixed(2) +
+          ' Bs ($' + precio.toFixed(2) + ' USD)';
+      }
+      const montoUsdt = document.getElementById('banner-monto-usdt');
+      if (montoUsdt) {
+        const ahorro = Math.max(0, (PRECIOS_BANNER.pago_movil || 0) - precio);
+        montoUsdt.textContent =
+          'Monto a pagar: ' + precio.toFixed(2) + ' USDT (Binance Pay)' +
+          (ahorro > 0 ? ' · ahorras $' + ahorro.toFixed(2) : '');
+      }
+    }
+
+    (function () {
+      const form = document.getElementById('form-banner');
+      if (!form) return;
+      const imagen = document.getElementById('banner-imagen');
+      const previewImg = document.getElementById('banner-preview-imagen');
+      const comp = document.getElementById('banner-comprobante');
+      const previewComp = document.getElementById('banner-preview-comprobante');
+      const boton = document.getElementById('banner-btn-submit');
+
+      function previsualizar(input, contenedor, textoVacio, clase) {
+        if (!input || !contenedor) return;
+        input.addEventListener('change', function () {
+          contenedor.innerHTML = '';
+          const archivo = input.files && input.files[0];
+          if (!archivo) {
+            contenedor.textContent = textoVacio;
+            return;
+          }
+          const img = document.createElement('img');
+          img.src = URL.createObjectURL(archivo);
+          img.className = clase;
+          img.onload = function () { URL.revokeObjectURL(img.src); };
+          contenedor.appendChild(img);
+        });
+      }
+
+      previsualizar(
+        imagen, previewImg, 'Vista previa del banner',
+        'w-full h-full object-cover'
+      );
+      previsualizar(
+        comp, previewComp, 'Vista previa del comprobante',
+        'max-h-48 rounded-xl border border-stone-200 mx-auto'
+      );
+
+      form.addEventListener('submit', function (evento) {
+        evento.preventDefault();
+        const archivoBanner = imagen && imagen.files && imagen.files[0];
+        const archivoPago = comp && comp.files && comp.files[0];
+        if (!archivoBanner) {
+          window.mostrarAlertaLocalis?.('Adjunta la imagen del banner.', 'error');
+          return;
+        }
+        if (!archivoPago) {
+          window.mostrarAlertaLocalis?.('Adjunta la captura del comprobante de pago.', 'error');
+          return;
+        }
+        if (boton) boton.disabled = true;
+        fetch('/api/banner/verificar', {
+          method: 'POST',
+          headers: {
+            'X-CSRFToken': boostCsrfToken(),
+            'X-Requested-With': 'fetch',
+            'Accept': 'application/json',
+          },
+          body: new FormData(form),
+          credentials: 'same-origin',
+        })
+          .then(function (r) {
+            return r.json().then(function (d) { return { ok: r.ok, datos: d || {} }; });
+          })
+          .then(function (res) {
+            const datos = res.datos || {};
+            if (res.ok && datos.ok) {
+              window.mostrarAlertaLocalis?.(datos.mensaje || '¡Banner publicado!', 'exito');
               setTimeout(function () { window.location.reload(); }, 1500);
               return;
             }

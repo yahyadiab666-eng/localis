@@ -155,6 +155,33 @@ def panel_comercio():
         logger.error(f'[Localis] panel_comercio pago movil fallo: {type(error).__name__}: {error}')
         pago_movil = {}
 
+    # Banners B2B de la portada (alquiler con pago móvil o Binance Pay).
+    maximo_banners = 5
+    try:
+        from backend.banners_b2b import (
+            MAX_BANNERS_ACTIVOS,
+            cupos_banners,
+            estado_banners_comercio,
+            opciones_banner,
+        )
+
+        maximo_banners = MAX_BANNERS_ACTIVOS
+        banners_b2b = (
+            estado_banners_comercio(comercio.get('id')) if comercio.get('id') else []
+        )
+        banner_opciones = opciones_banner()
+        banner_cupos = cupos_banners()
+    except Exception as error:
+        logger.error(
+            f'[Localis] panel_comercio banners B2B fallo: {type(error).__name__}: {error}'
+        )
+        banners_b2b, banner_opciones = [], {}
+        banner_cupos = {
+            'maximo': maximo_banners,
+            'ocupados': 0,
+            'disponibles': maximo_banners,
+        }
+
     # Premios y puntos (canje de destacados gratuitos).
     try:
         premios = resumen_premios(comercio.get('id')) if comercio.get('id') else {}
@@ -177,6 +204,10 @@ def panel_comercio():
             metricas=metricas,
             boosts=boosts,
             opciones_boost=opciones_boost(),
+            banners_b2b=banners_b2b,
+            banner_opciones=banner_opciones,
+            banner_cupos=banner_cupos,
+            banners_portada_total=banner_cupos.get('ocupados', 0),
             pago_movil=pago_movil,
             premios=premios,
             nav_activo='panel',

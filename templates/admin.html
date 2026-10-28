@@ -248,13 +248,13 @@
             </aside>
 
             <aside class="card" id="config-banner">
-                <h2>Banner sección destacada (barra naranja)</h2>
-                <p style="font-size: 0.85rem; color: #666; margin-bottom: 1rem;">Esta imagen aparece en la franja promocional naranja del inicio público. Se guarda en el servidor.</p>
+                <h2>Banner principal de la portada (por defecto)</h2>
+                <p style="font-size: 0.85rem; color: #666; margin-bottom: 1rem;">Imagen de respaldo de la franja promocional del inicio público: se muestra cuando no hay <strong>banners B2B alquilados</strong> rotando en el carrusel. Se guarda en el servidor.</p>
                 <img src="{{ banner_url }}" alt="Banner actual" class="banner-preview" onerror="this.onerror=null;this.src='{{ hero_local }}'">
                 <form action="{{ url_for('admin.admin_banner') }}" method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="form-group">
-                        <label for="banner">Nueva imagen para la sección destacada</label>
+                        <label for="banner">Nueva imagen de respaldo (1200 × 400 px recomendado)</label>
                         <input type="file" id="banner" name="banner" accept="image/*" required>
                     </div>
                     <button type="submit" class="btn-primario">Actualizar Banner</button>

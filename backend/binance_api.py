@@ -66,8 +66,9 @@ _SLICE_MS = 12 * 60 * 60 * 1000  # 12 h: ventana de barrido si hay truncamiento
 _MAX_SLICES = 12
 
 # La verificación solo acepta pagos en USDT y exige el importe exacto (con
-# centavos de margen). Nunca se acepta un dólar menos: en destacados de $2-4
-# eso equivalía a regalar hasta el 50 % del servicio.
+# centavos de margen). Nunca se acepta un dólar menos: en destacados de $1-4
+# (ya con el descuento de Binance) eso equivalía a regalar hasta el 100 % del
+# servicio, y en banners ($50) a descontar el alquiler de más.
 MONEDA_ESPERADA = 'USDT'
 _TOLERANCIA_USD_ABS = 0.02
 _TOLERANCIA_USD_REL = 0.01
