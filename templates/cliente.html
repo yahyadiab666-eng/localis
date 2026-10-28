@@ -76,28 +76,11 @@
       background-position: center;
       background-repeat: no-repeat;
     }
-    /* Carrusel B2B: 3:1 (medida del banner) en escritorio y más alto en móvil
-       para que la imagen y el título no queden aplastados. */
+    /* Carrusel B2B: se muestra SOLO la imagen, con su proporción 3:1 exacta
+       (la misma con la que se publica: 1200 x 400 px). Sin textos encima. */
     .banner-carrusel-caja {
+      /* Proporción exacta de la pieza (1200x400): no se recorta ni se deforma. */
       aspect-ratio: 3 / 1;
-      min-height: 168px;
-    }
-    /* Puntos del carrusel: sobre la barra del título en móvil. */
-    .carrusel-puntos {
-      bottom: 0.625rem;
-    }
-    @media (max-width: 640px) {
-      .banner-carrusel-caja {
-        aspect-ratio: 16 / 9;
-        min-height: 190px;
-      }
-      .banner-slide-titulo {
-        font-size: 1rem !important;
-        line-height: 1.2 !important;
-      }
-      .carrusel-puntos {
-        bottom: 3.25rem;
-      }
     }
     .localis-img-producto-wrap {
       height: 180px !important;
@@ -204,53 +187,18 @@
                  data-banner-slide="{{ loop.index0 }}"
                  data-banner-id="{{ banner.id }}"
                  aria-hidden="{{ 'false' if loop.first else 'true' }}">
+          {# SOLO la imagen del banner: sin título, sin etiquetas ni degradados. #}
           <a href="{{ banner.enlace_url or '#' }}"
              {% if banner.enlace_url %}target="_blank" rel="noopener sponsored"{% else %}aria-disabled="true" onclick="return false;"{% endif %}
-             class="flex flex-col w-full h-full text-white">
-            <span class="relative block flex-1 min-h-0 bg-stone-900">
-              {# Escritorio: la pieza llena el marco 3:1 (sin recorte).
-                 Móvil: se ve la pieza completa (contain) y el título va debajo. #}
-              <img src="{{ banner.imagen_url }}" alt="{{ banner.titulo or ('Banner de ' ~ (banner.comercio_nombre or 'un comercio')) }}"
-                   class="absolute inset-0 w-full h-full object-contain sm:object-cover" loading="lazy" decoding="async"
-                   onerror="this.style.display='none'">
-              <span class="absolute inset-0" style="background: linear-gradient(90deg, rgba(17,17,17,.72), rgba(17,17,17,.15));"></span>
-              <span class="relative z-10 hidden sm:flex h-full flex-col justify-center items-start gap-1.5 p-5 sm:p-8 max-w-[60%]">
-                <span class="bg-white/20 text-white text-[11px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">Publicidad</span>
-                <span id="banner-slide-titulo-{{ banner.id }}" class="banner-slide-titulo font-display text-2xl font-bold leading-tight line-clamp-2">{{ banner.titulo }}</span>
-                {% if banner.comercio_nombre %}
-                <span class="text-white/80 text-sm line-clamp-1">{{ banner.comercio_nombre }}</span>
-                {% endif %}
-                {% if banner.enlace_url %}
-                <span class="mt-1 inline-flex items-center gap-1 text-[11px] font-bold text-amber-300">
-                  Ver más <i data-lucide="arrow-right" style="width:12px;height:12px;"></i>
-                </span>
-                {% endif %}
-              </span>
-            </span>
-            {# Móvil: barra con el título debajo de la imagen (no tapa ni recorta la pieza). #}
-            <span class="sm:hidden z-10 w-full bg-stone-900/95 px-3 py-2 flex items-center justify-between gap-2">
-              <span class="min-w-0">
-                <span class="block text-[11px] font-bold truncate">{{ banner.titulo }}</span>
-                {% if banner.comercio_nombre %}
-                <span class="block text-[10px] text-white/60 truncate">{{ banner.comercio_nombre }}</span>
-                {% endif %}
-              </span>
-              {% if banner.enlace_url %}
-              <span class="shrink-0 text-[10px] font-bold text-amber-300">Ver más →</span>
-              {% endif %}
-            </span>
+             class="block w-full h-full">
+            <img src="{{ banner.imagen_url }}"
+                 alt="{{ banner.titulo or ('Banner de ' ~ (banner.comercio_nombre or 'un anunciante')) }}"
+                 class="w-full h-full object-cover" loading="lazy" decoding="async"
+                 referrerpolicy="no-referrer"
+                 onerror="this.style.display='none'">
           </a>
         </article>
         {% endfor %}
-
-        {% if banners_home | length > 1 %}
-        <div class="carrusel-puntos absolute left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5" role="tablist" aria-label="Banners">
-          {% for banner in banners_home %}
-          <button type="button" class="banner-punto h-1.5 rounded-full transition-all {% if loop.first %}w-5 bg-white{% else %}w-1.5 bg-white/50{% endif %}"
-                  data-banner-punto="{{ loop.index0 }}" aria-label="Banner {{ loop.index }}"></button>
-          {% endfor %}
-        </div>
-        {% endif %}
       {% else %}
         <div class="absolute inset-0 flex items-center p-8 text-white"
              style="background-image: linear-gradient(135deg, rgba(217, 119, 6, 0.88), rgba(245, 158, 11, 0.82)), url('{{ banner_url }}'); background-size: cover; background-position: center;">
@@ -262,6 +210,16 @@
         </div>
       {% endif %}
     </div>
+
+    {# Puntos de navegación FUERA de la imagen: la pieza nunca se tapa. #}
+    {% if banners_home | length > 1 %}
+    <div class="mt-2.5 flex items-center justify-center gap-1.5" role="tablist" aria-label="Banners">
+      {% for banner in banners_home %}
+      <button type="button" class="banner-punto h-1.5 rounded-full transition-all {% if loop.first %}w-5 bg-amber-500{% else %}w-1.5 bg-stone-300 hover:bg-stone-400{% endif %}"
+              data-banner-punto="{{ loop.index0 }}" aria-label="Banner {{ loop.index }}"></button>
+      {% endfor %}
+    </div>
+    {% endif %}
   </section>
 
   <section class="w-full py-14 px-6" style="background: rgb(245, 240, 232);">
@@ -648,9 +606,9 @@
         puntos.forEach(function (punto, i) {
           var activo = i === actual;
           punto.classList.toggle('w-5', activo);
-          punto.classList.toggle('bg-white', activo);
+          punto.classList.toggle('bg-amber-500', activo);
           punto.classList.toggle('w-1.5', !activo);
-          punto.classList.toggle('bg-white/50', !activo);
+          punto.classList.toggle('bg-stone-300', !activo);
         });
         contar(slides[actual]);
       }

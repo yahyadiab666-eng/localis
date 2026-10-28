@@ -762,11 +762,14 @@ def api_verificar_banner():
             409,
         )
 
+    # El nombre es OPCIONAL: en la portada se muestra solo la imagen. Sirve
+    # para identificar el banner en la lista del anunciante y como ``alt``.
     titulo = ' '.join((request.form.get('titulo') or '').split()).strip()
-    if not titulo:
-        return jsonify({'error': 'Escribe un título para el banner.'}), 400
     if len(titulo) > 120:
-        return jsonify({'error': 'El título no puede superar 120 caracteres.'}), 400
+        return (
+            jsonify({'error': 'El nombre del banner no puede superar 120 caracteres.'}),
+            400,
+        )
 
     enlace_raw = (request.form.get('enlace_url') or '').strip()
     if enlace_raw and not banners_b2b.sanitizar_enlace_banner(enlace_raw):

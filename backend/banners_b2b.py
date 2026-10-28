@@ -516,7 +516,9 @@ def activar_banner_b2b(
 
     titulo = ' '.join(str(titulo or '').split()).strip()[:120]
     if not titulo:
-        return False, 'Escribe un título para el banner.'
+        # En la portada solo se ve la imagen; el nombre es interno (lista del
+        # anunciante y texto alternativo).
+        titulo = f'Banner de {anunciante}' if anunciante else 'Banner en la portada'
     if not imagen_url:
         return False, 'No se pudo guardar la imagen del banner. Intenta de nuevo.'
 
