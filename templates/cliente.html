@@ -82,6 +82,14 @@
       /* Proporción exacta de la pieza (1200x400): no se recorta ni se deforma. */
       aspect-ratio: 3 / 1;
     }
+    /* El respaldo NO es una pieza 3:1: lleva texto propio y en móvil la caja
+       quedaría tan baja que el texto se recortaría. Solo ahí se le da alto. */
+    @media (max-width: 640px) {
+      .banner-carrusel-caja--fallback {
+        aspect-ratio: auto;
+        min-height: 164px;
+      }
+    }
     .localis-img-producto-wrap {
       height: 180px !important;
       min-height: 180px !important;
@@ -180,7 +188,7 @@
   <section class="max-w-6xl mx-auto px-6 my-8"
            data-banner-carrusel
            data-banner-rotacion="{{ banner_rotacion_seg | default(60) }}">
-    <div class="banner-carrusel-caja banner-destacado-bg rounded-2xl overflow-hidden shadow-lg relative w-full">
+    <div class="banner-carrusel-caja banner-destacado-bg rounded-2xl overflow-hidden shadow-lg relative w-full{% if not banners_home %} banner-carrusel-caja--fallback{% endif %}">
       {% if banners_home %}
         {% for banner in banners_home %}
         <article class="banner-slide absolute inset-0 transition-opacity duration-500{% if not loop.first %} opacity-0 pointer-events-none{% endif %}"
@@ -199,16 +207,18 @@
           </a>
         </article>
         {% endfor %}
-      {% else %}
-        <div class="absolute inset-0 flex items-center p-8 text-white"
-             style="background-image: linear-gradient(135deg, rgba(217, 119, 6, 0.88), rgba(245, 158, 11, 0.82)), url('{{ banner_url }}'); background-size: cover; background-position: center;">
-          <div class="flex-1 space-y-3 text-center md:text-left">
-            <span class="bg-white/20 text-white text-[11px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">Destacado</span>
-            <h4 class="font-display text-2xl md:text-3xl font-bold">Apoya lo local, vive mejor</h4>
-            <p class="text-amber-100 text-sm max-w-xl">Descubre ofertas exclusivas en tus comercios de cercanía. Ref Tasa: <strong>{{ tasa }} Bs/USD</strong></p>
-          </div>
-        </div>
       {% endif %}
+      {# Capa de respaldo: se ve cuando no hay banners alquilados o cuando la
+         imagen falla, para que la portada nunca quede como una franja vacía. #}
+      <div class="banner-respaldo absolute inset-0 flex items-center p-5 sm:p-8 text-white{% if banners_home %} hidden{% endif %}"
+           data-banner-respaldo
+           style="background-image: linear-gradient(135deg, rgba(217, 119, 6, 0.88), rgba(245, 158, 11, 0.82)), url('{{ banner_url }}'); background-size: cover; background-position: center;">
+        <div class="flex-1 space-y-2 sm:space-y-3 text-center md:text-left">
+          <span class="bg-white/20 text-white text-[11px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">Destacado</span>
+          <h4 class="font-display text-xl sm:text-2xl md:text-3xl font-bold leading-tight">Apoya lo local, vive mejor</h4>
+          <p class="text-amber-100 text-xs sm:text-sm max-w-xl">Descubre ofertas exclusivas en tus comercios de cercanía. Ref Tasa: <strong>{{ tasa }} Bs/USD</strong></p>
+        </div>
+      </div>
     </div>
 
     {# Puntos de navegación FUERA de la imagen: la pieza nunca se tapa. #}
@@ -571,6 +581,29 @@
         contenedor.querySelectorAll('[data-banner-slide]')
       );
       if (!slides.length) return;
+      var caja = contenedor.querySelector('.banner-carrusel-caja');
+      var respaldo = contenedor.querySelector('[data-banner-respaldo]');
+      var respaldoActivo = false;
+
+      // Si una pieza no carga, no se deja una franja vacía: se muestra el
+      // respaldo (con su propio texto y la foto del banner principal).
+      function mostrarRespaldo() {
+        if (!respaldo || respaldoActivo) return;
+        respaldoActivo = true;
+        slides.forEach(function (slide) {
+          slide.classList.add('opacity-0', 'pointer-events-none');
+          slide.setAttribute('aria-hidden', 'true');
+        });
+        if (caja) caja.classList.add('banner-carrusel-caja--fallback');
+        respaldo.classList.remove('hidden');
+      }
+
+      slides.forEach(function (slide) {
+        var img = slide.querySelector('img');
+        if (!img) return;
+        img.addEventListener('error', mostrarRespaldo);
+        if (img.complete && img.naturalWidth === 0) mostrarRespaldo();
+      });
       var puntos = Array.prototype.slice.call(
         contenedor.querySelectorAll('[data-banner-punto]')
       );
@@ -595,7 +628,7 @@
       }
 
       function mostrar(indice) {
-        if (!slides.length) return;
+        if (!slides.length || respaldoActivo) return;
         actual = ((indice % slides.length) + slides.length) % slides.length;
         slides.forEach(function (slide, i) {
           var activo = i === actual;
@@ -625,7 +658,7 @@
           mostrar(actual + 1);
         }, segundos * 1000);
       }
-      contar(slides[0]);
+      if (!respaldoActivo) contar(slides[0]);
     })();
   </script>
 {% include 'partials/asistente_widget.html' %}
