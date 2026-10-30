@@ -704,3 +704,322 @@ def extender_banner_b2b(comercio_id=None, dias=DIAS_BANNER, referencia=None):
     except Exception as error:
         logger.error(f'[Localis Banner] no se pudo extender: {error}')
         return False, 'No se pudo extender el banner.'
+
+
+# ==========================================================
+# Administración de banners (panel admin)
+# ==========================================================
+# El admin es el dueño de la portada: puede revisar TODOS los banners, activar
+# o pausar uno, ampliar días (pago confirmado a mano), corregir el enlace,
+# borrarlo o publicar una pieza propia (cortesía). Todo queda en auditoría y
+# respeta el tope de MAX_BANNERS_ACTIVOS para no romper el carrusel.
+
+ESTADOS_BANNER_ADMIN = ('activo', 'pausado', 'vencido', 'eliminado')
+
+_ETIQUETAS_ESTADO_BANNER = {
+    'activo': 'Activo',
+    'pausado': 'Pausado',
+    'vencido': 'Vencido',
+    'eliminado': 'Eliminado',
+}
+
+
+def _auditar_banner(admin_id, accion, detalle):
+    """Registra la acción del admin en ``logs_auditoria``. Nunca lanza."""
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                INSERT INTO logs_auditoria (usuario_id, accion, detalles)
+                VALUES (?, ?, ?)
+                """,
+                (admin_id, accion, str(detalle)[:900]),
+            )
+            conexion.commit()
+    except Exception as error:
+        logger.error(f'[Localis Banner] no se pudo auditar: {error}')
+
+
+def _banner_por_id(cursor, banner_id):
+    cursor.execute('SELECT * FROM banners_b2b WHERE id = ?', (int(banner_id),))
+    fila = cursor.fetchone()
+    return (dict(fila) if not isinstance(fila, dict) else fila) if fila else None
+
+
+def _vigencia(fin):
+    """``(vigente, dias_restantes)`` a partir de ``fecha_fin``."""
+    ahora = _ahora_utc()
+    if not isinstance(fin, datetime):
+        return False, None
+    momento = fin if fin.tzinfo else fin.replace(tzinfo=timezone.utc)
+    delta = momento - ahora
+    return delta.total_seconds() > 0, max(0, delta.days)
+
+
+def listar_banners_admin(limite=50):
+    """Todos los banners (cualquier estado) para el panel del admin.
+
+    Devuelve dicts con anunciante, estado legible, fechas, días restantes e
+    impresiones. Nunca lanza: sin BD devuelve una lista vacía.
+    """
+    resultado = []
+    try:
+        limite = max(1, min(200, int(limite or 50)))
+    except (TypeError, ValueError):
+        limite = 50
+    try:
+        with get_db_connection(row_factory=sqlite3.Row) as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT b.id, b.titulo, b.imagen_url, b.enlace_url, b.estado,
+                       b.comercio_id, b.usuario_id, b.anunciante, b.metodo,
+                       b.precio_usd, b.fecha_inicio, b.fecha_fin, b.fecha_registro,
+                       b.impresiones, b.referencia_pago,
+                       c.nombre AS comercio_nombre,
+                       u.correo AS usuario_correo
+                FROM banners_b2b b
+                LEFT JOIN comercios c ON c.id = b.comercio_id
+                LEFT JOIN usuarios u ON u.id = b.usuario_id
+                ORDER BY (COALESCE(b.estado, 'activo') = 'activo') DESC, b.id DESC
+                LIMIT ?
+                """,
+                (limite,),
+            )
+            filas = cursor.fetchall() or []
+    except Exception as error:
+        logger.error(f'[Localis Banner] listado admin no disponible: {error}')
+        return resultado
+
+    for fila in filas:
+        datos = dict(fila) if not isinstance(fila, dict) else fila
+        vigente, dias = _vigencia(datos.get('fecha_fin'))
+        estado = str(datos.get('estado') or 'activo').strip().lower()
+        resultado.append(
+            {
+                'id': int(datos.get('id')),
+                'titulo': (datos.get('titulo') or '').strip(),
+                'imagen_url': datos.get('imagen_url'),
+                'enlace_url': sanitizar_enlace_banner(datos.get('enlace_url')),
+                'estado': estado,
+                'etiqueta_estado': _ETIQUETAS_ESTADO_BANNER.get(estado, estado.title()),
+                'vigente': vigente,
+                'dias_restantes': dias,
+                'anunciante': (
+                    datos.get('comercio_nombre')
+                    or datos.get('anunciante')
+                    or datos.get('usuario_correo')
+                    or 'Localis'
+                ),
+                'comercio_id': datos.get('comercio_id'),
+                'metodo': datos.get('metodo'),
+                'precio_usd': datos.get('precio_usd'),
+                'fecha_inicio': datos.get('fecha_inicio'),
+                'fecha_fin': datos.get('fecha_fin'),
+                'fecha_registro': datos.get('fecha_registro'),
+                'impresiones': int(datos.get('impresiones') or 0),
+                'referencia_pago': datos.get('referencia_pago'),
+            }
+        )
+    return resultado
+
+
+def cambiar_estado_banner_admin(banner_id, estado, admin_id=None):
+    """Activa o pausa un banner desde el panel. Retorna ``(exito, mensaje)``."""
+    estado = str(estado or '').strip().lower()
+    if estado not in ('activo', 'pausado'):
+        return False, 'Estado no válido.'
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            banner = _banner_por_id(cursor, banner_id)
+            if not banner:
+                return False, 'El banner no existe.'
+            if estado == 'activo':
+                cursor.execute(
+                    'SELECT pg_advisory_xact_lock(?)', (CLAVE_LOCK_CUPOS_BANNER,)
+                )
+                activos = contar_banners_activos()
+                ya_activo = str(banner.get('estado') or '') == 'activo'
+                if not ya_activo and activos >= MAX_BANNERS_ACTIVOS:
+                    return (
+                        False,
+                        f'La portada ya tiene {MAX_BANNERS_ACTIVOS} banners activos. '
+                        'Pausa o elimina uno antes de activar otro.',
+                    )
+            cursor.execute(
+                'UPDATE banners_b2b SET estado = ? WHERE id = ?',
+                (estado, int(banner_id)),
+            )
+            conexion.commit()
+    except Exception as error:
+        logger.error(f'[Localis Banner] no se pudo cambiar el estado: {error}')
+        return False, 'No se pudo cambiar el estado del banner.'
+
+    _auditar_banner(
+        admin_id,
+        'Banner (admin): estado',
+        f'banner={banner_id} estado={estado}',
+    )
+    return (
+        True,
+        'Banner publicado en la portada.' if estado == 'activo' else 'Banner pausado.',
+    )
+
+
+def extender_banner_admin(banner_id, dias=DIAS_BANNER, admin_id=None):
+    """Amplía días de un banner concreto (pago confirmado a mano)."""
+    try:
+        dias = int(str(dias).strip())
+    except (TypeError, ValueError):
+        return False, 'Indica un número de días válido.'
+    if dias <= 0 or dias > 365:
+        return False, 'Los días deben estar entre 1 y 365.'
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            banner = _banner_por_id(cursor, banner_id)
+            if not banner:
+                return False, 'El banner no existe.'
+            vigente, _ = _vigencia(banner.get('fecha_fin'))
+            base = (
+                banner.get('fecha_fin')
+                if vigente and isinstance(banner.get('fecha_fin'), datetime)
+                else _ahora_utc()
+            )
+            if isinstance(base, datetime) and base.tzinfo is None:
+                base = base.replace(tzinfo=timezone.utc)
+            nuevo_fin = base + timedelta(days=dias)
+            cursor.execute(
+                'UPDATE banners_b2b SET fecha_fin = ?, estado = ? WHERE id = ?',
+                (nuevo_fin, 'activo', int(banner_id)),
+            )
+            conexion.commit()
+    except Exception as error:
+        logger.error(f'[Localis Banner] no se pudo extender: {error}')
+        return False, 'No se pudo extender el banner.'
+
+    _auditar_banner(
+        admin_id,
+        'Banner (admin): extensión',
+        f'banner={banner_id} dias={dias} fin={nuevo_fin}',
+    )
+    return True, f'Banner ampliado {dias} días.'
+
+
+def actualizar_enlace_banner_admin(banner_id, enlace_url, admin_id=None):
+    """Corrige el enlace de destino de un banner (o lo quita)."""
+    enlace = sanitizar_enlace_banner(enlace_url)
+    if enlace_url and not enlace:
+        return False, 'El enlace no es válido (usa https:// o una ruta interna).'
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            if not _banner_por_id(cursor, banner_id):
+                return False, 'El banner no existe.'
+            cursor.execute(
+                'UPDATE banners_b2b SET enlace_url = ? WHERE id = ?',
+                (enlace, int(banner_id)),
+            )
+            conexion.commit()
+    except Exception as error:
+        logger.error(f'[Localis Banner] no se pudo actualizar el enlace: {error}')
+        return False, 'No se pudo actualizar el enlace.'
+
+    _auditar_banner(
+        admin_id,
+        'Banner (admin): enlace',
+        f'banner={banner_id} enlace={enlace or "-"}',
+    )
+    return True, 'Enlace del banner actualizado.'
+
+
+def eliminar_banner_admin(banner_id, admin_id=None):
+    """Elimina un banner de la portada (deja de mostrarse al instante)."""
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            banner = _banner_por_id(cursor, banner_id)
+            if not banner:
+                return False, 'El banner no existe.'
+            cursor.execute('DELETE FROM banners_b2b WHERE id = ?', (int(banner_id),))
+            conexion.commit()
+    except Exception as error:
+        logger.error(f'[Localis Banner] no se pudo eliminar: {error}')
+        return False, 'No se pudo eliminar el banner.'
+
+    _auditar_banner(
+        admin_id,
+        'Banner (admin): eliminación',
+        f'banner={banner_id} titulo={banner.get("titulo")}',
+    )
+    return True, 'Banner eliminado de la portada.'
+
+
+def crear_banner_admin(
+    admin_id,
+    imagen_url,
+    titulo=None,
+    enlace_url=None,
+    dias=DIAS_BANNER,
+):
+    """Publica una pieza propia del admin (sin cobro). Retorna ``(ok, msg, id)``.
+
+    Sirve para promociones de la casa, pruebas de diseño y espacios cedidos.
+    Respeta el tope de ``MAX_BANNERS_ACTIVOS`` como cualquier alquiler.
+    """
+    if not imagen_url:
+        return False, 'Sube la imagen del banner.', None
+    try:
+        dias = int(str(dias).strip()) if dias is not None else DIAS_BANNER
+    except (TypeError, ValueError):
+        dias = DIAS_BANNER
+    if dias <= 0 or dias > 365:
+        dias = DIAS_BANNER
+    titulo = ' '.join(str(titulo or '').split()).strip()[:120]
+    enlace = sanitizar_enlace_banner(enlace_url)
+    if enlace_url and not enlace:
+        return False, 'El enlace no es válido (usa https:// o una ruta interna).', None
+
+    inicio = _ahora_utc()
+    fin = inicio + timedelta(days=dias)
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                'SELECT pg_advisory_xact_lock(?)', (CLAVE_LOCK_CUPOS_BANNER,)
+            )
+            if contar_banners_activos() >= MAX_BANNERS_ACTIVOS:
+                return (
+                    False,
+                    f'La portada ya tiene {MAX_BANNERS_ACTIVOS} banners activos. '
+                    'Pausa o elimina uno antes de publicar otro.',
+                    None,
+                )
+            cursor.execute(
+                """
+                INSERT INTO banners_b2b
+                    (comercio_id, usuario_id, anunciante, titulo, imagen_url,
+                     enlace_url, precio_usd, dias_duracion, referencia_pago,
+                     metodo, estado, fecha_inicio, fecha_fin, impresiones)
+                VALUES (NULL, ?, 'Localis', ?, ?, ?, 0, ?, NULL, 'admin',
+                        'activo', ?, ?, 0)
+                RETURNING id
+                """,
+                (admin_id, titulo or 'Banner de Localis', imagen_url, enlace, dias,
+                 inicio, fin),
+            )
+            fila = cursor.fetchone()
+            banner_id = (fila.get('id') if isinstance(fila, dict) else fila[0]) if fila else None
+            conexion.commit()
+    except Exception as error:
+        logger.error(f'[Localis Banner] no se pudo crear: {error}')
+        return False, 'No se pudo publicar el banner.', None
+
+    _auditar_banner(
+        admin_id,
+        'Banner (admin): alta',
+        f'banner={banner_id} dias={dias} titulo={titulo or "Localis"}',
+    )
+    return True, f'Banner publicado {dias} días en la portada.', banner_id

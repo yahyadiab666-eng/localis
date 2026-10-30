@@ -56,6 +56,18 @@ from backend.admin import (
     suspender_comercio_temporal,
 )
 from backend.apariencia import normalizar_color_banner
+from backend.banners_b2b import (
+    BannerInvalido,
+    actualizar_enlace_banner_admin,
+    cambiar_estado_banner_admin,
+    crear_banner_admin,
+    cupos_banners,
+    eliminar_banner_admin,
+    extender_banner_admin,
+    listar_banners_admin,
+    normalizar_imagen_banner,
+)
+from backend.supabase_storage import intentar_subir_bytes
 from backend.image_lookup import persistir_imagen_producto_hibrida
 from backend.import_queue import (
     ColaImportacionLlena,
@@ -126,6 +138,8 @@ def panel_admin():
         revisiones_pendientes=contar_revisiones_pago_pendientes(),
         solicitudes_pendientes=contar_solicitudes_pendientes(),
         bandeja=resumen_bandeja(),
+        banners_portada=listar_banners_admin(),
+        cupos_banner=cupos_banners(),
         salud=salud_pagos(),
         metricas_asistente=metricas_asistente,
         estado_ticket=estado_filtro or '',
@@ -161,6 +175,34 @@ def actualizar_tasa():
     return redirect(url_for('admin.panel_admin'))
 
 
+def _subir_imagen_banner(archivo, prefijo):
+    """Reencuadra a 1200x400 y sube a Storage (o local). Devuelve URL o None.
+
+    Nunca lanza: la ruta responde con un flash si algo falla.
+    """
+    from backend.images import leer_bytes_limitados
+
+    data, error_lectura = leer_bytes_limitados(archivo)
+    if error_lectura:
+        logger.info(f'[Localis Admin Banner] {error_lectura}')
+        return None
+    try:
+        payload, tipo, nombre = normalizar_imagen_banner(data)
+    except BannerInvalido as error:
+        logger.info(f'[Localis Admin Banner] imagen rechazada: {error}')
+        return None
+    except Exception as error:
+        logger.error(f'[Localis Admin Banner] imagen: {error}')
+        return None
+    try:
+        return intentar_subir_bytes(
+            payload, filename=nombre, content_type=tipo, carpeta='banners'
+        )[0]
+    except Exception as error:
+        logger.error(f'[Localis Admin Banner] subida: {error}')
+        return None
+
+
 @bp.route('/banner', methods=['POST'])
 @admin_requerido
 def admin_banner():
@@ -168,21 +210,77 @@ def admin_banner():
     admin_id = session.get('usuario_id')
 
     if banner_archivo and banner_archivo.filename:
-        banner_url, aviso_banner = procesar_imagen_subida(
-            banner_archivo,
-            prefijo='banner_app',
-            carpeta='banners',
-            max_dimension=1920,
-        )
-        if aviso_banner:
-            flash(aviso_banner, 'info')
-            exito, mensaje = False, aviso_banner
-        elif banner_url:
+        # Mismo tratamiento que las piezas alquiladas: se reencuadra a 1200x400
+        # (recorte centrado, sin deformar) para que la franja se vea igual.
+        banner_url = _subir_imagen_banner(banner_archivo, 'banner_app')
+        if banner_url:
             exito, mensaje = actualizar_banner_principal(admin_id, banner_url)
         else:
             exito, mensaje = False, 'No se pudo procesar el banner.'
     else:
         exito, mensaje = False, 'Debes seleccionar una imagen.'
+
+    flash(mensaje, 'exito' if exito else 'error')
+    return redirect(url_for('admin.panel_admin'))
+
+
+@bp.route('/banners', methods=['POST'])
+@admin_requerido
+def admin_banners_accion():
+    """Administración de los banners de la portada desde el panel.
+
+    ``accion``: ``nuevo`` (sube la pieza y la publica, sin cobro),
+    ``estado`` (activar/pausar), ``extender`` (días), ``enlace`` y ``eliminar``.
+    """
+    accion = (request.form.get('accion') or '').strip().lower()
+    admin_id = session.get('usuario_id')
+    banner_id = request.form.get('banner_id', type=int)
+
+    if accion == 'nuevo':
+        archivo = request.files.get('imagen')
+        if not archivo or not archivo.filename:
+            flash('Selecciona la imagen del banner (1200 × 400 px).', 'error')
+            return redirect(url_for('admin.panel_admin'))
+
+        imagen_url = _subir_imagen_banner(archivo, 'banner_admin')
+        if not imagen_url:
+            flash(
+                'No se pudo guardar la imagen del banner. Revisa que sea '
+                'panorámica (1200 × 400 px) e intenta de nuevo.',
+                'error',
+            )
+            return redirect(url_for('admin.panel_admin'))
+
+        exito, mensaje, _ = crear_banner_admin(
+            admin_id,
+            imagen_url,
+            titulo=request.form.get('titulo'),
+            enlace_url=request.form.get('enlace_url'),
+            dias=request.form.get('dias') or 30,
+        )
+        flash(mensaje, 'exito' if exito else 'error')
+        return redirect(url_for('admin.panel_admin'))
+
+    if not banner_id:
+        flash('Banner no válido.', 'error')
+        return redirect(url_for('admin.panel_admin'))
+
+    if accion == 'estado':
+        exito, mensaje = cambiar_estado_banner_admin(
+            banner_id, request.form.get('estado'), admin_id
+        )
+    elif accion == 'extender':
+        exito, mensaje = extender_banner_admin(
+            banner_id, request.form.get('dias') or 30, admin_id
+        )
+    elif accion == 'enlace':
+        exito, mensaje = actualizar_enlace_banner_admin(
+            banner_id, request.form.get('enlace_url'), admin_id
+        )
+    elif accion == 'eliminar':
+        exito, mensaje = eliminar_banner_admin(banner_id, admin_id)
+    else:
+        exito, mensaje = False, 'Acción no válida.'
 
     flash(mensaje, 'exito' if exito else 'error')
     return redirect(url_for('admin.panel_admin'))

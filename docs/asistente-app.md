@@ -129,7 +129,12 @@ rápidos: **Revisión**, **Comercios**, **Salud de pagos**, **Usuarios** y
 - **Asistente IA**: métricas del chat (consultas atendidas, respondidas, con
   error, latencia y 👍/👎). El chat se abre con la burbuja del asistente.
 - **Configuración Económica** (tasa del dólar), **Banner principal de la
-  portada** (imagen de respaldo) y **Nueva pre-cuenta** (tienda sin dueño, para
-  armarla y transferirla después).
+  portada** (la imagen que se ve cuando no hay banners alquilados) y **Nueva
+  pre-cuenta** (tienda sin dueño, para armarla y transferirla después).
+- **Banners de la portada**: el admin ve todos los banners (alquilados y
+  propios), cuántos cupos quedan (máximo 5), y puede **pausar**, **activar**,
+  **ampliar 30 días**, **corregir el enlace** o **eliminar** cada uno, además de
+  **publicar un banner propio sin cobro**. La portada muestra **solo las
+  imágenes**: no se añaden títulos ni textos encima.
 - El asistente puede LEER las cifras del panel para responder, pero **no acepta
   ni rechaza solicitudes**: eso lo hace el administrador con los botones.

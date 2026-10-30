@@ -28,10 +28,12 @@
             display: grid; grid-template-columns: 1fr 2fr; gap: 2rem;
         }
         .col-izquierda { display: flex; flex-direction: column; gap: 2rem; }
-        /* Lo operativo va primero en la columna: solicitudes de usuarios y,
-           justo después, las alertas de revisión de pago. */
-        #solicitudes { order: -2; }
-        #bandeja-revision { order: -1; }
+        /* Lo operativo va primero en la columna: solicitudes de usuarios, las
+           alertas de revisión de pago y la gestión de banners de la portada. */
+        #solicitudes { order: -4; }
+        #bandeja-revision { order: -3; }
+        #banners-portada { order: -2; }
+        #config-banner { order: -1; }
 
         /* Barra rápida de navegación (solo móvil). */
         .admin-nav-rapida { display: none; }
@@ -47,11 +49,12 @@
 
             #solicitudes { order: 4; }
             #bandeja-revision { order: 5; }
-            #salud-pagos { order: 6; }
-            #asistente-ia { order: 7; }
-            #config-economica { order: 8; }
-            #config-banner { order: 9; }
-            #nueva-precuenta { order: 10; }
+            #banners-portada { order: 6; }
+            #salud-pagos { order: 7; }
+            #asistente-ia { order: 8; }
+            #config-economica { order: 9; }
+            #config-banner { order: 10; }
+            #nueva-precuenta { order: 11; }
             .tabla-box { order: 3; }
 
             /* Con cosas por atender, la bandeja va arriba del todo. */
@@ -228,7 +231,13 @@
 
             <aside class="card" id="config-banner">
                 <h2>Banner principal de la portada (por defecto)</h2>
-                <p style="font-size: 0.85rem; color: #666; margin-bottom: 1rem;">Imagen de respaldo de la franja promocional del inicio público: se muestra cuando no hay <strong>banners B2B alquilados</strong> rotando en el carrusel. Se guarda en el servidor.</p>
+                <p style="font-size: 0.85rem; color: #666; margin-bottom: 1rem;">
+                    Imagen que se muestra en la franja de la portada cuando no hay
+                    <strong>banners alquilados</strong> rotando. Se ve <strong>solo la imagen</strong>:
+                    no se le añade ningún título, etiqueta ni degradado por encima, así que
+                    el texto, si lo quieres, debe venir dibujado en la propia imagen
+                    (1200 × 400 px).
+                </p>
                 <img src="{{ banner_url }}" alt="Banner actual" class="banner-preview" onerror="this.onerror=null;this.src='{{ hero_local }}'">
                 <form action="{{ url_for('admin.admin_banner') }}" method="POST" enctype="multipart/form-data">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -238,6 +247,118 @@
                     </div>
                     <button type="submit" class="btn-primario">Actualizar Banner</button>
                 </form>
+            </aside>
+
+            {# ===== Administración de los banners de la portada ===== #}
+            {% set cupos = cupos_banner | default({}, true) %}
+            {% set banners_portada = banners_portada | default([], true) %}
+            <aside class="card" id="banners-portada">
+                <h2>
+                    Banners de la portada
+                    <span class="contador-revision" style="background:#212529;">
+                        {{ cupos.ocupados or 0 }}/{{ cupos.maximo or 5 }} activos
+                    </span>
+                </h2>
+                <p style="font-size:0.85rem;color:#666;margin-bottom:0.75rem;">
+                    Todo lo que rota en el carrusel: los alquilados por comercios y los
+                    que publiques tú. Puedes <strong>pausar</strong>, <strong>ampliar días</strong>,
+                    <strong>corregir el enlace</strong> o <strong>eliminar</strong> cualquiera.
+                    Se muestran <strong>solo las imágenes</strong> (sin textos encima).
+                </p>
+
+                <details class="solicitud-form__nota" style="margin-bottom:0.85rem;">
+                    <summary>+ Publicar un banner propio (sin cobro)</summary>
+                    <form class="solicitud-form" style="margin-top:0.5rem;"
+                          action="{{ url_for('admin.admin_banners_accion') }}"
+                          method="POST" enctype="multipart/form-data">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="accion" value="nuevo">
+                        <label for="banner_nuevo_imagen" style="font-size:0.8rem;font-weight:600;">Imagen (1200 × 400 px)</label>
+                        <input type="file" id="banner_nuevo_imagen" name="imagen" accept="image/*" required>
+                        <input type="text" name="titulo" maxlength="120" placeholder="Nombre interno (opcional)">
+                        <input type="url" name="enlace_url" placeholder="Enlace de destino (opcional, https://…)">
+                        <select name="dias" aria-label="Días en la portada">
+                            <option value="7">7 días</option>
+                            <option value="15">15 días</option>
+                            <option value="30" selected>30 días</option>
+                            <option value="60">60 días</option>
+                        </select>
+                        <button type="submit" class="btn-accion-tabla btn-activar">Publicar banner</button>
+                    </form>
+                </details>
+
+                <div class="bandeja-scroll" style="max-height: 560px; overflow-y: auto;">
+                    {% for banner in banners_portada %}
+                    <div class="banner-admin-item">
+                        {% if banner.imagen_url %}
+                        <img class="banner-admin-thumb" src="{{ banner.imagen_url }}" alt=""
+                             loading="lazy" decoding="async"
+                             onerror="this.style.display='none'">
+                        {% else %}
+                        <div class="banner-admin-thumb banner-admin-thumb--vacio"></div>
+                        {% endif %}
+                        <div class="banner-admin-datos">
+                            <strong>{{ banner.anunciante }}</strong>
+                            <span class="badge badge-estado-banner-{{ banner.estado }}">{{ banner.etiqueta_estado }}</span>
+                            {% if banner.vigente and banner.dias_restantes is not none %}
+                            <span class="badge badge-visible">{{ banner.dias_restantes }} días</span>
+                            {% endif %}
+                            <span class="ticket-meta">
+                                #{{ banner.id }} · {{ banner.impresiones }} impresiones
+                                {% if banner.metodo %} · {{ banner.metodo }}{% endif %}
+                            </span>
+                            {% if banner.enlace_url %}
+                            <a class="enlace-comprobante" href="{{ banner.enlace_url }}"
+                               target="_blank" rel="noopener">Destino del enlace</a>
+                            {% endif %}
+                        </div>
+                        <div class="banner-admin-acciones">
+                            <form action="{{ url_for('admin.admin_banners_accion') }}" method="POST">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="accion" value="estado">
+                                <input type="hidden" name="banner_id" value="{{ banner.id }}">
+                                {% if banner.estado == 'activo' %}
+                                <input type="hidden" name="estado" value="pausado">
+                                <button type="submit" class="btn-accion-tabla btn-suspender">Pausar</button>
+                                {% else %}
+                                <input type="hidden" name="estado" value="activo">
+                                <button type="submit" class="btn-accion-tabla btn-activar">Activar</button>
+                                {% endif %}
+                            </form>
+                            <form action="{{ url_for('admin.admin_banners_accion') }}" method="POST"
+                                  onsubmit="return confirm('¿Ampliar 30 días este banner?');">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="accion" value="extender">
+                                <input type="hidden" name="banner_id" value="{{ banner.id }}">
+                                <input type="hidden" name="dias" value="30">
+                                <button type="submit" class="btn-accion-tabla btn-resolver">+30 días</button>
+                            </form>
+                            <form action="{{ url_for('admin.admin_banners_accion') }}" method="POST"
+                                  class="banner-admin-enlace">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="accion" value="enlace">
+                                <input type="hidden" name="banner_id" value="{{ banner.id }}">
+                                <input type="url" name="enlace_url" value="{{ banner.enlace_url or '' }}"
+                                       placeholder="https://… (vacío = sin enlace)"
+                                       aria-label="Enlace del banner #{{ banner.id }}">
+                                <button type="submit" class="btn-accion-tabla btn-ver">Enlace</button>
+                            </form>
+                            <form action="{{ url_for('admin.admin_banners_accion') }}" method="POST"
+                                  onsubmit="return confirm('¿Eliminar definitivamente este banner de la portada?');">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="accion" value="eliminar">
+                                <input type="hidden" name="banner_id" value="{{ banner.id }}">
+                                <button type="submit" class="btn-accion-tabla btn-eliminar">Eliminar</button>
+                            </form>
+                        </div>
+                    </div>
+                    {% else %}
+                    <p style="text-align:center;color:#777;padding:1rem;">
+                        No hay banners en la portada. Mientras tanto se muestra el
+                        <strong>banner principal</strong> de arriba.
+                    </p>
+                    {% endfor %}
+                </div>
             </aside>
 
             <aside class="card" id="nueva-precuenta">

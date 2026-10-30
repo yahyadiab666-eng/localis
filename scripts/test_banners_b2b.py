@@ -144,6 +144,32 @@ def main() -> int:
     print('\n=== Sin BD no rompe la portada ===')
     _ok(banners_b2b.listar_banners_activos() == [], 'sin BD devuelve lista vacía')
 
+    print('\n=== Administración de banners (panel admin) ===')
+    _ok(banners_b2b.listar_banners_admin() == [], 'sin BD el listado admin es vacío')
+    _ok(
+        banners_b2b.cambiar_estado_banner_admin(1, 'raro') == (False, 'Estado no válido.'),
+        'estado no válido se rechaza',
+    )
+    ok_ext_admin, _ = banners_b2b.extender_banner_admin(1, 'abc')
+    _ok(ok_ext_admin is False, 'extender con días no numéricos se rechaza')
+    ok_ext_admin, _ = banners_b2b.extender_banner_admin(1, 999)
+    _ok(ok_ext_admin is False, 'extender con más de 365 días se rechaza')
+    ok_nuevo, _, banner_nuevo = banners_b2b.crear_banner_admin(1, None)
+    _ok(
+        ok_nuevo is False and banner_nuevo is None,
+        'crear sin imagen se rechaza (no publica nada)',
+    )
+    ok_nuevo, _, _ = banners_b2b.crear_banner_admin(
+        1, 'https://cdn/x.webp', enlace_url='javascript:alert(1)'
+    )
+    _ok(ok_nuevo is False, 'crear con enlace peligroso se rechaza')
+    ok_enlace, _ = banners_b2b.actualizar_enlace_banner_admin(1, 'javascript:alert(1)')
+    _ok(ok_enlace is False, 'actualizar enlace peligroso se rechaza')
+    _ok(
+        set(banners_b2b.ESTADOS_BANNER_ADMIN) >= {'activo', 'pausado'},
+        'estados de banner documentados (activo/pausado)',
+    )
+
     print('\n=== RESULTADO ===')
     if FALLOS:
         print(f'FALLOS: {len(FALLOS)}')
