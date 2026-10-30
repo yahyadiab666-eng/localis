@@ -28,9 +28,20 @@ En la barra superior también aparece **"Cómo funciona"**.
 
 ## Panel del comerciante (menú superior)
 
-Los enlaces del panel son: **Inicio · Panel · Premios · <!-- PLANES_INICIO -->Planes · <!-- PLANES_FIN -->Editar · Guía ·
+Los enlaces del panel son: **Inicio · Panel · Premios · Banner · <!-- PLANES_INICIO -->Planes · <!-- PLANES_FIN -->Editar · Guía ·
 Ver tienda · Mi perfil · Salir**. En el teléfono, el menú lateral añade
-**"Editar tienda"**, **"Guía de uso"** y **"Soporte técnico"**.
+**"Alquilar banner"**, **"Editar tienda"**, **"Guía de uso"** y **"Soporte técnico"**.
+
+## Banner en la portada (opcional, cualquier usuario)
+
+- Se entra desde **"Banner"** en el panel o desde **"Alquilar banner"** en el
+  menú del teléfono; también desde el perfil del usuario.
+- Dura **30 días** y hay un máximo de **5 banners activos** a la vez en el
+  carrusel de la portada.
+- Precio: **60 USD con Pago Móvil** o **50 USD con Binance Pay**. La imagen debe
+  medir **1200 × 400 px**.
+- Se paga igual que el resto: se sube la **captura del comprobante** y el equipo
+  lo revisa; el cobro es manual (OCR + revisión).
 
 ## Importar inventario
 
@@ -82,4 +93,43 @@ Ver tienda · Mi perfil · Salir**. En el teléfono, el menú lateral añade
 - **Enlace público y código QR** para compartir tu tienda en redes, vitrina o
   volantes.
 - **Premios y puntos** por referir otros comercios (canjeables por destacados).
-- **Destacados** para aparecer primero (3 días 2 USD, 5 días 3 USD, 7 días 4 USD).
+- **Destacados** para aparecer primero (3 días 2 USD, 5 días 3 USD, 7 días 4 USD;
+  con Binance Pay 1 USD menos: 1, 2 y 3 USD).
+
+## Panel de administración (solo usuarios con rol admin)
+
+Pantalla **"Localis | Panel Admin"**. En el teléfono, la cabecera muestra accesos
+rápidos: **Revisión**, **Comercios**, **Salud de pagos**, **Usuarios** y
+**Ver sitio**, además de la burbuja del **Asistente IA**.
+
+- **Bandeja de revisiones**: aquí llegan dos cosas distintas.
+  1. **Solicitudes de los usuarios**: soporte, reporte de tienda y reporte de
+     artículo.
+  2. **Alertas de revisión de pago**: pagos con Binance Pay que la API no pudo
+     confirmar.
+  - Filtros: **Todas · Abiertas · En proceso · Aceptadas · Rechazadas**.
+  - Estados de una solicitud: **Pendiente**, **En proceso**, **Aceptada** y
+    **Rechazada**.
+  - Acciones según el tipo de solicitud: **Tomar (en proceso)**,
+    **Aceptar y cerrar**, **Rechazar (no procede)**, **Aceptar y suspender la
+    tienda** (solo reportes de tienda) y **Aceptar y ocultar el producto** (solo
+    reportes de artículo). Las cerradas se pueden **Reabrir**. Se puede añadir
+    una nota que queda guardada con la decisión.
+  - Alertas de pago: **Ver comercio**, **Confirmar pago**, **Suspender**,
+    **Marcar como revisada** y **Rechazar**; muestran el ID de orden y el
+    enlace al comprobante subido.
+- **Salud de pagos (últimos 30 días)**: pagos registrados, confirmados por
+  Binance, sin verificar, no encontrados y pendientes de revisión ahora.
+- **Control de Comercios**: buscador (nombre, correo del dueño, RIF/Cédula o
+  teléfono) y por comercio **Gestionar**, **Suspender**/**Reactivar**,
+  **Eliminar**, **Transferir** o **Reasignar** dueño. En el teléfono la tabla se
+  ve como tarjetas, una por comercio.
+- **Usuarios registrados**: listado de perfiles con su rol (admin, comerciante,
+  cliente) y sus comercios.
+- **Asistente IA**: métricas del chat (consultas atendidas, respondidas, con
+  error, latencia y 👍/👎). El chat se abre con la burbuja del asistente.
+- **Configuración Económica** (tasa del dólar), **Banner principal de la
+  portada** (imagen de respaldo) y **Nueva pre-cuenta** (tienda sin dueño, para
+  armarla y transferirla después).
+- El asistente puede LEER las cifras del panel para responder, pero **no acepta
+  ni rechaza solicitudes**: eso lo hace el administrador con los botones.

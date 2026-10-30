@@ -54,7 +54,10 @@ Sigue sin haber `pytest`: los "tests" son los `scripts/test_*.py`.
 Cada `scripts/test_*.py` es un **script autónomo** con `main()` y un reportero `_ok()`; se ejecutan uno a uno y devuelven código de salida (no hay runner que los descubra). Inserta la raíz del repo en `sys.path`, así que corre desde cualquier lugar.
 
 - Muchos requieren `DATABASE_URL` real y/o red: crean datos sandbox `__...__` y limpian al final (p. ej. `test_importacion_formatos.py` escribe en la BD).
-- Verificación rápida y **sin BD ni red**: `test_clasificador_categorias.py`, `test_cobertura_universal.py`.
+- Verificación rápida y **sin BD ni red**: `test_clasificador_categorias.py`,
+  `test_cobertura_universal.py`, `test_asistente_verdades.py` (contrasta la
+  documentación del asistente con las constantes reales: planes, destacados,
+  banner, puntos y las acciones/estados de la bandeja).
 - Diagnóstico: `diagnostico_*.py` y `auditoria_*.py` (algunos aceptan `--apply`; sin el flag son dry-run).
 
 ## Estado en memoria del worker (no romper)

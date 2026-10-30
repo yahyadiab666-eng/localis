@@ -60,9 +60,9 @@ _SUGERENCIAS = {
         '¿Que incluye mi plan?',
     ],
     'admin': [
-        '¿Como funciona la bandeja tecnica?',
+        '¿Cuantas solicitudes hay pendientes en la bandeja?',
+        '¿Como acepto o rechazo una solicitud?',
         '¿Que significan los estados de pago?',
-        '¿Como reviso las imagenes pendientes?',
     ],
 }
 
@@ -115,7 +115,12 @@ def _construir_contexto(usuario, rol, texto):
     if precios:
         partes.append('PRECIOS DEL CATALOGO (datos en vivo):\n' + precios)
 
-    if datos_vivos.menciona_tienda(texto):
+    # El admin que pregunta "cuantos comercios hay" no quiere el listado publico:
+    # eso lo responden las cifras de la operacion (abajo).
+    pide_tiendas = datos_vivos.menciona_tienda(texto) and not (
+        rol == 'admin' and datos_vivos.menciona_operacion(texto)
+    )
+    if pide_tiendas:
         tiendas = datos_vivos.buscar_tiendas(texto)
         if tiendas:
             partes.append('TIENDAS EN LOCALIS (datos en vivo):\n' + tiendas)
@@ -145,6 +150,22 @@ def _construir_contexto(usuario, rol, texto):
             titulo = 'DATOS DE TU COMERCIO'
         if bloque:
             partes.append(f'{titulo} (datos en vivo):\n{bloque}')
+
+    if rol == 'admin':
+        # Cifras reales del panel: sin ellas el modelo tiende a inventar
+        # "cuántos hay". Se piden solo segun el tema para no gastar contexto.
+        if datos_vivos.menciona_bandeja(texto):
+            bloque = datos_vivos.resumen_bandeja()
+            if bloque:
+                partes.append(f'BANDEJA DEL PANEL (datos en vivo):\n{bloque}')
+        if datos_vivos.menciona_salud_pagos(texto):
+            bloque = datos_vivos.resumen_salud_pagos()
+            if bloque:
+                partes.append(f'SALUD DE PAGOS (datos en vivo):\n{bloque}')
+        if datos_vivos.menciona_operacion(texto):
+            bloque = datos_vivos.resumen_operacion()
+            if bloque:
+                partes.append(f'CIFRAS DE LA OPERACION (datos en vivo):\n{bloque}')
 
     return '\n\n---\n\n'.join(partes)
 

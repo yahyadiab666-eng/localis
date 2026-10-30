@@ -86,11 +86,28 @@ Después del pago:
 
 Se puede destacar un producto o la tienda para aparecer con prioridad:
 
-| Duración | Precio |
-|---|---|
-| 3 días | 2 USD |
-| 5 días | 3 USD |
-| 7 días | 4 USD |
+| Duración | Pago Móvil | Binance Pay |
+|---|---|---|
+| 3 días | 2 USD | 1 USD |
+| 5 días | 3 USD | 2 USD |
+| 7 días | 4 USD | 3 USD |
+
+También se puede alquilar un **banner en la portada**: 30 días por **60 USD con
+Pago Móvil** o **50 USD con Binance Pay**, imagen de **1200 × 400 px**, máximo 5
+banners activos a la vez. Lo puede alquilar cualquier usuario, tenga o no tienda.
+
+## Bandeja del panel de administración
+
+- La bandeja mezcla **solicitudes de los usuarios** (soporte, reporte de tienda,
+  reporte de artículo) y **alertas de revisión de pago**.
+- Estados de una solicitud: **Pendiente**, **En proceso**, **Aceptada** y
+  **Rechazada**. Se filtra con **Todas · Abiertas · En proceso · Aceptadas ·
+  Rechazadas**.
+- Acciones: **Tomar (en proceso)**, **Aceptar y cerrar**, **Rechazar (no
+  procede)**, **Aceptar y suspender la tienda**, **Aceptar y ocultar el
+  producto** y **Reabrir**.
+- Las alertas de pago se resuelven con **Confirmar pago** (activa lo pagado),
+  **Suspender**, **Marcar como revisada** o **Rechazar**.
 
 ## Premios y puntos
 

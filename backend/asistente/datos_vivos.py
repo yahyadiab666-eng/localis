@@ -47,6 +47,24 @@ _CLAVES_PAGO = ('pago', 'pagar', 'comprobante', 'verific', 'revision', 'transfer
 _CLAVES_TIENDA = ('tienda', 'comercio', 'sucursal', 'vende', 'venden', 'donde queda', 'ubicacion', 'local')
 _CLAVES_CATEGORIA = ('categoria', 'categorias')
 
+# --- Panel de administración (solo lectura) ---
+# La bandeja del panel mezcla dos cosas: SOLICITUDES de los usuarios (soporte y
+# reportes) y ALERTAS de revisión de pago. Las preguntas del admin suelen ir
+# sobre "cuántos hay pendientes", así que el asistente lee los conteos reales.
+_CLAVES_BANDEJA = (
+    'bandeja', 'ticket', 'tickets', 'solicitud', 'solicitudes', 'reporte',
+    'reportes', 'revision', 'revisiones', 'pendiente', 'pendientes', 'abiert',
+    'acept', 'rechaz', 'atender', 'atencion', 'soporte', 'cola',
+)
+_CLAVES_OPERACION = (
+    'comercio', 'comercios', 'tienda', 'tiendas', 'usuario', 'usuarios',
+    'producto', 'productos', 'catalogo', 'metricas', 'operacion', 'resumen',
+    'cuantos', 'cuantas', 'salud', 'visibles', 'suspendid',
+)
+_CLAVES_SALUD_PAGOS = (
+    'salud', 'pagos', 'confirmad', 'verificad', 'binance', 'comprobante',
+)
+
 # Hechos canonicos que se inyectan SIEMPRE: son pequenos y evitan que el modelo
 # invente precios de planes, destacados o puntos cuando el RAG no los recupera.
 # Este texto es el RESPALDO (sin BD). En cada peticion se prefiere ``hechos_clave()``,
@@ -254,6 +272,23 @@ def menciona_tienda(mensaje):
 def menciona_categoria(mensaje):
     bajo = _normalizar(mensaje)
     return any(clave in bajo for clave in _CLAVES_CATEGORIA)
+
+
+def menciona_bandeja(mensaje):
+    """True si el admin pregunta por solicitudes/tickets de la bandeja."""
+    bajo = _normalizar(mensaje)
+    return any(clave in bajo for clave in _CLAVES_BANDEJA)
+
+
+def menciona_operacion(mensaje):
+    """True si el admin pregunta por cifras de la operación (comercios, etc.)."""
+    bajo = _normalizar(mensaje)
+    return any(clave in bajo for clave in _CLAVES_OPERACION)
+
+
+def menciona_salud_pagos(mensaje):
+    bajo = _normalizar(mensaje)
+    return any(clave in bajo for clave in _CLAVES_SALUD_PAGOS)
 
 
 def formatear_productos(productos, maximo=6):
@@ -524,6 +559,129 @@ def formatear_tiendas(tiendas, maximo=4):
         sufijo = (' - ' + ' | '.join(extra)) if extra else ''
         lineas.append(f'- {nombre}{sufijo}')
     return '\n'.join(lineas)
+
+
+# ---------------------------------------------------------------------------
+# Panel de administración: cifras REALES de la operación (solo lectura)
+# ---------------------------------------------------------------------------
+# El admin pregunta mucho por "cuántos hay" (solicitudes abiertas, pagos por
+# revisar, tiendas suspendidas). Sin estos números el modelo tendería a
+# inventarlos, así que se calculan en la BD y se cachean unos segundos: puede
+# haber varias preguntas seguidas y no conviene golpear la BD en cada una.
+_TTL_OPERACION_SEG = 45
+
+
+def resumen_bandeja():
+    """Solicitudes abiertas y alertas de pago de la bandeja del panel (o '')."""
+    try:
+        from backend.admin import resumen_bandeja as _resumen
+
+        datos = _resumen() or {}
+        abiertas = int(datos.get('abiertas') or 0)
+        en_proceso = int(datos.get('en_proceso') or 0)
+        aceptadas = int(datos.get('aceptadas') or 0)
+        rechazadas = int(datos.get('rechazadas') or 0)
+        revisiones = int(datos.get('revisiones_pago') or 0)
+        por_tipo = datos.get('por_tipo') or {}
+        lineas = [
+            f'Solicitudes de usuarios abiertas: {abiertas} '
+            f'(en proceso: {en_proceso})',
+            f'Aceptadas: {aceptadas}; rechazadas: {rechazadas}',
+            f'Alertas de revisión de pago pendientes: {revisiones}',
+        ]
+        if por_tipo:
+            detalle = ', '.join(
+                f'{tipo}: {total}' for tipo, total in sorted(por_tipo.items())
+            )
+            lineas.append(f'Solicitudes por tipo (histórico): {detalle}')
+        return '\n'.join(lineas)
+    except Exception as error:
+        _log.warning('resumen de bandeja fallo: %s', error)
+        return ''
+
+
+def resumen_salud_pagos(dias=30):
+    """Salud de la verificación de pagos de los últimos días (o '')."""
+    try:
+        from backend.admin import salud_pagos as _salud
+
+        datos = _salud(dias) or {}
+        return '\n'.join(
+            [
+                f'Pagos registrados (últimos {datos.get("dias") or dias} días): '
+                f'{int(datos.get("total") or 0)}',
+                f'Confirmados por Binance: {int(datos.get("confirmados") or 0)}',
+                f'Sin verificar (API): {int(datos.get("no_verificados") or 0)}',
+                f'No encontrados: {int(datos.get("no_encontrados") or 0)}',
+                'Por revisar ahora (bandeja): '
+                f'{int(datos.get("pendientes_revision") or 0)}',
+            ]
+        )
+    except Exception as error:
+        _log.warning('resumen de salud de pagos fallo: %s', error)
+        return ''
+
+
+def _cifras_operacion():
+    """Conteos de comercios, usuarios y productos. Cacheado y defensivo."""
+    def _cargar():
+        from backend.db import get_db_connection
+
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM comercios),
+                    (SELECT COUNT(*) FROM comercios
+                      WHERE COALESCE(visible, 1) = 1),
+                    (SELECT COUNT(*) FROM comercios
+                      WHERE COALESCE(estado_pago, '') = 'suspendido'
+                         OR COALESCE(visible, 1) = 0),
+                    (SELECT COUNT(*) FROM comercios
+                      WHERE COALESCE(estado_tienda, 'activa') = 'pre_cuenta'),
+                    (SELECT COUNT(*) FROM usuarios),
+                    (SELECT COUNT(*) FROM productos)
+                """
+            )
+            fila = cursor.fetchone() or (0,) * 6
+
+        claves = (
+            'comercios',
+            'comercios_visibles',
+            'comercios_inactivos',
+            'pre_cuentas',
+            'usuarios',
+            'productos',
+        )
+        return {clave: int(valor or 0) for clave, valor in zip(claves, fila)}
+
+    try:
+        from backend.runtime_cache import get_or_load
+
+        return get_or_load(
+            'asistente:cifras_operacion', _cargar, ttl_seconds=_TTL_OPERACION_SEG
+        )
+    except Exception as error:
+        _log.warning('cifras de operacion fallaron: %s', error)
+        return {}
+
+
+def resumen_operacion():
+    """Cifras del panel (comercios, usuarios, productos) para el admin (o '')."""
+    datos = _cifras_operacion()
+    if not datos:
+        return ''
+    return '\n'.join(
+        [
+            f'Comercios registrados: {datos.get("comercios", 0)} '
+            f'(visibles: {datos.get("comercios_visibles", 0)}; '
+            f'inactivos/suspendidos: {datos.get("comercios_inactivos", 0)}; '
+            f'pre-cuentas: {datos.get("pre_cuentas", 0)})',
+            f'Usuarios registrados: {datos.get("usuarios", 0)}',
+            f'Productos en catálogo: {datos.get("productos", 0)}',
+        ]
+    )
 
 
 def categorias_disponibles():

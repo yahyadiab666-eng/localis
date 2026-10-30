@@ -66,6 +66,8 @@ SIN_RED = [
     'test_asistente_conocimiento.py',
     'test_asistente_datos.py',
     'test_asistente_rutas.py',
+    # Contraste documentacion del asistente <-> constantes reales de la app.
+    'test_asistente_verdades.py',
     'test_ocr_remoto.py',
     'test_imagenes_worker.py',
 ]

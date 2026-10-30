@@ -66,11 +66,19 @@
         <i data-lucide="life-buoy"></i>
         <span>Escribir a soporte (WhatsApp)</span>
       </button>
+      {% if _asistente_rol == 'admin' %}
+      <p class="asistente-aviso">
+        Respuestas con IA para el panel. Lee las cifras en vivo (bandeja, pagos y
+        comercios), pero no acepta ni rechaza solicitudes: eso lo haces tu desde
+        la bandeja.
+      </p>
+      {% else %}
       <p class="asistente-aviso">
         Respuestas con IA, solo informativas. Puede revalidar un pago en Binance y
         activar lo que pagaste. Para editar tu comercio o un caso concreto, escribe
         a soporte: la atencion puede tardar un poco.
       </p>
+      {% endif %}
     </footer>
   </section>
 </div>

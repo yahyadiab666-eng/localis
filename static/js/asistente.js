@@ -434,6 +434,13 @@
     continuar();
   }
 
+  // Abridor publico: otros paneles (p. ej. el de administracion) tienen un boton
+  // "Asistente IA" que abre el chat sin que el usuario busque la burbuja.
+  window.localisAbrirAsistente = function () {
+    if (panel.hidden) abrir();
+    else entrada.focus();
+  };
+
   burbuja.addEventListener('click', function () {
     if (panel.hidden) {
       abrir();
