@@ -48,6 +48,13 @@ Sigue sin haber `pytest`: los "tests" son los `scripts/test_*.py`.
 - Escribe SQL con marcadores **`?`**, no `%s`. La capa de conexión lo adapta en `_adapt_sql` (`database.py`): además de `?` → `%s`, reescribe sintaxis SQLite heredada (`ON CONFLICT`, `excluded.`→`EXCLUDED.`, `datetime('now')`→`CURRENT_TIMESTAMP`, `strftime`→`TO_CHAR`). Usa `database.get_db_connection` / `backend.db.get_db_connection`.
 - `init_db()` es aditivo: crea tablas, añade columnas, siembra `categorias`/`planes`, reconcilia `imagen_estado` e índices. Toma un advisory lock, así que varios workers pueden arrancar a la vez. Esquema de referencia en `schema.sql`.
 - `BaseDatosNoDisponible` es un error **recuperable** (arranque en frío/pool), no fatal; preserva ese trato en el manejo de errores.
+- **Los `id` NO son consecutivos y no es un bug**: son secuencias `SERIAL`, que no
+  devuelven valores en rollback/reintento ni al borrar filas (la importación en
+  espejo y las bajas del admin borran productos). Por eso **lo visible es
+  `codigo_publico`** (`PROD-/COM-/USR-`, contador en `contadores_publicos`) y el
+  panel admin muestra ese código, no el id. Diagnóstico:
+  `python scripts/diagnostico_ids.py [--apply]` (solo reajusta contadores
+  atrasados; nunca renumera ids).
 
 ## Tests
 

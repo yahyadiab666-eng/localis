@@ -365,12 +365,12 @@
                     <table>
                         <thead>
                             <tr>
-                                <th>ID</th>
+                                <th title="Código público consecutivo. El id interno no se usa porque los productos eliminados no reutilizan su número.">Código</th>
                                 <th>Imagen</th>
                                 <th>Producto</th>
                                 <th>Precio USD</th>
                                 <th>Precio Bs</th>
-                                <th>Código</th>
+                                <th>EAN</th>
                                 <th>Estado</th>
                                 <th>Destacado</th>
                                 <th>Acción</th>
@@ -380,7 +380,9 @@
                             {% for producto in productos %}
                             {% set img = producto|url_imagen_producto %}
                             <tr>
-                                <td data-etiqueta="ID">{{ producto.id }}</td>
+                                <td data-etiqueta="Código">
+                                    <span class="codigo-pub">{{ producto.codigo_publico or ('#' ~ producto.id) }}</span>
+                                </td>
                                 <td data-etiqueta="Imagen">
                                     <img class="thumb" src="{{ img or placeholder_producto }}" alt="{{ producto.nombre }}"
                                          onerror="window.rescatarImagenProducto ? window.rescatarImagenProducto(this) : (this.onerror=null, this.src='{{ placeholder_producto }}');">
@@ -391,7 +393,7 @@
                                 </td>
                                 <td data-etiqueta="Precio USD">${{ "%.2f"|format(producto.precio_usd or 0) }}</td>
                                 <td data-etiqueta="Precio Bs">{{ "%.2f"|format((producto.precio_usd or 0) * (tasa or 1)) }} Bs</td>
-                                <td data-etiqueta="Código"><small>{{ producto.codigo_barras or '—' }}</small></td>
+                                <td data-etiqueta="EAN"><small>{{ producto.codigo_barras or '—' }}</small></td>
                                 <td data-etiqueta="Estado">
                                     <span class="badge badge-{{ 'activo' if producto.activo == 1 else 'vencido' }}">{{ 'Activo' if producto.activo == 1 else 'Inactivo' }}</span>
                                     <br><small class="muted">{{ producto.imagen_estado or 'pendiente' }}</small>

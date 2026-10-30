@@ -463,6 +463,16 @@
   }
 }
 
+/* ===== Código público visible (PROD-/COM-/USR-) ===== */
+/* Es el número que se muestra en el panel: contiguo y estable. El id interno
+   (SERIAL) se oculta porque tiene saltos por borrados y rollbacks. */
+.codigo-pub {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #084298;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 /* ===== Tarjetas y metricas ===== */
 .admin-metricas {
   display: grid;

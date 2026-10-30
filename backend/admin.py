@@ -1047,8 +1047,9 @@ def obtener_productos_admin(comercio_id, busqueda=None):
             try:
                 cursor.execute(
                     f"""
-                    SELECT id, nombre, descripcion, precio_usd, codigo_barras, stock,
-                           imagen_url, imagen_estado, activo, destacado
+                    SELECT id, codigo_publico, nombre, descripcion, precio_usd,
+                           codigo_barras, stock, imagen_url, imagen_estado,
+                           activo, destacado
                     FROM productos
                     WHERE comercio_id = ?{filtro}
                     ORDER BY id DESC
@@ -1057,7 +1058,8 @@ def obtener_productos_admin(comercio_id, busqueda=None):
                 )
                 return [dict(f) for f in cursor.fetchall()]
             except Exception:
-                # Degradación: si ``destacado`` aún no existe, no romper el listado.
+                # Degradación: si ``destacado``/``codigo_publico`` aún no existen,
+                # no romper el listado.
                 try:
                     conexion.rollback()
                 except Exception:
@@ -1247,20 +1249,36 @@ def obtener_usuarios_admin(busqueda=None):
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
-            query = """
-                SELECT u.id, u.nombre, u.correo, u.rol, u.foto_url,
-                       (
-                           SELECT COUNT(*) FROM comercios c WHERE c.usuario_id = u.id
-                       ) AS total_comercios
-                FROM usuarios u
-            """
             parametros = []
+            filtro = ''
             if busqueda:
                 termino = f'%{busqueda.strip()}%'
-                query += ' WHERE u.nombre ILIKE ? OR u.correo ILIKE ?'
+                filtro = ' WHERE u.nombre ILIKE ? OR u.correo ILIKE ?'
                 parametros.extend([termino, termino])
-            query += ' ORDER BY u.id DESC'
-            cursor.execute(query, parametros)
+
+            def _construir(con_codigo):
+                # ``codigo_publico`` es el número visible (USR-0001). Si la
+                # migración aún no lo agregó, se sigue listando sin él.
+                codigo = 'u.codigo_publico,' if con_codigo else ''
+                return f"""
+                    SELECT u.id, {codigo} u.nombre, u.correo, u.rol, u.foto_url,
+                           (
+                               SELECT COUNT(*) FROM comercios c
+                               WHERE c.usuario_id = u.id
+                           ) AS total_comercios
+                    FROM usuarios u
+                    {filtro}
+                    ORDER BY u.id DESC
+                """
+
+            try:
+                cursor.execute(_construir(True), parametros)
+            except Exception:
+                try:
+                    conexion.rollback()
+                except Exception:
+                    pass
+                cursor.execute(_construir(False), parametros)
             usuarios = [dict(f) for f in cursor.fetchall()]
 
             # Se adjuntan los comercios de cada usuario (para enlazar a su ficha).

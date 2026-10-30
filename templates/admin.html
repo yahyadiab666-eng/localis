@@ -605,7 +605,7 @@
                 <table>
                     <thead>
                         <tr>
-                            <th>ID</th>
+                            <th title="Código público consecutivo. El id interno no se usa porque los comercios eliminados no reutilizan su número.">Código</th>
                             <th>Comercio</th>
                             <th>Dueño / Doc.</th>
                             <th>Categoría</th>
@@ -622,7 +622,13 @@
                     <tbody>
                         {% for comercio in comercios %}
                         <tr>
-                            <td data-etiqueta="ID">{{ comercio.id }}</td>
+                            <td data-etiqueta="Código">
+                                <span class="codigo-pub">{{ comercio.codigo_publico or ('#' ~ comercio.id) }}</span>
+                                {% if comercio.codigo_publico %}
+                                <button type="button" class="btn-copiar" data-codigo="{{ comercio.codigo_publico }}"
+                                    onclick="var b=this,c=b.getAttribute('data-codigo');if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(c);}b.textContent='¡Copiado!';setTimeout(function(){b.textContent='Copiar';},1200);">Copiar</button>
+                                {% endif %}
+                            </td>
                             <td data-etiqueta="Comercio">
                                 <a href="{{ url_for('admin.admin_comercio_detalle', comercio_id=comercio.id) }}"
                                    style="color:#0d6efd;font-weight:700;text-decoration:none;">
@@ -635,11 +641,6 @@
                                        title="Vista previa de solo lectura para compartir con el comercio">Vista previa</a>
                                 {% endif %}
                                 <br><small>{{ comercio.telefono or '' }}</small>
-                                {% if comercio.codigo_publico %}
-                                <br><small class="codigo-pub">{{ comercio.codigo_publico }}</small>
-                                <button type="button" class="btn-copiar" data-codigo="{{ comercio.codigo_publico }}"
-                                    onclick="var b=this,c=b.getAttribute('data-codigo');if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(c);}b.textContent='¡Copiado!';setTimeout(function(){b.textContent='Copiar';},1200);">Copiar</button>
-                                {% endif %}
                             </td>
                             <td data-etiqueta="Dueño / Doc.">
                                 {% if comercio.correo_dueno %}

@@ -71,7 +71,7 @@
                 <table>
                     <thead>
                         <tr>
-                            <th>ID</th>
+                            <th title="Código público consecutivo. El id interno no se usa porque los usuarios eliminados no reutilizan su número.">Código</th>
                             <th>Perfil</th>
                             <th>Rol</th>
                             <th>Comercios</th>
@@ -80,7 +80,9 @@
                     <tbody>
                         {% for usuario in usuarios %}
                         <tr>
-                            <td data-etiqueta="ID">{{ usuario.id }}</td>
+                            <td data-etiqueta="Código">
+                                <span class="codigo-pub">{{ usuario.codigo_publico or ('#' ~ usuario.id) }}</span>
+                            </td>
                             <td data-etiqueta="Perfil">
                                 <div style="display:flex;align-items:center;gap:10px;">
                                     {% if usuario.foto_url %}
