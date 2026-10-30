@@ -6,6 +6,7 @@
     <title>Localis - Panel de Administración</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}?v={{ asset_v }}">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         body { background-color: #f4f6f9; color: #333; }
@@ -27,7 +28,9 @@
             display: grid; grid-template-columns: 1fr 2fr; gap: 2rem;
         }
         .col-izquierda { display: flex; flex-direction: column; gap: 2rem; }
-        /* La bandeja de revisión es lo operativo: va primero en la columna. */
+        /* Lo operativo va primero en la columna: solicitudes de usuarios y,
+           justo después, las alertas de revisión de pago. */
+        #solicitudes { order: -2; }
         #bandeja-revision { order: -1; }
 
         /* Barra rápida de navegación (solo móvil). */
@@ -42,76 +45,42 @@
                poder reordenarlos: lo operativo primero. */
             .col-izquierda { display: contents; }
 
-            #bandeja-revision { order: 4; }
-            #salud-pagos { order: 5; }
-            #config-economica { order: 6; }
-            #config-banner { order: 7; }
-            #nueva-precuenta { order: 8; }
+            #solicitudes { order: 4; }
+            #bandeja-revision { order: 5; }
+            #salud-pagos { order: 6; }
+            #asistente-ia { order: 7; }
+            #config-economica { order: 8; }
+            #config-banner { order: 9; }
+            #nueva-precuenta { order: 10; }
             .tabla-box { order: 3; }
 
-            /* Con pagos por revisar, la bandeja y el contador van arriba del todo. */
-            .container.hay-revisiones #bandeja-revision { order: 1; }
-            .container.hay-revisiones .tabla-box { order: 2; }
+            /* Con cosas por atender, la bandeja va arriba del todo. */
+            .container.hay-pendientes #solicitudes { order: 1; }
+            .container.hay-pendientes #bandeja-revision { order: 2; }
+            .container.hay-pendientes .tabla-box { order: 3; }
         }
 
         @media (max-width: 768px) {
+            /* Cabecera pegajosa y chips: estilos compartidos en admin.css. */
             header.admin-header-mobile {
                 position: sticky; top: 0; z-index: 50;
                 padding: 0.65rem 0.9rem !important;
             }
             header.admin-header-mobile h1 { font-size: 1.1rem; }
-            .admin-nav-rapida {
-                display: flex; gap: 0.4rem; overflow-x: auto;
-                -webkit-overflow-scrolling: touch; width: 100%;
-                padding-bottom: 2px; scrollbar-width: none;
-            }
-            .admin-nav-rapida::-webkit-scrollbar { display: none; }
-            .admin-nav-rapida a {
-                flex: 0 0 auto; font-size: 0.8rem; font-weight: 600;
-                padding: 6px 12px; border-radius: 999px; text-decoration: none;
-                background: #343a40; color: #fff; white-space: nowrap;
-            }
-            .admin-nav-rapida a.destacado { background: #dc3545; }
 
             .card { padding: 1rem; }
             .card h2 { font-size: 1.05rem; margin-bottom: 0.85rem; }
 
-            /* Objetivos táctiles cómodos y sin zoom automático en iOS. */
-            .btn-accion-tabla { padding: 9px 12px; font-size: 0.85rem; min-height: 40px; }
-            .btn-primario { padding: 0.75rem 1.2rem; min-height: 44px; }
-            .form-group input, .form-group select,
-            .cuenta-form input, .plan-form select,
-            .bandeja-filtros a, .busqueda-admin input, .busqueda-admin button {
-                font-size: 16px; min-height: 40px;
-            }
+            /* La tarjeta de la bandeja no debe encerrar un scroll propio: en el
+               telefono se recorre con la pagina entera. */
+            .bandeja-scroll { max-height: none !important; }
+
             .acciones-comercio { gap: 6px; }
             .acciones-comercio form { flex: 1 1 auto; }
             .acciones-comercio .btn-accion-tabla { width: 100%; }
 
-            /* Tabla de comercios -> tarjetas apiladas (sin scroll horizontal). */
-            .tabla-responsive { overflow-x: visible; }
-            .tabla-responsive table { min-width: 0; }
-            .tabla-responsive thead { display: none; }
-            .tabla-responsive tbody tr {
-                display: block; background: #fff; border: 1px solid #e1e4e8;
-                border-radius: 10px; margin-bottom: 0.75rem; overflow: hidden;
-            }
-            .tabla-responsive tbody tr:nth-child(even) { background: #fff; }
-            .tabla-responsive td {
-                display: flex; align-items: flex-start; gap: 0.75rem;
-                padding: 0.5rem 0.75rem; border-bottom: 1px dashed #eef0f2;
-                font-size: 0.9rem;
-            }
-            .tabla-responsive td:last-child { border-bottom: none; }
-            .tabla-responsive td::before {
-                content: attr(data-etiqueta); flex: 0 0 34%;
-                font-size: 0.72rem; font-weight: 700; color: #6c757d;
-                text-transform: uppercase; letter-spacing: 0.02em; padding-top: 2px;
-            }
-            .tabla-responsive td[data-etiqueta=""]::before { content: none; }
-            .tabla-responsive td[data-etiqueta="Acciones"] { flex-direction: column; }
-            .tabla-responsive td[data-etiqueta="Acciones"]::before { padding-bottom: 4px; }
-            .tabla-responsive td[data-etiqueta="Acciones"] > * { width: 100%; }
+            /* Tabla de comercios -> tarjetas apiladas (admin.css). */
+            .tabla-contenedor { overflow-x: visible; }
         }
         .card {
             background: white; padding: 1.5rem; border-radius: 8px;
@@ -200,18 +169,28 @@
     <header class="admin-header-mobile">
         <h1>Localis | Panel Admin</h1>
         <!-- Accesos rápidos: en el teléfono evitan scrollear todo el panel. -->
-        <nav class="admin-nav-rapida">
+        <nav class="admin-nav-rapida admin-chips">
             <a href="#bandeja-revision"
                class="{{ 'destacado' if revisiones_pendientes else '' }}">
-                Revisión{% if revisiones_pendientes %} ({{ revisiones_pendientes }}){% endif %}
+                Bandeja{% if revisiones_pendientes %} ({{ revisiones_pendientes }}){% endif %}
+            </a>
+            <a href="#solicitudes"
+               class="{{ 'destacado' if solicitudes_pendientes else '' }}">
+                Solicitudes{% if solicitudes_pendientes %} ({{ solicitudes_pendientes }}){% endif %}
             </a>
             <a href="#control-comercios">Comercios</a>
             <a href="#salud-pagos">Salud de pagos</a>
+            <a href="#asistente-ia">Asistente IA</a>
             <a href="{{ url_for('admin.admin_usuarios') }}">Usuarios</a>
             <a href="{{ url_for('index') }}">Ver sitio</a>
         </nav>
         <div class="nav-links admin-nav-mobile">
             <a href="{{ url_for('admin.admin_usuarios') }}">Usuarios</a>
+            <!-- Abre el chat del asistente ya integrado en el panel. -->
+            <a href="#asistente-ia" class="admin-abrir-asistente"
+               onclick="if(window.localisAbrirAsistente){window.localisAbrirAsistente();return false;}">
+                Asistente IA
+            </a>
             <a href="https://wa.me/584125970507" target="_blank" class="wa-link">WhatsApp Soporte</a>
             <a href="{{ url_for('index') }}">Ver Sitio Público</a>
             <form method="POST" action="{{ url_for('auth.logout') }}" style="display:inline;"
@@ -232,7 +211,7 @@
       {% endif %}
     {% endwith %}
 
-    <div class="container{{ ' hay-revisiones' if revisiones_pendientes else '' }}">
+    <div class="container{{ ' hay-pendientes' if (revisiones_pendientes or solicitudes_pendientes) else '' }}">
         <div class="col-izquierda">
 
             <aside class="card" id="config-economica">
@@ -314,46 +293,156 @@
                 </form>
             </aside>
 
-            <aside class="card" id="bandeja-revision">
+            {# ===== Solicitudes de los usuarios (soporte y reportes) ===== #}
+            {% set solicitudes = tickets | rejectattr('tipo', 'equalto', 'revision_pago') | list %}
+            {% set revisiones = tickets | selectattr('tipo', 'equalto', 'revision_pago') | list %}
+            <aside class="card" id="solicitudes">
                 <h2>
-                    Bandeja de revisión
-                    {% if revisiones_pendientes %}
-                    <span class="contador-revision">{{ revisiones_pendientes }} pago(s) por revisar</span>
+                    Solicitudes de usuarios
+                    {% if solicitudes_pendientes %}
+                    <span class="contador-revision">{{ solicitudes_pendientes }} abierta(s)</span>
                     {% endif %}
                 </h2>
                 <p style="font-size:0.85rem;color:#666;margin-bottom:0.75rem;">
-                    Aquí llegan los <strong>pagos con Binance Pay que la API no pudo confirmar</strong>
-                    (rechazados o aceptados sin verificar). Ábrelos para ver la transacción y el
-                    comprobante. Marca <strong>Listo</strong> cuando lo hayas revisado.
+                    Mensajes de soporte y <strong>reportes de tiendas o artículos</strong> que
+                    envían clientes y comercios. Según el tipo, se <strong>acepta</strong> la
+                    solicitud (cerrarla), se acepta <strong>suspendiendo la tienda</strong> o
+                    <strong>ocultando el producto</strong> reportado, o se <strong>rechaza</strong>
+                    si no procede. Todo queda en auditoría.
                 </p>
 
-                <div class="bandeja-filtros">
+                <div class="bandeja-filtros" role="group" aria-label="Filtrar solicitudes por estado">
+                    <a href="{{ url_for('admin.panel_admin', tipo_ticket=tipo_ticket or None) }}"
+                       class="{{ 'activo' if not estado_ticket else '' }}">Todas</a>
+                    <a href="{{ url_for('admin.panel_admin', estado_ticket='pendiente', tipo_ticket=tipo_ticket or None) }}"
+                       class="{{ 'activo' if estado_ticket == 'pendiente' else '' }}">
+                        Abiertas{% if bandeja.abiertas %}<span class="n">{{ bandeja.abiertas }}</span>{% endif %}
+                    </a>
+                    <a href="{{ url_for('admin.panel_admin', estado_ticket='en_proceso', tipo_ticket=tipo_ticket or None) }}"
+                       class="{{ 'activo' if estado_ticket == 'en_proceso' else '' }}">En proceso</a>
+                    <a href="{{ url_for('admin.panel_admin', estado_ticket='resuelto', tipo_ticket=tipo_ticket or None) }}"
+                       class="{{ 'activo' if estado_ticket == 'resuelto' else '' }}">Aceptadas</a>
+                    <a href="{{ url_for('admin.panel_admin', estado_ticket='rechazado', tipo_ticket=tipo_ticket or None) }}"
+                       class="{{ 'activo' if estado_ticket == 'rechazado' else '' }}">Rechazadas</a>
+                </div>
+
+                <div class="bandeja-filtros" role="group" aria-label="Filtrar solicitudes por tipo">
+                    <a href="{{ url_for('admin.panel_admin', estado_ticket=estado_ticket or None) }}"
+                       class="{{ 'activo' if not tipo_ticket else '' }}">Todo tipo</a>
+                    <a href="{{ url_for('admin.panel_admin', tipo_ticket='soporte', estado_ticket=estado_ticket or None) }}"
+                       class="{{ 'activo' if tipo_ticket == 'soporte' else '' }}">Soporte</a>
+                    <a href="{{ url_for('admin.panel_admin', tipo_ticket='reportar_tienda', estado_ticket=estado_ticket or None) }}"
+                       class="{{ 'activo' if tipo_ticket == 'reportar_tienda' else '' }}">Tienda</a>
+                    <a href="{{ url_for('admin.panel_admin', tipo_ticket='reportar_articulo', estado_ticket=estado_ticket or None) }}"
+                       class="{{ 'activo' if tipo_ticket == 'reportar_articulo' else '' }}">Artículo</a>
+                    <a href="{{ url_for('admin.panel_admin', tipo_ticket='revision_pago', estado_ticket=estado_ticket or None) }}"
+                       class="{{ 'activo' if tipo_ticket == 'revision_pago' else '' }}">Pagos</a>
+                </div>
+
+                <div class="bandeja-scroll" style="max-height: 520px; overflow-y: auto;">
+                    {% for ticket in solicitudes %}
+                        {% set estado = ticket.estado or 'pendiente' %}
+                        <div class="ticket-item">
+                            <div class="ticket-item__cuerpo">
+                                <h4 style="font-size:0.95rem;">
+                                    <span class="badge badge-tipo-{{ ticket.tipo }}">
+                                        {% if ticket.tipo == 'reportar_tienda' %}REPORTE DE TIENDA
+                                        {% elif ticket.tipo == 'reportar_articulo' %}REPORTE DE ARTÍCULO
+                                        {% else %}SOPORTE{% endif %}
+                                    </span>
+                                    {{ ticket.correo }}
+                                </h4>
+                                <p class="ticket-mensaje">{{ ticket.mensaje }}</p>
+                                <p class="ticket-meta">
+                                    #{{ ticket.id }}
+                                    {% if ticket.fecha %} · {{ ticket.fecha }}{% endif %}
+                                    {% if ticket.referencia_id %} · ref. {{ ticket.referencia_id }}{% endif %}
+                                </p>
+                                <span class="badge badge-estado-{{ estado }}">{{ ticket.etiqueta_estado }}</span>
+                                {% if ticket.respuesta %}
+                                <p class="ticket-nota">{{ ticket.respuesta }}</p>
+                                {% endif %}
+                            </div>
+                            <div class="ticket-item__acciones">
+                                {% if ticket.tipo == 'reportar_tienda' and ticket.referencia_id %}
+                                <a class="btn-accion-tabla btn-ver" style="text-decoration:none;"
+                                   href="{{ url_for('admin.admin_comercio_detalle', comercio_id=ticket.referencia_id) }}">
+                                    Ver tienda
+                                </a>
+                                {% elif ticket.tipo == 'reportar_articulo' and ticket.referencia_id %}
+                                <a class="btn-accion-tabla btn-ver" style="text-decoration:none;"
+                                   href="{{ url_for('admin.admin_producto_detalle', producto_id=ticket.referencia_id) }}">
+                                    Ver producto
+                                </a>
+                                {% endif %}
+                                {% if ticket.acciones %}
+                                <form class="solicitud-form" method="POST"
+                                      action="{{ url_for('admin.admin_ticket_accion', ticket_id=ticket.id) }}"
+                                      onsubmit="return confirm('¿Aplicar la acción elegida a esta solicitud?');">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <select name="accion" aria-label="Acción para la solicitud #{{ ticket.id }}">
+                                        {% for opcion in ticket.acciones %}
+                                        <option value="{{ opcion.accion }}">{{ opcion.etiqueta }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <details class="solicitud-form__nota">
+                                        <summary>Nota (opcional)</summary>
+                                        <textarea name="nota" rows="2" maxlength="1000"
+                                                  placeholder="Motivo o respuesta para el registro"></textarea>
+                                    </details>
+                                    <button type="submit" class="btn-accion-tabla btn-resolver">Aplicar</button>
+                                </form>
+                                {% endif %}
+                            </div>
+                        </div>
+                    {% else %}
+                        <p style="text-align:center;color:#777;padding:1rem;">
+                            No hay solicitudes de usuarios con este filtro.
+                        </p>
+                    {% endfor %}
+                </div>
+            </aside>
+
+            {# ===== Alertas de revisión de pagos ===== #}
+            <aside class="card" id="bandeja-revision">
+                <h2>
+                    Revisión de pagos
+                    {% if revisiones_pendientes %}
+                    <span class="contador-revision">{{ revisiones_pendientes }} por revisar</span>
+                    {% endif %}
+                </h2>
+                <p style="font-size:0.85rem;color:#666;margin-bottom:0.75rem;">
+                    <strong>Pagos con Binance Pay que la API no pudo confirmar</strong>
+                    (rechazados o aceptados sin verificar). Abre cada alerta para ver la
+                    transacción y el comprobante. <strong>Confirmar</strong> activa lo que se
+                    pagaba; <strong>Marcar como revisada</strong> solo cierra la alerta y
+                    <strong>Rechazar</strong> la desestima.
+                </p>
+
+                <div class="bandeja-filtros" role="group" aria-label="Filtrar revisiones de pago">
                     <a href="{{ url_for('admin.panel_admin', tipo_ticket=tipo_ticket or None) }}"
                        class="{{ 'activo' if not estado_ticket else '' }}">Todas</a>
                     <a href="{{ url_for('admin.panel_admin', estado_ticket='pendiente', tipo_ticket=tipo_ticket or None) }}"
                        class="{{ 'activo' if estado_ticket == 'pendiente' else '' }}">Por revisar</a>
                     <a href="{{ url_for('admin.panel_admin', estado_ticket='resuelto', tipo_ticket=tipo_ticket or None) }}"
                        class="{{ 'activo' if estado_ticket == 'resuelto' else '' }}">Revisadas</a>
+                    <a href="{{ url_for('admin.panel_admin', estado_ticket='rechazado', tipo_ticket=tipo_ticket or None) }}"
+                       class="{{ 'activo' if estado_ticket == 'rechazado' else '' }}">Rechazadas</a>
                 </div>
 
-                <div style="max-height: 420px; overflow-y: auto;">
-                    {% for ticket in tickets %}
-                        {% set es_revision = ticket.tipo == 'revision_pago' %}
-                        {% set es_aviso = es_revision and 'SIN VERIFICAR' in (ticket.mensaje or '') %}
-                        <div class="ticket-item {{ 'ticket-revision' if es_revision else '' }} {{ 'es-aviso' if es_aviso else '' }}">
-                            <div style="flex:1;min-width:0;">
+                <div class="bandeja-scroll" style="max-height: 420px; overflow-y: auto;">
+                    {% for ticket in revisiones %}
+                        {% set pendiente = (ticket.estado or 'pendiente') in ('pendiente', 'en_proceso') %}
+                        {% set es_aviso = 'SIN VERIFICAR' in (ticket.mensaje or '') %}
+                        <div class="ticket-item ticket-revision {{ 'es-aviso' if es_aviso else '' }}">
+                            <div class="ticket-item__cuerpo">
                                 <h4 style="font-size:0.95rem;">
-                                    {% if es_revision %}
                                     <span class="badge {{ 'badge-aviso' if es_aviso else 'badge-revision' }}">
                                         {{ 'SIN VERIFICAR' if es_aviso else 'PAGO RECHAZADO' }}
                                     </span>
-                                    {% else %}
-                                    <span class="badge badge-soporte">{{ ticket.tipo | upper }}</span>
-                                    {% endif %}
                                     {{ ticket.correo }}
                                 </h4>
-                                <p style="font-size:0.88rem;color:#444;margin-top:4px;">{{ ticket.mensaje }}</p>
-                                {% if es_revision %}
+                                <p class="ticket-mensaje">{{ ticket.mensaje }}</p>
                                 <p class="ticket-meta">
                                     {% if ticket.referencia_pago %}ID de orden: {{ ticket.referencia_pago }} · {% endif %}
                                     {{ ticket.fecha }}
@@ -362,46 +451,53 @@
                                 <a class="enlace-comprobante" href="{{ ticket.comprobante_url }}"
                                    target="_blank" rel="noopener">Ver comprobante subido</a>
                                 {% endif %}
+                                <br>
+                                <span class="badge badge-estado-{{ ticket.estado or 'pendiente' }}">{{ ticket.etiqueta_estado }}</span>
+                                {% if ticket.respuesta %}
+                                <p class="ticket-nota">{{ ticket.respuesta }}</p>
                                 {% endif %}
-                                <span class="badge">{{ ticket.estado }}</span>
                             </div>
-                            <div style="display:flex;flex-direction:column;gap:4px;align-items:stretch;">
-                                {% if es_revision and ticket.referencia_id %}
-                                <a class="btn-accion-tabla btn-ver" style="text-align:center;text-decoration:none;"
+                            <div class="ticket-item__acciones">
+                                {% if ticket.referencia_id %}
+                                <a class="btn-accion-tabla btn-ver" style="text-decoration:none;"
                                    href="{{ url_for('admin.admin_comercio_detalle', comercio_id=ticket.referencia_id) }}">
                                     Ver comercio
                                 </a>
                                 {% endif %}
-                                {% if ticket.estado == 'pendiente' %}
-                                    {% if es_revision %}
-                                        {% if ticket.concepto %}
-                                        <form action="{{ url_for('admin.admin_revision_accion', ticket_id=ticket.id) }}" method="POST"
-                                              onsubmit="return confirm('¿Confirmar el pago y activar lo que se estaba pagando?');">
-                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                            <input type="hidden" name="accion" value="confirmar">
-                                            <button type="submit" class="btn-accion-tabla btn-activar">Confirmar pago</button>
-                                        </form>
-                                        {% endif %}
-                                        {% if ticket.referencia_id %}
-                                        <form action="{{ url_for('admin.admin_revision_accion', ticket_id=ticket.id) }}" method="POST"
-                                              onsubmit="return confirm('¿Suspender esta tienda?');">
-                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                            <input type="hidden" name="accion" value="suspender">
-                                            <button type="submit" class="btn-accion-tabla btn-suspender">Suspender</button>
-                                        </form>
-                                        {% endif %}
+                                {% if pendiente %}
+                                    {% if ticket.concepto %}
+                                    <form action="{{ url_for('admin.admin_revision_accion', ticket_id=ticket.id) }}" method="POST"
+                                          onsubmit="return confirm('¿Confirmar el pago y activar lo que se estaba pagando?');">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="accion" value="confirmar">
+                                        <button type="submit" class="btn-accion-tabla btn-activar">Confirmar pago</button>
+                                    </form>
+                                    {% endif %}
+                                    {% if ticket.referencia_id %}
+                                    <form action="{{ url_for('admin.admin_revision_accion', ticket_id=ticket.id) }}" method="POST"
+                                          onsubmit="return confirm('¿Suspender esta tienda?');">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="accion" value="suspender">
+                                        <button type="submit" class="btn-accion-tabla btn-suspender">Suspender</button>
+                                    </form>
                                     {% endif %}
                                     <form action="{{ url_for('admin.admin_revision_accion', ticket_id=ticket.id) }}" method="POST">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <input type="hidden" name="accion" value="resolver">
-                                        <button type="submit" class="btn-accion-tabla btn-resolver">Listo</button>
+                                        <button type="submit" class="btn-accion-tabla btn-resolver">Marcar como revisada</button>
+                                    </form>
+                                    <form action="{{ url_for('admin.admin_revision_accion', ticket_id=ticket.id) }}" method="POST"
+                                          onsubmit="return confirm('¿Rechazar este comprobante? No se activará nada.');">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="accion" value="rechazar">
+                                        <button type="submit" class="btn-accion-tabla btn-eliminar">Rechazar</button>
                                     </form>
                                 {% endif %}
                             </div>
                         </div>
                     {% else %}
                         <p style="text-align:center;color:#777;padding:1rem;">
-                            No hay nada por revisar. Los pagos confirmados no generan alertas.
+                            No hay alertas de pago con este filtro. Los pagos confirmados no generan alertas.
                         </p>
                     {% endfor %}
                 </div>
@@ -444,7 +540,17 @@
                     Uso del asistente desde que arrancó el worker. El feedback son los
                     👍/👎 que dejan los usuarios en el chat.
                 </p>
-                <div class="salud-pagos">
+                <button type="button" class="btn-primario admin-abrir-asistente"
+                        style="margin-bottom:0.85rem;"
+                        onclick="if(window.localisAbrirAsistente){window.localisAbrirAsistente();}">
+                    Abrir el asistente
+                </button>
+                <p style="font-size:0.8rem;color:#6c757d;margin-bottom:0.85rem;">
+                    Pregúntale por las solicitudes abiertas, los pagos por revisar o cómo
+                    aceptar y rechazar una solicitud. Lee las cifras en vivo del panel,
+                    pero <strong>no acepta ni rechaza nada</strong>: eso lo haces tú.
+                </p>
+                <div class="salud-pagos admin-metricas">
                     <div class="metrica">
                         <strong>{{ metricas_asistente.mensajes or 0 }}</strong>
                         <span>Consultas</span>
@@ -495,7 +601,7 @@
                     {% endif %}
                 </form>
             </div>
-            <div class="tabla-contenedor tabla-responsive">
+            <div class="tabla-contenedor tabla-responsive tabla-admin-cards">
                 <table>
                     <thead>
                         <tr>

@@ -1,0 +1,509 @@
+/* Localis - panel de administracion (compartido por todas las pantallas admin).
+ *
+ * Objetivo: que el panel se use comodamente en el TELEFONO sin tocar la logica.
+ *   - Cabecera pegajosa + chips de acceso rapido (el panel es largo).
+ *   - Tablas -> tarjetas apiladas (sin scroll horizontal): cada <td> muestra su
+ *     etiqueta con `data-etiqueta`.
+ *   - Objetivos tactiles de 40-44 px y fuentes de 16 px en los campos (iOS no
+ *     hace zoom automatico por debajo de esa medida).
+ *   - La bandeja de revisiones y sus acciones a ancho completo.
+ *
+ * Se carga DESPUES de responsive.css para poder anular su min-width de tablas.
+ */
+
+/* ===== Cabecera y navegacion ===== */
+.admin-top {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  background: #212529;
+  color: #fff;
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 1rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.admin-top h1 {
+  font-size: 1.15rem;
+  color: #ffc107;
+  line-height: 1.2;
+}
+
+.admin-top__acciones {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.admin-top__acciones a,
+.admin-top__acciones button {
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-decoration: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.admin-chips {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  width: 100%;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.admin-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.admin-chips a {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 7px 13px;
+  border-radius: 999px;
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  white-space: nowrap;
+}
+
+.admin-chips a.destacado {
+  background: #dc3545;
+}
+
+.admin-chips a:active {
+  transform: scale(0.97);
+}
+
+/* ===== Aviso: la tabla se convierte en tarjetas en el telefono ===== */
+@media (max-width: 768px) {
+  /* Anula el min-width de responsive.css: ya no hace falta scroll lateral. */
+  .tabla-admin-cards.tabla-responsive table {
+    min-width: 0 !important;
+  }
+
+  .tabla-admin-cards thead {
+    display: none;
+  }
+
+  .tabla-admin-cards tbody tr {
+    display: block;
+    background: #fff;
+    border: 1px solid #e1e4e8;
+    border-radius: 10px;
+    margin-bottom: 0.75rem;
+    overflow: hidden;
+  }
+
+  .tabla-admin-cards tbody tr:nth-child(even) {
+    background: #fff;
+  }
+
+  /* Rejilla (no flex): el contenido puede encogerse y partirse, así una celda
+     con teléfono + código + botón "Copiar" no desborda la tarjeta. */
+  .tabla-admin-cards td {
+    display: grid;
+    grid-template-columns: 32% minmax(0, 1fr);
+    align-items: start;
+    column-gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px dashed #eef0f2;
+    font-size: 0.9rem;
+    overflow-wrap: anywhere;
+  }
+
+  .tabla-admin-cards td:last-child {
+    border-bottom: none;
+  }
+
+  .tabla-admin-cards td::before {
+    content: attr(data-etiqueta);
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #6c757d;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    padding-top: 2px;
+  }
+
+  /* Todo el contenido de la celda va en la columna del valor (la primera
+     columna es la etiqueta), aunque haya varios elementos (enlace + copiar). */
+  .tabla-admin-cards td > * {
+    grid-column: 2;
+    min-width: 0;
+    justify-self: start;
+  }
+
+  .tabla-admin-cards td[data-etiqueta=""] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tabla-admin-cards td[data-etiqueta=""] > * {
+    grid-column: 1;
+  }
+
+  .tabla-admin-cards td[data-etiqueta=""]::before {
+    content: none;
+  }
+
+  /* La celda de acciones se apila y sus botones ocupan el ancho completo. */
+  .tabla-admin-cards td[data-etiqueta="Acciones"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* El buscador no debe desbordar por el placeholder largo. */
+  .busqueda-admin input,
+  .busqueda-admin button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .tabla-admin-cards td[data-etiqueta="Acciones"]::before {
+    padding-bottom: 4px;
+  }
+
+  .tabla-admin-cards td[data-etiqueta="Acciones"] > * {
+    width: 100%;
+  }
+}
+
+/* ===== Controles tactiles ===== */
+@media (max-width: 768px) {
+  .admin-top {
+    padding: 0.6rem 0.85rem;
+  }
+
+  .admin-top h1 {
+    font-size: 1rem;
+  }
+
+  .admin-top__acciones {
+    gap: 0.25rem;
+  }
+
+  /* El panel principal trae dos navegaciones: los chips (#bandeja, #solicitudes,
+     ...) y los enlaces generales. En el telefono ambas se convierten en filas de
+     pildoras desplazables en horizontal, para no romper la cabecera en 3 lineas
+     ni dejar los enlaces en vertical. */
+  .admin-header-mobile .admin-nav-rapida {
+    display: flex;
+  }
+
+  .admin-nav-mobile,
+  .admin-top__acciones {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.4rem;
+    width: 100%;
+    margin-left: 0;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .admin-nav-mobile::-webkit-scrollbar,
+  .admin-top__acciones::-webkit-scrollbar {
+    display: none;
+  }
+
+  .admin-nav-mobile a,
+  .admin-nav-mobile button,
+  .admin-top__acciones a,
+  .admin-top__acciones button {
+    flex: 0 0 auto;
+    margin-left: 0 !important;
+    padding: 7px 13px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.14);
+    color: #fff;
+    font-size: 0.8rem;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+    text-decoration: none;
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
+    width: auto;
+  }
+
+  .admin-nav-mobile form,
+  .admin-top__acciones form {
+    display: inline-flex;
+    flex: 0 0 auto;
+  }
+
+  .admin-nav-mobile .wa-link {
+    background: rgba(37, 211, 102, 0.22);
+    color: #d1fae5;
+  }
+
+  .btn-accion-tabla,
+  .btn-primario,
+  .btn-secundario {
+    min-height: 42px;
+    padding: 9px 12px;
+    font-size: 0.86rem;
+  }
+
+  .admin-form input,
+  .admin-form select,
+  .admin-form textarea,
+  .solicitud-form select,
+  .solicitud-form textarea,
+  .cuenta-form input,
+  .plan-form select,
+  .busqueda-admin input,
+  .bandeja-filtros a {
+    font-size: 16px;
+    min-height: 42px;
+  }
+
+  .admin-form textarea,
+  .solicitud-form textarea {
+    min-height: 72px;
+  }
+}
+
+/* ===== Bandeja de revisiones ===== */
+.bandeja-filtros {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 0.75rem;
+  font-size: 0.8rem;
+}
+
+.bandeja-filtros a {
+  padding: 5px 10px;
+  border-radius: 999px;
+  text-decoration: none;
+  border: 1px solid #d7dbe0;
+  color: #495057;
+  background: #fff;
+}
+
+.bandeja-filtros a.activo {
+  background: #212529;
+  color: #fff;
+  border-color: #212529;
+}
+
+.bandeja-filtros a .n {
+  font-weight: 700;
+  margin-left: 4px;
+}
+
+.ticket-item {
+  padding: 1rem;
+  border-bottom: 1px solid #e1e4e8;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.6rem;
+}
+
+.ticket-item__cuerpo {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Las acciones van debajo del mensaje (la tarjeta suele ser estrecha): el texto
+   respira y los botones se reparten en una rejilla que se adapta al ancho. */
+.ticket-item__acciones {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 6px;
+  align-items: stretch;
+  width: 100%;
+}
+
+.ticket-item__acciones > form,
+.ticket-item__acciones > a,
+.ticket-item__acciones > .solicitud-form {
+  width: 100%;
+}
+
+.ticket-item__acciones .btn-accion-tabla {
+  width: 100%;
+  text-align: center;
+}
+
+/* El formulario de la solicitud ocupa toda la fila (select + nota + aplicar). */
+.ticket-item__acciones > .solicitud-form {
+  grid-column: 1 / -1;
+}
+
+.ticket-mensaje {
+  font-size: 0.88rem;
+  color: #444;
+  margin-top: 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ticket-meta {
+  font-size: 0.78rem;
+  color: #6c757d;
+  margin-top: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-wrap: anywhere;
+}
+
+.ticket-nota {
+  font-size: 0.82rem;
+  color: #1e429f;
+  background: #e1effe;
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-top: 6px;
+  white-space: pre-wrap;
+}
+
+.badge-estado-pendiente {
+  background: #ffe8cc;
+  color: #8a5a00;
+}
+
+.badge-estado-en_proceso {
+  background: #e1effe;
+  color: #084298;
+}
+
+.badge-estado-resuelto {
+  background: #def7ec;
+  color: #03543f;
+}
+
+.badge-estado-rechazado {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.badge-tipo-soporte {
+  background: #e1effe;
+  color: #084298;
+}
+
+.badge-tipo-reportar_tienda,
+.badge-tipo-reportar_articulo {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.solicitud-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid #e1e4e8;
+  border-radius: 8px;
+  padding: 8px;
+  background: #fbfcfd;
+}
+
+.solicitud-form select,
+.solicitud-form textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font: inherit;
+}
+
+.solicitud-form textarea {
+  resize: vertical;
+}
+
+.solicitud-form button {
+  width: 100%;
+}
+
+.solicitud-form__nota summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: #495057;
+  font-weight: 600;
+  padding: 4px 0;
+}
+
+.solicitud-form__nota textarea {
+  margin-top: 4px;
+}
+
+/* En el telefono cada accion ocupa todo el ancho y con altura tactil. */
+@media (max-width: 768px) {
+  .ticket-item {
+    gap: 0.6rem;
+  }
+
+  .ticket-item__acciones {
+    grid-template-columns: 1fr;
+  }
+
+  .ticket-item__acciones .btn-accion-tabla {
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+/* ===== Tarjetas y metricas ===== */
+.admin-metricas {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+  gap: 8px;
+}
+
+.admin-metricas .metrica {
+  background: #f8f9fa;
+  border: 1px solid #e1e4e8;
+  border-radius: 6px;
+  padding: 8px;
+  text-align: center;
+}
+
+.admin-metricas .metrica strong {
+  display: block;
+  font-size: 1.25rem;
+}
+
+.admin-metricas .metrica span {
+  font-size: 0.72rem;
+  color: #6c757d;
+}
+
+.admin-metricas .metrica.alerta strong {
+  color: #dc3545;
+}
+
+@media (max-width: 480px) {
+  .admin-metricas {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ===== Asistente flotante en el panel ===== */
+/* La burbuja ya respeta el safe-area (asistente.css); aqui solo se cuida que
+   el boton que abre el chat desde la cabecera tenga un objetivo tactil comodo. */
+.admin-abrir-asistente {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

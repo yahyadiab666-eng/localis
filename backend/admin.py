@@ -19,6 +19,30 @@ from backend.utils import parsear_visible_form, url_banner_principal
 
 TIPOS_REPORTES_PERMITIDOS = {'soporte', 'reportar_tienda', 'reportar_articulo'}
 
+# Bandeja única del panel: solicitudes de usuarios + alertas de revisión de pago.
+TIPO_REVISION_PAGO = 'revision_pago'
+# Estados de una solicitud. ``resuelto`` = aceptada y cerrada; ``rechazado`` =
+# desestimada (no procede). Las dos se pueden reabrir.
+ESTADOS_SOLICITUD_ABIERTOS = ('pendiente', 'en_proceso')
+ESTADOS_SOLICITUD = ('pendiente', 'en_proceso', 'resuelto', 'rechazado')
+
+# Acciones de aceptación/rechazo por tipo de solicitud (whitelist cerrada).
+ACCIONES_SOLICITUD = {
+    'en_proceso': 'Tomar (en proceso)',
+    'aceptar': 'Aceptar y cerrar',
+    'rechazar': 'Rechazar (no procede)',
+    'suspender_tienda': 'Aceptar y suspender la tienda',
+    'ocultar_producto': 'Aceptar y ocultar el producto',
+    'reabrir': 'Reabrir',
+}
+
+_ETIQUETAS_ESTADO_SOLICITUD = {
+    'pendiente': 'Pendiente',
+    'en_proceso': 'En proceso',
+    'resuelto': 'Aceptada',
+    'rechazado': 'Rechazada',
+}
+
 
 def validar_correo(correo):
     return re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', correo) is not None
@@ -65,6 +89,11 @@ def crear_ticket_soporte_o_reporte(
 
 
 def obtener_bandeja_tecnica(estado_filtro=None, tipo_filtro=None):
+    """Solicitudes y alertas de la bandeja del panel.
+
+    ``estado_filtro``: ``pendiente`` muestra lo ABIERTO (pendiente + en
+    proceso), ``en_proceso``, ``resuelto`` (aceptadas) o ``rechazado``.
+    """
     try:
         with get_db_connection(row_factory=sqlite3.Row) as conexion:
             cursor = conexion.cursor()
@@ -72,8 +101,13 @@ def obtener_bandeja_tecnica(estado_filtro=None, tipo_filtro=None):
             condiciones = []
             parametros = []
 
-            if estado_filtro in ['pendiente', 'resuelto']:
-                condiciones.append('estado = ?')
+            estado_filtro = str(estado_filtro or '').strip().lower()
+            if estado_filtro == 'pendiente':
+                condiciones.append(
+                    "COALESCE(estado, 'pendiente') IN ('pendiente', 'en_proceso')"
+                )
+            elif estado_filtro in ESTADOS_SOLICITUD:
+                condiciones.append("COALESCE(estado, 'pendiente') = ?")
                 parametros.append(estado_filtro)
             if tipo_filtro:
                 condiciones.append('tipo = ?')
@@ -82,8 +116,11 @@ def obtener_bandeja_tecnica(estado_filtro=None, tipo_filtro=None):
             query = 'SELECT * FROM soporte_y_reportes'
             if condiciones:
                 query += ' WHERE ' + ' AND '.join(condiciones)
-            # Lo pendiente primero y, dentro de cada estado, lo más reciente.
-            query += " ORDER BY (estado = 'resuelto') ASC, fecha DESC"
+            # Lo abierto primero y, dentro de cada estado, lo más reciente.
+            query += (
+                " ORDER BY (COALESCE(estado, 'pendiente') IN "
+                "('resuelto', 'rechazado')) ASC, fecha DESC"
+            )
             cursor.execute(query, parametros)
             return [dict(fila) for fila in cursor.fetchall()]
     except Exception as e:
@@ -107,6 +144,114 @@ def contar_revisiones_pago_pendientes():
     except Exception as e:
         logger.error(f'Error al contar revisiones de pago: {str(e)}')
         return 0
+
+
+def contar_solicitudes_pendientes():
+    """Solicitudes de usuarios ABIERTAS (soporte y reportes). Nunca lanza."""
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT COUNT(*) FROM soporte_y_reportes
+                WHERE COALESCE(tipo, '') <> ?
+                  AND COALESCE(estado, 'pendiente') IN ('pendiente', 'en_proceso')
+                """,
+                (TIPO_REVISION_PAGO,),
+            )
+            fila = cursor.fetchone()
+            return int(fila[0]) if fila and fila[0] is not None else 0
+    except Exception as e:
+        logger.error(f'Error al contar solicitudes pendientes: {str(e)}')
+        return 0
+
+
+def resumen_bandeja():
+    """Conteo de la bandeja por estado y tipo (para el panel y el asistente).
+
+    Devuelve un dict con ``abiertas``, ``en_proceso``, ``aceptadas``,
+    ``rechazadas``, ``revisiones_pago`` y ``por_tipo``. Nunca lanza.
+    """
+    resumen = {
+        'abiertas': 0,
+        'en_proceso': 0,
+        'aceptadas': 0,
+        'rechazadas': 0,
+        'revisiones_pago': 0,
+        'por_tipo': {},
+    }
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            cursor.execute(
+                """
+                SELECT COALESCE(tipo, 'soporte') AS tipo,
+                       COALESCE(estado, 'pendiente') AS estado,
+                       COUNT(*)
+                FROM soporte_y_reportes
+                GROUP BY 1, 2
+                """
+            )
+            filas = cursor.fetchall() or []
+    except Exception as e:
+        logger.error(f'Error al resumir la bandeja: {str(e)}')
+        return resumen
+
+    for fila in filas:
+        tipo, estado, total = fila[0], fila[1], int(fila[2] or 0)
+        if tipo == TIPO_REVISION_PAGO:
+            if estado in ESTADOS_SOLICITUD_ABIERTOS:
+                resumen['revisiones_pago'] += total
+            continue
+        resumen['por_tipo'][tipo] = resumen['por_tipo'].get(tipo, 0) + total
+        if estado in ESTADOS_SOLICITUD_ABIERTOS:
+            resumen['abiertas'] += total
+            if estado == 'en_proceso':
+                resumen['en_proceso'] += total
+        elif estado == 'resuelto':
+            resumen['aceptadas'] += total
+        elif estado == 'rechazado':
+            resumen['rechazadas'] += total
+    return resumen
+
+
+def etiqueta_estado_ticket(ticket):
+    """Etiqueta legible del estado de una solicitud. Función pura."""
+    estado = str((ticket or {}).get('estado') or 'pendiente').strip().lower()
+    return _ETIQUETAS_ESTADO_SOLICITUD.get(estado, estado.title() or 'Pendiente')
+
+
+def acciones_ticket(ticket):
+    """Acciones de aceptación disponibles para UNA solicitud (lista de dicts).
+
+    Es una whitelist por tipo: las alertas de pago no se gestionan aquí (tienen
+    sus propios botones de confirmar/suspender). Función pura: no toca la BD.
+    """
+    ticket = ticket or {}
+    tipo = str(ticket.get('tipo') or '').strip().lower()
+    if tipo not in TIPOS_REPORTES_PERMITIDOS:
+        return []
+    estado = str(ticket.get('estado') or 'pendiente').strip().lower()
+    referencia_id = ticket.get('referencia_id')
+    acciones = []
+
+    def _accion(clave, clase):
+        return {'accion': clave, 'etiqueta': ACCIONES_SOLICITUD[clave], 'clase': clase}
+
+    if estado in ESTADOS_SOLICITUD_ABIERTOS:
+        # La primera opcion es la aceptacion simple (la mas habitual) para que
+        # el <select> del panel llegue ya con la accion correcta.
+        acciones.append(_accion('aceptar', 'btn-activar'))
+        if tipo == 'reportar_tienda' and referencia_id:
+            acciones.append(_accion('suspender_tienda', 'btn-suspender'))
+        if tipo == 'reportar_articulo' and referencia_id:
+            acciones.append(_accion('ocultar_producto', 'btn-suspender'))
+        acciones.append(_accion('rechazar', 'btn-eliminar'))
+        if estado == 'pendiente':
+            acciones.append(_accion('en_proceso', 'btn-ver'))
+    else:
+        acciones.append(_accion('reabrir', 'btn-resolver'))
+    return acciones
 
 
 def obtener_ticket(ticket_id):
@@ -144,14 +289,15 @@ def _auditar_accion_admin(admin_id, accion, detalles):
 def aplicar_accion_revision(ticket_id, accion, admin_id):
     """Ejecuta una acción sobre una alerta de revisión de pago.
 
-    Acciones: ``resolver`` (solo cierra), ``confirmar`` (activa el plan o el
-    destacado que el comerciante intentó pagar) y ``suspender`` (oculta la
-    tienda). Retorna ``(exito, mensaje)``. Nunca lanza.
+    Acciones: ``resolver`` (acepta y cierra), ``confirmar`` (activa el plan o el
+    destacado que el comerciante intentó pagar), ``suspender`` (oculta la
+    tienda) y ``rechazar`` (desestima el comprobante, sin activar nada).
+    Retorna ``(exito, mensaje)``. Nunca lanza.
     """
     from backend.verificacion_pagos import parsear_concepto
 
     accion = str(accion or '').strip().lower()
-    if accion not in ('resolver', 'confirmar', 'suspender'):
+    if accion not in ('resolver', 'confirmar', 'suspender', 'rechazar'):
         return False, 'Acción no válida.'
 
     ticket = obtener_ticket(ticket_id)
@@ -169,11 +315,17 @@ def aplicar_accion_revision(ticket_id, accion, admin_id):
         return False, 'La alerta no tiene comercio asociado.'
     comercio_id = int(comercio_id) if comercio_id else None
 
-    if accion == 'resolver':
-        exito, mensaje = resolver_ticket_soporte(ticket_id)
+    if accion in ('resolver', 'rechazar'):
+        exito, mensaje = resolver_ticket_soporte(
+            ticket_id, 'rechazado' if accion == 'rechazar' else 'resuelto'
+        )
         _auditar_accion_admin(
             admin_id,
-            'Revisión de pago resuelta',
+            (
+                'Revisión de pago rechazada'
+                if accion == 'rechazar'
+                else 'Revisión de pago resuelta'
+            ),
             f'ticket={ticket_id} comercio={comercio_id} ref={ticket.get("referencia_pago")}',
         )
         return exito, mensaje
@@ -270,18 +422,171 @@ def salud_pagos(dias=30):
     return resultado
 
 
-def resolver_ticket_soporte(ticket_id):
+def resolver_ticket_soporte(ticket_id, estado='resuelto', respuesta=None):
+    """Cierra una solicitud. ``estado``: ``resuelto`` (aceptada) o ``rechazado``.
+
+    ``respuesta`` es la nota opcional del admin. Nunca lanza.
+    """
+    estado = str(estado or 'resuelto').strip().lower()
+    if estado not in ('resuelto', 'rechazado'):
+        return False, 'Estado de cierre no válido.'
+    nota = str(respuesta or '').strip()[:1000] or None
     try:
         with get_db_connection() as conexion:
             cursor = conexion.cursor()
             cursor.execute(
-                "UPDATE soporte_y_reportes SET estado = 'resuelto' WHERE id = ?",
-                (int(ticket_id),),
+                """
+                UPDATE soporte_y_reportes
+                SET estado = ?,
+                    respuesta = COALESCE(?, respuesta),
+                    fecha_resolucion = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (estado, nota, int(ticket_id)),
             )
             conexion.commit()
-        return True, 'El ticket fue marcado como resuelto con éxito.'
+        if estado == 'rechazado':
+            return True, 'La solicitud fue rechazada.'
+        return True, 'La solicitud fue aceptada y cerrada.'
     except Exception as e:
-        return False, f'Error al resolver el ticket: {str(e)}'
+        return False, f'Error al cerrar la solicitud: {str(e)}'
+
+
+def cambiar_estado_ticket_soporte(ticket_id, estado):
+    """Cambia el estado de una solicitud sin cerrarla (p. ej. ``en_proceso``).
+
+    ``reabrir`` devuelve la solicitud a ``pendiente`` y limpia la resolución.
+    Nunca lanza.
+    """
+    estado = str(estado or '').strip().lower()
+    if estado not in ESTADOS_SOLICITUD:
+        return False, 'Estado no válido.'
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            if estado in ESTADOS_SOLICITUD_ABIERTOS:
+                cursor.execute(
+                    """
+                    UPDATE soporte_y_reportes
+                    SET estado = ?, fecha_resolucion = NULL, respuesta = NULL
+                    WHERE id = ?
+                    """,
+                    (estado, int(ticket_id)),
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE soporte_y_reportes
+                    SET estado = ?, fecha_resolucion = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (estado, int(ticket_id)),
+                )
+            conexion.commit()
+        etiquetas = {
+            'en_proceso': 'La solicitud quedó en proceso.',
+            'pendiente': 'La solicitud volvió a la lista de pendientes.',
+        }
+        return True, etiquetas.get(estado, f'Estado actualizado a {estado}.')
+    except Exception as e:
+        return False, f'Error al cambiar el estado: {str(e)}'
+
+
+def ocultar_producto_admin(admin_id, producto_id, comercio_id=None):
+    """Oculta un producto (``activo = 0``) sin borrarlo. Reversible. Nunca lanza."""
+    try:
+        with get_db_connection() as conexion:
+            cursor = conexion.cursor()
+            if comercio_id:
+                cursor.execute(
+                    'SELECT nombre FROM productos WHERE id = ? AND comercio_id = ?',
+                    (int(producto_id), int(comercio_id)),
+                )
+            else:
+                cursor.execute(
+                    'SELECT nombre FROM productos WHERE id = ?', (int(producto_id),)
+                )
+            fila = cursor.fetchone()
+            if not fila:
+                return False, 'El producto no existe para ese comercio.'
+            nombre = fila[0]
+            cursor.execute(
+                'UPDATE productos SET activo = 0 WHERE id = ?', (int(producto_id),)
+            )
+            cursor.execute(
+                """
+                INSERT INTO logs_auditoria (usuario_id, accion, detalles)
+                VALUES (?, 'Producto ocultado por reporte', ?)
+                """,
+                (admin_id, f'producto={producto_id} "{nombre}" comercio={comercio_id}'),
+            )
+            conexion.commit()
+        return True, f'El producto «{nombre}» quedó oculto de la tienda.'
+    except Exception as e:
+        logger.error(f'Error al ocultar el producto {producto_id}: {str(e)}')
+        return False, f'Error al ocultar el producto: {str(e)}'
+
+
+def aplicar_accion_solicitud(ticket_id, accion, admin_id, nota=None):
+    """Acepta, rechaza, toma o reabre una SOLICITUD de usuario de la bandeja.
+
+    Whitelist: ``en_proceso``, ``aceptar``, ``rechazar``, ``suspender_tienda``,
+    ``ocultar_producto`` y ``reabrir``. Cada acción queda auditada. Retorna
+    ``(exito, mensaje)`` y nunca lanza.
+    """
+    accion = str(accion or '').strip().lower()
+    if accion not in ACCIONES_SOLICITUD:
+        return False, 'Acción no válida.'
+
+    ticket = obtener_ticket(ticket_id)
+    if not ticket:
+        return False, 'La solicitud no existe.'
+    tipo = str(ticket.get('tipo') or '').strip().lower()
+    if tipo not in TIPOS_REPORTES_PERMITIDOS:
+        return False, 'Esa entrada no es una solicitud de usuario.'
+
+    estado = str(ticket.get('estado') or 'pendiente').strip().lower()
+    abierta = estado in ESTADOS_SOLICITUD_ABIERTOS
+    # Coherencia estado/acción: una solicitud cerrada solo se reabre y una
+    # abierta no se "reabre" (evita acciones cruzadas desde un POST manual).
+    if accion == 'reabrir' and abierta:
+        return False, 'La solicitud sigue abierta.'
+    if accion != 'reabrir' and not abierta:
+        return False, 'La solicitud ya está cerrada: reábrela para actuar.'
+
+    referencia_id = ticket.get('referencia_id')
+    comercio_id = int(referencia_id) if referencia_id else None
+
+    if accion == 'reabrir':
+        exito, mensaje = cambiar_estado_ticket_soporte(ticket_id, 'pendiente')
+    elif accion == 'en_proceso':
+        exito, mensaje = cambiar_estado_ticket_soporte(ticket_id, 'en_proceso')
+    elif accion == 'aceptar':
+        exito, mensaje = resolver_ticket_soporte(ticket_id, 'resuelto', nota)
+    elif accion == 'rechazar':
+        exito, mensaje = resolver_ticket_soporte(ticket_id, 'rechazado', nota)
+    elif accion == 'suspender_tienda':
+        if tipo != 'reportar_tienda' or not comercio_id:
+            return False, 'Esta solicitud no apunta a una tienda concreta.'
+        exito, mensaje = suspender_comercio_temporal(admin_id, comercio_id)
+        if exito:
+            resolver_ticket_soporte(ticket_id, 'resuelto', nota)
+    elif accion == 'ocultar_producto':
+        if tipo != 'reportar_articulo' or not referencia_id:
+            return False, 'Esta solicitud no apunta a un producto concreto.'
+        exito, mensaje = ocultar_producto_admin(admin_id, referencia_id)
+        if exito:
+            resolver_ticket_soporte(ticket_id, 'resuelto', nota)
+    else:  # pragma: no cover - la whitelist ya filtró
+        return False, 'Acción no válida.'
+
+    if exito:
+        _auditar_accion_admin(
+            admin_id,
+            'Solicitud atendida',
+            f'ticket={ticket_id} tipo={tipo} accion={accion} ref={referencia_id}',
+        )
+    return exito, mensaje
 
 
 # ==========================================

@@ -369,6 +369,10 @@ COLUMNAS_ESQUEMA = {
         ('referencia_pago', 'TEXT'),
         # Qué se estaba pagando (plan:pro / boost:7:prod:123) para poder actuar.
         ('concepto', 'TEXT'),
+        # Cierre de una solicitud por el admin: nota y fecha de la decisión
+        # (estado 'resuelto' = aceptada, 'rechazado' = desestimada, 'en_proceso').
+        ('respuesta', 'TEXT'),
+        ('fecha_resolucion', 'TIMESTAMP'),
     ],
     'configuracion_sistema': [
         ('clave', 'TEXT'),

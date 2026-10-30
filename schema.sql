@@ -131,7 +131,13 @@ CREATE TABLE IF NOT EXISTS soporte_y_reportes (
     mensaje TEXT NOT NULL,
     referencia_id INTEGER, 
     fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    estado TEXT DEFAULT 'pendiente', -- 'pendiente', 'resuelto'
+    -- 'pendiente', 'en_proceso', 'resuelto' (aceptada), 'rechazado' (desestimada)
+    estado TEXT DEFAULT 'pendiente',
+    comprobante_url TEXT,
+    referencia_pago TEXT,
+    concepto TEXT,
+    respuesta TEXT,            -- nota del admin al aceptar o rechazar
+    fecha_resolucion TIMESTAMP,
     FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL
 );
 

@@ -7,6 +7,7 @@
     <title>Localis - Gestión de {{ comercio.nombre }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}?v={{ asset_v }}">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         body { background-color: #f4f6f9; color: #333; }
@@ -74,11 +75,15 @@
 </head>
 <body>
 
-    <header>
+    <header class="admin-top">
         <h1>Localis | Gestión de comercio</h1>
-        <div class="nav-links">
+        <div class="nav-links admin-top__acciones">
             <a href="{{ url_for('admin.panel_admin') }}">&larr; Volver al panel</a>
             <a href="{{ url_for('admin.admin_usuarios') }}">Usuarios</a>
+            <a href="{{ url_for('admin.panel_admin') }}#asistente-ia" class="admin-abrir-asistente"
+               onclick="if(window.localisAbrirAsistente){window.localisAbrirAsistente();return false;}">
+                Asistente IA
+            </a>
             {% if comercio.id %}
             <a href="{{ url_for('admin.admin_editar_comercio', comercio_id=comercio.id) }}">Editar tienda</a>
             <a href="{{ url_for('admin.admin_nuevo_producto', comercio_id=comercio.id) }}">Añadir producto</a>
@@ -356,7 +361,7 @@
                            title="Cargar un producto en este comercio">+ Añadir producto</a>
                     </div>
                 </div>
-                <div class="tabla-contenedor">
+                <div class="tabla-contenedor tabla-responsive tabla-admin-cards">
                     <table>
                         <thead>
                             <tr>
@@ -375,23 +380,23 @@
                             {% for producto in productos %}
                             {% set img = producto|url_imagen_producto %}
                             <tr>
-                                <td>{{ producto.id }}</td>
-                                <td>
+                                <td data-etiqueta="ID">{{ producto.id }}</td>
+                                <td data-etiqueta="Imagen">
                                     <img class="thumb" src="{{ img or placeholder_producto }}" alt="{{ producto.nombre }}"
                                          onerror="window.rescatarImagenProducto ? window.rescatarImagenProducto(this) : (this.onerror=null, this.src='{{ placeholder_producto }}');">
                                 </td>
-                                <td>
+                                <td data-etiqueta="Producto">
                                     <strong>{{ producto.nombre }}</strong>
                                     {% if producto.descripcion %}<br><small class="muted">{{ producto.descripcion }}</small>{% endif %}
                                 </td>
-                                <td>${{ "%.2f"|format(producto.precio_usd or 0) }}</td>
-                                <td>{{ "%.2f"|format((producto.precio_usd or 0) * (tasa or 1)) }} Bs</td>
-                                <td><small>{{ producto.codigo_barras or '—' }}</small></td>
-                                <td>
+                                <td data-etiqueta="Precio USD">${{ "%.2f"|format(producto.precio_usd or 0) }}</td>
+                                <td data-etiqueta="Precio Bs">{{ "%.2f"|format((producto.precio_usd or 0) * (tasa or 1)) }} Bs</td>
+                                <td data-etiqueta="Código"><small>{{ producto.codigo_barras or '—' }}</small></td>
+                                <td data-etiqueta="Estado">
                                     <span class="badge badge-{{ 'activo' if producto.activo == 1 else 'vencido' }}">{{ 'Activo' if producto.activo == 1 else 'Inactivo' }}</span>
                                     <br><small class="muted">{{ producto.imagen_estado or 'pendiente' }}</small>
                                 </td>
-                                <td>
+                                <td data-etiqueta="Destacado">
                                     {% set es_destacado = (producto.destacado or 0) == 1 %}
                                     <form action="{{ url_for('admin.admin_destacar_producto', producto_id=producto.id) }}" method="POST" style="display:inline;"
                                           onsubmit="this.querySelector('button').disabled=true;">
@@ -420,7 +425,7 @@
                                         <button type="submit" class="btn-accion-tabla btn-activar" title="Destacar por el tiempo elegido">Aplicar</button>
                                     </form>
                                 </td>
-                                <td>
+                                <td data-etiqueta="Acciones">
                                     <a href="{{ url_for('admin.admin_editar_producto', comercio_id=comercio.id, producto_id=producto.id) }}"
                                        class="btn-accion-tabla btn-resolver" style="text-decoration:none;display:inline-block;margin-bottom:4px;"
                                        title="Editar producto">Editar</a>
@@ -434,7 +439,7 @@
                             </tr>
                             {% else %}
                             <tr>
-                                <td colspan="9" style="text-align:center;padding:2rem;color:#666;">Este comercio no tiene productos en su catálogo.</td>
+                                <td data-etiqueta="" colspan="9" style="text-align:center;padding:2rem;color:#666;">Este comercio no tiene productos en su catálogo.</td>
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -561,5 +566,6 @@
     });
   })();
 </script>
+{% include 'partials/asistente_widget.html' %}
 </body>
 </html>

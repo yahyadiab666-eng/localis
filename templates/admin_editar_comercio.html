@@ -6,6 +6,7 @@
     <title>Localis - Editar tienda (admin)</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}?v={{ asset_v }}">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         body { background-color: #f4f6f9; color: #333; }
@@ -49,11 +50,15 @@
 </head>
 <body>
 
-    <header>
+    <header class="admin-top">
         <h1>Localis | Editar tienda (admin)</h1>
-        <div class="nav-links">
+        <div class="nav-links admin-top__acciones">
             <a href="{{ url_for('admin.admin_comercio_detalle', comercio_id=comercio.id) }}">&larr; Volver a la ficha</a>
             <a href="{{ url_for('admin.panel_admin') }}">Panel admin</a>
+            <a href="{{ url_for('admin.panel_admin') }}#asistente-ia" class="admin-abrir-asistente"
+               onclick="if(window.localisAbrirAsistente){window.localisAbrirAsistente();return false;}">
+                Asistente IA
+            </a>
             <form method="POST" action="{{ url_for('auth.logout') }}" style="display:inline;"
                   onsubmit="return confirm('¿Seguro que quieres cerrar sesión?');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -221,5 +226,6 @@
         })();
     </script>
     <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
+    {% include 'partials/asistente_widget.html' %}
 </body>
 </html>

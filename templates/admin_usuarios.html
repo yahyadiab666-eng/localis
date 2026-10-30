@@ -6,6 +6,7 @@
     <title>Localis - Usuarios registrados</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}?v={{ asset_v }}">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         body { background-color: #f4f6f9; color: #333; }
@@ -40,10 +41,14 @@
 </head>
 <body>
 
-    <header>
+    <header class="admin-top">
         <h1>Localis | Usuarios registrados</h1>
-        <div class="nav-links">
+        <div class="nav-links admin-top__acciones">
             <a href="{{ url_for('admin.panel_admin') }}">&larr; Volver al panel</a>
+            <a href="{{ url_for('admin.panel_admin') }}#asistente-ia" class="admin-abrir-asistente"
+               onclick="if(window.localisAbrirAsistente){window.localisAbrirAsistente();return false;}">
+                Asistente IA
+            </a>
             <form method="POST" action="{{ url_for('auth.logout') }}" style="display:inline;"
                   onsubmit="return confirm('¿Seguro que quieres cerrar sesión?');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -62,7 +67,7 @@
         </form>
 
         <div class="tabla-box">
-            <div class="tabla-contenedor">
+            <div class="tabla-contenedor tabla-responsive tabla-admin-cards">
                 <table>
                     <thead>
                         <tr>
@@ -75,8 +80,8 @@
                     <tbody>
                         {% for usuario in usuarios %}
                         <tr>
-                            <td>{{ usuario.id }}</td>
-                            <td>
+                            <td data-etiqueta="ID">{{ usuario.id }}</td>
+                            <td data-etiqueta="Perfil">
                                 <div style="display:flex;align-items:center;gap:10px;">
                                     {% if usuario.foto_url %}
                                         <img class="avatar" src="{{ usuario.foto_url }}" alt=""
@@ -90,10 +95,10 @@
                                     </div>
                                 </div>
                             </td>
-                            <td>
+                            <td data-etiqueta="Rol">
                                 <span class="badge badge-{{ usuario.rol or 'cliente' }}">{{ usuario.rol or 'cliente' }}</span>
                             </td>
-                            <td>
+                            <td data-etiqueta="Comercios">
                                 {% if usuario.comercios %}
                                     <ul class="lista-comercios">
                                         {% for comercio in usuario.comercios %}
@@ -112,7 +117,7 @@
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="4" style="text-align:center;padding:2rem;color:#666;">No hay usuarios registrados.</td>
+                            <td data-etiqueta="" colspan="4" style="text-align:center;padding:2rem;color:#666;">No hay usuarios registrados.</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -122,5 +127,7 @@
     </div>
 
 <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
+{# Asistente de IA: mismas respuestas y metricas que en el resto del panel. #}
+{% include 'partials/asistente_widget.html' %}
 </body>
 </html>

@@ -24,12 +24,14 @@ from flask import (
 
 from config import DEFAULT_BANNER_URL, WHATSAPP_SOPORTE, WHATSAPP_SOPORTE_URL
 from backend.admin import (
+    acciones_ticket,
     actualizar_banner_principal,
     actualizar_comercio_admin,
     actualizar_producto_admin,
     actualizar_tasa_dolar,
     alternar_destacado_producto,
     aplicar_accion_revision,
+    aplicar_accion_solicitud,
     cambiar_plan_comercio,
     cambiar_visibilidad_comercio,
     crear_producto_admin,
@@ -38,6 +40,9 @@ from backend.admin import (
     eliminar_producto_admin,
     obtener_bandeja_tecnica,
     contar_revisiones_pago_pendientes,
+    contar_solicitudes_pendientes,
+    etiqueta_estado_ticket,
+    resumen_bandeja,
     salud_pagos,
     obtener_banner_principal,
     obtener_categorias_admin,
@@ -96,6 +101,11 @@ def panel_admin():
     tickets = obtener_bandeja_tecnica(
         estado_filtro=estado_filtro, tipo_filtro=tipo_filtro
     )
+    # Cada solicitud llega a la plantilla con su estado legible y sus acciones
+    # de aceptación permitidas (whitelist en ``backend.admin``).
+    for ticket in tickets:
+        ticket['etiqueta_estado'] = etiqueta_estado_ticket(ticket)
+        ticket['acciones'] = acciones_ticket(ticket)
     tasa_actual = obtener_tasa_dolar()
     comercios = obtener_todos_comercios_admin(busqueda=busqueda or None)
     banner_url = url_hero_inicio(obtener_banner_principal()) or DEFAULT_BANNER_URL
@@ -114,6 +124,8 @@ def panel_admin():
         comercios=comercios,
         tickets=tickets,
         revisiones_pendientes=contar_revisiones_pago_pendientes(),
+        solicitudes_pendientes=contar_solicitudes_pendientes(),
+        bandeja=resumen_bandeja(),
         salud=salud_pagos(),
         metricas_asistente=metricas_asistente,
         estado_ticket=estado_filtro or '',
@@ -304,6 +316,32 @@ def admin_resolver_ticket(ticket_id):
     return redirect(url_for('admin.panel_admin'))
 
 
+@bp.route('/ticket/accion/<int:ticket_id>', methods=['POST'])
+@admin_requerido
+def admin_ticket_accion(ticket_id):
+    """Acepta, rechaza, toma o reabre una solicitud de usuario de la bandeja.
+
+    La variedad de aceptación depende del tipo (Reporte de tienda -> suspender
+    la tienda; Reporte de artículo -> ocultar el producto). Las alertas de pago
+    siguen usando ``admin_revision_accion``.
+    """
+    accion = (
+        request.form.get('accion')
+        or (request.get_json(silent=True) or {}).get('accion')
+        or ''
+    )
+    nota = request.form.get('nota') or (request.get_json(silent=True) or {}).get('nota')
+    exito, mensaje = aplicar_accion_solicitud(
+        ticket_id, accion, session.get('usuario_id'), nota=nota
+    )
+    if peticion_acepta_json():
+        return jsonify({'ok': bool(exito), 'mensaje': mensaje}), (
+            200 if exito else 400
+        )
+    flash(mensaje, 'exito' if exito else 'error')
+    return redirect(url_for('admin.panel_admin'))
+
+
 @bp.route('/revision/<int:ticket_id>', methods=['POST'])
 @admin_requerido
 def admin_revision_accion(ticket_id):
@@ -355,6 +393,21 @@ def admin_comercio_detalle(comercio_id):
         tasa=tasa_actual,
         planes=PLANES,
         q=busqueda,
+    )
+
+
+@bp.route('/producto/<int:producto_id>')
+@admin_requerido
+def admin_producto_detalle(producto_id):
+    """Abre la ficha del comercio dueño del producto (desde un reporte)."""
+    producto = obtener_producto_admin(producto_id)
+    if not producto or not producto.get('comercio_id'):
+        flash('Producto no encontrado.', 'error')
+        return redirect(url_for('admin.panel_admin'))
+    return redirect(
+        url_for(
+            'admin.admin_comercio_detalle', comercio_id=producto['comercio_id']
+        )
     )
 
 
