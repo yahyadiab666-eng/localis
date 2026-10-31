@@ -95,6 +95,22 @@ def main():
             not _ok(cabecera in texto_main, f'define {cabecera}')
         )
 
+    # La geolocalización NO puede quedar bloqueada por política: el botón
+    # "Usar mi ubicación actual" (sedes del comercio) la necesita en el propio
+    # origen. Con `geolocation=()` el navegador ni pregunta y siempre falla.
+    fallos.append(
+        not _ok(
+            'geolocation=(self)' in texto_main,
+            'Permissions-Policy permite geolocation=(self)',
+        )
+    )
+    fallos.append(
+        not _ok(
+            'geolocation=()' not in texto_main,
+            'Permissions-Policy no bloquea la geolocalización por completo',
+        )
+    )
+
     # 7) Toda ruta /admin va precedida por el guard de administrador.
     #    Las rutas viven en main.py o en el blueprint admin (url_prefix=/admin).
     print('=== Rutas /admin protegidas ===')

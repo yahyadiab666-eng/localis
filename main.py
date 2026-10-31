@@ -879,8 +879,12 @@ def agregar_cabeceras_seguridad(response):
     response.headers.setdefault(
         'Referrer-Policy', 'strict-origin-when-cross-origin'
     )
+    # ``geolocation=(self)``: el botón "Usar mi ubicación actual" (sedes del
+    # comercio) necesita la API de geolocalización en NUESTRO origen. Bloqueada
+    # para todos (lista vacía), el navegador ni pregunta y siempre fallaba con
+    # "permiso denegado". Micrófono y cámara siguen bloqueados.
     response.headers.setdefault(
-        'Permissions-Policy', 'geolocation=(), microphone=(), camera=()'
+        'Permissions-Policy', 'geolocation=(self), microphone=(), camera=()'
     )
     if es_entorno_produccion():
         response.headers.setdefault(
