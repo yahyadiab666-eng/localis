@@ -209,6 +209,26 @@ db = None
 csrf = None
 
 
+def asset_version(relativo):
+    """Huella corta de un archivo de ``static/`` (mtime+tamaño) para la URL.
+
+    El Service Worker de la PWA sirve ``/static/`` en cache-first, así que una
+    URL fija (``?v=catalogo-180``) dejaba al teléfono con el CSS viejo para
+    siempre: el panel admin salía sin estilos. Con la huella del archivo, cada
+    cambio genera una URL nueva y el navegador baja la versión correcta.
+    """
+    try:
+        from config import RUTA_RAIZ
+
+        estado = os.stat(os.path.join(RUTA_RAIZ, 'static', str(relativo)))
+        return f'{estado.st_mtime_ns:x}{estado.st_size:x}'[-10:]
+    except Exception:
+        return '1'
+
+
+app.jinja_env.globals['asset_version'] = asset_version
+
+
 def _sqlalchemy_url(url):
     """URI para SQLAlchemy forzando el driver instalado ``psycopg2``.
 

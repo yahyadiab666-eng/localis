@@ -6,7 +6,7 @@
     <title>Localis - Panel de Administración</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/flash.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}?v={{ asset_v }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}?v={{ asset_version('css/admin.css') }}">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         body { background-color: #f4f6f9; color: #333; }
@@ -117,6 +117,36 @@
 
             .tabla-contenedor { overflow-x: visible; }
         }
+
+        /* ===== Respaldo mínimo =====
+           Las pestañas y el botón ⋮ son la navegación del panel. Si admin.css
+           tardara en cargar (caché vieja del Service Worker), estos estilos
+           en línea mantienen el panel usable; admin.css los afina después. */
+        .admin-tabs {
+            display: flex; gap: 2px; overflow-x: auto;
+            background: #212529; padding: 0 0.85rem;
+            -webkit-overflow-scrolling: touch;
+        }
+        .admin-tab {
+            flex: 0 0 auto; padding: 12px 14px; border: none;
+            border-bottom: 3px solid transparent; background: none;
+            color: rgba(255, 255, 255, 0.75); font: inherit; font-size: 0.92rem;
+            font-weight: 600; cursor: pointer; white-space: nowrap;
+        }
+        .admin-tab.is-active { color: #fff; border-bottom-color: #ffc107; }
+        .admin-menu__boton {
+            width: 40px; height: 40px; border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            background: rgba(255, 255, 255, 0.12); color: #fff;
+            font-size: 1.2rem; cursor: pointer;
+        }
+        .admin-menu__lista {
+            position: absolute; right: 0; top: calc(100% + 6px); z-index: 80;
+            min-width: 220px; background: #fff; color: #212529;
+            border: 1px solid #e1e4e8; border-radius: 10px;
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18); padding: 6px;
+        }
+        .admin-menu__lista[hidden] { display: none; }
     </style>
 </head>
 <body>
@@ -135,7 +165,24 @@
                 &#8942;
             </button>
             <div class="admin-menu__lista" id="admin-menu-lista" role="menu" hidden>
-                <a role="menuitem" href="{{ url_for('admin.admin_usuarios') }}">Usuarios</a>
+                {# La lista trae TODO el panel: cada sección y cada acceso, para no
+                   depender de recordar dónde está cada cosa. #}
+                <span class="admin-menu__titulo">Secciones</span>
+                <button type="button" role="menuitem" data-ir="resumen">Resumen</button>
+                <button type="button" role="menuitem" data-ir="solicitudes">
+                    Solicitudes
+                    {% if solicitudes_pendientes %}<span class="admin-menu__n">{{ solicitudes_pendientes }}</span>{% endif %}
+                </button>
+                <button type="button" role="menuitem" data-ir="pagos">
+                    Pagos
+                    {% if revisiones_pendientes %}<span class="admin-menu__n">{{ revisiones_pendientes }}</span>{% endif %}
+                </button>
+                <button type="button" role="menuitem" data-ir="comercios">Comercios</button>
+                <button type="button" role="menuitem" data-ir="banners">Banners de la portada</button>
+                <button type="button" role="menuitem" data-ir="ajustes">Ajustes (tasa y pre-cuenta)</button>
+                <div class="admin-menu__sep" role="separator"></div>
+                <span class="admin-menu__titulo">Otros accesos</span>
+                <a role="menuitem" href="{{ url_for('admin.admin_usuarios') }}">Usuarios registrados</a>
                 <button type="button" role="menuitem" class="admin-abrir-asistente"
                         onclick="if(window.localisAbrirAsistente){window.localisAbrirAsistente();}">
                     Asistente IA

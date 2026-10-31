@@ -161,6 +161,27 @@
   background: #f1f3f5;
 }
 
+.admin-menu__titulo {
+  padding: 8px 12px 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #868e96;
+}
+
+.admin-menu__n {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #dc3545;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-align: center;
+}
+
 .admin-menu__lista .admin-menu__salir {
   color: #b02a37;
 }

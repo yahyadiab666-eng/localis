@@ -2,13 +2,16 @@
  *
  * Estrategias:
  *  - App shell / navegación pública: network-first con fallback a caché y a /offline.
- *  - Estáticos (/static/): cache-first (rápido y barato).
+ *  - Estáticos (/static/): **stale-while-revalidate** (se sirve la copia y se
+ *    actualiza en segundo plano). Antes era cache-first puro y, con URLs de
+ *    versión fijas, un teléfono podía quedarse para siempre con un CSS viejo
+ *    (el panel admin salía sin estilos).
  *  - API y zonas privadas: solo red (nunca se cachean).
  *
  * Reglas de seguridad: no se cachea nada de /api/, /admin, /comercio, /perfil,
  * /login/google ni /logout para no exponer datos de sesión.
  */
-const VERSION = 'localis-v1';
+const VERSION = 'localis-v2';
 const CACHE_ESTATICOS = `${VERSION}-estaticos`;
 const CACHE_PAGINAS = `${VERSION}-paginas`;
 
@@ -85,20 +88,29 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Estáticos: cache-first
+  // Estáticos: stale-while-revalidate. Se responde al instante con la copia
+  // (si la hay) y se pide una versión nueva para la próxima visita, así nunca
+  // queda clavado un CSS/JS viejo.
   if (url.pathname.startsWith('/static/')) {
     event.respondWith(
-      caches.match(request).then(
-        (enCache) =>
-          enCache ||
-          fetch(request).then((respuesta) => {
+      caches.match(request).then((enCache) => {
+        // La red se pide SIEMPRE (actualiza la copia aunque ya haya caché).
+        const red = fetch(request)
+          .then((respuesta) => {
             if (respuesta && respuesta.status === 200 && respuesta.type === 'basic') {
               const copia = respuesta.clone();
-              caches.open(CACHE_ESTATICOS).then((cache) => cache.put(request, copia)).catch(() => {});
+              caches
+                .open(CACHE_ESTATICOS)
+                .then((cache) => cache.put(request, copia))
+                .catch(() => {});
             }
             return respuesta;
           })
-      )
+          .catch(() => enCache || Response.error());
+
+        // Con copia: se sirve ya; sin copia: se espera a la red.
+        return enCache || red;
+      })
     );
     return;
   }
