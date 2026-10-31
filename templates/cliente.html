@@ -184,7 +184,10 @@
      rotación registra una impresión. Sin banners activos se muestra el banner
      principal configurado, así la portada nunca queda vacía. #}
   {% set banners_home = banners_portada | default([], true) %}
-  <section class="max-w-6xl mx-auto px-6 my-8"
+  {# La franja usa casi todo el ancho disponible (max-w-7xl y poco margen en el
+     teléfono): la imagen se ve más grande sin recortarla, porque se mantiene la
+     proporción 3:1 exacta de la pieza (1200 x 400). #}
+  <section class="max-w-7xl mx-auto px-3 sm:px-6 my-8"
            data-banner-carrusel
            data-banner-rotacion="{{ banner_rotacion_seg | default(60) }}">
     <div class="banner-carrusel-caja banner-destacado-bg rounded-2xl overflow-hidden shadow-lg relative w-full{% if not banners_home %} banner-carrusel-caja--fallback{% endif %}">

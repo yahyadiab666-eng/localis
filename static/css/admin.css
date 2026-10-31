@@ -88,6 +88,189 @@
   transform: scale(0.97);
 }
 
+/* ===== Menú de 3 puntos (⋮) ===== */
+/* Patrón de las apps: en vez de repartir botones por la barra y por cada fila,
+   todo se recoge en una lista que abre el botón de tres puntos. */
+.admin-menu {
+  position: relative;
+  margin-left: auto;
+}
+
+.admin-menu__boton {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.admin-menu__boton:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.admin-menu__lista {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 80;
+  min-width: 210px;
+  background: #fff;
+  color: #212529;
+  border: 1px solid #e1e4e8;
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+  padding: 6px;
+  display: grid;
+}
+
+.admin-menu__lista[hidden] {
+  display: none;
+}
+
+.admin-menu__lista a,
+.admin-menu__lista button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 11px 12px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 600;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.admin-menu__lista a:hover,
+.admin-menu__lista button:hover,
+.admin-menu__lista a:focus-visible,
+.admin-menu__lista button:focus-visible {
+  background: #f1f3f5;
+}
+
+.admin-menu__lista .admin-menu__salir {
+  color: #b02a37;
+}
+
+.admin-menu__sep {
+  height: 1px;
+  background: #eef0f2;
+  margin: 4px 6px;
+}
+
+/* Menú por fila (tablas y listas): abre la lista EN SITIO, sin flotar, así no
+   la recorta el contenedor con scroll de la tabla. */
+.acciones-menu {
+  position: relative;
+}
+
+.acciones-menu > summary {
+  list-style: none;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d7dbe0;
+  border-radius: 8px;
+  background: #fff;
+  color: #495057;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.acciones-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.acciones-menu[open] > summary {
+  background: #212529;
+  border-color: #212529;
+  color: #fff;
+}
+
+.acciones-menu__lista {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 6px;
+  border: 1px solid #e1e4e8;
+  border-radius: 10px;
+  background: #fbfcfd;
+}
+
+.acciones-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 8px;
+  background: #fff;
+  color: #212529;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 600;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  border-left: 3px solid #ced4da;
+}
+
+.acciones-menu__item:hover {
+  background: #f1f3f5;
+}
+
+.acciones-menu__item--ok { border-left-color: #28a745; }
+.acciones-menu__item--ojo { border-left-color: #dc3545; }
+.acciones-menu__item--info { border-left-color: #0d6efd; }
+.acciones-menu__item--peligro {
+  border-left-color: #6c757d;
+  color: #b02a37;
+}
+
+.acciones-menu__form {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #eef0f2;
+}
+
+.acciones-menu__form label {
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: #6c757d;
+}
+
+.acciones-menu__form input,
+.acciones-menu__form select {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 0.86rem;
+}
+
 /* ===== Pestañas del panel ===== */
 /* Una sola página con 8 tarjetas obliga a scrollear mucho: cada bloque vive
    ahora en su pestaña y solo se pinta la activa. */
@@ -687,43 +870,7 @@
   margin-top: 2px;
 }
 
-.banner-admin-acciones {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 6px;
-  align-items: stretch;
-}
-
-.banner-admin-acciones form {
-  display: flex;
-  gap: 4px;
-  min-width: 0;
-}
-
-.banner-admin-acciones .btn-accion-tabla {
-  width: 100%;
-}
-
-.banner-admin-enlace {
-  grid-column: 1 / -1;
-}
-
-/* En la fila del enlace el campo ocupa el espacio y el botón solo lo suyo
-   (si el botón fuera 100% comprimiría el input a casi nada). */
-.banner-admin-enlace .btn-accion-tabla {
-  width: auto;
-  flex: 0 0 auto;
-}
-
-.banner-admin-enlace input[type="url"] {
-  flex: 1;
-  min-width: 0;
-  padding: 8px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  font: inherit;
-}
+/* Las acciones de cada banner viven en el menú ⋮ (.acciones-menu). */
 
 .badge-estado-banner-activo {
   background: #d4edda;
@@ -747,10 +894,6 @@
 
   .banner-admin-thumb {
     width: 100%;
-  }
-
-  .banner-admin-acciones {
-    grid-template-columns: 1fr;
   }
 }
 

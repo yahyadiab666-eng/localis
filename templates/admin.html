@@ -46,7 +46,13 @@
             border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%;
         }
         .btn-primario:hover { background: #343a40; }
-        .banner-preview { width: 100%; max-height: 120px; object-fit: cover; border-radius: 6px; margin-bottom: 1rem; }
+        /* Vista previa del banner: se muestra grande (3:1) para juzgar el diseño
+           antes de publicarlo; en el teléfono ocupa todo el ancho. */
+        .banner-preview {
+            width: 100%; aspect-ratio: 3 / 1; max-height: 260px;
+            object-fit: contain; background: #f5efe4;
+            border-radius: 6px; margin-bottom: 1rem;
+        }
         .tabla-box {
             background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
             border: 1px solid #e1e4e8; overflow: hidden;
@@ -81,7 +87,6 @@
         .salud-pagos .metrica strong { display: block; font-size: 1.3rem; }
         .salud-pagos .metrica span { font-size: 0.72rem; color: #6c757d; }
         .salud-pagos .metrica.alerta strong { color: #dc3545; }
-        .acciones-comercio { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
         .ticket-item.ticket-revision { border-left: 4px solid #dc3545; background: #fffafa; }
         .ticket-item.ticket-revision.es-aviso { border-left-color: #fd7e14; background: #fffaf3; }
         .badge-revision { background: #f8d7da; color: #721c24; }
@@ -92,13 +97,6 @@
             padding: 1px 8px; font-size: 0.75rem; font-weight: bold; margin-left: 6px;
         }
         .enlace-comprobante { font-size: 0.78rem; color: #0d6efd; text-decoration: underline; }
-        .plan-form { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
-        .plan-form select { padding: 4px; font-size: 0.8rem; }
-        .cuenta-form { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
-        .cuenta-form input[type="email"] {
-            padding: 4px; font-size: 0.8rem; border: 1px solid #ccc; border-radius: 4px;
-            min-width: 160px; flex: 1;
-        }
 
         @media (max-width: 768px) {
             /* La cabecera NO es pegajosa: lo que se queda arriba son las
@@ -117,10 +115,6 @@
             /* En el teléfono la página entera hace scroll: nada de scroll interno. */
             .bandeja-scroll { max-height: none !important; }
 
-            .acciones-comercio { gap: 6px; }
-            .acciones-comercio form { flex: 1 1 auto; }
-            .acciones-comercio .btn-accion-tabla { width: 100%; }
-
             .tabla-contenedor { overflow-x: visible; }
         }
     </style>
@@ -132,19 +126,28 @@
 
     <header class="admin-header-mobile">
         <h1>Localis | Panel Admin</h1>
-        <div class="nav-links admin-nav-mobile">
-            <a href="{{ url_for('admin.admin_usuarios') }}">Usuarios</a>
-            <!-- Abre el chat del asistente ya integrado en el panel. -->
-            <a href="#asistente-ia" class="admin-abrir-asistente"
-               onclick="if(window.localisAbrirAsistente){window.localisAbrirAsistente();return false;}">
-                Asistente IA
-            </a>
-            <a href="{{ url_for('index') }}">Ver Sitio Público</a>
-            <form method="POST" action="{{ url_for('auth.logout') }}" style="display:inline;"
-                  onsubmit="return confirm('¿Seguro que quieres cerrar sesión?');">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" style="color:#ffc107;background:none;border:none;cursor:pointer;font:inherit;font-weight:600;margin-left:15px;padding:0;">Salir</button>
-            </form>
+        {# Menú de 3 puntos, como en las apps: los accesos generales viven en una
+           lista y la cabecera queda limpia (solo el título y las pestañas). #}
+        <div class="admin-menu">
+            <button type="button" class="admin-menu__boton" id="admin-menu-boton"
+                    aria-haspopup="true" aria-expanded="false" aria-controls="admin-menu-lista"
+                    aria-label="Menú del panel" title="Menú">
+                &#8942;
+            </button>
+            <div class="admin-menu__lista" id="admin-menu-lista" role="menu" hidden>
+                <a role="menuitem" href="{{ url_for('admin.admin_usuarios') }}">Usuarios</a>
+                <button type="button" role="menuitem" class="admin-abrir-asistente"
+                        onclick="if(window.localisAbrirAsistente){window.localisAbrirAsistente();}">
+                    Asistente IA
+                </button>
+                <a role="menuitem" href="{{ url_for('index') }}">Ver sitio público</a>
+                <div class="admin-menu__sep" role="separator"></div>
+                <form method="POST" action="{{ url_for('auth.logout') }}"
+                      onsubmit="return confirm('¿Seguro que quieres cerrar sesión?');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" role="menuitem" class="admin-menu__salir">Salir</button>
+                </form>
+            </div>
         </div>
 
         {# Pestañas: cada bloque del panel vive en la suya para no acumular
@@ -603,66 +606,77 @@
                                     {% endif %}
                                 </td>
                                 <td data-etiqueta="Acciones">
-                                    <div class="acciones-comercio">
-                                    <a href="{{ url_for('admin.admin_comercio_detalle', comercio_id=comercio.id) }}"
-                                       class="btn-accion-tabla btn-resolver"
-                                       style="text-decoration:none;display:inline-block;"
-                                       title="Ver perfil, catálogo y gestionar">Gestionar</a>
-                                    {% if comercio.visible == 1 and comercio.estado_pago != 'suspendido' %}
-                                        <form action="{{ url_for('admin.admin_suspender_comercio', comercio_id=comercio.id) }}" method="POST" style="display:inline;">
-                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                            <button type="submit" class="btn-accion-tabla btn-suspender" title="Suspensión temporal">Suspender</button>
-                                        </form>
-                                    {% else %}
-                                        <form action="{{ url_for('admin.admin_reactivar_comercio', comercio_id=comercio.id) }}" method="POST" style="display:inline;">
-                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                            <button type="submit" class="btn-accion-tabla btn-activar" title="Reactivar cuenta">Reactivar</button>
-                                        </form>
-                                    {% endif %}
+                                    {# Menú de 3 puntos: la lista se abre en la propia
+                                       fila (no flota) para que la tabla no la recorte. #}
+                                    <details class="acciones-menu">
+                                        <summary aria-label="Acciones de {{ comercio.nombre }}" title="Acciones">&#8942;</summary>
+                                        <div class="acciones-menu__lista">
+                                            <a class="acciones-menu__item acciones-menu__item--info"
+                                               href="{{ url_for('admin.admin_comercio_detalle', comercio_id=comercio.id) }}">
+                                                Gestionar tienda
+                                            </a>
+                                            {% if comercio.visible == 1 and comercio.estado_pago != 'suspendido' %}
+                                            <form action="{{ url_for('admin.admin_suspender_comercio', comercio_id=comercio.id) }}" method="POST">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                <button type="submit" class="acciones-menu__item acciones-menu__item--ojo">Suspender tienda</button>
+                                            </form>
+                                            {% else %}
+                                            <form action="{{ url_for('admin.admin_reactivar_comercio', comercio_id=comercio.id) }}" method="POST">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                <button type="submit" class="acciones-menu__item acciones-menu__item--ok">Reactivar tienda</button>
+                                            </form>
+                                            {% endif %}
 
-                                    <form action="{{ url_for('admin.admin_eliminar_comercio', comercio_id=comercio.id) }}" method="POST" style="display:inline;"
-                                          onsubmit="return confirm('¿Eliminar definitivamente el comercio {{ comercio.nombre }}? Esta acción no se puede deshacer.');">
-                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                        <button type="submit" class="btn-accion-tabla btn-eliminar" title="Eliminación permanente">Eliminar</button>
-                                    </form>
-                                    </div>
+                                            {% if comercio.estado_tienda == 'pre_cuenta' or not comercio.correo_dueno %}
+                                            <form class="acciones-menu__form"
+                                                  action="{{ url_for('admin.admin_transferir_comercio', comercio_id=comercio.id) }}" method="POST"
+                                                  onsubmit="return confirm('¿Transferir la propiedad de «{{ comercio.nombre }}» a este correo? La tienda se activará como un comercio nuevo con plan gratis.');">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                <label>Transferir a (correo del dueño)</label>
+                                                <input type="email" name="owner_email" placeholder="correo@ejemplo.com" required>
+                                                <button type="submit" class="acciones-menu__item acciones-menu__item--ok">Transferir propiedad</button>
+                                            </form>
+                                            {% else %}
+                                            <form class="acciones-menu__form"
+                                                  action="{{ url_for('admin.admin_reasignar_comercio', comercio_id=comercio.id) }}" method="POST"
+                                                  onsubmit="return confirm('¿Reasignar el dueño de «{{ comercio.nombre }}»? Se conserva el plan actual.');">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                <label>Reasignar a (correo)</label>
+                                                <input type="email" name="owner_email" placeholder="nuevo@ejemplo.com" required>
+                                                <button type="submit" class="acciones-menu__item acciones-menu__item--info">Reasignar dueño</button>
+                                            </form>
+                                            {% endif %}
 
-                                    {% if comercio.estado_tienda == 'pre_cuenta' or not comercio.correo_dueno %}
-                                    <form action="{{ url_for('admin.admin_transferir_comercio', comercio_id=comercio.id) }}" method="POST" class="cuenta-form"
-                                          onsubmit="return confirm('¿Transferir la propiedad de «{{ comercio.nombre }}» a este correo? La tienda se activará como un comercio nuevo con plan gratis.');">
-                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                        <input type="email" name="owner_email" placeholder="correo del dueño" required>
-                                        <button type="submit" class="btn-accion-tabla btn-activar">Transferir</button>
-                                    </form>
-                                    {% else %}
-                                    <form action="{{ url_for('admin.admin_reasignar_comercio', comercio_id=comercio.id) }}" method="POST" class="cuenta-form"
-                                          onsubmit="return confirm('¿Reasignar el dueño de «{{ comercio.nombre }}»? Se conserva el plan actual.');">
-                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                        <input type="email" name="owner_email" placeholder="nuevo correo del dueño" required>
-                                        <button type="submit" class="btn-accion-tabla btn-resolver">Reasignar</button>
-                                    </form>
-                                    {% endif %}
+                                            <!-- RESTAURAR_PAGOS_INICIO -->
+                                            {% if not pagos_congelados %}
+                                            <form class="acciones-menu__form"
+                                                  action="{{ url_for('admin.admin_cambiar_plan', comercio_id=comercio.id) }}" method="POST">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                <label>Plan y estado de pago</label>
+                                                <select name="plan_tipo">
+                                                    <option value="gratis" {% if comercio.plan_tipo == 'gratis' %}selected{% endif %}>Gratis / Prueba</option>
+                                                    <option value="basica" {% if comercio.plan_tipo == 'basica' %}selected{% endif %}>Básico</option>
+                                                    <option value="pro" {% if comercio.plan_tipo == 'pro' %}selected{% endif %}>Pro</option>
+                                                    <option value="business" {% if comercio.plan_tipo == 'business' %}selected{% endif %}>Business</option>
+                                                </select>
+                                                <select name="estado_pago" aria-label="Estado de pago">
+                                                    <option value="activo" {% if comercio.estado_pago == 'activo' %}selected{% endif %}>Activo</option>
+                                                    <option value="vencido" {% if comercio.estado_pago == 'vencido' %}selected{% endif %}>Vencido</option>
+                                                    <option value="suspendido" {% if comercio.estado_pago == 'suspendido' %}selected{% endif %}>Suspendido</option>
+                                                    <option value="gratis" {% if comercio.estado_pago == 'gratis' %}selected{% endif %}>Gratis</option>
+                                                </select>
+                                                <button type="submit" class="acciones-menu__item acciones-menu__item--info">Aplicar plan</button>
+                                            </form>
+                                            {% endif %}
+                                            <!-- RESTAURAR_PAGOS_FIN -->
 
-                                    <!-- RESTAURAR_PAGOS_INICIO -->
-                                    {% if not pagos_congelados %}
-                                    <form action="{{ url_for('admin.admin_cambiar_plan', comercio_id=comercio.id) }}" method="POST" class="plan-form">
-                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                        <select name="plan_tipo">
-                                            <option value="gratis" {% if comercio.plan_tipo == 'gratis' %}selected{% endif %}>Gratis / Prueba</option>
-                                            <option value="basica" {% if comercio.plan_tipo == 'basica' %}selected{% endif %}>Básico</option>
-                                            <option value="pro" {% if comercio.plan_tipo == 'pro' %}selected{% endif %}>Pro</option>
-                                            <option value="business" {% if comercio.plan_tipo == 'business' %}selected{% endif %}>Business</option>
-                                        </select>
-                                        <select name="estado_pago">
-                                            <option value="activo" {% if comercio.estado_pago == 'activo' %}selected{% endif %}>Activo</option>
-                                            <option value="vencido" {% if comercio.estado_pago == 'vencido' %}selected{% endif %}>Vencido</option>
-                                            <option value="suspendido" {% if comercio.estado_pago == 'suspendido' %}selected{% endif %}>Suspendido</option>
-                                            <option value="gratis" {% if comercio.estado_pago == 'gratis' %}selected{% endif %}>Gratis</option>
-                                        </select>
-                                        <button type="submit" class="btn-accion-tabla btn-resolver">Plan</button>
-                                    </form>
-                                    {% endif %}
-                                    <!-- RESTAURAR_PAGOS_FIN -->
+                                            <form action="{{ url_for('admin.admin_eliminar_comercio', comercio_id=comercio.id) }}" method="POST"
+                                                  onsubmit="return confirm('¿Eliminar definitivamente el comercio {{ comercio.nombre }}? Esta acción no se puede deshacer.');">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                <button type="submit" class="acciones-menu__item acciones-menu__item--peligro">Eliminar tienda</button>
+                                            </form>
+                                        </div>
+                                    </details>
                                 </td>
                             </tr>
                             {% else %}
@@ -760,45 +774,49 @@
                                target="_blank" rel="noopener">Destino del enlace</a>
                             {% endif %}
                         </div>
-                        <div class="banner-admin-acciones">
-                            <form action="{{ url_for('admin.admin_banners_accion') }}" method="POST">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                <input type="hidden" name="accion" value="estado">
-                                <input type="hidden" name="banner_id" value="{{ banner.id }}">
-                                {% if banner.estado == 'activo' %}
-                                <input type="hidden" name="estado" value="pausado">
-                                <button type="submit" class="btn-accion-tabla btn-suspender">Pausar</button>
-                                {% else %}
-                                <input type="hidden" name="estado" value="activo">
-                                <button type="submit" class="btn-accion-tabla btn-activar">Activar</button>
-                                {% endif %}
-                            </form>
-                            <form action="{{ url_for('admin.admin_banners_accion') }}" method="POST"
-                                  onsubmit="return confirm('¿Ampliar 30 días este banner?');">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                <input type="hidden" name="accion" value="extender">
-                                <input type="hidden" name="banner_id" value="{{ banner.id }}">
-                                <input type="hidden" name="dias" value="30">
-                                <button type="submit" class="btn-accion-tabla btn-resolver">+30 días</button>
-                            </form>
-                            <form action="{{ url_for('admin.admin_banners_accion') }}" method="POST"
-                                  class="banner-admin-enlace">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                <input type="hidden" name="accion" value="enlace">
-                                <input type="hidden" name="banner_id" value="{{ banner.id }}">
-                                <input type="url" name="enlace_url" value="{{ banner.enlace_url or '' }}"
-                                       placeholder="https://… (vacío = sin enlace)"
-                                       aria-label="Enlace del banner #{{ banner.id }}">
-                                <button type="submit" class="btn-accion-tabla btn-ver">Enlace</button>
-                            </form>
-                            <form action="{{ url_for('admin.admin_banners_accion') }}" method="POST"
-                                  onsubmit="return confirm('¿Eliminar definitivamente este banner de la portada?');">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                <input type="hidden" name="accion" value="eliminar">
-                                <input type="hidden" name="banner_id" value="{{ banner.id }}">
-                                <button type="submit" class="btn-accion-tabla btn-eliminar">Eliminar</button>
-                            </form>
-                        </div>
+                        <details class="acciones-menu">
+                            <summary aria-label="Acciones del banner #{{ banner.id }}" title="Acciones">&#8942;</summary>
+                            <div class="acciones-menu__lista">
+                                <form action="{{ url_for('admin.admin_banners_accion') }}" method="POST">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="accion" value="estado">
+                                    <input type="hidden" name="banner_id" value="{{ banner.id }}">
+                                    {% if banner.estado == 'activo' %}
+                                    <input type="hidden" name="estado" value="pausado">
+                                    <button type="submit" class="acciones-menu__item acciones-menu__item--ojo">Pausar</button>
+                                    {% else %}
+                                    <input type="hidden" name="estado" value="activo">
+                                    <button type="submit" class="acciones-menu__item acciones-menu__item--ok">Activar</button>
+                                    {% endif %}
+                                </form>
+                                <form action="{{ url_for('admin.admin_banners_accion') }}" method="POST"
+                                      onsubmit="return confirm('¿Ampliar 30 días este banner?');">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="accion" value="extender">
+                                    <input type="hidden" name="banner_id" value="{{ banner.id }}">
+                                    <input type="hidden" name="dias" value="30">
+                                    <button type="submit" class="acciones-menu__item acciones-menu__item--info">Ampliar 30 días</button>
+                                </form>
+                                <form action="{{ url_for('admin.admin_banners_accion') }}" method="POST"
+                                      class="acciones-menu__form">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="accion" value="enlace">
+                                    <input type="hidden" name="banner_id" value="{{ banner.id }}">
+                                    <label>Enlace de destino</label>
+                                    <input type="url" name="enlace_url" value="{{ banner.enlace_url or '' }}"
+                                           placeholder="https://… (vacío = sin enlace)"
+                                           aria-label="Enlace del banner #{{ banner.id }}">
+                                    <button type="submit" class="acciones-menu__item acciones-menu__item--info">Guardar enlace</button>
+                                </form>
+                                <form action="{{ url_for('admin.admin_banners_accion') }}" method="POST"
+                                      onsubmit="return confirm('¿Eliminar definitivamente este banner de la portada?');">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="accion" value="eliminar">
+                                    <input type="hidden" name="banner_id" value="{{ banner.id }}">
+                                    <button type="submit" class="acciones-menu__item acciones-menu__item--peligro">Eliminar banner</button>
+                                </form>
+                            </div>
+                        </details>
                     </div>
                     {% else %}
                     <p style="text-align:center;color:#777;padding:1rem;">
@@ -974,6 +992,49 @@
             try { inicial = sessionStorage.getItem(CLAVE); } catch (e) {}
         }
         mostrar(inicial || 'resumen', true);
+    })();
+</script>
+<script>
+    // Menú de 3 puntos de la cabecera: abre/cierra la lista de accesos.
+    (function () {
+        var boton = document.getElementById('admin-menu-boton');
+        var lista = document.getElementById('admin-menu-lista');
+        if (!boton || !lista) return;
+
+        function cerrar() {
+            lista.hidden = true;
+            boton.setAttribute('aria-expanded', 'false');
+        }
+
+        boton.addEventListener('click', function (evento) {
+            evento.stopPropagation();
+            if (lista.hidden) {
+                lista.hidden = false;
+                boton.setAttribute('aria-expanded', 'true');
+            } else {
+                cerrar();
+            }
+        });
+
+        document.addEventListener('click', function (evento) {
+            if (lista.hidden) return;
+            if (lista.contains(evento.target) || boton.contains(evento.target)) return;
+            cerrar();
+        });
+
+        document.addEventListener('keydown', function (evento) {
+            if (evento.key === 'Escape') cerrar();
+        });
+
+        // Al elegir una opción (o abrir el chat) el menú se cierra solo.
+        Array.prototype.slice.call(lista.querySelectorAll('a, button')).forEach(function (item) {
+            item.addEventListener('click', function () {
+                setTimeout(cerrar, 0);
+            });
+        });
+        Array.prototype.slice.call(lista.querySelectorAll('form')).forEach(function (form) {
+            form.addEventListener('submit', cerrar);
+        });
     })();
 </script>
 <script src="{{ url_for('static', filename='js/flash.js') }}"></script>
