@@ -62,10 +62,14 @@
     </form>
 
     <footer class="asistente-panel__pie">
+      {# El admin atiende el soporte, no lo pide: en el panel no se ofrece el
+         botón de WhatsApp (sí en las páginas públicas y del comerciante). #}
+      {% if _asistente_rol != 'admin' %}
       <button type="button" id="asistente-soporte" class="asistente-soporte">
         <i data-lucide="life-buoy"></i>
         <span>Escribir a soporte (WhatsApp)</span>
       </button>
+      {% endif %}
       {% if _asistente_rol == 'admin' %}
       <p class="asistente-aviso">
         Respuestas con IA para el panel. Lee las cifras en vivo (bandeja, pagos y

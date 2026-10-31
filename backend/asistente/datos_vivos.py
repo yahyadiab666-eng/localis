@@ -579,14 +579,12 @@ def resumen_bandeja():
         datos = _resumen() or {}
         abiertas = int(datos.get('abiertas') or 0)
         en_proceso = int(datos.get('en_proceso') or 0)
-        aceptadas = int(datos.get('aceptadas') or 0)
-        rechazadas = int(datos.get('rechazadas') or 0)
         revisiones = int(datos.get('revisiones_pago') or 0)
         por_tipo = datos.get('por_tipo') or {}
         lineas = [
             f'Solicitudes de usuarios abiertas: {abiertas} '
             f'(en proceso: {en_proceso})',
-            f'Aceptadas: {aceptadas}; rechazadas: {rechazadas}',
+            'Lo aceptado o rechazado se archiva (se borra de la bandeja).',
             f'Alertas de revisión de pago pendientes: {revisiones}',
         ]
         if por_tipo:

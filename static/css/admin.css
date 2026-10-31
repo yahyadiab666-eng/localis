@@ -88,6 +88,172 @@
   transform: scale(0.97);
 }
 
+/* ===== Pestañas del panel ===== */
+/* Una sola página con 8 tarjetas obliga a scrollear mucho: cada bloque vive
+   ahora en su pestaña y solo se pinta la activa. */
+.admin-tabs {
+  display: flex;
+  gap: 0.25rem;
+  overflow-x: auto;
+  width: 100%;
+  padding: 0 0.85rem 0;
+  background: #212529;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.admin-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.admin-tab {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 14px;
+  border: none;
+  border-bottom: 3px solid transparent;
+  background: none;
+  color: rgba(255, 255, 255, 0.72);
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.admin-tab:hover {
+  color: #fff;
+}
+
+.admin-tab.is-active {
+  color: #fff;
+  border-bottom-color: #ffc107;
+}
+
+.admin-tab__n {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #dc3545;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* En el teléfono las pestañas se quedan pegadas bajo la cabecera. */
+@media (max-width: 768px) {
+  .admin-tabs {
+    position: sticky;
+    top: 0;
+    z-index: 55;
+    padding: 0 0.5rem;
+  }
+
+  .admin-tab {
+    padding: 11px 12px;
+    font-size: 0.85rem;
+  }
+}
+
+/* ===== Resumen: tarjetas grandes y lista de pendientes ===== */
+.admin-resumen-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+}
+
+.admin-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  padding: 0.9rem 1rem;
+  background: #fff;
+  border: 1px solid #e1e4e8;
+  border-left: 4px solid #ced4da;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+}
+
+.admin-tile:hover {
+  border-color: #adb5bd;
+}
+
+.admin-tile strong {
+  font-size: 1.6rem;
+  color: #212529;
+  line-height: 1.1;
+}
+
+.admin-tile span {
+  font-size: 0.78rem;
+  color: #6c757d;
+}
+
+.admin-tile.alerta {
+  border-left-color: #dc3545;
+}
+
+.admin-tile.alerta strong {
+  color: #dc3545;
+}
+
+.admin-pendientes {
+  list-style: none;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.admin-pendientes li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0.6rem 0;
+  border-bottom: 1px dashed #eef0f2;
+  font-size: 0.88rem;
+  color: #495057;
+}
+
+.admin-pendientes li:last-child {
+  border-bottom: none;
+}
+
+.admin-enlace-btn {
+  margin-left: auto;
+  background: none;
+  border: 1px solid #ced4da;
+  border-radius: 999px;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #084298;
+  cursor: pointer;
+}
+
+.admin-enlace-btn:hover {
+  background: #eef2f7;
+}
+
+@media (max-width: 480px) {
+  .admin-resumen-tiles {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .admin-enlace-btn {
+    margin-left: 0;
+  }
+}
+
 /* ===== Aviso: la tabla se convierte en tarjetas en el telefono ===== */
 @media (max-width: 768px) {
   /* Anula el min-width de responsive.css: ya no hace falta scroll lateral. */

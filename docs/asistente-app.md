@@ -98,26 +98,31 @@ Ver tienda · Mi perfil · Salir**. En el teléfono, el menú lateral añade
 
 ## Panel de administración (solo usuarios con rol admin)
 
-Pantalla **"Localis | Panel Admin"**. En el teléfono, la cabecera muestra accesos
-rápidos: **Revisión**, **Comercios**, **Salud de pagos**, **Usuarios** y
-**Ver sitio**, además de la burbuja del **Asistente IA**.
+Pantalla **"Localis | Panel Admin"**. Arriba hay **pestañas** (cada bloque del
+panel vive en la suya, no en una sola página interminable):
+**Resumen · Solicitudes · Pagos · Comercios · Banners · Ajustes**. En la
+cabecera también están **Usuarios**, **Asistente IA**, **Ver Sitio Público** y
+**Salir**.
 
-- **Bandeja de revisiones**: aquí llegan dos cosas distintas.
-  1. **Solicitudes de los usuarios**: soporte, reporte de tienda y reporte de
-     artículo.
-  2. **Alertas de revisión de pago**: pagos con Binance Pay que la API no pudo
-     confirmar.
-  - Filtros: **Todas · Abiertas · En proceso · Aceptadas · Rechazadas**.
-  - Estados de una solicitud: **Pendiente**, **En proceso**, **Aceptada** y
-    **Rechazada**.
-  - Acciones según el tipo de solicitud: **Tomar (en proceso)**,
-    **Aceptar y cerrar**, **Rechazar (no procede)**, **Aceptar y suspender la
-    tienda** (solo reportes de tienda) y **Aceptar y ocultar el producto** (solo
-    reportes de artículo). Las cerradas se pueden **Reabrir**. Se puede añadir
-    una nota que queda guardada con la decisión.
-  - Alertas de pago: **Ver comercio**, **Confirmar pago**, **Suspender**,
-    **Marcar como revisada** y **Rechazar**; muestran el ID de orden y el
-    enlace al comprobante subido.
+- **Resumen**: cifras de un vistazo (solicitudes abiertas, pagos por revisar,
+  comercios, banners ocupados), la lista "Qué requiere tu atención" con accesos
+  directos y las métricas del **Asistente IA**.
+
+- **Solicitudes de usuarios**: soporte, reporte de tienda y reporte de
+  artículo. La pestaña solo muestra lo **abierto**: al aceptar o rechazar, la
+  solicitud **se archiva** (se elimina de la bandeja) y la decisión queda en
+  auditoría.
+  - Filtros: **Todas · En proceso**, más el filtro por tipo
+    (**Soporte · Tienda · Artículo · Pagos**).
+  - Estados mientras está abierta: **Pendiente** y **En proceso**.
+  - Acciones según el tipo: **Tomar (en proceso)**, **Aceptar y archivar**,
+    **Rechazar y archivar**, **Aceptar y suspender la tienda** (solo reportes
+    de tienda) y **Aceptar y ocultar el producto** (solo reportes de
+    artículo). Se puede añadir una nota que queda en el registro.
+- **Revisión de pagos**: alertas de pagos con Binance Pay que la API no pudo
+  confirmar. Acciones: **Ver comercio**, **Confirmar pago**, **Suspender**,
+  **Marcar como revisada** y **Rechazar**; muestran el ID de orden y el enlace
+  al comprobante. Al cerrar la alerta también se archiva.
 - **Salud de pagos (últimos 30 días)**: pagos registrados, confirmados por
   Binance, sin verificar, no encontrados y pendientes de revisión ahora.
 - **Control de Comercios**: buscador (nombre, correo del dueño, RIF/Cédula o

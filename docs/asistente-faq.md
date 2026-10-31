@@ -98,16 +98,17 @@ banners activos a la vez. Lo puede alquilar cualquier usuario, tenga o no tienda
 
 ## Bandeja del panel de administración
 
-- La bandeja mezcla **solicitudes de los usuarios** (soporte, reporte de tienda,
-  reporte de artículo) y **alertas de revisión de pago**.
-- Estados de una solicitud: **Pendiente**, **En proceso**, **Aceptada** y
-  **Rechazada**. Se filtra con **Todas · Abiertas · En proceso · Aceptadas ·
-  Rechazadas**.
-- Acciones: **Tomar (en proceso)**, **Aceptar y cerrar**, **Rechazar (no
-  procede)**, **Aceptar y suspender la tienda**, **Aceptar y ocultar el
-  producto** y **Reabrir**.
+- El panel separa **Solicitudes de los usuarios** (soporte, reporte de tienda,
+  reporte de artículo) y **Revisión de pagos** (alertas de pagos que la API no
+  pudo confirmar).
+- La bandeja solo muestra lo abierto: estados **Pendiente** y **En proceso**.
+- Acciones: **Tomar (en proceso)**, **Aceptar y archivar**, **Rechazar y
+  archivar**, **Aceptar y suspender la tienda** y **Aceptar y ocultar el
+  producto**. Al aceptar o rechazar, la solicitud **se elimina de la bandeja**
+  y la decisión queda registrada en auditoría.
 - Las alertas de pago se resuelven con **Confirmar pago** (activa lo pagado),
-  **Suspender**, **Marcar como revisada** o **Rechazar**.
+  **Suspender**, **Marcar como revisada** o **Rechazar**; al cerrarlas también
+  se archivan.
 
 ## Premios y puntos
 

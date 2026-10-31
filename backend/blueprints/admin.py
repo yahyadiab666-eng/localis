@@ -417,11 +417,13 @@ def admin_resolver_ticket(ticket_id):
 @bp.route('/ticket/accion/<int:ticket_id>', methods=['POST'])
 @admin_requerido
 def admin_ticket_accion(ticket_id):
-    """Acepta, rechaza, toma o reabre una solicitud de usuario de la bandeja.
+    """Atiende o rechaza una solicitud de usuario de la bandeja.
 
     La variedad de aceptación depende del tipo (Reporte de tienda -> suspender
-    la tienda; Reporte de artículo -> ocultar el producto). Las alertas de pago
-    siguen usando ``admin_revision_accion``.
+    la tienda; Reporte de artículo -> ocultar el producto). Al aceptar o
+    rechazar, la solicitud se **archiva** (se elimina) para que la bandeja solo
+    muestre pendientes. Las alertas de pago siguen usando
+    ``admin_revision_accion``.
     """
     accion = (
         request.form.get('accion')

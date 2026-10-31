@@ -253,10 +253,20 @@ def _probar_admin():
         'ocultar_producto' in {a['accion'] for a in reporte_articulo},
         'un reporte de articulo ofrece ocultar el producto',
     )
-    cerrada = acciones_ticket({'tipo': 'soporte', 'estado': 'resuelto'})
+    # Lo atendido/rechazado se archiva (se elimina): no existen acciones de
+    # reapertura ni estados "Aceptada"/"Rechazada" en la bandeja.
     _ok(
-        [a['accion'] for a in cerrada] == ['reabrir'],
-        'una solicitud cerrada solo se puede reabrir',
+        'reabrir' not in ACCIONES_SOLICITUD,
+        'no se ofrece reabrir: lo cerrado se archiva',
+    )
+    _ok(
+        acciones_ticket({'tipo': 'soporte', 'estado': 'resuelto'}) == [],
+        'una solicitud ya cerrada no ofrece acciones',
+    )
+    _ok(
+        'archivar' in ACCIONES_SOLICITUD['aceptar'].lower()
+        and 'archivar' in ACCIONES_SOLICITUD['rechazar'].lower(),
+        'aceptar y rechazar dejan claro que archivan',
     )
     _ok(
         acciones_ticket({'tipo': 'revision_pago', 'estado': 'pendiente'}) == [],
